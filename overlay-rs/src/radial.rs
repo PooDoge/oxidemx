@@ -98,8 +98,19 @@ impl RadialState {
         self.target_slice = None;
     }
 
+    /// Hide the menu and dispatch the highlighted slice's action
+    /// (drag-select). Returns the slice that was selected, if any —
+    /// used by the app's update() to log + extend dispatch in the
+    /// future. The call to `actions::dispatch` happens inline so a
+    /// release with no highlight is a clean no-op.
     pub fn hide(&mut self) {
         self.visible = false;
+        let selected = self.target_slice;
+        if let Some(idx) = selected {
+            if let Some(slice) = self.slices.get(idx) {
+                crate::actions::dispatch(slice);
+            }
+        }
         for a in &mut self.highlights {
             a.target = 0.0;
         }
