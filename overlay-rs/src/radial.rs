@@ -44,6 +44,20 @@ impl RadialWidget {
     }
 }
 
+impl RadialWidget {
+    /// Drag-mode cursor delta from the daemon's CursorMoved signal.
+    ///
+    /// Both deltas are accumulated REL_X / REL_Y values from the
+    /// gesture-button press point — *not* absolute screen coords. The
+    /// radial widget translates these directly into the polar
+    /// coordinates that drive slice highlighting.
+    pub fn on_cursor_moved(&self, _dx: i32, _dy: i32) {
+        // TODO: convert (dx, dy) into a slice index via
+        // `crate::input::slice_index_at`, update `highlighted_slice`
+        // state, and queue a redraw.
+    }
+}
+
 impl Default for RadialWidget {
     fn default() -> Self {
         Self::new()

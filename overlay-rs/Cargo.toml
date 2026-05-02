@@ -28,6 +28,7 @@ gtk4-layer-shell = "0.5"
 # IPC with the daemon (signals on org.kde.juhradialmx)
 zbus = "5"
 async-channel = "2"
+futures-util = "0.3"
 
 # Serde for config (re-exported via juhradial-shared but pinned here for
 # direct serde_json::Value usage in the editor preview).
