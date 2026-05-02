@@ -151,6 +151,54 @@ most non-radial settings; the radial slices need a proper visual editor.
   themed icons in the current Python overlay).
 - Preview at the actual rendered size in the menu.
 
+### Application launcher tab (the Flatpak ask)
+
+The icon picker doubles as an application launcher when the slice's
+action kind is `Exec`. A dedicated "Apps" tab enumerates every
+desktop-registered application — both system .desktop entries and
+**Flatpak apps** — and lets the user pick one to fill in *both* the
+slice's command and its icon at once.
+
+Sources:
+
+- **Flatpak**: walk
+  `~/.local/share/flatpak/exports/share/applications/*.desktop` and
+  `/var/lib/flatpak/exports/share/applications/*.desktop`. Each
+  Flatpak app exports a `.desktop` file with an `X-Flatpak=<appid>`
+  hint and an `Exec=` line that already starts with `/usr/bin/flatpak
+  run …`. We don't need the Flatpak CLI; reading these directories
+  works out of the box on every Flatpak install (system or per-user).
+- **Native apps**: standard XDG paths (`/usr/share/applications/`,
+  `/usr/local/share/applications/`, `~/.local/share/applications/`).
+- Parse via `freedesktop_entry_parser` or the simpler `ini` crate;
+  either works.
+
+UI:
+
+- Search box that fuzzy-matches `Name` / `GenericName` / `Comment`.
+- Filter chips: All / Native / Flatpak (filtered by the
+  `X-Flatpak` key).
+- Clicking an app fills the slice's `command` with the entry's `Exec`
+  line (with field codes like `%u %f` stripped) and its `icon` with
+  the entry's `Icon` field, which the resolver in `render::icons`
+  already knows how to handle:
+    * Bare names (e.g. `org.gnome.Console`) → `gtk::IconTheme` lookup
+      finds them via the Flatpak icon export dirs that Flatpak adds to
+      `XDG_DATA_DIRS` automatically.
+    * Absolute paths → loaded as-is via gdk-pixbuf (covers the rare
+      case of an app shipping its icon outside the standard export
+      tree).
+    * If the icon isn't in any theme search path (for instance because
+      the user disabled the Flatpak portal), offer "Extract icon" —
+      copies the icon file from the Flatpak export tree into
+      `~/.local/share/juhradial/icons/` and rewrites the slice to
+      reference the absolute path. Lossless and self-contained.
+
+This collapses the "find the right command-line incantation" and "find
+a matching icon" steps into a single click — for both native and
+Flatpak apps without distinguishing between them in the user's
+mental model.
+
 ## New features the rewrite makes possible
 
 The rewrite isn't an excuse to scope-creep, but layer-shell + GTK4 + the
