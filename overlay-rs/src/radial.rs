@@ -6,15 +6,30 @@
 //! into `iced::widget::canvas::Frame` (cairo-equivalent calls in
 //! pure Rust).
 
-use iced::widget::canvas::{self, Action, Frame, Geometry, Path, Stroke};
+use iced::widget::canvas::{self, Action, Frame, Geometry, Path};
 use iced::{mouse, Color, Event, Point, Rectangle, Renderer, Theme};
-use juhradial_shared::{theme::parse_hex_rgba, AppConfig, Slice};
+use juhradial_shared::{theme::parse_hex_rgba, ActionKind, AppConfig, Slice};
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use crate::geometry::{Geometry as RadialGeometry, MENU_RADIUS, WINDOW_SIZE};
 use crate::render::icons::IconCache;
 use crate::theme::ActiveTheme;
+
+/// Distance from the menu centre to a submenu sub-item's centre,
+/// in logical pixels. Has to clear the outer ring so the popped-out
+/// items sit beyond the main wedges. Mirrors the Python overlay's
+/// `SUBMENU_RADIUS = MENU_RADIUS + 45`.
+pub const SUBMENU_RADIUS: f32 = (MENU_RADIUS as f32) + 45.0;
+/// Visible radius of each sub-item disc.
+pub const SUBITEM_RENDER_RADIUS: f32 = 24.0;
+/// Generous hit-test radius — slightly larger than render so the
+/// items don't feel "spiky" when crossing between them.
+pub const SUBITEM_HIT_RADIUS: f32 = 32.0;
+/// Degrees between adjacent sub-items, measured from the menu centre.
+/// Render uses 18°, hit-test uses 15° (matches Python overlay).
+pub const SUBITEM_RENDER_SPREAD_DEG: f32 = 18.0;
+pub const SUBITEM_HIT_SPREAD_DEG: f32 = 15.0;
 
 /// Maximum press-to-release duration that still counts as a "tap" —
 /// mirrors the Python overlay's TAP_THRESHOLD_MS = 250.
@@ -29,9 +44,9 @@ const ICON_BG_RADIUS: f32 = 26.0;
 /// `iced::time::every` advances each entry toward its target value
 /// using `ease_out_quad`-shaped steps.
 #[derive(Debug, Clone, Copy)]
-struct Animation {
-    current: f32,
-    target: f32,
+pub(crate) struct Animation {
+    pub(crate) current: f32,
+    pub(crate) target: f32,
 }
 
 impl Animation {
@@ -49,6 +64,33 @@ impl Animation {
         // visually pleasing 4-6 frame transition between hover
         // states without the jitter a linear ramp would produce.
         self.current += delta * 0.25;
+    }
+}
+
+/// Open submenu state. `None` when the user isn't hovering a
+/// Submenu-kind slice (the common case). Created when hover lands
+/// on a slice with `kind == Submenu` and a non-empty `submenu` vec;
+/// dropped when the cursor leaves both the parent slice and the
+/// sub-item arc.
+#[derive(Debug, Clone)]
+pub struct SubmenuState {
+    /// Index of the parent slice (0..7) that opened this submenu.
+    pub parent: usize,
+    /// 0.0 → 1.0 grow-out animation. Drives the per-item radius +
+    /// scale + opacity stagger in the renderer.
+    pub progress: Animation,
+    /// Currently-hovered sub-item index, or `None` for "between
+    /// items, mouse over the parent wedge".
+    pub highlighted: Option<usize>,
+}
+
+impl SubmenuState {
+    fn new(parent: usize) -> Self {
+        Self {
+            parent,
+            progress: Animation { current: 0.0, target: 1.0 },
+            highlighted: None,
+        }
     }
 }
 
@@ -77,6 +119,12 @@ pub struct RadialState {
     /// (cursor move + clicks via `canvas::Program::update`), and
     /// only closes on click or escape.
     toggle_mode: bool,
+    /// Open submenu state, or `None` when no Submenu slice is
+    /// currently hovered. The painter reads this to render the
+    /// pop-out arc; `dispatch_and_close` consults it before
+    /// dispatching the parent so a hovered sub-item wins over the
+    /// parent slice.
+    pub(crate) submenu: Option<SubmenuState>,
 }
 
 impl std::fmt::Debug for RadialState {
@@ -87,6 +135,7 @@ impl std::fmt::Debug for RadialState {
             .field("target_slice", &self.target_slice)
             .field("visible", &self.visible)
             .field("toggle_mode", &self.toggle_mode)
+            .field("submenu", &self.submenu)
             .finish()
     }
 }
@@ -104,6 +153,7 @@ impl RadialState {
             icons: Rc::new(IconCache::new()),
             show_time: None,
             toggle_mode: false,
+            submenu: None,
         }
     }
 
@@ -116,6 +166,7 @@ impl RadialState {
             a.target = 0.0;
         }
         self.target_slice = None;
+        self.submenu = None;
     }
 
     /// Handle the daemon's `Hide` signal (gesture button release).
@@ -155,10 +206,35 @@ impl RadialState {
         }
         self.visible = false;
         self.toggle_mode = false;
+        self.submenu = None;
     }
 
     fn dispatch_and_close(&mut self) {
         self.visible = false;
+        // Submenu sub-item wins over the parent slice — if the user
+        // released while hovering one, fire that. Falling back to
+        // the parent only when no sub-item was hovered keeps the
+        // muscle-memory single-press-to-AI flow alive.
+        if let Some(sub) = self.submenu.take() {
+            if let Some(child_idx) = sub.highlighted {
+                if let Some(parent) = self.slices.get(sub.parent) {
+                    if let Some(child) = parent.submenu.get(child_idx) {
+                        let allowed = child
+                            .visible_if
+                            .as_ref()
+                            .map(|c| c.eval())
+                            .unwrap_or(true);
+                        if allowed {
+                            crate::actions::dispatch(child);
+                        }
+                    }
+                }
+                self.reset_after_dispatch();
+                return;
+            }
+            // Submenu was open but no sub-item targeted — fall
+            // through to the parent slice handling below.
+        }
         let selected = self.target_slice;
         if let Some(idx) = selected {
             if let Some(slice) = self.slices.get(idx) {
@@ -172,11 +248,16 @@ impl RadialState {
                 }
             }
         }
+        self.reset_after_dispatch();
+    }
+
+    fn reset_after_dispatch(&mut self) {
         for a in &mut self.highlights {
             a.target = 0.0;
         }
         self.target_slice = None;
         self.toggle_mode = false;
+        self.submenu = None;
     }
 
     /// True when the menu is in toggle mode and the canvas should
@@ -192,36 +273,37 @@ impl RadialState {
     pub fn on_toggle_cursor(&mut self, local_x: f64, local_y: f64) {
         let dx = local_x - (WINDOW_SIZE / 2.0);
         let dy = local_y - (WINDOW_SIZE / 2.0);
-        let new_target = crate::input::slice_index_at(
-            dx,
-            dy,
-            crate::geometry::CENTER_ZONE_RADIUS,
-            crate::geometry::MENU_RADIUS,
-        );
-        if new_target != self.target_slice {
-            if let Some(prev) = self.target_slice {
-                self.highlights[prev].target = 0.0;
-            }
-            if let Some(next) = new_target {
-                self.highlights[next].target = 1.0;
-            }
-            self.target_slice = new_target;
-        }
+        self.update_pointer(dx, dy);
     }
 
     /// Drag-mode delta from the daemon's CursorMoved signal.
     /// `dx, dy` are accumulated REL_X / REL_Y values from the
     /// gesture-button press point (NOT absolute screen coords).
     pub fn on_cursor_moved(&mut self, dx: i32, dy: i32) {
+        self.update_pointer(dx as f64, dy as f64);
+    }
+
+    /// Shared cursor-update path: updates the highlighted slice and,
+    /// when the pointer is over a submenu sub-item, the sub-item
+    /// highlight too. Submenu state is opened automatically when the
+    /// pointer lands on a Submenu-kind slice with a non-empty
+    /// `submenu` vec, and closed when the pointer leaves both the
+    /// parent slice and the popped-out arc.
+    fn update_pointer(&mut self, dx: f64, dy: f64) {
+        // 1. Resolve the new slice under the cursor (if any). We
+        //    deliberately use the same hit-test as the no-submenu
+        //    path — sub-items live just beyond the ring, but the
+        //    parent slice is what determines "is the user still
+        //    inside the menu's gravity well".
         let new_target = crate::input::slice_index_at(
-            dx as f64,
-            dy as f64,
+            dx,
+            dy,
             crate::geometry::CENTER_ZONE_RADIUS,
             crate::geometry::MENU_RADIUS,
         );
+
+        // 2. Slice highlight transition (parent ring), unchanged.
         if new_target != self.target_slice {
-            // Drop the previously-targeted slice's highlight,
-            // raise the new one's.
             if let Some(prev) = self.target_slice {
                 self.highlights[prev].target = 0.0;
             }
@@ -230,12 +312,54 @@ impl RadialState {
             }
             self.target_slice = new_target;
         }
+
+        // 3. Submenu maintenance.
+        //    a) An open submenu's highlight follows the cursor (or
+        //       drops to None when over the parent wedge but not
+        //       over an item).
+        //    b) Hovering off both the parent wedge AND the sub-item
+        //       arc closes the submenu — same rule as the legacy
+        //       overlay (bias toward keeping the submenu open while
+        //       the user is still over the parent slice).
+        //    c) Landing on a fresh Submenu-kind slice opens its
+        //       submenu and resets the grow animation.
+        let mut should_close = false;
+        if let Some(sub) = self.submenu.as_mut() {
+            let hit = subitem_at(dx, dy, sub.parent, &self.slices);
+            if hit.is_some() {
+                sub.highlighted = hit;
+            } else if new_target == Some(sub.parent) {
+                // Still over the parent wedge — keep submenu open
+                // but no sub-item highlighted.
+                sub.highlighted = None;
+            } else {
+                should_close = true;
+            }
+        }
+        if should_close {
+            self.submenu = None;
+        }
+        if self.submenu.is_none() {
+            if let Some(idx) = new_target {
+                if let Some(slice) = self.slices.get(idx) {
+                    if matches!(slice.kind, ActionKind::Submenu)
+                        && !slice.submenu.is_empty()
+                    {
+                        self.submenu = Some(SubmenuState::new(idx));
+                    }
+                }
+            }
+        }
     }
 
-    /// Step the per-slice highlight animations one frame.
+    /// Step the per-slice highlight animations one frame, plus any
+    /// open submenu's grow-out animation.
     pub fn advance_animations(&mut self) {
         for a in &mut self.highlights {
             a.step();
+        }
+        if let Some(sub) = self.submenu.as_mut() {
+            sub.progress.step();
         }
     }
 
@@ -248,7 +372,37 @@ impl RadialState {
             *a = Animation::at(0.0);
         }
         self.target_slice = None;
+        self.submenu = None;
     }
+}
+
+/// Hit-test the sub-items of slot `parent`. Returns the index of the
+/// sub-item whose centre is within `SUBITEM_HIT_RADIUS` of the
+/// cursor, or `None`. `dx`/`dy` are the cursor offset from the menu
+/// centre (same convention as `slice_index_at`).
+///
+/// Sub-items are arranged on an arc of radius `SUBMENU_RADIUS`
+/// centred on the parent slice's bisector, with
+/// `SUBITEM_HIT_SPREAD_DEG` between adjacent items. Mirrors
+/// `_get_subitem_at_position` in the legacy Python overlay.
+pub fn subitem_at(dx: f64, dy: f64, parent: usize, slices: &[Slice]) -> Option<usize> {
+    let parent_slice = slices.get(parent)?;
+    if parent_slice.submenu.is_empty() {
+        return None;
+    }
+    let n = parent_slice.submenu.len() as f32;
+    let parent_angle_deg = (parent as f32) * 45.0 - 90.0;
+    for (i, _) in parent_slice.submenu.iter().enumerate() {
+        let offset_deg = (i as f32 - (n - 1.0) / 2.0) * SUBITEM_HIT_SPREAD_DEG;
+        let item_angle = (parent_angle_deg + offset_deg).to_radians();
+        let item_x = SUBMENU_RADIUS * item_angle.cos();
+        let item_y = SUBMENU_RADIUS * item_angle.sin();
+        let dist = ((dx - item_x as f64).powi(2) + (dy - item_y as f64).powi(2)).sqrt();
+        if dist < SUBITEM_HIT_RADIUS as f64 {
+            return Some(i);
+        }
+    }
+    None
 }
 
 /// Per-frame canvas state.
@@ -365,6 +519,20 @@ impl<'a> canvas::Program<crate::app::Message> for Painter<'a> {
             geom.center_radius as f32,
             palette,
         );
+
+        // Submenu pop-out (drawn AFTER the centre so its sub-items
+        // sit cleanly on top of the ring instead of being clipped
+        // by the wedges they're popping out of).
+        if let Some(sub) = self.state.submenu.as_ref() {
+            crate::render::slices::draw_submenu(
+                &mut frame,
+                center,
+                sub,
+                &self.state.slices,
+                palette,
+                &self.state.icons,
+            );
+        }
 
         vec![frame.into_geometry()]
     }

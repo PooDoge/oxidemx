@@ -9,7 +9,13 @@
       {"label": "Screenshot", "type": "exec", "command": "gnome-screenshot -i || flatpak run be.alexandervanhee.gradia --screenshot=INTERACTIVE", "color": "peach", "icon": "camera-photo-symbolic"},
       {"label": "Emoji",      "type": "exec", "command": "ibus emoji || flatpak run org.gnome.Characters", "color": "pink", "icon": "face-smile-symbolic"},
       {"label": "Files",      "type": "exec", "command": "xdg-open . || nautilus || dolphin || thunar", "color": "sapphire", "icon": "folder-symbolic"},
-      {"label": "AI",         "type": "submenu", "command": "",                  "color": "lavender", "icon": "applications-science-symbolic"}
+      {"label": "AI",         "type": "submenu", "command": "",                  "color": "lavender", "icon": "applications-science-symbolic",
+       "submenu": [
+         {"label": "Claude",     "type": "exec", "command": "xdg-open https://claude.ai",         "color": "peach",    "icon": "applications-science-symbolic"},
+         {"label": "ChatGPT",    "type": "exec", "command": "xdg-open https://chat.openai.com",   "color": "green",    "icon": "applications-science-symbolic"},
+         {"label": "Gemini",     "type": "exec", "command": "xdg-open https://gemini.google.com", "color": "sapphire", "icon": "applications-science-symbolic"},
+         {"label": "Perplexity", "type": "exec", "command": "xdg-open https://perplexity.ai",     "color": "teal",     "icon": "applications-science-symbolic"}
+       ]}
     ]
   }
 }
