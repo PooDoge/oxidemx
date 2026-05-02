@@ -1,7 +1,76 @@
-# Rust + GTK4 + layer-shell overlay rewrite — design doc
+# Rust overlay rewrite — design doc
 
-Status: draft, not yet implemented.
-Branch: `rust-gtk4-overlay` (off master).
+Status: in progress. Toolkit pivot landed (gtk4 → iced).
+Branch: `rust-gtk4-overlay` (off master). The branch name still says
+"gtk4" for git history continuity; the actual implementation no
+longer uses GTK at all.
+
+## 2026-05-02 toolkit pivot — gtk4 to iced
+
+After the dev box's first attempt to layer the gtk4 *-devel packages
+broke the Bazzite install (forced reinstall), we re-validated the
+core assumption: gtk4-layer-shell relies on the wlr-layer-shell
+Wayland protocol, and **Mutter (stable GNOME) doesn't advertise it**
+— confirmed via `wayland-info` from inside a Fedora distrobox
+talking to the host compositor. So the original "layer-shell makes
+positioning trivial" pitch was a fiction on GNOME from day one;
+the visual smoke test would have failed at `LayerShell::init_for_window()`.
+
+The pivot:
+
+* Drop gtk4-rs + gtk4-layer-shell + cairo-rs + gdk-pixbuf + pango.
+* Adopt **iced 0.14** (MIT, pure Rust, Canvas widget, winit-backed).
+* Solve positioning by extending the existing `juhradial-cursor`
+  GNOME shell extension with a `MoveOverlay(app_id, x, y, monitor)`
+  D-Bus method. The extension runs *inside* Mutter and can call
+  `Meta.Window.move_frame()` directly, bypassing the protocol-level
+  positioning restriction on regular xdg-shell clients.
+* Build entirely inside a Fedora distrobox — no host-side
+  rpm-ostree layering needed. The container holds rust + cargo +
+  the small set of devel packages that iced depends on
+  (libxkbcommon, expat, fontconfig, freetype, libxcb,
+  vulkan-loader). Rebooting / breaking the host is impossible.
+
+Validated by `spike-iced/` (a throwaway crate at the workspace
+root) which renders the radial wheel using
+`iced::widget::canvas::Path` primitives, opens a transparent
+decorationless always-on-top window via the iced Application
+builder's first-class `.transparent()` / `.decorations()` /
+`.level()` methods, and shows the desktop through the gaps
+between/around wedges. Spike will be deleted once overlay-rs is
+fully ported.
+
+What carries over unchanged from the gtk4 design:
+
+* The `juhradial-shared` crate (config, themes, profiles,
+  conditions, app launcher) is UI-toolkit-agnostic.
+* Slice math (geometry, hit-test, easing curves) is unchanged —
+  cairo's `move_to` / `line_to` / `arc` map line-by-line to
+  iced's `Path::new` builder + `Arc` struct.
+* The daemon's D-Bus contract is unchanged.
+* The configuration schema is unchanged.
+
+What changes from the gtk4 design:
+
+* Module `window.rs` is gone; the iced `Application` builder owns
+  windowing.
+* Module `ext_positioner.rs` is new — async client for the
+  GNOME extension's `MoveOverlay`.
+* `dbus.rs` exposes a `Stream<OverlayEvent>` for
+  `iced::Subscription::run` instead of a glib-MainContext task.
+* `render/slices.rs` rebuilt against iced::widget::canvas::Frame
+  rather than cairo::Context.
+* `tray.rs` will be KStatusNotifierItem via raw zbus rather than
+  a libgtk-supplied SNI client.
+* The editor window (`editor/*`) targets iced widgets directly
+  instead of GTK ApplicationWindow + DrawingArea.
+
+The rest of this doc keeps the original layer-shell-era prose for
+historical context but with `gtk4` substituted for `iced` wherever
+implementation details appear.
+
+---
+
 
 ## Goals
 
