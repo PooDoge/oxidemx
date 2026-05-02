@@ -1,0 +1,82 @@
+{
+  "name": "Golden Classic (3D)",
+  "description": "Ornamental radial wheel with golden filigree",
+  "is_dark": true,
+  "radial_image": "radialwheel5.png",
+  "radial_params": {
+    "image_size": 310,
+    "icon_radius": 101,
+    "ring_inner": 58,
+    "ring_outer": 144,
+    "icon_scale": 1.0,
+    "icon_color": [
+      255,
+      235,
+      190
+    ],
+    "icon_shadow_alpha": 85,
+    "highlight_fill": [
+      230,
+      190,
+      110,
+      45
+    ],
+    "highlight_border": [
+      255,
+      220,
+      150,
+      100
+    ],
+    "hover_glow": [
+      255,
+      210,
+      130,
+      70
+    ],
+    "center_bg": [
+      22,
+      18,
+      12,
+      235
+    ],
+    "center_border": [
+      230,
+      190,
+      110,
+      180
+    ],
+    "center_border_width": 2.0,
+    "center_text_color": [
+      245,
+      215,
+      160
+    ],
+    "icon_bold": 1.4
+  },
+  "colors": {
+    "crust": "#0a0808",
+    "mantle": "#121010",
+    "base": "#181614",
+    "surface0": "#221e1a",
+    "surface1": "#2c2820",
+    "surface2": "#38322a",
+    "overlay0": "#4e4638",
+    "overlay1": "#665e50",
+    "text": "#f0e8d0",
+    "subtext1": "#d0c8a8",
+    "subtext0": "#988e70",
+    "accent": "#d4a840",
+    "accent2": "#c09030",
+    "accent_dim": "#a07828",
+    "green": "#78b858",
+    "yellow": "#d4a840",
+    "red": "#c85848",
+    "blue": "#6090b8",
+    "mauve": "#a07898",
+    "pink": "#c08080",
+    "peach": "#d89850",
+    "teal": "#58a090",
+    "sapphire": "#6090b8",
+    "lavender": "#a07898"
+  }
+}

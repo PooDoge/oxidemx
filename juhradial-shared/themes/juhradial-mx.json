@@ -1,0 +1,32 @@
+{
+  "name": "JuhRadial MX",
+  "description": "Premium dark theme with vibrant cyan accents",
+  "is_dark": true,
+  "radial_image": null,
+  "colors": {
+    "crust": "#0a0c10",
+    "mantle": "#0f1117",
+    "base": "#121418",
+    "surface0": "#1a1d24",
+    "surface1": "#242832",
+    "surface2": "#2e3440",
+    "overlay0": "#404654",
+    "overlay1": "#525866",
+    "text": "#f0f4f8",
+    "subtext1": "#c8d0dc",
+    "subtext0": "#9aa5b5",
+    "accent": "#00d4ff",
+    "accent2": "#0abdc6",
+    "accent_dim": "#0891a8",
+    "green": "#00e676",
+    "yellow": "#ffd54f",
+    "red": "#ff5252",
+    "blue": "#4a9eff",
+    "mauve": "#b388ff",
+    "pink": "#ff80ab",
+    "peach": "#ffab40",
+    "teal": "#0abdc6",
+    "sapphire": "#00b4d8",
+    "lavender": "#00d4ff"
+  }
+}

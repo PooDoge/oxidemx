@@ -1,0 +1,32 @@
+{
+  "name": "GitHub Light",
+  "description": "Clean light theme inspired by GitHub",
+  "is_dark": false,
+  "radial_image": null,
+  "colors": {
+    "crust": "#f0f0f0",
+    "mantle": "#f6f8fa",
+    "base": "#ffffff",
+    "surface0": "#f6f8fa",
+    "surface1": "#eaeef2",
+    "surface2": "#d8dee4",
+    "overlay0": "#c8cdd3",
+    "overlay1": "#afb8c1",
+    "text": "#24292f",
+    "subtext1": "#57606a",
+    "subtext0": "#6e7781",
+    "accent": "#0969da",
+    "accent2": "#0550ae",
+    "accent_dim": "#0747a6",
+    "green": "#1a7f37",
+    "yellow": "#bf8700",
+    "red": "#cf222e",
+    "blue": "#0969da",
+    "mauve": "#8250df",
+    "pink": "#bf3989",
+    "peach": "#bf5700",
+    "teal": "#0d7d76",
+    "sapphire": "#00838b",
+    "lavender": "#8250df"
+  }
+}

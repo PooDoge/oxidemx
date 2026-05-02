@@ -1,0 +1,82 @@
+{
+  "name": "Pearl Blossom (3D)",
+  "description": "Elegant pearl radial wheel with blossom pink tones",
+  "is_dark": true,
+  "radial_image": "radialwheel2.png",
+  "radial_params": {
+    "image_size": 310,
+    "icon_radius": 101,
+    "ring_inner": 58,
+    "ring_outer": 144,
+    "icon_scale": 1.0,
+    "icon_color": [
+      255,
+      255,
+      255
+    ],
+    "icon_shadow_alpha": 90,
+    "highlight_fill": [
+      232,
+      160,
+      184,
+      40
+    ],
+    "highlight_border": [
+      240,
+      200,
+      220,
+      80
+    ],
+    "hover_glow": [
+      232,
+      180,
+      200,
+      50
+    ],
+    "center_bg": [
+      30,
+      20,
+      28,
+      220
+    ],
+    "center_border": [
+      200,
+      160,
+      180,
+      140
+    ],
+    "center_border_width": 2.0,
+    "center_text_color": [
+      220,
+      200,
+      210
+    ],
+    "icon_bold": 1.4
+  },
+  "colors": {
+    "crust": "#0e0a0c",
+    "mantle": "#161014",
+    "base": "#1c1418",
+    "surface0": "#2a1e24",
+    "surface1": "#362832",
+    "surface2": "#443440",
+    "overlay0": "#5e4858",
+    "overlay1": "#785e70",
+    "text": "#f4e8ee",
+    "subtext1": "#dcc0d0",
+    "subtext0": "#a88898",
+    "accent": "#e8a0b8",
+    "accent2": "#d088a0",
+    "accent_dim": "#b06880",
+    "green": "#a0c890",
+    "yellow": "#d8c888",
+    "red": "#e07070",
+    "blue": "#88a8d0",
+    "mauve": "#c090d0",
+    "pink": "#e8a0b8",
+    "peach": "#d8a888",
+    "teal": "#80b8b0",
+    "sapphire": "#88a8d0",
+    "lavender": "#c090d0"
+  }
+}

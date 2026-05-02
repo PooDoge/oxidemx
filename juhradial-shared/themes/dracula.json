@@ -1,0 +1,32 @@
+{
+  "name": "Dracula",
+  "description": "Dark theme with vibrant colors",
+  "is_dark": true,
+  "radial_image": null,
+  "colors": {
+    "crust": "#21222c",
+    "mantle": "#282a36",
+    "base": "#343746",
+    "surface0": "#414458",
+    "surface1": "#4e5268",
+    "surface2": "#5a5e78",
+    "overlay0": "#6c7093",
+    "overlay1": "#7e82a8",
+    "text": "#f8f8f2",
+    "subtext1": "#e2e2d8",
+    "subtext0": "#bfbfb4",
+    "accent": "#bd93f9",
+    "accent2": "#ff79c6",
+    "accent_dim": "#9a6dd7",
+    "green": "#50fa7b",
+    "yellow": "#f1fa8c",
+    "red": "#ff5555",
+    "blue": "#8be9fd",
+    "mauve": "#bd93f9",
+    "pink": "#ff79c6",
+    "peach": "#ffb86c",
+    "teal": "#50fa7b",
+    "sapphire": "#8be9fd",
+    "lavender": "#bd93f9"
+  }
+}

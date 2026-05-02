@@ -1,0 +1,82 @@
+{
+  "name": "Dark Ember (3D)",
+  "description": "Dark elegant radial wheel with golden accents",
+  "is_dark": true,
+  "radial_image": "radialwheel4.png",
+  "radial_params": {
+    "image_size": 310,
+    "icon_radius": 101,
+    "ring_inner": 58,
+    "ring_outer": 144,
+    "icon_scale": 1.0,
+    "icon_color": [
+      255,
+      215,
+      160
+    ],
+    "icon_shadow_alpha": 90,
+    "highlight_fill": [
+      255,
+      130,
+      60,
+      45
+    ],
+    "highlight_border": [
+      255,
+      170,
+      90,
+      95
+    ],
+    "hover_glow": [
+      255,
+      140,
+      70,
+      70
+    ],
+    "center_bg": [
+      26,
+      16,
+      12,
+      235
+    ],
+    "center_border": [
+      220,
+      140,
+      70,
+      170
+    ],
+    "center_border_width": 2.0,
+    "center_text_color": [
+      240,
+      200,
+      140
+    ],
+    "icon_bold": 1.4
+  },
+  "colors": {
+    "crust": "#0a0a08",
+    "mantle": "#121210",
+    "base": "#1a1814",
+    "surface0": "#242018",
+    "surface1": "#2e2a20",
+    "surface2": "#3a3428",
+    "overlay0": "#504838",
+    "overlay1": "#686050",
+    "text": "#f0e8d8",
+    "subtext1": "#d0c8b0",
+    "subtext0": "#988e78",
+    "accent": "#d4a840",
+    "accent2": "#c09030",
+    "accent_dim": "#a07828",
+    "green": "#80b860",
+    "yellow": "#d4a840",
+    "red": "#c86050",
+    "blue": "#6898c0",
+    "mauve": "#a080b0",
+    "pink": "#c88890",
+    "peach": "#d8a060",
+    "teal": "#60a898",
+    "sapphire": "#6898c0",
+    "lavender": "#a080b0"
+  }
+}

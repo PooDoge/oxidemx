@@ -1,0 +1,32 @@
+{
+  "name": "Catppuccin Mocha",
+  "description": "Soothing pastel theme with lavender accents",
+  "is_dark": true,
+  "radial_image": null,
+  "colors": {
+    "crust": "#11111b",
+    "mantle": "#181825",
+    "base": "#1e1e2e",
+    "surface0": "#313244",
+    "surface1": "#45475a",
+    "surface2": "#585b70",
+    "overlay0": "#6c7086",
+    "overlay1": "#7f849c",
+    "text": "#cdd6f4",
+    "subtext1": "#bac2de",
+    "subtext0": "#a6adc8",
+    "accent": "#b4befe",
+    "accent2": "#cba6f7",
+    "accent_dim": "#9399b2",
+    "green": "#a6e3a1",
+    "yellow": "#f9e2af",
+    "red": "#f38ba8",
+    "blue": "#89b4fa",
+    "mauve": "#cba6f7",
+    "pink": "#f5c2e7",
+    "peach": "#fab387",
+    "teal": "#94e2d5",
+    "sapphire": "#74c7ec",
+    "lavender": "#b4befe"
+  }
+}

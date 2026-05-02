@@ -1,0 +1,82 @@
+{
+  "name": "Neon Sci-Fi (3D)",
+  "description": "Cyberpunk neon radial wheel with electric glow",
+  "is_dark": true,
+  "radial_image": "radialwheel3.png",
+  "radial_params": {
+    "image_size": 310,
+    "icon_radius": 101,
+    "ring_inner": 58,
+    "ring_outer": 144,
+    "icon_scale": 1.0,
+    "icon_color": [
+      200,
+      240,
+      255
+    ],
+    "icon_shadow_alpha": 0,
+    "highlight_fill": [
+      0,
+      232,
+      255,
+      35
+    ],
+    "highlight_border": [
+      0,
+      232,
+      255,
+      100
+    ],
+    "hover_glow": [
+      0,
+      232,
+      255,
+      70
+    ],
+    "center_bg": [
+      8,
+      12,
+      22,
+      235
+    ],
+    "center_border": [
+      0,
+      232,
+      255,
+      200
+    ],
+    "center_border_width": 2.0,
+    "center_text_color": [
+      0,
+      210,
+      240
+    ],
+    "icon_bold": 1.4
+  },
+  "colors": {
+    "crust": "#06080e",
+    "mantle": "#0a0e18",
+    "base": "#0e1220",
+    "surface0": "#141a2e",
+    "surface1": "#1c243c",
+    "surface2": "#242e4a",
+    "overlay0": "#364068",
+    "overlay1": "#485580",
+    "text": "#e0f0ff",
+    "subtext1": "#b0c8e8",
+    "subtext0": "#7090b8",
+    "accent": "#00e8ff",
+    "accent2": "#e040ff",
+    "accent_dim": "#0098b0",
+    "green": "#00ff88",
+    "yellow": "#ffdd00",
+    "red": "#ff3060",
+    "blue": "#00b8ff",
+    "mauve": "#e040ff",
+    "pink": "#ff60c0",
+    "peach": "#ff8840",
+    "teal": "#00e8d0",
+    "sapphire": "#00b8ff",
+    "lavender": "#b080ff"
+  }
+}
