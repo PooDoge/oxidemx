@@ -29,6 +29,7 @@ mod config;
 mod dbus;
 mod input;
 mod tray;
+mod geometry;
 mod render {
     pub mod slices;
     pub mod icons;

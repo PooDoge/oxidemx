@@ -275,6 +275,84 @@ cost. Ranked roughly by user value vs implementation effort:
 5. **Deprecate the Python overlay** once parity is solid and the new
    features are stable. Remove `overlay/` after one or two release cycles.
 
+## Build prerequisites
+
+`overlay-rs` links against the GTK4 stack. The base Bazzite image ships
+the runtime libraries but not the `*-devel` headers needed for
+`pkg-config` discovery. Layer these once before `cargo build -p
+juhradial-overlay-rs`:
+
+```
+sudo rpm-ostree install \
+    cairo-devel \
+    gdk-pixbuf2-devel \
+    gtk4-devel \
+    gtk4-layer-shell-devel \
+    pango-devel \
+    glib2-devel
+sudo systemctl reboot
+```
+
+(`gtk4` itself, `gtk4-layer-shell`, `cairo`, `pango`, and
+`gdk-pixbuf2` runtimes are already layered for the Python overlay's
+sake — these `*-devel` siblings just add the headers.)
+
+`juhradial-shared` has no system dependencies and compiles + tests
+cleanly without any of the above (`cargo test -p juhradial-shared`).
+
+These layered packages will be folded into `install.sh`'s
+`install_deps_fedora_atomic()` once `overlay-rs` is the default
+overlay; for now they're a manual step for anyone building the
+rewrite branch.
+
+## Status (2026-05-02 working tree)
+
+What's landed on `rust-gtk4-overlay`:
+
+  * Workspace skeleton: daemon + juhradial-shared + overlay-rs.
+  * `juhradial-shared`: AppConfig / Slice / RadialMenuConfig serde
+    types, ThemeName, ActionKind, all 11 themes from the Python
+    overlay (vector + 3D), Theme::load + Theme::catalogue, hex →
+    RGBA helpers. 8/8 tests passing.
+  * `overlay-rs/src/dbus.rs`: typed zbus #[proxy] for
+    MenuRequested(i32,i32) / HideMenu() / CursorMoved(i32,i32),
+    one task per signal stream, GTK MainContext integration.
+  * `overlay-rs/src/window.rs`: layer-shell window + show_at()
+    that resolves cursor → monitor → margins.
+  * `overlay-rs/src/radial.rs`: RadialState + RadialWidget wired to
+    the renderer; on_cursor_moved drives the slice highlight.
+  * `overlay-rs/src/render/slices.rs`: cairo translation of
+    `_draw_slice` — donut wedges, hover overlay, glow ring, icon
+    background. Icon glyph is a placeholder pending the
+    icon-resolver port.
+  * `overlay-rs/src/theme.rs`: ActiveTheme wrapper with explicit
+    fallback + tests.
+  * `overlay-rs/src/input.rs`: slice_index_at hit-test + 8 unit
+    tests covering each cardinal/diagonal slot, deadzone, max
+    radius, boundary rounding.
+  * `overlay-rs/src/geometry.rs`: layout constants, Geometry
+    struct.
+
+What's stubbed (TODO each becomes one focused commit):
+
+  * `render/icons.rs`: three-tier icon resolution (path / internal
+    id / theme).
+  * `render/animation.rs`: 60Hz frame ticker, easing curves, in-flight
+    tweens for highlight progress.
+  * `editor/`: window + slice panel + icon picker + live preview.
+  * `tray.rs`: KStatusNotifierItem with Edit / Settings / Quit.
+  * Per-app profile loader (window_tracker integration).
+  * Quick-search overlay.
+  * Drag-and-drop targets.
+  * Hotkey + button combos.
+  * 3D-theme renderer (`radial_image` + `radial_params` path).
+  * Submenu pop-out renderer (cairo translation of `_draw_submenu`).
+
+The next natural pause point is once the icon resolver lands and you
+can layer the `*-devel` packages and try `cargo run -p
+juhradial-overlay-rs` against the running daemon — that's the first
+moment where visual non-automated testing is needed.
+
 ## Risks / unknowns
 
 - **Layer-shell on GNOME requires a shell extension or wlr-layer-shell
