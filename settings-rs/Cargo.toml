@@ -1,0 +1,31 @@
+[package]
+name = "juhradial-settings-rs"
+version = "0.0.1"
+edition = "2021"
+description = "JuhRadial MX settings GUI (Rust + iced)"
+license = "GPL-3.0"
+repository = "https://github.com/JuhLabs/juhradial-mx"
+
+[[bin]]
+name = "juhradial-settings"
+path = "src/main.rs"
+
+[dependencies]
+juhradial-shared = { path = "../juhradial-shared" }
+
+# iced 0.14 — same toolkit as the overlay so we share render
+# tech and don't drag in a separate UI dep tree. Standard widgets
+# only (no canvas), wayland + x11.
+iced = { version = "0.14", features = ["wayland", "x11", "tokio"] }
+
+# Config IO: load + save the same JSON the overlay watches.
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Tokio for iced::time::every (debounced auto-save) — same dep as
+# the overlay.
+tokio = { version = "1", features = ["rt", "macros", "time"] }

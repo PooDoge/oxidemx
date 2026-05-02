@@ -10,8 +10,19 @@ use tracing::{info, warn};
 /// a misconfigured slice shouldn't crash the overlay.
 pub fn dispatch(slice: &Slice) {
     match slice.kind {
-        ActionKind::Exec | ActionKind::Settings | ActionKind::Emoji => {
+        ActionKind::Exec | ActionKind::Emoji => {
             spawn_shell(&slice.command, &slice.label);
+        }
+        ActionKind::Settings => {
+            // The Settings slice opens the dedicated settings GUI
+            // binary. Falls back to executing `slice.command` if
+            // the user has overridden it explicitly.
+            let cmd = if slice.command.trim().is_empty() {
+                "juhradial-settings"
+            } else {
+                slice.command.as_str()
+            };
+            spawn_shell(cmd, &slice.label);
         }
         ActionKind::Submenu => {
             // Submenu opens are handled in the radial widget on

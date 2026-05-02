@@ -5,8 +5,11 @@
 #                           Pre-existing; not touched by this rewrite.
 #   * juhradial-shared/   — types shared between daemon and overlay
 #                           (config.json structs, theme names, action enums).
-#   * overlay-rs/         — Rust + GTK4 + layer-shell radial menu overlay.
-#                           Replacement for the Python overlay/ tree.
+#   * overlay-rs/         — Rust + iced overlay. Replacement for the
+#                           Python overlay/ tree.
+#   * settings-rs/        — Rust + iced settings GUI. Edits the same
+#                           config.json the overlay watches via inotify,
+#                           so changes preview live with no IPC.
 #
 # The legacy Python overlay/ stays in place during the migration; both
 # overlays talk to the same daemon over the same D-Bus interface, and a
@@ -18,6 +21,7 @@ members = [
     "daemon",
     "juhradial-shared",
     "overlay-rs",
+    "settings-rs",
     "spike-iced",
 ]
 
