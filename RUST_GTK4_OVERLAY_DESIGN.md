@@ -305,53 +305,86 @@ These layered packages will be folded into `install.sh`'s
 overlay; for now they're a manual step for anyone building the
 rewrite branch.
 
-## Status (2026-05-02 working tree)
+## Status (2026-05-02 working tree, end of pre-GTK-link push)
 
-What's landed on `rust-gtk4-overlay`:
+The GTK4 dev libraries aren't layered on the dev box yet, so visual
+testing is gated on a `rpm-ostree install … && reboot`. The chunks
+below are everything that can land *without* needing that — they
+either compile + test in pure Rust (`juhradial-shared`) or are
+overlay-rs code that links once the devel packages are in place.
+
+Landed (`rust-gtk4-overlay` → 65b916d):
 
   * Workspace skeleton: daemon + juhradial-shared + overlay-rs.
-  * `juhradial-shared`: AppConfig / Slice / RadialMenuConfig serde
-    types, ThemeName, ActionKind, all 11 themes from the Python
-    overlay (vector + 3D), Theme::load + Theme::catalogue, hex →
-    RGBA helpers. 8/8 tests passing.
-  * `overlay-rs/src/dbus.rs`: typed zbus #[proxy] for
-    MenuRequested(i32,i32) / HideMenu() / CursorMoved(i32,i32),
-    one task per signal stream, GTK MainContext integration.
-  * `overlay-rs/src/window.rs`: layer-shell window + show_at()
-    that resolves cursor → monitor → margins.
-  * `overlay-rs/src/radial.rs`: RadialState + RadialWidget wired to
-    the renderer; on_cursor_moved drives the slice highlight.
-  * `overlay-rs/src/render/slices.rs`: cairo translation of
-    `_draw_slice` — donut wedges, hover overlay, glow ring, icon
-    background. Icon glyph is a placeholder pending the
-    icon-resolver port.
-  * `overlay-rs/src/theme.rs`: ActiveTheme wrapper with explicit
-    fallback + tests.
-  * `overlay-rs/src/input.rs`: slice_index_at hit-test + 8 unit
-    tests covering each cardinal/diagonal slot, deadzone, max
-    radius, boundary rounding.
-  * `overlay-rs/src/geometry.rs`: layout constants, Geometry
-    struct.
+  * `juhradial-shared` (36/36 tests passing, no system deps):
+      - AppConfig / Slice / RadialMenuConfig serde types.
+      - ThemeName, all 11 themes from the Python overlay
+        (vector + 3D), Theme::load / Theme::catalogue, hex →
+        RGBA helpers.
+      - ActionKind enum.
+      - applications: native + Flatpak `.desktop` enumeration,
+        clean_exec_line for field-code + `@@u`/`@@U` stripping,
+        case-insensitive ranked search. Exercises against 145
+        real entries on the dev box.
+      - profiles: `ProfileResolver::menu_for(focused_class)`
+        with case-insensitive matching, fallback when the
+        profile file is missing, save_main / save_profile for
+        the editor's write path.
+      - conditions: `visible_if` predicate enum (executable,
+        file_exists, process_running, env_set / env_equals,
+        all / any / not). Pure-Rust evaluator.
+      - examples/list_apps.rs smoke test.
 
-What's stubbed (TODO each becomes one focused commit):
+  * `overlay-rs` (links once devel packages are layered):
+      - dbus.rs: typed zbus `#[proxy]` for the daemon's
+        MenuRequested / HideMenu / CursorMoved signals,
+        per-stream tasks, glib MainContext integration.
+      - window.rs: layer-shell window with show_at() →
+        monitor lookup + Edge margin offsets. Sidesteps the
+        entire xcb / dpr / xdotool stack.
+      - radial.rs: RadialState (theme + slices + per-slice
+        highlight + Rc<IconCache>) shared between draw_func
+        and the event pump.
+      - render/slices.rs: cairo donut-wedge slices, hover
+        overlay, glow ring, icon background; glyph composite
+        from the icon resolver.
+      - render/icons.rs: three-tier resolver (path /
+        freedesktop name / placeholder), tinted via
+        Operator::SourceIn, cached by
+        (source, size, color_packed_u32).
+      - theme.rs: ActiveTheme with fallback + tests.
+      - input.rs: slice_index_at hit-test + 8 unit tests
+        (will run with the GTK link).
+      - geometry.rs: layout constants + Geometry struct.
 
-  * `render/icons.rs`: three-tier icon resolution (path / internal
-    id / theme).
-  * `render/animation.rs`: 60Hz frame ticker, easing curves, in-flight
-    tweens for highlight progress.
-  * `editor/`: window + slice panel + icon picker + live preview.
-  * `tray.rs`: KStatusNotifierItem with Edit / Settings / Quit.
-  * Per-app profile loader (window_tracker integration).
-  * Quick-search overlay.
-  * Drag-and-drop targets.
-  * Hotkey + button combos.
-  * 3D-theme renderer (`radial_image` + `radial_params` path).
+What still needs the GTK link (queue for after the reboot):
+
+  * Animation timer (glib::timeout_add) → smooth highlight tweens.
+  * Toggle-mode hover (gtk::EventControllerMotion) + click
+    (gtk::GestureClick) + action dispatch.
   * Submenu pop-out renderer (cairo translation of `_draw_submenu`).
+  * 3D-theme renderer (radial_image + radial_params path).
+  * Internal-id custom glyphs (legacy "play_pause", "folder",
+    "easy_switch", "os_*" — direct cairo paths).
+  * editor/: window + slice panel + icon picker (with the
+    Flatpak app launcher tab using `juhradial_shared::applications`)
+    + live preview.
+  * tray.rs: KStatusNotifierItem.
+  * Wire ProfileResolver into RadialState (one-line swap, but
+    needs the link to compile-test).
+  * Apply `Condition::eval` filter in the slice render loop.
+  * Config inotify watcher → `RadialWidget::reload_from`.
 
-The next natural pause point is once the icon resolver lands and you
-can layer the `*-devel` packages and try `cargo run -p
-juhradial-overlay-rs` against the running daemon — that's the first
-moment where visual non-automated testing is needed.
+What's only blocked on the daemon side (independent of the overlay
+build):
+
+  * Daemon → juhradial-shared type migration (eliminate drift).
+    Daemon's existing test suite gives us the safety net.
+  * Daemon emitting a focused-class signal so the overlay can
+    drive ProfileResolver::menu_for().
+
+The next natural pause point is the visual smoke test — see the
+Build prerequisites section above and `overlay-rs/run-smoke-test.sh`.
 
 ## Risks / unknowns
 

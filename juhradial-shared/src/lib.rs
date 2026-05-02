@@ -26,4 +26,4 @@ pub use applications::{
 pub use conditions::Condition;
 pub use config::{AppConfig, RadialMenuConfig, Slice};
 pub use profiles::ProfileResolver;
-pub use theme::ThemeName;
+pub use theme::{Theme, ThemeName};
