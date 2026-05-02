@@ -8,10 +8,13 @@
 
 use iced::widget::canvas::{self, Action, Frame, Geometry, Path};
 use iced::{mouse, Color, Event, Point, Rectangle, Renderer, Theme};
-use juhradial_shared::{theme::parse_hex_rgba, ActionKind, AppConfig, Slice};
+use juhradial_shared::{
+    theme::parse_hex_rgba, ActionKind, AnimationConfig, AppConfig, ElementAnimation, Slice,
+};
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
+use crate::anim::Tween;
 use crate::geometry::{Geometry as RadialGeometry, MENU_RADIUS, WINDOW_SIZE};
 use crate::render::icons::IconCache;
 use crate::theme::ActiveTheme;
@@ -40,55 +43,31 @@ const RING_OUTER_INSET: f32 = 6.0;
 const RING_INNER_INSET: f32 = 6.0;
 const ICON_BG_RADIUS: f32 = 26.0;
 
-/// Per-slice highlight progress in [0.0, 1.0]. The 60Hz tick from
-/// `iced::time::every` advances each entry toward its target value
-/// using `ease_out_quad`-shaped steps.
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct Animation {
-    pub(crate) current: f32,
-    pub(crate) target: f32,
-}
-
-impl Animation {
-    const fn at(value: f32) -> Self {
-        Self { current: value, target: value }
-    }
-    fn step(&mut self) {
-        let delta = self.target - self.current;
-        if delta.abs() < 0.001 {
-            self.current = self.target;
-            return;
-        }
-        // Geometric easing — fast at first, settles smoothly. Each
-        // tick covers ~25% of the remaining distance, giving a
-        // visually pleasing 4-6 frame transition between hover
-        // states without the jitter a linear ramp would produce.
-        self.current += delta * 0.25;
-    }
-}
-
 /// Open submenu state. `None` when the user isn't hovering a
 /// Submenu-kind slice (the common case). Created when hover lands
 /// on a slice with `kind == Submenu` and a non-empty `submenu` vec;
-/// dropped when the cursor leaves both the parent slice and the
-/// sub-item arc.
+/// dropped (after an exit fade settles) when the cursor leaves both
+/// the parent slice and the sub-item arc.
 #[derive(Debug, Clone)]
 pub struct SubmenuState {
     /// Index of the parent slice (0..7) that opened this submenu.
     pub parent: usize,
-    /// 0.0 → 1.0 grow-out animation. Drives the per-item radius +
-    /// scale + opacity stagger in the renderer.
-    pub progress: Animation,
+    /// 0.0 → 1.0 grow-out tween. Drives the per-item radius / scale
+    /// / opacity in the renderer via `crate::anim::evaluate`. Speed
+    /// + curve come from `AnimationConfig::submenu`.
+    pub progress: Tween,
     /// Currently-hovered sub-item index, or `None` for "between
     /// items, mouse over the parent wedge".
     pub highlighted: Option<usize>,
 }
 
 impl SubmenuState {
-    fn new(parent: usize) -> Self {
+    fn new(parent: usize, anim: &ElementAnimation) -> Self {
+        let mut progress = Tween::at(0.0);
+        progress.set_target(1.0, &anim.enter);
         Self {
             parent,
-            progress: Animation { current: 0.0, target: 1.0 },
+            progress,
             highlighted: None,
         }
     }
@@ -98,15 +77,21 @@ impl SubmenuState {
 pub struct RadialState {
     pub theme: ActiveTheme,
     pub slices: Vec<Slice>,
-    /// Per-slice hover progress. Index `i` corresponds to slot `i`
+    /// User-tweakable animation parameters for menu / submenu /
+    /// slice highlight. Reloaded by the inotify watcher so the
+    /// user can iterate on feel without restarting.
+    pub anim_config: AnimationConfig,
+    /// Per-slice hover tween in [0, 1]. Index `i` is slot `i`
     /// clockwise from the top.
-    highlights: [Animation; 8],
+    highlights: [Tween; 8],
     /// Currently-targeted slice (or `None` for centre/outside).
-    /// Drives `highlights` via `step()`.
+    /// Drives `highlights` via `set_target()` on transitions.
     target_slice: Option<usize>,
-    /// Whether the menu is currently visible (Show received, Hide
-    /// not yet).
-    visible: bool,
+    /// Whole-menu open/close tween. 1.0 = fully visible, 0.0 =
+    /// hidden. Replaces the old `visible: bool` so the painter
+    /// can keep drawing during an exit fade. `is_drawable()` is
+    /// the renderer's "render anything?" gate.
+    pub(crate) menu: Tween,
     /// Per-overlay icon cache shared with the painter via `Rc`.
     icons: Rc<IconCache>,
     /// When the daemon's most recent `Show` arrived. Compared
@@ -133,7 +118,7 @@ impl std::fmt::Debug for RadialState {
             .field("theme", &self.theme)
             .field("slices.len", &self.slices.len())
             .field("target_slice", &self.target_slice)
-            .field("visible", &self.visible)
+            .field("menu", &self.menu)
             .field("toggle_mode", &self.toggle_mode)
             .field("submenu", &self.submenu)
             .finish()
@@ -144,12 +129,14 @@ impl RadialState {
     pub fn new(config: &AppConfig) -> Self {
         let theme = ActiveTheme::resolve(&config.theme);
         let slices = config.radial_menu.slices.clone();
+        let anim_config = config.radial_menu.animation.clone();
         RadialState {
             theme,
             slices,
-            highlights: [Animation::at(0.0); 8],
+            anim_config,
+            highlights: [Tween::at(0.0); 8],
             target_slice: None,
-            visible: false,
+            menu: Tween::at(0.0),
             icons: Rc::new(IconCache::new()),
             show_time: None,
             toggle_mode: false,
@@ -158,15 +145,31 @@ impl RadialState {
     }
 
     pub fn show(&mut self) {
-        self.visible = true;
+        self.menu.set_target(1.0, &self.anim_config.menu.enter);
         self.show_time = Some(Instant::now());
         self.toggle_mode = false;
         // Reset any stale highlights from a previous show.
         for a in &mut self.highlights {
-            a.target = 0.0;
+            a.set_target(0.0, &self.anim_config.slice_highlight.exit);
         }
         self.target_slice = None;
         self.submenu = None;
+    }
+
+    /// True when the menu is currently visible OR mid-exit-fade.
+    /// The painter uses this to keep drawing during the close
+    /// animation; once it returns false the canvas can short-
+    /// circuit to a clear frame.
+    pub fn is_drawable(&self) -> bool {
+        self.menu.current > 0.001 || self.menu.target > 0.001
+    }
+
+    /// True when the menu is logically "open" — the daemon hasn't
+    /// hidden us yet (or we're in toggle mode). Used by hit-test +
+    /// dispatch paths so a request that lands during the exit fade
+    /// doesn't accidentally trigger an action.
+    pub fn is_open(&self) -> bool {
+        self.menu.target > 0.5
     }
 
     /// Handle the daemon's `Hide` signal (gesture button release).
@@ -202,15 +205,19 @@ impl RadialState {
     pub fn dismiss(&mut self) {
         self.target_slice = None;
         for a in &mut self.highlights {
-            a.target = 0.0;
+            a.set_target(0.0, &self.anim_config.slice_highlight.exit);
         }
-        self.visible = false;
+        self.menu.set_target(0.0, &self.anim_config.menu.exit);
         self.toggle_mode = false;
-        self.submenu = None;
+        // Trigger the submenu's exit fade rather than dropping it
+        // immediately, so any in-flight pop-out gets to play out.
+        if let Some(sub) = self.submenu.as_mut() {
+            sub.progress.set_target(0.0, &self.anim_config.submenu.exit);
+        }
     }
 
     fn dispatch_and_close(&mut self) {
-        self.visible = false;
+        self.menu.set_target(0.0, &self.anim_config.menu.exit);
         // Submenu sub-item wins over the parent slice — if the user
         // released while hovering one, fire that. Falling back to
         // the parent only when no sub-item was hovered keeps the
@@ -253,11 +260,13 @@ impl RadialState {
 
     fn reset_after_dispatch(&mut self) {
         for a in &mut self.highlights {
-            a.target = 0.0;
+            a.set_target(0.0, &self.anim_config.slice_highlight.exit);
         }
         self.target_slice = None;
         self.toggle_mode = false;
-        self.submenu = None;
+        if let Some(sub) = self.submenu.as_mut() {
+            sub.progress.set_target(0.0, &self.anim_config.submenu.exit);
+        }
     }
 
     /// True when the menu is in toggle mode and the canvas should
@@ -283,11 +292,13 @@ impl RadialState {
     /// `dx, dy` are accumulated REL_X / REL_Y values from the
     /// gesture-button press point (NOT absolute screen coords).
     pub fn on_cursor_moved(&mut self, dx: i32, dy: i32) {
-        // Drag-mode (gesture button held): never auto-opens a
-        // submenu. Holding-and-dragging over a Submenu slice should
-        // just highlight that slice; if the user wants the submenu
-        // they tap to enter toggle mode first.
-        self.update_pointer(dx as f64, dy as f64, false);
+        // Drag-mode also opens submenus: dragging onto a Submenu
+        // slice pops out its sub-items so the user can continue
+        // the drag onto a sub-item and release to fire it. Visual
+        // pace of the pop-out is governed by
+        // `AnimationConfig.submenu.enter` so the user can dial it
+        // up if it feels slow.
+        self.update_pointer(dx as f64, dy as f64, true);
     }
 
     /// Shared cursor-update path: updates the highlighted slice and,
@@ -310,13 +321,16 @@ impl RadialState {
             crate::geometry::MENU_RADIUS,
         );
 
-        // 2. Slice highlight transition (parent ring), unchanged.
+        // 2. Slice highlight transition (parent ring) — drives the
+        //    per-slice tween via the configured highlight enter/exit.
         if new_target != self.target_slice {
             if let Some(prev) = self.target_slice {
-                self.highlights[prev].target = 0.0;
+                self.highlights[prev]
+                    .set_target(0.0, &self.anim_config.slice_highlight.exit);
             }
             if let Some(next) = new_target {
-                self.highlights[next].target = 1.0;
+                self.highlights[next]
+                    .set_target(1.0, &self.anim_config.slice_highlight.enter);
             }
             self.target_slice = new_target;
         }
@@ -365,31 +379,48 @@ impl RadialState {
                     if matches!(slice.kind, ActionKind::Submenu)
                         && !slice.submenu.is_empty()
                     {
-                        self.submenu = Some(SubmenuState::new(idx));
+                        self.submenu =
+                            Some(SubmenuState::new(idx, &self.anim_config.submenu));
                     }
                 }
             }
         }
     }
 
-    /// Step the per-slice highlight animations one frame, plus any
-    /// open submenu's grow-out animation.
+    /// Step every tween one frame (slice highlights, menu open/close,
+    /// open-submenu grow). Cheap when nothing's animating because each
+    /// `Tween::step` short-circuits on idle.
     pub fn advance_animations(&mut self) {
         for a in &mut self.highlights {
             a.step();
         }
-        if let Some(sub) = self.submenu.as_mut() {
-            sub.progress.step();
+        self.menu.step();
+        let sub_settled_to_zero = match self.submenu.as_mut() {
+            Some(sub) => {
+                sub.progress.step();
+                sub.progress.is_idle() && sub.progress.target <= 0.001
+            }
+            None => false,
+        };
+        if sub_settled_to_zero {
+            // Exit fade finished — drop the submenu so the renderer
+            // skips it and a future activation starts from progress 0.
+            self.submenu = None;
         }
     }
 
     /// Refresh from a freshly-loaded config (called by the inotify
-    /// watcher after the editor saves).
+    /// watcher after the editor saves). Replaces theme + slices +
+    /// animation parameters in place; in-flight tweens continue
+    /// playing but pick up the new speeds on their next
+    /// `set_target`. Drops any open submenu since slice indices
+    /// may have changed.
     pub fn reload_from(&mut self, config: &AppConfig) {
         self.theme = ActiveTheme::resolve(&config.theme);
         self.slices = config.radial_menu.slices.clone();
+        self.anim_config = config.radial_menu.animation.clone();
         for a in &mut self.highlights {
-            *a = Animation::at(0.0);
+            *a = Tween::at(0.0);
         }
         self.target_slice = None;
         self.submenu = None;
@@ -450,7 +481,7 @@ impl<'a> canvas::Program<crate::app::Message> for Painter<'a> {
         bounds: Rectangle,
         cursor: mouse::Cursor,
     ) -> Option<Action<crate::app::Message>> {
-        if !self.state.visible || !self.state.is_toggle_mode() {
+        if !self.state.is_open() || !self.state.is_toggle_mode() {
             return None;
         }
         match event {
@@ -491,8 +522,9 @@ impl<'a> canvas::Program<crate::app::Message> for Painter<'a> {
     ) -> Vec<Geometry> {
         let mut frame = Frame::new(renderer, bounds.size());
 
-        if !self.state.visible {
-            // Menu not requested — leave canvas transparent.
+        if !self.state.is_drawable() {
+            // Fully closed (no in-flight exit fade) — render a clear
+            // frame and bail.
             return vec![frame.into_geometry()];
         }
 
@@ -500,14 +532,34 @@ impl<'a> canvas::Program<crate::app::Message> for Painter<'a> {
         let center = Point::new(geom.cx as f32, geom.cy as f32);
         let palette = &self.state.theme.theme.colors;
 
+        // Whole-menu visual modulation. `Visual.scale` becomes a
+        // canvas transform around the centre; `Visual.opacity` is
+        // multiplied into every fill alpha downstream. When the
+        // menu animation is `None` (default), `menu_vis` reduces
+        // to (1.0, 1.0) and the geometry below renders unchanged.
+        let menu_vis = crate::anim::evaluate(
+            &self.state.menu,
+            &self.state.anim_config.menu.enter,
+            &self.state.anim_config.menu.exit,
+        );
+        // iced's `Frame::scale_to` doesn't exist as a save/restore
+        // primitive, so we apply scale manually by adjusting radii.
+        // Keeping it to radii (not a true affine) keeps stroke widths
+        // consistent — a "shrinking" exit looks like the disc itself
+        // contracting toward the centre rather than the whole canvas
+        // zooming.
+        let mscale = menu_vis.scale.max(0.0);
+        let mopacity = menu_vis.opacity.clamp(0.0, 1.0);
+
         // Faint shadow halo so the disc reads against transparent
         // backgrounds.
-        let halo = Path::circle(center, MENU_RADIUS as f32 + 6.0);
-        frame.fill(&halo, Color::from_rgba(0.0, 0.0, 0.0, 0.35));
+        let halo = Path::circle(center, (MENU_RADIUS as f32 + 6.0) * mscale);
+        frame.fill(&halo, Color::from_rgba(0.0, 0.0, 0.0, 0.35 * mopacity));
 
-        let outer_r = (MENU_RADIUS as f32) - RING_OUTER_INSET;
-        let inner_r = (geom.center_radius as f32) + RING_INNER_INSET;
-        let icon_r = geom.icon_radius as f32;
+        let outer_r = ((MENU_RADIUS as f32) - RING_OUTER_INSET) * mscale;
+        let inner_r = ((geom.center_radius as f32) + RING_INNER_INSET) * mscale;
+        let icon_r = (geom.icon_radius as f32) * mscale;
+        let icon_bg_r = ICON_BG_RADIUS * mscale;
 
         for i in 0..8 {
             let highlight = self.state.highlights[i].current;
@@ -524,11 +576,12 @@ impl<'a> canvas::Program<crate::app::Message> for Painter<'a> {
                 inner_r,
                 outer_r,
                 icon_r,
-                ICON_BG_RADIUS,
+                icon_bg_r,
                 i,
                 slice_for_render,
                 palette,
                 highlight,
+                mopacity,
                 &self.state.icons,
             );
         }
@@ -536,8 +589,9 @@ impl<'a> canvas::Program<crate::app::Message> for Painter<'a> {
         crate::render::slices::draw_center(
             &mut frame,
             center,
-            geom.center_radius as f32,
+            (geom.center_radius as f32) * mscale,
             palette,
+            mopacity,
         );
 
         // Submenu pop-out (drawn AFTER the centre so its sub-items
@@ -550,6 +604,8 @@ impl<'a> canvas::Program<crate::app::Message> for Painter<'a> {
                 sub,
                 &self.state.slices,
                 palette,
+                &self.state.anim_config.submenu,
+                mopacity,
                 &self.state.icons,
             );
         }

@@ -16,8 +16,9 @@
 use iced::widget::canvas::{path::Arc, Frame, Path, Stroke};
 use iced::{Color, Point, Radians};
 use juhradial_shared::theme::{parse_hex_rgba, ThemeColors};
-use juhradial_shared::Slice;
+use juhradial_shared::{ElementAnimation, Slice};
 
+use crate::anim;
 use crate::radial::{
     SubmenuState, SUBITEM_RENDER_RADIUS, SUBITEM_RENDER_SPREAD_DEG, SUBMENU_RADIUS,
 };
@@ -41,6 +42,7 @@ pub fn draw_slice(
     slice: Option<&Slice>,
     palette: &ThemeColors,
     highlight: f32,
+    menu_opacity: f32,
     icons: &IconCache,
 ) {
     // Slice angular range in cairo coords (clockwise from +X axis,
@@ -52,14 +54,15 @@ pub fn draw_slice(
     let end_rad = end_deg.to_radians();
 
     let wedge = build_wedge(center, inner_r, outer_r, start_rad, end_rad);
+    let mo = menu_opacity.clamp(0.0, 1.0);
 
     // Base fill — surface0 @ alpha 80/255.
-    frame.fill(&wedge, rgba(&palette.surface0, 80.0 / 255.0));
+    frame.fill(&wedge, rgba(&palette.surface0, (80.0 / 255.0) * mo));
 
     // Stroke — interpolate surface2 → white, alpha 60..120, line
     // width 1.0..1.5.
     let stroke_color = lerp(rgba(&palette.surface2, 1.0), Color::WHITE, highlight);
-    let alpha = (60.0 + 60.0 * highlight) / 255.0;
+    let alpha = ((60.0 + 60.0 * highlight) / 255.0) * mo;
     frame.stroke(
         &wedge,
         Stroke::default()
@@ -71,7 +74,7 @@ pub fn draw_slice(
     if highlight > 0.0 {
         frame.fill(
             &wedge,
-            Color::from_rgba(1.0, 1.0, 1.0, 45.0 / 255.0 * highlight),
+            Color::from_rgba(1.0, 1.0, 1.0, (45.0 / 255.0) * highlight * mo),
         );
     }
 
@@ -86,7 +89,7 @@ pub fn draw_slice(
             &glow,
             Stroke::default()
                 .with_color(Color::from_rgba(
-                    1.0, 1.0, 1.0, 40.0 / 255.0 * highlight,
+                    1.0, 1.0, 1.0, (40.0 / 255.0) * highlight * mo,
                 ))
                 .with_width(3.0),
         );
@@ -96,7 +99,7 @@ pub fn draw_slice(
     let s1 = rgba(&palette.surface1, 1.0);
     let s2 = rgba(&palette.surface2, 1.0);
     let bg = lerp(s1, s2, highlight);
-    let bg_alpha = (230.0 + 25.0 * highlight) / 255.0;
+    let bg_alpha = ((230.0 + 25.0 * highlight) / 255.0) * mo;
     frame.fill(
         &Path::circle(icon_pos, icon_bg_radius),
         Color { a: bg_alpha, ..bg },
@@ -109,7 +112,7 @@ pub fn draw_slice(
         .filter(|s| !s.is_empty())
         .unwrap_or("accent");
     let (sr, sg, sb, _) = palette.slice_color_rgba(slot_color_key);
-    let icon_color_rgba = (sr as f32, sg as f32, sb as f32, 1.0);
+    let icon_color_rgba = (sr as f32, sg as f32, sb as f32, mo);
 
     // Try to load + tint the slice's configured icon. On miss
     // (icon name not in any theme dir, file load failure, etc.),
@@ -122,7 +125,7 @@ pub fn draw_slice(
     if let Some(handle) = icons.resolve(icon_source, glyph_size_px, icon_color_rgba) {
         draw_icon(frame, icon_pos.x, icon_pos.y, glyph_size, &handle);
     } else {
-        let dot_color = Color::from_rgb(sr as f32, sg as f32, sb as f32);
+        let dot_color = Color::from_rgba(sr as f32, sg as f32, sb as f32, mo);
         frame.fill(&Path::circle(icon_pos, icon_bg_radius * 0.35), dot_color);
     }
 }
@@ -150,6 +153,8 @@ pub fn draw_submenu(
     submenu: &SubmenuState,
     slices: &[Slice],
     palette: &ThemeColors,
+    submenu_anim: &ElementAnimation,
+    menu_opacity: f32,
     icons: &IconCache,
 ) {
     let parent = match slices.get(submenu.parent) {
@@ -162,17 +167,28 @@ pub fn draw_submenu(
     }
     let n = items.len() as f32;
     let parent_angle_deg = (submenu.parent as f32) * 45.0 - 90.0;
+    // The whole-submenu progress drives the per-item stagger window;
+    // the per-item Visual is computed by re-running `anim::evaluate`
+    // against a synthetic Tween whose `current` is the item-local t.
+    // That way the user's chosen kind/curve from
+    // `AnimationConfig.submenu` is what shapes the pop-out, not a
+    // hardcoded ease-out-back.
     let progress = submenu.progress.current.clamp(0.0, 1.0);
-    // Stagger: each item starts `STAGGER` later than the previous in
-    // normalised time. The denominator keeps the *last* item's
-    // window ending at progress = 1.0 regardless of count.
+    // Stagger keeps the visual signature of the legacy overlay —
+    // items pop out one after the other instead of simultaneously.
+    // The window denominator keeps the *last* item ending exactly at
+    // progress = 1.0 regardless of count.
     const STAGGER: f32 = 0.12;
     let denom = (1.0 - (n - 1.0) * STAGGER).max(0.05);
+    let mo = menu_opacity.clamp(0.0, 1.0);
+
+    // Direction inferred once per draw: when the tween's target ≥
+    // current it's an entry (use enter cfg), otherwise an exit.
+    // Per-item Visual borrows the same direction so an exit fade
+    // doesn't suddenly switch curves mid-flight.
+    let going_in = submenu.progress.target >= submenu.progress.current;
 
     for (i, item) in items.iter().enumerate() {
-        // Skip sub-items whose visibility predicate evaluates false
-        // — same convention as the main ring's slot-stays-empty
-        // behaviour, except here we just don't draw the disc.
         let allowed = item
             .visible_if
             .as_ref()
@@ -183,14 +199,21 @@ pub fn draw_submenu(
         }
 
         let item_t = ((progress - (i as f32) * STAGGER) / denom).clamp(0.0, 1.0);
-        let eased = ease_out_back(item_t);
-        // Animate the radius from the ring edge out to the final
-        // submenu position so the items appear to grow out of the
-        // wedge they belong to.
-        let menu_r = (crate::geometry::MENU_RADIUS) as f32;
-        let anim_radius = menu_r + (SUBMENU_RADIUS - menu_r) * eased;
-        let item_scale = 0.5 + 0.5 * item_t;
-        let item_opacity = (item_t * 2.5).min(1.0);
+        // Synthesise a per-item tween at `current = item_t` and feed
+        // it through anim::evaluate so the user's configured kind/
+        // curve / initial_scale apply uniformly to every sub-item.
+        let mut item_tween = crate::anim::Tween::at(item_t);
+        item_tween.target = if going_in { 1.0 } else { 0.0 };
+        let v = anim::evaluate(&item_tween, &submenu_anim.enter, &submenu_anim.exit);
+
+        // Radius interpolates from the ring edge out to the
+        // submenu position — the "growing out of the wedge" feel.
+        let menu_r = crate::geometry::MENU_RADIUS as f32;
+        let anim_radius = menu_r + (SUBMENU_RADIUS - menu_r) * v.progress;
+
+        let item_opacity = (v.opacity * mo).clamp(0.0, 1.0);
+        let scaled_radius = SUBITEM_RENDER_RADIUS * v.scale.max(0.0);
+        let is_highlighted = submenu.highlighted == Some(i);
 
         let offset_deg = (i as f32 - (n - 1.0) / 2.0) * SUBITEM_RENDER_SPREAD_DEG;
         let item_angle = (parent_angle_deg + offset_deg).to_radians();
@@ -198,9 +221,6 @@ pub fn draw_submenu(
             center.x + anim_radius * item_angle.cos(),
             center.y + anim_radius * item_angle.sin(),
         );
-
-        let scaled_radius = SUBITEM_RENDER_RADIUS * item_scale;
-        let is_highlighted = submenu.highlighted == Some(i);
 
         // Drop shadow — slight south-east offset.
         frame.fill(
@@ -223,7 +243,6 @@ pub fn draw_submenu(
             );
         }
 
-        // Background — surface2 when highlighted, surface1 otherwise.
         let bg_hex = if is_highlighted {
             &palette.surface2
         } else {
@@ -233,8 +252,6 @@ pub fn draw_submenu(
         let bg = rgba(bg_hex, bg_alpha * item_opacity);
         frame.fill(&Path::circle(item_pos, scaled_radius), bg);
 
-        // Border — bright white when highlighted, surface2 dim
-        // otherwise.
         let border_color = if is_highlighted {
             Color::from_rgba(1.0, 1.0, 1.0, 150.0 / 255.0 * item_opacity)
         } else {
@@ -247,9 +264,6 @@ pub fn draw_submenu(
                 .with_width(1.5),
         );
 
-        // Icon — same XDG resolver as the main ring. Tint with the
-        // sub-item's configured colour key (falls back to the parent
-        // slice's accent).
         let color_key = if !item.color.is_empty() {
             item.color.as_str()
         } else if !parent.color.is_empty() {
@@ -264,23 +278,12 @@ pub fn draw_submenu(
         if let Some(handle) = icons.resolve(item.icon.as_str(), glyph_size_px, icon_color) {
             draw_icon(frame, item_pos.x, item_pos.y, glyph_size, &handle);
         } else {
-            // Fallback dot in the slice colour so the user still sees
-            // *something* before the icon resolver catches up.
             frame.fill(
                 &Path::circle(item_pos, scaled_radius * 0.35),
                 Color::from_rgba(sr as f32, sg as f32, sb as f32, item_opacity),
             );
         }
     }
-}
-
-/// `ease_out_back` (Penner) — overshoots the target then settles.
-/// Used for the submenu pop-out so sub-items feel springy.
-fn ease_out_back(t: f32) -> f32 {
-    const C1: f32 = 1.70158;
-    const C3: f32 = C1 + 1.0;
-    let p = t - 1.0;
-    1.0 + C3 * p * p * p + C1 * p * p
 }
 
 /// Centre puck — small filled circle with stroked accent ring,
@@ -292,13 +295,15 @@ pub fn draw_center(
     center: Point,
     radius: f32,
     palette: &ThemeColors,
+    menu_opacity: f32,
 ) {
+    let mo = menu_opacity.clamp(0.0, 1.0);
     let puck = Path::circle(center, radius);
-    frame.fill(&puck, rgba(&palette.surface0, 220.0 / 255.0));
+    frame.fill(&puck, rgba(&palette.surface0, (220.0 / 255.0) * mo));
     frame.stroke(
         &puck,
         Stroke::default()
-            .with_color(rgba(&palette.accent_dim, 140.0 / 255.0))
+            .with_color(rgba(&palette.accent_dim, (140.0 / 255.0) * mo))
             .with_width(2.0),
     );
 }

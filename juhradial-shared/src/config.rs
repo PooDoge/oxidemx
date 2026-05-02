@@ -1,4 +1,5 @@
 use crate::action::ActionKind;
+use crate::animation::AnimationConfig;
 use crate::conditions::Condition;
 use crate::theme::ThemeName;
 use serde::{Deserialize, Serialize};
@@ -67,6 +68,14 @@ pub struct RadialMenuConfig {
     /// the host icon in the Easy-Switch submenu.
     #[serde(default)]
     pub easy_switch_host_os: Vec<String>,
+
+    /// Per-element animation tweaks. Optional — when missing, every
+    /// element falls back to its `ElementAnimation::*_default()`
+    /// preset which preserves today's hardcoded behaviour. The
+    /// overlay's inotify watcher picks up changes live, so users
+    /// can iterate on animation feel without restarting.
+    #[serde(default)]
+    pub animation: AnimationConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

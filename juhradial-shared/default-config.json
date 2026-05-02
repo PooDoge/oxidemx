@@ -1,6 +1,20 @@
 {
   "theme": "juhradial-mx",
   "radial_menu": {
+    "animation": {
+      "menu": {
+        "enter": { "kind": "grow_bounce", "speed": 0.22, "bounce": 1.4, "initial_scale": 0.6, "initial_opacity": 0.0 },
+        "exit":  { "kind": "fade",        "speed": 0.30, "initial_opacity": 0.0 }
+      },
+      "submenu": {
+        "enter": { "kind": "grow_bounce", "speed": 0.18, "bounce": 1.7, "initial_scale": 0.5, "initial_opacity": 0.0 },
+        "exit":  { "kind": "fade",        "speed": 0.30, "initial_opacity": 0.0 }
+      },
+      "slice_highlight": {
+        "enter": { "kind": "fade", "speed": 0.25, "initial_opacity": 0.0 },
+        "exit":  { "kind": "fade", "speed": 0.25, "initial_opacity": 0.0 }
+      }
+    },
     "slices": [
       {"label": "Play/Pause", "type": "exec", "command": "playerctl play-pause", "color": "green",    "icon": "media-playback-start-symbolic"},
       {"label": "New Note",   "type": "exec", "command": "gnome-text-editor",    "color": "yellow",   "icon": "document-new-symbolic"},

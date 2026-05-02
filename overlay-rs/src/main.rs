@@ -20,6 +20,7 @@
 //! GTK, no `*-devel` rpm-ostree layering. Pure Rust dep tree.
 
 mod actions;
+mod anim;
 mod app;
 mod config;
 mod dbus;

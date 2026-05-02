@@ -12,6 +12,7 @@
 //! `daemon/src/config.rs` and will migrate over here as they're touched.
 
 pub mod action;
+pub mod animation;
 pub mod applications;
 pub mod conditions;
 pub mod config;
@@ -19,6 +20,7 @@ pub mod profiles;
 pub mod theme;
 
 pub use action::ActionKind;
+pub use animation::{AnimationConfig, ElementAnimation, TransitionConfig, TransitionKind};
 pub use applications::{
     clean_exec_line, enumerate_applications, parse_desktop_file, parse_desktop_string,
     search as search_applications, DesktopEntry,
