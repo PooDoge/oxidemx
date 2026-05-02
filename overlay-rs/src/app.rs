@@ -42,6 +42,9 @@ pub enum Message {
     /// Toggle-mode dismiss without dispatching (right-click / Esc /
     /// click outside the menu).
     ToggleDismiss,
+    /// Config reload from inotify watcher — replace theme + slices
+    /// in the live state without restarting the overlay.
+    ConfigReloaded(juhradial_shared::AppConfig),
 }
 
 pub fn run() -> iced::Result {
@@ -140,6 +143,11 @@ fn update(state: &mut RadialState, message: Message) -> Task<Message> {
             state.dismiss();
             Task::none()
         }
+        Message::ConfigReloaded(cfg) => {
+            info!("config reloaded — refreshing theme + slices");
+            state.reload_from(&cfg);
+            Task::none()
+        }
     }
 }
 
@@ -151,14 +159,17 @@ fn view(state: &RadialState) -> Element<'_, Message> {
 }
 
 fn subscription(_state: &RadialState) -> Subscription<Message> {
-    // Two streams merged into the same Message channel:
+    // Three streams merged into the same Message channel:
     //   * D-Bus listener — translates the daemon's three signal
     //     streams into OverlayEvent values.
+    //   * Inotify config watcher — yields a fresh AppConfig each
+    //     time `~/.config/juhradial/config.json` is saved.
     //   * 60 Hz frame ticker — keeps animations smooth while a
     //     menu is visible. (Cheap when nothing animates because
     //     update() returns Task::none() immediately.)
     Subscription::batch([
         Subscription::run(crate::dbus::stream).map(Message::Overlay),
+        Subscription::run(crate::config::watch_stream).map(Message::ConfigReloaded),
         iced::time::every(std::time::Duration::from_millis(16)).map(|_| Message::Tick),
     ])
 }
