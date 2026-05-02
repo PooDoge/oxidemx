@@ -1,0 +1,42 @@
+[package]
+name = "juhradial-overlay-rs"
+version = "0.0.1"
+edition = "2021"
+description = "JuhRadial MX radial-menu overlay (Rust + GTK4 + layer-shell)"
+license = "GPL-3.0"
+repository = "https://github.com/JuhLabs/juhradial-mx"
+
+[[bin]]
+name = "juhradial-overlay-rs"
+path = "src/main.rs"
+
+[dependencies]
+juhradial-shared = { path = "../juhradial-shared" }
+
+# GUI / compositor — gtk4-rs 0.9.x family.
+# These versions are starting points; resolve against what's actually
+# packaged on Bazzite/Fedora 44 once we pull deps for real.
+gtk4 = "0.9"
+gdk4 = "0.9"
+gio = "0.20"
+glib = "0.20"
+cairo-rs = "0.20"
+gdk-pixbuf = "0.20"
+pango = "0.20"
+gtk4-layer-shell = "0.5"
+
+# IPC with the daemon (signals on org.kde.juhradialmx)
+zbus = "5"
+async-channel = "2"
+
+# Serde for config (re-exported via juhradial-shared but pinned here for
+# direct serde_json::Value usage in the editor preview).
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# File watching for config hot-reload (matches daemon)
+notify = "6"

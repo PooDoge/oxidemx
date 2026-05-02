@@ -1,0 +1,29 @@
+# Cargo workspace for the JuhRadial MX project.
+#
+# Members:
+#   * daemon/             — juhradiald, the HID++ + D-Bus + KWin daemon.
+#                           Pre-existing; not touched by this rewrite.
+#   * juhradial-shared/   — types shared between daemon and overlay
+#                           (config.json structs, theme names, action enums).
+#   * overlay-rs/         — Rust + GTK4 + layer-shell radial menu overlay.
+#                           Replacement for the Python overlay/ tree.
+#
+# The legacy Python overlay/ stays in place during the migration; both
+# overlays talk to the same daemon over the same D-Bus interface, and a
+# config flag selects which one autostarts.
+
+[workspace]
+resolver = "2"
+members = [
+    "daemon",
+    "juhradial-shared",
+    "overlay-rs",
+]
+
+[profile.release]
+# Match daemon/Cargo.toml's existing release profile so a `cargo build
+# --release -p juhradiald` from the workspace root produces an identical
+# binary to the legacy `cd daemon && cargo build --release` flow.
+opt-level = 3
+lto = true
+codegen-units = 1
