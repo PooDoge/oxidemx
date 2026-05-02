@@ -54,6 +54,40 @@ pub struct Slice {
     pub visible_if: Option<Condition>,
 }
 
+/// Visual knobs the user controls directly from the settings UI.
+/// These don't animate — they're the "this is how I want it to
+/// look at rest" multipliers applied on top of the theme palette.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VisualSettings {
+    /// Multiplier on the wheel disc + halo background alpha. 1.0 =
+    /// full theme opacity, 0.0 = invisible disc (you'd still see
+    /// the slices). Caps at 1.0; negatives are clamped at 0.
+    #[serde(default = "default_menu_bg_opacity")]
+    pub menu_background_opacity: f32,
+
+    /// Multiplier on the per-slice hover highlight peak. 1.0 = full
+    /// hover glow (today's default), 0.0 = no highlight at all.
+    /// Useful for users who find the hover flash too loud.
+    #[serde(default = "default_slice_highlight_opacity")]
+    pub slice_highlight_opacity: f32,
+}
+
+fn default_menu_bg_opacity() -> f32 {
+    1.0
+}
+fn default_slice_highlight_opacity() -> f32 {
+    1.0
+}
+
+impl Default for VisualSettings {
+    fn default() -> Self {
+        VisualSettings {
+            menu_background_opacity: default_menu_bg_opacity(),
+            slice_highlight_opacity: default_slice_highlight_opacity(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct RadialMenuConfig {
     #[serde(default)]
@@ -71,11 +105,14 @@ pub struct RadialMenuConfig {
 
     /// Per-element animation tweaks. Optional — when missing, every
     /// element falls back to its `ElementAnimation::*_default()`
-    /// preset which preserves today's hardcoded behaviour. The
-    /// overlay's inotify watcher picks up changes live, so users
-    /// can iterate on animation feel without restarting.
+    /// preset. Inotify-reloaded so users iterate live.
     #[serde(default)]
     pub animation: AnimationConfig,
+
+    /// Static visual knobs (background opacity, highlight intensity)
+    /// the user controls directly from the settings UI.
+    #[serde(default)]
+    pub visuals: VisualSettings,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

@@ -43,6 +43,8 @@ pub fn draw_slice(
     palette: &ThemeColors,
     highlight: f32,
     menu_opacity: f32,
+    bg_opacity: f32,
+    highlight_opacity: f32,
     icons: &IconCache,
 ) {
     // Slice angular range in cairo coords (clockwise from +X axis,
@@ -55,26 +57,34 @@ pub fn draw_slice(
 
     let wedge = build_wedge(center, inner_r, outer_r, start_rad, end_rad);
     let mo = menu_opacity.clamp(0.0, 1.0);
+    let bgo = bg_opacity.clamp(0.0, 1.0);
+    let hlo = highlight_opacity.clamp(0.0, 1.0);
+    // The user's hover-glow modulation only applies to the
+    // *highlight* portion of the slice (the stroke brightness
+    // delta, the hover wash, the glow ring). The base wedge fill
+    // tracks `bg_opacity` so users can darken the wheel substrate
+    // without losing the hover feedback.
+    let hl = highlight * hlo;
 
     // Base fill — surface0 @ alpha 80/255.
-    frame.fill(&wedge, rgba(&palette.surface0, (80.0 / 255.0) * mo));
+    frame.fill(&wedge, rgba(&palette.surface0, (80.0 / 255.0) * mo * bgo));
 
     // Stroke — interpolate surface2 → white, alpha 60..120, line
     // width 1.0..1.5.
-    let stroke_color = lerp(rgba(&palette.surface2, 1.0), Color::WHITE, highlight);
-    let alpha = ((60.0 + 60.0 * highlight) / 255.0) * mo;
+    let stroke_color = lerp(rgba(&palette.surface2, 1.0), Color::WHITE, hl);
+    let alpha = ((60.0 + 60.0 * hl) / 255.0) * mo;
     frame.stroke(
         &wedge,
         Stroke::default()
             .with_color(Color { a: alpha, ..stroke_color })
-            .with_width(1.0 + 0.5 * highlight),
+            .with_width(1.0 + 0.5 * hl),
     );
 
     // Hover fade-in.
-    if highlight > 0.0 {
+    if hl > 0.0 {
         frame.fill(
             &wedge,
-            Color::from_rgba(1.0, 1.0, 1.0, (45.0 / 255.0) * highlight * mo),
+            Color::from_rgba(1.0, 1.0, 1.0, (45.0 / 255.0) * hl * mo),
         );
     }
 
@@ -83,13 +93,13 @@ pub fn draw_slice(
     let icon_pos = polar(center, icon_r, icon_angle);
 
     // Glow ring on hover.
-    if highlight > 0.0 {
+    if hl > 0.0 {
         let glow = Path::circle(icon_pos, icon_bg_radius + 2.0);
         frame.stroke(
             &glow,
             Stroke::default()
                 .with_color(Color::from_rgba(
-                    1.0, 1.0, 1.0, (40.0 / 255.0) * highlight * mo,
+                    1.0, 1.0, 1.0, (40.0 / 255.0) * hl * mo,
                 ))
                 .with_width(3.0),
         );
@@ -98,8 +108,8 @@ pub fn draw_slice(
     // Icon background — interpolate surface1 → surface2.
     let s1 = rgba(&palette.surface1, 1.0);
     let s2 = rgba(&palette.surface2, 1.0);
-    let bg = lerp(s1, s2, highlight);
-    let bg_alpha = ((230.0 + 25.0 * highlight) / 255.0) * mo;
+    let bg = lerp(s1, s2, hl);
+    let bg_alpha = ((230.0 + 25.0 * hl) / 255.0) * mo;
     frame.fill(
         &Path::circle(icon_pos, icon_bg_radius),
         Color { a: bg_alpha, ..bg },
@@ -167,26 +177,14 @@ pub fn draw_submenu(
     }
     let n = items.len() as f32;
     let parent_angle_deg = (submenu.parent as f32) * 45.0 - 90.0;
-    // The whole-submenu progress drives the per-item stagger window;
-    // the per-item Visual is computed by re-running `anim::evaluate`
-    // against a synthetic Tween whose `current` is the item-local t.
-    // That way the user's chosen kind/curve from
-    // `AnimationConfig.submenu` is what shapes the pop-out, not a
-    // hardcoded ease-out-back.
-    let progress = submenu.progress.current.clamp(0.0, 1.0);
-    // Stagger keeps the visual signature of the legacy overlay —
-    // items pop out one after the other instead of simultaneously.
-    // The window denominator keeps the *last* item ending exactly at
-    // progress = 1.0 regardless of count.
-    const STAGGER: f32 = 0.12;
-    let denom = (1.0 - (n - 1.0) * STAGGER).max(0.05);
     let mo = menu_opacity.clamp(0.0, 1.0);
 
-    // Direction inferred once per draw: when the tween's target ≥
-    // current it's an entry (use enter cfg), otherwise an exit.
-    // Per-item Visual borrows the same direction so an exit fade
-    // doesn't suddenly switch curves mid-flight.
-    let going_in = submenu.progress.target >= submenu.progress.current;
+    // Per-item stagger comes from the user's chain config; 0 means
+    // all sub-items animate simultaneously. The renderer uses the
+    // master tween's elapsed clock + the per-item offset to derive
+    // each item's Visual, so users can dial the ripple feel from
+    // the settings UI.
+    let stagger_ms = anim::chain_stagger_ms(submenu_anim.chain.as_ref());
 
     for (i, item) in items.iter().enumerate() {
         let allowed = item
@@ -198,18 +196,18 @@ pub fn draw_submenu(
             continue;
         }
 
-        let item_t = ((progress - (i as f32) * STAGGER) / denom).clamp(0.0, 1.0);
-        // Synthesise a per-item tween at `current = item_t` and feed
-        // it through anim::evaluate so the user's configured kind/
-        // curve / initial_scale apply uniformly to every sub-item.
-        let mut item_tween = crate::anim::Tween::at(item_t);
-        item_tween.target = if going_in { 1.0 } else { 0.0 };
-        let v = anim::evaluate(&item_tween, &submenu_anim.enter, &submenu_anim.exit);
+        let offset = (i as f32) * stagger_ms;
+        let v = anim::evaluate_chain_item(
+            &submenu.progress,
+            &submenu_anim.enter,
+            &submenu_anim.exit,
+            offset,
+        );
 
         // Radius interpolates from the ring edge out to the
         // submenu position — the "growing out of the wedge" feel.
         let menu_r = crate::geometry::MENU_RADIUS as f32;
-        let anim_radius = menu_r + (SUBMENU_RADIUS - menu_r) * v.progress;
+        let anim_radius = menu_r + (SUBMENU_RADIUS - menu_r) * v.progress.clamp(0.0, 1.0);
 
         let item_opacity = (v.opacity * mo).clamp(0.0, 1.0);
         let scaled_radius = SUBITEM_RENDER_RADIUS * v.scale.max(0.0);
@@ -296,14 +294,16 @@ pub fn draw_center(
     radius: f32,
     palette: &ThemeColors,
     menu_opacity: f32,
+    bg_opacity: f32,
 ) {
     let mo = menu_opacity.clamp(0.0, 1.0);
+    let bgo = bg_opacity.clamp(0.0, 1.0);
     let puck = Path::circle(center, radius);
-    frame.fill(&puck, rgba(&palette.surface0, (220.0 / 255.0) * mo));
+    frame.fill(&puck, rgba(&palette.surface0, (220.0 / 255.0) * mo * bgo));
     frame.stroke(
         &puck,
         Stroke::default()
-            .with_color(rgba(&palette.accent_dim, (140.0 / 255.0) * mo))
+            .with_color(rgba(&palette.accent_dim, (140.0 / 255.0) * mo * bgo))
             .with_width(2.0),
     );
 }

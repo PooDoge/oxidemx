@@ -1,95 +1,224 @@
 //! User-tweakable animation parameters for the radial overlay.
 //!
-//! Each animated *element* (the menu itself, the submenu pop-out, a
-//! slice's hover highlight) carries a separate enter/exit transition
-//! pair. Each transition picks a `kind` (the visual effect — fade,
-//! grow, grow-with-bounce, none) and a small set of timing/shape
-//! knobs the user can edit live in `~/.config/juhradial/config.json`
-//! and pick up via the overlay's inotify watcher.
+//! Inspired by Motion.dev's React API: every transition is described
+//! by a *kind* (what visual property to interpolate — fade, grow,
+//! grow+fade), a *duration* in milliseconds, an *easing* curve
+//! (linear / ease-in / ease-out / ease-in-out / spring), and a
+//! handful of element-specific knobs (initial scale / opacity, end
+//! opacity, pre-roll delay).
 //!
-//! All fields default to values that reproduce today's hardcoded
-//! behaviour, so existing configs without an `animation` block render
-//! identically. Adding the block in the editor (or by hand) is what
-//! gives the user the tweakability.
+//! Each animated *element* (the menu itself, the submenu pop-out,
+//! a slice's hover highlight) carries an independent enter/exit
+//! transition pair plus an optional `chain` block that controls
+//! per-item stagger when the element renders multiple sub-pieces
+//! (e.g. submenu sub-items).
+//!
+//! Config lives in `~/.config/juhradial/config.json` →
+//! `radial_menu.animation` and is reloaded live by the overlay's
+//! inotify watcher, so users can iterate without restarting.
 
 use serde::{Deserialize, Serialize};
 
-/// Visual style of a transition. Tells the renderer *what* to
-/// interpolate (scale, opacity, both) and *how* (smooth vs. springy).
+// ============================================================================
+// Easing curves
+// ============================================================================
+
+/// Easing curve applied to the [0, 1] normalised time of a
+/// transition. `Linear` and the `Ease*` cubic curves are exact
+/// closed-form expressions; `Spring` is a damped harmonic
+/// oscillator simulated against a normalised time axis (so the
+/// transition still respects its `duration_ms` window — the spring
+/// just shapes what happens within it).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum Easing {
+    Linear,
+    EaseIn,
+    EaseOut,
+    EaseInOut,
+    /// Spring physics — `stiffness` controls oscillation frequency
+    /// (higher = snappier), `damping` controls overshoot (lower =
+    /// bouncier). Defaults match Motion.dev's "gentle" preset.
+    Spring {
+        #[serde(default = "default_spring_stiffness")]
+        stiffness: f32,
+        #[serde(default = "default_spring_damping")]
+        damping: f32,
+    },
+}
+
+fn default_spring_stiffness() -> f32 {
+    100.0
+}
+fn default_spring_damping() -> f32 {
+    12.0
+}
+
+impl Default for Easing {
+    fn default() -> Self {
+        Easing::EaseOut
+    }
+}
+
+impl Easing {
+    /// Map normalised time `t` ∈ [0, 1] to a [0, 1+overshoot]
+    /// progress value. The renderer uses this to interpolate the
+    /// element's start/end values.
+    pub fn eval(&self, t: f32) -> f32 {
+        let t = t.clamp(0.0, 1.0);
+        match *self {
+            Easing::Linear => t,
+            Easing::EaseIn => t * t * t,
+            Easing::EaseOut => {
+                let p = 1.0 - t;
+                1.0 - p * p * p
+            }
+            Easing::EaseInOut => {
+                if t < 0.5 {
+                    4.0 * t * t * t
+                } else {
+                    let p = -2.0 * t + 2.0;
+                    1.0 - (p * p * p) / 2.0
+                }
+            }
+            Easing::Spring { stiffness, damping } => spring_eval(t, stiffness, damping),
+        }
+    }
+}
+
+/// Damped harmonic oscillator solution, parameterised so that the
+/// transition completes (current ≈ target) within the [0, 1]
+/// normalised time window for a wide range of stiffness / damping
+/// values. We scale physical time by ~6× the normalised time —
+/// roughly five oscillator time-constants — which is enough for
+/// even a soft spring (low stiffness) to land near 1.0 by t = 1.0,
+/// while still letting a stiff one finish its visible bounce well
+/// before the end of the window.
+fn spring_eval(t: f32, stiffness: f32, damping: f32) -> f32 {
+    let mass = 1.0_f32;
+    let k = stiffness.max(1.0);
+    let c = damping.max(0.0);
+    let omega = (k / mass).sqrt();
+    let zeta = c / (2.0 * (k * mass).sqrt());
+
+    // Map [0,1] of transition time onto the oscillator's natural
+    // time axis. Constant chosen so duration_ms behaves like an
+    // intuitive "total duration" knob — at t=1 the spring has
+    // settled within ~0.5 % for the default stiffness/damping.
+    let phys_t = t * 6.0 / omega.sqrt().max(0.1);
+
+    if (zeta - 1.0).abs() < 1e-3 {
+        // Critically damped — smooth, no overshoot.
+        let e = (-omega * phys_t).exp();
+        1.0 - e * (1.0 + omega * phys_t)
+    } else if zeta < 1.0 {
+        // Underdamped — overshoots and oscillates. The bouncy case.
+        let omega_d = omega * (1.0 - zeta * zeta).sqrt();
+        let e = (-zeta * omega * phys_t).exp();
+        let cos_t = (omega_d * phys_t).cos();
+        let sin_t = (omega_d * phys_t).sin();
+        1.0 - e * (cos_t + (zeta * omega / omega_d) * sin_t)
+    } else {
+        // Overdamped — slow, smooth approach (sluggish).
+        let r = (zeta * zeta - 1.0).sqrt();
+        let r1 = -omega * (zeta - r);
+        let r2 = -omega * (zeta + r);
+        let denom = (r1 - r2).max(1e-6);
+        let c1 = -r2 / denom;
+        let c2 = r1 / denom;
+        1.0 - c1 * (r1 * phys_t).exp() - c2 * (r2 * phys_t).exp()
+    }
+}
+
+// ============================================================================
+// TransitionKind
+// ============================================================================
+
+/// What property a transition interpolates. Every kind respects the
+/// same duration / easing / delay knobs; the kind only changes
+/// *what* the eased progress controls.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TransitionKind {
-    /// No animation — element snaps straight to the target state.
+    /// No animation — value snaps directly to the target.
     None,
-    /// Opacity-only fade. Element starts at `initial_opacity` and
-    /// blends to fully visible (enter) or back down (exit).
+    /// Opacity-only ramp from `initial_opacity` to `final_opacity`.
     Fade,
-    /// Smooth scale-up from `initial_scale` to 1.0, with opacity
-    /// matching. Standard "popup" feel.
+    /// Scale ramp from `initial_scale` to 1.0. Opacity stays at
+    /// `final_opacity` (default 1.0) for the whole transition.
     Grow,
-    /// Scale-up with overshoot — the spring/elastic style. The
-    /// `bounce` knob in `TransitionConfig` controls how far past
-    /// 1.0 the scale goes before settling.
-    GrowBounce,
+    /// Scale + opacity together — `initial_scale` → 1.0 with
+    /// `initial_opacity` → `final_opacity` on the same eased curve.
+    /// The Motion.dev "scale + fade" combo.
+    GrowAndFade,
 }
 
 impl Default for TransitionKind {
-    /// Default to `None` (instant snap) so any field a user
-    /// *omits* from a partial config block doesn't accidentally
-    /// introduce an animation they didn't ask for. The
-    /// element-level "recommended" presets
-    /// (`ElementAnimation::*_default`) are what you get when the
-    /// whole `animation` block is missing — those are deliberate
-    /// nice defaults; per-field omission is "stay still".
+    /// `None` so any field a user *omits* from a partial config
+    /// block doesn't accidentally introduce an animation. Element-
+    /// level "recommended" presets in `ElementAnimation::*_default`
+    /// are what you get when the whole `animation` block is
+    /// missing.
     fn default() -> Self {
         TransitionKind::None
     }
 }
 
-/// One direction of a transition (enter OR exit). Lives inside an
+// ============================================================================
+// TransitionConfig — one direction (enter OR exit)
+// ============================================================================
+
+/// One direction of a transition. Lives inside an
 /// `ElementAnimation` so each element has independent enter/exit
-/// behaviour — e.g. a snappy bouncy entry plus a quick linear fade
-/// out.
+/// behaviour.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TransitionConfig {
-    /// What kind of visual effect this is.
+    /// What visual property the transition interpolates.
     #[serde(default)]
     pub kind: TransitionKind,
 
-    /// Per-frame interpolation factor for the underlying tween,
-    /// applied at 60 Hz. Larger = snappier. 0.25 ≈ ~6 frames to
-    /// settle (the legacy default), 0.10 ≈ slow & smooth, 0.50 ≈
-    /// near-instant. Range is open but values outside (0.01, 0.95]
-    /// will look pathological.
-    #[serde(default = "default_speed")]
-    pub speed: f32,
+    /// Total duration of the transition, in milliseconds. Larger =
+    /// slower / smoother. For `Spring` easing this is the upper
+    /// bound — the spring may settle visibly before the duration
+    /// elapses depending on stiffness / damping.
+    #[serde(default = "default_duration_ms")]
+    pub duration_ms: u32,
 
-    /// Bounce strength for `GrowBounce` — how far past 1.0 the
-    /// scale overshoots before settling. 0.0 = no overshoot,
-    /// 1.70 = Penner's classic ease-out-back, 3.0 = exaggerated
-    /// rubbery feel. Ignored for other kinds.
-    #[serde(default = "default_bounce")]
-    pub bounce: f32,
+    /// Easing curve applied to normalised time. Defaults to
+    /// `EaseOut` — the standard "snappy at the start, smooth at
+    /// the end" curve used in most UI animations.
+    #[serde(default)]
+    pub easing: Easing,
 
-    /// Starting scale for `Grow` and `GrowBounce`. 0.0 = pop in
-    /// from a single point, 1.0 = no growth (only opacity moves).
-    /// Ignored for `None` and `Fade`.
+    /// Pre-roll delay in milliseconds before the transition
+    /// actually starts moving. 0 = immediate (default). Useful for
+    /// sequencing two related elements without writing a full
+    /// chain.
+    #[serde(default)]
+    pub delay_ms: u32,
+
+    /// Starting scale for `Grow` / `GrowAndFade`. 0.0 = pop in
+    /// from a single point, 1.0 = no scale change. Ignored for
+    /// `None` and `Fade`.
     #[serde(default = "default_initial_scale")]
     pub initial_scale: f32,
 
-    /// Starting opacity for `Fade`, `Grow`, and `GrowBounce`.
-    /// 0.0 = invisible at the start of the enter (or end of the
-    /// exit), 1.0 = always fully opaque (so opacity never
-    /// changes — useful for a "scale only" feel).
+    /// Starting opacity for `Fade` / `GrowAndFade`. 0.0 = fully
+    /// invisible at the start of an enter (or end of an exit),
+    /// 1.0 = no opacity change. Ignored for `None` and `Grow`.
     #[serde(default = "default_initial_opacity")]
     pub initial_opacity: f32,
+
+    /// Final opacity reached by `Fade` / `GrowAndFade`. 1.0 =
+    /// fully visible (the common case). Lowering it lets users
+    /// peg an element to e.g. 80 % alpha at "fully open" — useful
+    /// for the menu-background-opacity story.
+    #[serde(default = "default_final_opacity")]
+    pub final_opacity: f32,
 }
 
-fn default_speed() -> f32 {
-    0.25
-}
-fn default_bounce() -> f32 {
-    1.70158
+fn default_duration_ms() -> u32 {
+    250
 }
 fn default_initial_scale() -> f32 {
     0.5
@@ -97,104 +226,165 @@ fn default_initial_scale() -> f32 {
 fn default_initial_opacity() -> f32 {
     0.0
 }
+fn default_final_opacity() -> f32 {
+    1.0
+}
 
 impl Default for TransitionConfig {
     fn default() -> Self {
         TransitionConfig {
             kind: TransitionKind::default(),
-            speed: default_speed(),
-            bounce: default_bounce(),
+            duration_ms: default_duration_ms(),
+            easing: Easing::default(),
+            delay_ms: 0,
             initial_scale: default_initial_scale(),
             initial_opacity: default_initial_opacity(),
+            final_opacity: default_final_opacity(),
         }
     }
 }
 
 impl TransitionConfig {
-    /// "Linear / snappy" preset — instant snap, no animation.
+    /// "Instant snap" preset.
     pub fn instant() -> Self {
         TransitionConfig {
             kind: TransitionKind::None,
-            speed: 1.0,
+            duration_ms: 0,
+            easing: Easing::Linear,
             ..Default::default()
         }
     }
 
-    /// "Soft fade" preset — opacity-only, gentle.
-    pub fn fade() -> Self {
+    /// "Soft fade" preset — opacity-only, gentle ease-out.
+    pub fn fade(duration_ms: u32) -> Self {
         TransitionConfig {
             kind: TransitionKind::Fade,
-            speed: 0.20,
+            duration_ms,
+            easing: Easing::EaseOut,
             initial_opacity: 0.0,
+            final_opacity: 1.0,
+            ..Default::default()
+        }
+    }
+
+    /// "Bouncy grow + fade" preset — Motion.dev's `scale` + `opacity`
+    /// combo with a soft spring. Used as the default for the
+    /// menu open + submenu pop-out.
+    pub fn pop(duration_ms: u32) -> Self {
+        TransitionConfig {
+            kind: TransitionKind::GrowAndFade,
+            duration_ms,
+            easing: Easing::Spring {
+                stiffness: 180.0,
+                damping: 14.0,
+            },
+            initial_scale: 0.6,
+            initial_opacity: 0.0,
+            final_opacity: 1.0,
             ..Default::default()
         }
     }
 }
 
-/// Enter + exit pair for one animated element.
+// ============================================================================
+// ChainConfig — per-item stagger for elements with multiple sub-pieces
+// ============================================================================
+
+/// Stagger config for elements whose enter / exit animates a
+/// collection of sub-items in sequence (today: submenu sub-items).
+/// Each sub-item starts its transition `stagger_ms` after the
+/// previous one, giving a Motion.dev-style "ripple" effect.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChainConfig {
+    /// Delay between adjacent items, in milliseconds. 0 = all
+    /// items animate simultaneously.
+    #[serde(default = "default_stagger_ms")]
+    pub stagger_ms: u32,
+}
+
+fn default_stagger_ms() -> u32 {
+    35
+}
+
+impl Default for ChainConfig {
+    fn default() -> Self {
+        ChainConfig {
+            stagger_ms: default_stagger_ms(),
+        }
+    }
+}
+
+// ============================================================================
+// ElementAnimation — enter + exit + optional chain
+// ============================================================================
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ElementAnimation {
     #[serde(default)]
     pub enter: TransitionConfig,
     #[serde(default)]
     pub exit: TransitionConfig,
+    /// Per-item stagger for multi-item elements. None = items
+    /// animate together (no stagger). Only meaningful for the
+    /// submenu element today; harmless on others.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chain: Option<ChainConfig>,
 }
 
 impl ElementAnimation {
-    /// Slice highlight — opacity only, fast in, fast out. Used by
-    /// the hover glow and the focused-slice halo. Defaults match
-    /// the legacy hardcoded `Animation::step` (0.25 step factor).
+    /// Slice highlight — quick fade in / out of the hover glow.
     pub fn slice_highlight_default() -> Self {
         ElementAnimation {
-            enter: TransitionConfig::fade(),
-            exit: TransitionConfig::fade(),
+            enter: TransitionConfig::fade(120),
+            exit: TransitionConfig::fade(120),
+            chain: None,
         }
     }
 
-    /// Submenu pop-out — bouncy grow on enter, gentle shrink on
-    /// exit. Matches today's `ease_out_back` behaviour at the
-    /// user level.
+    /// Submenu pop-out — bouncy scale + fade with per-item stagger.
     pub fn submenu_default() -> Self {
         ElementAnimation {
-            enter: TransitionConfig {
-                kind: TransitionKind::GrowBounce,
-                speed: 0.18,
-                bounce: 1.70158,
-                initial_scale: 0.5,
-                initial_opacity: 0.0,
-            },
+            enter: TransitionConfig::pop(350),
             exit: TransitionConfig {
                 kind: TransitionKind::Fade,
-                speed: 0.30,
+                duration_ms: 180,
+                easing: Easing::EaseIn,
                 initial_opacity: 0.0,
+                final_opacity: 1.0,
                 ..Default::default()
             },
+            chain: Some(ChainConfig::default()),
         }
     }
 
-    /// Whole-menu open / close. Defaults to instant — preserves
-    /// today's "pops in immediately on Show" feel until the user
-    /// dials in something they like.
+    /// Whole-menu open / close — small bouncy scale on open, quick
+    /// fade out on close.
     pub fn menu_default() -> Self {
         ElementAnimation {
-            enter: TransitionConfig::instant(),
-            exit: TransitionConfig::instant(),
+            enter: TransitionConfig::pop(280),
+            exit: TransitionConfig {
+                kind: TransitionKind::Fade,
+                duration_ms: 140,
+                easing: Easing::EaseIn,
+                initial_opacity: 0.0,
+                final_opacity: 1.0,
+                ..Default::default()
+            },
+            chain: None,
         }
     }
 }
 
-/// Top-level animation block — one `ElementAnimation` per animated
-/// element. New elements add a field here with a default-getter so
-/// older configs deserialize cleanly.
+// ============================================================================
+// AnimationConfig — top-level
+// ============================================================================
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AnimationConfig {
-    /// Whole-menu open/close.
     #[serde(default = "ElementAnimation::menu_default")]
     pub menu: ElementAnimation,
-    /// Submenu pop-out (per-Submenu-slice arc).
     #[serde(default = "ElementAnimation::submenu_default")]
     pub submenu: ElementAnimation,
-    /// Per-slice hover highlight.
     #[serde(default = "ElementAnimation::slice_highlight_default")]
     pub slice_highlight: ElementAnimation,
 }
@@ -209,6 +399,10 @@ impl Default for AnimationConfig {
     }
 }
 
+// ============================================================================
+// Tests
+// ============================================================================
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -216,23 +410,78 @@ mod tests {
     #[test]
     fn empty_object_picks_up_defaults() {
         let cfg: AnimationConfig = serde_json::from_str("{}").unwrap();
-        assert_eq!(cfg.submenu.enter.kind, TransitionKind::GrowBounce);
-        assert_eq!(cfg.menu.enter.kind, TransitionKind::None);
+        assert_eq!(cfg.submenu.enter.kind, TransitionKind::GrowAndFade);
+        assert_eq!(cfg.menu.enter.kind, TransitionKind::GrowAndFade);
+        assert_eq!(cfg.slice_highlight.enter.kind, TransitionKind::Fade);
     }
 
     #[test]
-    fn user_can_pick_fade_for_menu_open() {
-        let json = r#"{ "menu": { "enter": { "kind": "fade", "speed": 0.20 } } }"#;
+    fn user_can_pick_spring_easing() {
+        let json = r#"{
+            "menu": {
+                "enter": {
+                    "kind": "grow_and_fade",
+                    "duration_ms": 500,
+                    "easing": { "type": "spring", "stiffness": 200, "damping": 8 }
+                }
+            }
+        }"#;
         let cfg: AnimationConfig = serde_json::from_str(json).unwrap();
-        assert_eq!(cfg.menu.enter.kind, TransitionKind::Fade);
-        assert!((cfg.menu.enter.speed - 0.20).abs() < 1e-4);
-        // Exit untouched — still default (instant).
-        assert_eq!(cfg.menu.exit.kind, TransitionKind::None);
+        assert_eq!(cfg.menu.enter.duration_ms, 500);
+        match cfg.menu.enter.easing {
+            Easing::Spring { stiffness, damping } => {
+                assert!((stiffness - 200.0).abs() < 1e-4);
+                assert!((damping - 8.0).abs() < 1e-4);
+            }
+            other => panic!("expected spring, got {other:?}"),
+        }
     }
 
     #[test]
-    fn unknown_kind_fails_gracefully() {
-        let json = r#"{ "menu": { "enter": { "kind": "warp_speed" } } }"#;
-        assert!(serde_json::from_str::<AnimationConfig>(json).is_err());
+    fn easing_curves_pass_through_endpoints() {
+        for e in [
+            Easing::Linear,
+            Easing::EaseIn,
+            Easing::EaseOut,
+            Easing::EaseInOut,
+        ] {
+            assert!(e.eval(0.0).abs() < 1e-4, "{e:?} should be 0 at t=0");
+            assert!((e.eval(1.0) - 1.0).abs() < 1e-4, "{e:?} should be 1 at t=1");
+        }
+    }
+
+    #[test]
+    fn underdamped_spring_overshoots_above_one() {
+        let s = Easing::Spring {
+            stiffness: 250.0,
+            damping: 6.0,
+        };
+        let mut peak = 0.0_f32;
+        for i in 0..=100 {
+            let v = s.eval(i as f32 / 100.0);
+            if v > peak {
+                peak = v;
+            }
+        }
+        assert!(peak > 1.05, "expected overshoot > 1.05, got {peak}");
+    }
+
+    #[test]
+    fn critically_damped_spring_does_not_overshoot() {
+        let s = Easing::Spring {
+            stiffness: 100.0,
+            damping: 20.0, // ζ = 1 → critical
+        };
+        for i in 0..=100 {
+            let v = s.eval(i as f32 / 100.0);
+            assert!(v <= 1.001, "critically damped should not overshoot, got {v}");
+        }
+    }
+
+    #[test]
+    fn chain_config_round_trips() {
+        let json = r#"{ "submenu": { "chain": { "stagger_ms": 80 } } }"#;
+        let cfg: AnimationConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(cfg.submenu.chain.unwrap().stagger_ms, 80);
     }
 }

@@ -20,12 +20,14 @@ pub mod profiles;
 pub mod theme;
 
 pub use action::ActionKind;
-pub use animation::{AnimationConfig, ElementAnimation, TransitionConfig, TransitionKind};
+pub use animation::{
+    AnimationConfig, ChainConfig, Easing, ElementAnimation, TransitionConfig, TransitionKind,
+};
 pub use applications::{
     clean_exec_line, enumerate_applications, parse_desktop_file, parse_desktop_string,
     search as search_applications, DesktopEntry,
 };
 pub use conditions::Condition;
-pub use config::{AppConfig, RadialMenuConfig, Slice};
+pub use config::{AppConfig, RadialMenuConfig, Slice, VisualSettings};
 pub use profiles::ProfileResolver;
 pub use theme::{Theme, ThemeName};

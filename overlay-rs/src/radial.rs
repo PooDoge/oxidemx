@@ -10,6 +10,7 @@ use iced::widget::canvas::{self, Action, Frame, Geometry, Path};
 use iced::{mouse, Color, Event, Point, Rectangle, Renderer, Theme};
 use juhradial_shared::{
     theme::parse_hex_rgba, ActionKind, AnimationConfig, AppConfig, ElementAnimation, Slice,
+    VisualSettings,
 };
 use std::rc::Rc;
 use std::time::{Duration, Instant};
@@ -81,6 +82,9 @@ pub struct RadialState {
     /// slice highlight. Reloaded by the inotify watcher so the
     /// user can iterate on feel without restarting.
     pub anim_config: AnimationConfig,
+    /// Static visual knobs (background opacity, slice highlight
+    /// peak alpha) the user controls from the settings UI.
+    pub visuals: VisualSettings,
     /// Per-slice hover tween in [0, 1]. Index `i` is slot `i`
     /// clockwise from the top.
     highlights: [Tween; 8],
@@ -110,6 +114,11 @@ pub struct RadialState {
     /// dispatching the parent so a hovered sub-item wins over the
     /// parent slice.
     pub(crate) submenu: Option<SubmenuState>,
+    /// Wall-clock timestamp of the most recent `Tick`. The Tween
+    /// runtime is duration-based so we need real-time deltas
+    /// rather than assuming 16.67 ms per tick — keeps animations
+    /// honest if the compositor stalls.
+    last_tick: Option<Instant>,
 }
 
 impl std::fmt::Debug for RadialState {
@@ -130,10 +139,12 @@ impl RadialState {
         let theme = ActiveTheme::resolve(&config.theme);
         let slices = config.radial_menu.slices.clone();
         let anim_config = config.radial_menu.animation.clone();
+        let visuals = config.radial_menu.visuals.clone();
         RadialState {
             theme,
             slices,
             anim_config,
+            visuals,
             highlights: [Tween::at(0.0); 8],
             target_slice: None,
             menu: Tween::at(0.0),
@@ -141,6 +152,7 @@ impl RadialState {
             show_time: None,
             toggle_mode: false,
             submenu: None,
+            last_tick: None,
         }
     }
 
@@ -387,17 +399,29 @@ impl RadialState {
         }
     }
 
-    /// Step every tween one frame (slice highlights, menu open/close,
-    /// open-submenu grow). Cheap when nothing's animating because each
-    /// `Tween::step` short-circuits on idle.
+    /// Step every tween by real-time `dt_ms` (slice highlights,
+    /// menu open/close, open-submenu grow). Cheap when nothing is
+    /// animating because each `Tween::step` short-circuits on idle.
     pub fn advance_animations(&mut self) {
+        let now = Instant::now();
+        let dt_ms = match self.last_tick {
+            Some(t) => {
+                let dt = now.duration_since(t).as_secs_f32() * 1000.0;
+                // Clamp to a sane range — long stalls (compositor
+                // freeze, debugger pause) shouldn't fast-forward
+                // animations through their entire window.
+                dt.clamp(0.0, 100.0)
+            }
+            None => 0.0,
+        };
+        self.last_tick = Some(now);
         for a in &mut self.highlights {
-            a.step();
+            a.step(dt_ms);
         }
-        self.menu.step();
+        self.menu.step(dt_ms);
         let sub_settled_to_zero = match self.submenu.as_mut() {
             Some(sub) => {
-                sub.progress.step();
+                sub.progress.step(dt_ms);
                 sub.progress.is_idle() && sub.progress.target <= 0.001
             }
             None => false,
@@ -411,14 +435,15 @@ impl RadialState {
 
     /// Refresh from a freshly-loaded config (called by the inotify
     /// watcher after the editor saves). Replaces theme + slices +
-    /// animation parameters in place; in-flight tweens continue
-    /// playing but pick up the new speeds on their next
-    /// `set_target`. Drops any open submenu since slice indices
-    /// may have changed.
+    /// animation + visual settings in place; in-flight tweens
+    /// continue playing but pick up the new durations / easings on
+    /// their next `set_target`. Drops any open submenu since slice
+    /// indices may have changed.
     pub fn reload_from(&mut self, config: &AppConfig) {
         self.theme = ActiveTheme::resolve(&config.theme);
         self.slices = config.radial_menu.slices.clone();
         self.anim_config = config.radial_menu.animation.clone();
+        self.visuals = config.radial_menu.visuals.clone();
         for a in &mut self.highlights {
             *a = Tween::at(0.0);
         }
@@ -551,10 +576,24 @@ impl<'a> canvas::Program<crate::app::Message> for Painter<'a> {
         let mscale = menu_vis.scale.max(0.0);
         let mopacity = menu_vis.opacity.clamp(0.0, 1.0);
 
+        // The user's static "background opacity" knob multiplies
+        // into the halo + base wedge fills (everything that draws
+        // the wheel substrate). Highlights/icons are gated by a
+        // separate knob below.
+        let bg_op = self.state.visuals.menu_background_opacity.clamp(0.0, 1.0);
+        let highlight_op = self
+            .state
+            .visuals
+            .slice_highlight_opacity
+            .clamp(0.0, 1.0);
+
         // Faint shadow halo so the disc reads against transparent
         // backgrounds.
         let halo = Path::circle(center, (MENU_RADIUS as f32 + 6.0) * mscale);
-        frame.fill(&halo, Color::from_rgba(0.0, 0.0, 0.0, 0.35 * mopacity));
+        frame.fill(
+            &halo,
+            Color::from_rgba(0.0, 0.0, 0.0, 0.35 * mopacity * bg_op),
+        );
 
         let outer_r = ((MENU_RADIUS as f32) - RING_OUTER_INSET) * mscale;
         let inner_r = ((geom.center_radius as f32) + RING_INNER_INSET) * mscale;
@@ -582,6 +621,8 @@ impl<'a> canvas::Program<crate::app::Message> for Painter<'a> {
                 palette,
                 highlight,
                 mopacity,
+                bg_op,
+                highlight_op,
                 &self.state.icons,
             );
         }
@@ -592,6 +633,7 @@ impl<'a> canvas::Program<crate::app::Message> for Painter<'a> {
             (geom.center_radius as f32) * mscale,
             palette,
             mopacity,
+            bg_op,
         );
 
         // Submenu pop-out (drawn AFTER the centre so its sub-items
