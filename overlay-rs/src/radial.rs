@@ -16,9 +16,10 @@ use gtk::prelude::*;
 use juhradial_shared::{AppConfig, Slice};
 
 use crate::geometry::{Geometry, WINDOW_SIZE};
+use crate::render::icons::IconCache;
 use crate::theme::ActiveTheme;
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct RadialState {
     pub theme: ActiveTheme,
     pub slices: Vec<Slice>,
@@ -31,6 +32,13 @@ pub struct RadialState {
     /// Toggle-mode means the menu stays open after a quick tap and
     /// closes on the next click; drag-mode closes on button release.
     pub toggle_mode: bool,
+    /// Per-widget icon cache. Stored as `Rc<IconCache>` so cloning
+    /// `RadialState` shares the cache instead of duplicating it —
+    /// the cache fills as slices render and the contents stay
+    /// useful across reloads (cache key includes the icon source
+    /// string and the tint colour, both of which change on reload
+    /// for slices that the user actually edited).
+    pub icons: Rc<IconCache>,
 }
 
 impl RadialState {
@@ -43,6 +51,7 @@ impl RadialState {
             highlights: [0.0; 8],
             highlighted: None,
             toggle_mode: false,
+            icons: IconCache::new(),
         }
     }
 }
@@ -77,6 +86,7 @@ impl RadialWidget {
                 &s.slices,
                 &s.theme,
                 &s.highlights,
+                &s.icons,
             );
             crate::render::slices::draw_center(cr, &geom, &s.theme);
         });

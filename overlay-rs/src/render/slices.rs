@@ -20,6 +20,7 @@ use cairo::Context;
 use juhradial_shared::{Slice, ThemeColors};
 
 use crate::geometry::Geometry;
+use crate::render::icons::{draw_icon, IconCache};
 use crate::theme::ActiveTheme;
 use juhradial_shared::theme::parse_hex_rgba;
 
@@ -47,6 +48,7 @@ pub fn draw_slice(
     slice: &Slice,
     theme: &ActiveTheme,
     highlight: f64,
+    icons: &IconCache,
 ) {
     let palette = &theme.theme.colors;
 
@@ -122,20 +124,38 @@ pub fn draw_slice(
     cr.arc(icon_x, icon_y, ICON_BG_RADIUS, 0.0, std::f64::consts::TAU);
     let _ = cr.fill();
 
-    // TODO: render the icon glyph at (icon_x, icon_y) using
-    // crate::render::icons. Until then, draw a small placeholder so
-    // the layout is visible end-to-end:
-    let icon_color_rgba = icon_color(palette, highlight);
-    cr.set_source_rgba(
-        icon_color_rgba.0,
-        icon_color_rgba.1,
-        icon_color_rgba.2,
-        icon_color_rgba.3,
-    );
-    cr.arc(icon_x, icon_y, ICON_BG_RADIUS * 0.35, 0.0, std::f64::consts::TAU);
-    let _ = cr.fill();
+    // Icon glyph — slice colour tint, sized to ~70% of the icon
+    // background so it sits inside the disc with a small margin.
+    // Falls back to a small placeholder dot when the icon source
+    // can't be resolved (lets the user *see* a slice with a typo'd
+    // icon name rather than rendering blank).
+    let glyph_size = (ICON_BG_RADIUS * 1.4) as i32;
+    let glyph_color = icon_color(palette, highlight);
+    let icon_source = pick_icon_source(slice);
+    if let Some(surface) = icons.resolve(icon_source, glyph_size, glyph_color) {
+        draw_icon(cr, icon_x, icon_y, &surface);
+    } else {
+        cr.set_source_rgba(
+            glyph_color.0,
+            glyph_color.1,
+            glyph_color.2,
+            glyph_color.3,
+        );
+        cr.arc(icon_x, icon_y, ICON_BG_RADIUS * 0.35, 0.0, std::f64::consts::TAU);
+        let _ = cr.fill();
+    }
+}
 
-    let _ = slice; // currently unused — see icon TODO above.
+/// Pick the icon source string from a slice — for a typical
+/// configuration this is `slice.icon`. Empty strings are normalised
+/// so the resolver short-circuits without trying to look up an empty
+/// icon name (which the cache would treat as a real key otherwise).
+fn pick_icon_source(slice: &Slice) -> &str {
+    if slice.icon.is_empty() {
+        ""
+    } else {
+        slice.icon.as_str()
+    }
 }
 
 /// Render every slice in `slices` at its angular slot. `highlights`
@@ -146,9 +166,10 @@ pub fn draw_slices(
     slices: &[Slice],
     theme: &ActiveTheme,
     highlights: &[f64; 8],
+    icons: &IconCache,
 ) {
     for (i, slice) in slices.iter().enumerate().take(8) {
-        draw_slice(cr, geom, i, slice, theme, highlights[i]);
+        draw_slice(cr, geom, i, slice, theme, highlights[i], icons);
     }
 }
 
