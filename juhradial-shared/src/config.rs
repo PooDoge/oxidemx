@@ -1,4 +1,5 @@
 use crate::action::ActionKind;
+use crate::conditions::Condition;
 use crate::theme::ThemeName;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -42,6 +43,14 @@ pub struct Slice {
     /// Empty for non-submenu slices.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub submenu: Vec<Slice>,
+
+    /// Optional visibility predicate. Slices whose predicate evaluates
+    /// to `false` are skipped at render time — their slot stays empty
+    /// rather than being filled by the next slice (so the menu's
+    /// muscle-memory layout is preserved). `None` means always
+    /// visible. See the `conditions` module for the variants.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub visible_if: Option<Condition>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
