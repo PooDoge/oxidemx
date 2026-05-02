@@ -273,23 +273,31 @@ impl RadialState {
     pub fn on_toggle_cursor(&mut self, local_x: f64, local_y: f64) {
         let dx = local_x - (WINDOW_SIZE / 2.0);
         let dy = local_y - (WINDOW_SIZE / 2.0);
-        self.update_pointer(dx, dy);
+        // Toggle mode is the only path that opens submenus —
+        // matches the legacy overlay's mouseMoveEvent vs. drag
+        // split (the gesture-button drag never pops the submenu).
+        self.update_pointer(dx, dy, true);
     }
 
     /// Drag-mode delta from the daemon's CursorMoved signal.
     /// `dx, dy` are accumulated REL_X / REL_Y values from the
     /// gesture-button press point (NOT absolute screen coords).
     pub fn on_cursor_moved(&mut self, dx: i32, dy: i32) {
-        self.update_pointer(dx as f64, dy as f64);
+        // Drag-mode (gesture button held): never auto-opens a
+        // submenu. Holding-and-dragging over a Submenu slice should
+        // just highlight that slice; if the user wants the submenu
+        // they tap to enter toggle mode first.
+        self.update_pointer(dx as f64, dy as f64, false);
     }
 
     /// Shared cursor-update path: updates the highlighted slice and,
     /// when the pointer is over a submenu sub-item, the sub-item
-    /// highlight too. Submenu state is opened automatically when the
-    /// pointer lands on a Submenu-kind slice with a non-empty
-    /// `submenu` vec, and closed when the pointer leaves both the
-    /// parent slice and the popped-out arc.
-    fn update_pointer(&mut self, dx: f64, dy: f64) {
+    /// highlight too. Submenu state is opened automatically (only
+    /// when `may_open_submenu` is true) when the pointer lands on a
+    /// Submenu-kind slice with a non-empty `submenu` vec, and
+    /// closed when the pointer leaves both the parent slice and
+    /// the popped-out arc.
+    fn update_pointer(&mut self, dx: f64, dy: f64, may_open_submenu: bool) {
         // 1. Resolve the new slice under the cursor (if any). We
         //    deliberately use the same hit-test as the no-submenu
         //    path — sub-items live just beyond the ring, but the
@@ -317,20 +325,32 @@ impl RadialState {
         //    a) An open submenu's highlight follows the cursor (or
         //       drops to None when over the parent wedge but not
         //       over an item).
-        //    b) Hovering off both the parent wedge AND the sub-item
-        //       arc closes the submenu — same rule as the legacy
-        //       overlay (bias toward keeping the submenu open while
-        //       the user is still over the parent slice).
+        //    b) The submenu stays open as long as ANY of:
+        //         - cursor is over a sub-item (highlighted),
+        //         - cursor is still in the parent wedge,
+        //         - cursor is past the outer ring (radius >
+        //           MENU_RADIUS) — covers the transition band
+        //           between the wedge edge (~150 px) and the
+        //           sub-item hit zone (~163-227 px), where the
+        //           cursor is genuinely *travelling* toward an
+        //           item. Without this third predicate the submenu
+        //           dies mid-flight and the user never reaches the
+        //           sub-item they were aiming for.
+        //       Only entering a *different* parent slice's wedge
+        //       closes the submenu — matches the legacy Python
+        //       overlay's "bias toward keeping the submenu open"
+        //       rule.
         //    c) Landing on a fresh Submenu-kind slice opens its
         //       submenu and resets the grow animation.
         let mut should_close = false;
+        let dist = (dx * dx + dy * dy).sqrt();
         if let Some(sub) = self.submenu.as_mut() {
             let hit = subitem_at(dx, dy, sub.parent, &self.slices);
             if hit.is_some() {
                 sub.highlighted = hit;
-            } else if new_target == Some(sub.parent) {
-                // Still over the parent wedge — keep submenu open
-                // but no sub-item highlighted.
+            } else if new_target == Some(sub.parent)
+                || dist > crate::geometry::MENU_RADIUS
+            {
                 sub.highlighted = None;
             } else {
                 should_close = true;
@@ -339,7 +359,7 @@ impl RadialState {
         if should_close {
             self.submenu = None;
         }
-        if self.submenu.is_none() {
+        if may_open_submenu && self.submenu.is_none() {
             if let Some(idx) = new_target {
                 if let Some(slice) = self.slices.get(idx) {
                     if matches!(slice.kind, ActionKind::Submenu)
