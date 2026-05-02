@@ -18,7 +18,7 @@ juhradial-shared = { path = "../juhradial-shared" }
 # Mutter doesn't advertise wlr-layer-shell on stable GNOME (verified
 # via wayland-info from the dev distrobox), and keeping the build
 # pure-Rust avoids the *-devel rpm-ostree pain on atomic Fedora.
-iced = { version = "0.14", features = ["canvas", "wayland", "x11", "tokio"] }
+iced = { version = "0.14", features = ["canvas", "wayland", "x11", "tokio", "image"] }
 
 # IPC with the daemon (signals on org.kde.juhradialmx) and with the
 # GNOME shell extension (window positioning).
@@ -32,6 +32,7 @@ tokio = { version = "1", features = ["rt", "macros", "time"] }
 # when iced isn't doing it itself.
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 resvg = "0.44"
+tiny-skia = "0.11"
 
 # Config + serde-json (re-exported via juhradial-shared but kept
 # direct here for the editor's mutable JSON manipulation).

@@ -9,8 +9,10 @@
 use iced::widget::canvas::{self, Frame, Geometry, Path, Stroke};
 use iced::{Color, Point, Rectangle, Renderer, Theme};
 use juhradial_shared::{theme::parse_hex_rgba, AppConfig, Slice};
+use std::rc::Rc;
 
 use crate::geometry::{Geometry as RadialGeometry, MENU_RADIUS, WINDOW_SIZE};
+use crate::render::icons::IconCache;
 use crate::theme::ActiveTheme;
 
 const SLICE_DEGREES: f32 = 45.0;
@@ -46,7 +48,6 @@ impl Animation {
 }
 
 /// Top-level model for the iced app. Owns everything view() needs.
-#[derive(Debug)]
 pub struct RadialState {
     pub theme: ActiveTheme,
     pub slices: Vec<Slice>,
@@ -59,6 +60,19 @@ pub struct RadialState {
     /// Whether the menu is currently visible (Show received, Hide
     /// not yet).
     visible: bool,
+    /// Per-overlay icon cache shared with the painter via `Rc`.
+    icons: Rc<IconCache>,
+}
+
+impl std::fmt::Debug for RadialState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RadialState")
+            .field("theme", &self.theme)
+            .field("slices.len", &self.slices.len())
+            .field("target_slice", &self.target_slice)
+            .field("visible", &self.visible)
+            .finish()
+    }
 }
 
 impl RadialState {
@@ -71,6 +85,7 @@ impl RadialState {
             highlights: [Animation::at(0.0); 8],
             target_slice: None,
             visible: false,
+            icons: Rc::new(IconCache::new()),
         }
     }
 
@@ -188,6 +203,7 @@ impl<'a> canvas::Program<crate::app::Message> for Painter<'a> {
                 self.state.slices.get(i),
                 palette,
                 highlight,
+                &self.state.icons,
             );
         }
 

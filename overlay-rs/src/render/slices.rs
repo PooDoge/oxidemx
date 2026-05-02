@@ -18,6 +18,8 @@ use iced::{Color, Point, Radians};
 use juhradial_shared::theme::{parse_hex_rgba, ThemeColors};
 use juhradial_shared::Slice;
 
+use crate::render::icons::{draw_icon, IconCache};
+
 const SLICE_DEGREES: f32 = 45.0;
 
 /// Render a single slice. `highlight` is per-slice hover progress in
@@ -36,6 +38,7 @@ pub fn draw_slice(
     slice: Option<&Slice>,
     palette: &ThemeColors,
     highlight: f32,
+    icons: &IconCache,
 ) {
     // Slice angular range in cairo coords (clockwise from +X axis,
     // radians). Python uses `index * 45 - 22.5 - 90` with degrees;
@@ -96,16 +99,29 @@ pub fn draw_slice(
         Color { a: bg_alpha, ..bg },
     );
 
-    // Slice colour placeholder. The icon resolver port comes next
-    // — until then, paint a tinted dot in the slot's configured
-    // colour so the ring has a visible identity per slot.
+    // Icon colour for the slot — uses the configured slice color
+    // (e.g. "green", "sapphire") looked up in the active palette.
     let slot_color_key = slice
         .map(|s| s.color.as_str())
         .filter(|s| !s.is_empty())
         .unwrap_or("accent");
     let (sr, sg, sb, _) = palette.slice_color_rgba(slot_color_key);
-    let dot_color = Color::from_rgb(sr as f32, sg as f32, sb as f32);
-    frame.fill(&Path::circle(icon_pos, icon_bg_radius * 0.35), dot_color);
+    let icon_color_rgba = (sr as f32, sg as f32, sb as f32, 1.0);
+
+    // Try to load + tint the slice's configured icon. On miss
+    // (icon name not in any theme dir, file load failure, etc.),
+    // fall back to a placeholder dot in the slice colour so the
+    // ring still has a visible identity.
+    let icon_source = slice.map(|s| s.icon.as_str()).unwrap_or("");
+    let glyph_size = (icon_bg_radius * 1.4).max(8.0);
+    let glyph_size_px = glyph_size.round() as u32;
+
+    if let Some(handle) = icons.resolve(icon_source, glyph_size_px, icon_color_rgba) {
+        draw_icon(frame, icon_pos.x, icon_pos.y, glyph_size, &handle);
+    } else {
+        let dot_color = Color::from_rgb(sr as f32, sg as f32, sb as f32);
+        frame.fill(&Path::circle(icon_pos, icon_bg_radius * 0.35), dot_color);
+    }
 }
 
 /// Centre puck — small filled circle with stroked accent ring,
