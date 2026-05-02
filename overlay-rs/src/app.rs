@@ -33,6 +33,15 @@ pub enum Message {
     /// Result of asking the GNOME extension to position the window.
     /// Used only for logging / future retries.
     Positioned(bool),
+    /// Toggle-mode cursor moved over the canvas. Coords are widget-
+    /// local pixels (origin at canvas top-left).
+    ToggleCursor { x: f64, y: f64 },
+    /// Toggle-mode left-click — dispatch the highlighted slice and
+    /// close the menu.
+    ToggleClickSelect,
+    /// Toggle-mode dismiss without dispatching (right-click / Esc /
+    /// click outside the menu).
+    ToggleDismiss,
 }
 
 pub fn run() -> iced::Result {
@@ -115,6 +124,20 @@ fn update(state: &mut RadialState, message: Message) -> Task<Message> {
                     APP_ID
                 );
             }
+            Task::none()
+        }
+        Message::ToggleCursor { x, y } => {
+            state.on_toggle_cursor(x, y);
+            Task::none()
+        }
+        Message::ToggleClickSelect => {
+            debug!("Toggle-mode click select");
+            state.click_select();
+            Task::none()
+        }
+        Message::ToggleDismiss => {
+            debug!("Toggle-mode dismiss");
+            state.dismiss();
             Task::none()
         }
     }

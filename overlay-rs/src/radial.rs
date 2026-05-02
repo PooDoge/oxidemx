@@ -6,14 +6,19 @@
 //! into `iced::widget::canvas::Frame` (cairo-equivalent calls in
 //! pure Rust).
 
-use iced::widget::canvas::{self, Frame, Geometry, Path, Stroke};
-use iced::{Color, Point, Rectangle, Renderer, Theme};
+use iced::widget::canvas::{self, Action, Frame, Geometry, Path, Stroke};
+use iced::{mouse, Color, Event, Point, Rectangle, Renderer, Theme};
 use juhradial_shared::{theme::parse_hex_rgba, AppConfig, Slice};
 use std::rc::Rc;
+use std::time::{Duration, Instant};
 
 use crate::geometry::{Geometry as RadialGeometry, MENU_RADIUS, WINDOW_SIZE};
 use crate::render::icons::IconCache;
 use crate::theme::ActiveTheme;
+
+/// Maximum press-to-release duration that still counts as a "tap" —
+/// mirrors the Python overlay's TAP_THRESHOLD_MS = 250.
+const TAP_THRESHOLD: Duration = Duration::from_millis(250);
 
 const SLICE_DEGREES: f32 = 45.0;
 const RING_OUTER_INSET: f32 = 6.0;
@@ -62,6 +67,16 @@ pub struct RadialState {
     visible: bool,
     /// Per-overlay icon cache shared with the painter via `Rc`.
     icons: Rc<IconCache>,
+    /// When the daemon's most recent `Show` arrived. Compared
+    /// against the matching `Hide` to detect a quick tap (tap →
+    /// toggle mode; otherwise drag-select fires the highlighted
+    /// slice and closes).
+    show_time: Option<Instant>,
+    /// Toggle mode is on after a quick tap. The menu stays visible
+    /// after the daemon's `Hide`, listens for OS mouse events
+    /// (cursor move + clicks via `canvas::Program::update`), and
+    /// only closes on click or escape.
+    toggle_mode: bool,
 }
 
 impl std::fmt::Debug for RadialState {
@@ -71,6 +86,7 @@ impl std::fmt::Debug for RadialState {
             .field("slices.len", &self.slices.len())
             .field("target_slice", &self.target_slice)
             .field("visible", &self.visible)
+            .field("toggle_mode", &self.toggle_mode)
             .finish()
     }
 }
@@ -86,11 +102,15 @@ impl RadialState {
             target_slice: None,
             visible: false,
             icons: Rc::new(IconCache::new()),
+            show_time: None,
+            toggle_mode: false,
         }
     }
 
     pub fn show(&mut self) {
         self.visible = true;
+        self.show_time = Some(Instant::now());
+        self.toggle_mode = false;
         // Reset any stale highlights from a previous show.
         for a in &mut self.highlights {
             a.target = 0.0;
@@ -98,11 +118,46 @@ impl RadialState {
         self.target_slice = None;
     }
 
-    /// Hide the menu and dispatch the highlighted slice's action
-    /// (drag-select). Slices whose visible_if predicate is false
-    /// are skipped — the slot is invisible at render time, so
-    /// activating it would surprise the user.
+    /// Handle the daemon's `Hide` signal (gesture button release).
+    ///
+    /// Two paths:
+    ///   * **Tap** (release within `TAP_THRESHOLD` of show, no
+    ///     drag highlight) → enter toggle mode. The menu stays
+    ///     visible; OS mouse events (forwarded by
+    ///     `Painter::update`) drive the selection until the user
+    ///     clicks or escapes.
+    ///   * **Drag-select** → run the highlighted slice's action
+    ///     and close.
     pub fn hide(&mut self) {
+        let was_drag_select = self.target_slice.is_some();
+        let dur = self.show_time.map(|t| t.elapsed()).unwrap_or(Duration::MAX);
+        if !was_drag_select && dur < TAP_THRESHOLD {
+            // Tap detected — switch to toggle mode rather than closing.
+            self.toggle_mode = true;
+            tracing::debug!(?dur, "tap → entering toggle mode");
+            return;
+        }
+        self.dispatch_and_close();
+    }
+
+    /// Toggle-mode click handler — fires the highlighted slice and
+    /// closes the menu.
+    pub fn click_select(&mut self) {
+        self.dispatch_and_close();
+    }
+
+    /// Toggle-mode dismiss without dispatching (right click / Esc /
+    /// click outside).
+    pub fn dismiss(&mut self) {
+        self.target_slice = None;
+        for a in &mut self.highlights {
+            a.target = 0.0;
+        }
+        self.visible = false;
+        self.toggle_mode = false;
+    }
+
+    fn dispatch_and_close(&mut self) {
         self.visible = false;
         let selected = self.target_slice;
         if let Some(idx) = selected {
@@ -121,6 +176,37 @@ impl RadialState {
             a.target = 0.0;
         }
         self.target_slice = None;
+        self.toggle_mode = false;
+    }
+
+    /// True when the menu is in toggle mode and the canvas should
+    /// react to OS-level mouse events.
+    pub fn is_toggle_mode(&self) -> bool {
+        self.toggle_mode
+    }
+
+    /// Update the highlight from a toggle-mode cursor position.
+    /// `local_x`/`local_y` are widget-local pixels (the canvas's
+    /// own coordinate space — `(0,0)` at the top-left of the
+    /// 484×484 surface, centre at `(WINDOW_SIZE/2, WINDOW_SIZE/2)`).
+    pub fn on_toggle_cursor(&mut self, local_x: f64, local_y: f64) {
+        let dx = local_x - (WINDOW_SIZE / 2.0);
+        let dy = local_y - (WINDOW_SIZE / 2.0);
+        let new_target = crate::input::slice_index_at(
+            dx,
+            dy,
+            crate::geometry::CENTER_ZONE_RADIUS,
+            crate::geometry::MENU_RADIUS,
+        );
+        if new_target != self.target_slice {
+            if let Some(prev) = self.target_slice {
+                self.highlights[prev].target = 0.0;
+            }
+            if let Some(next) = new_target {
+                self.highlights[next].target = 1.0;
+            }
+            self.target_slice = new_target;
+        }
     }
 
     /// Drag-mode delta from the daemon's CursorMoved signal.
@@ -178,6 +264,48 @@ impl<'a> Painter<'a> {
 
 impl<'a> canvas::Program<crate::app::Message> for Painter<'a> {
     type State = ();
+
+    /// Forward toggle-mode mouse events as `Message`s the iced
+    /// app loop dispatches into `RadialState`. We only react when
+    /// the menu is in toggle mode — drag mode is driven entirely
+    /// by the daemon's CursorMoved signals (see app.rs).
+    fn update(
+        &self,
+        _canvas_state: &mut (),
+        event: &Event,
+        bounds: Rectangle,
+        cursor: mouse::Cursor,
+    ) -> Option<Action<crate::app::Message>> {
+        if !self.state.visible || !self.state.is_toggle_mode() {
+            return None;
+        }
+        match event {
+            Event::Mouse(mouse::Event::CursorMoved { .. }) => {
+                let p = cursor.position_in(bounds)?;
+                Some(Action::publish(crate::app::Message::ToggleCursor {
+                    x: p.x as f64,
+                    y: p.y as f64,
+                }))
+            }
+            Event::Mouse(mouse::Event::ButtonPressed(button)) => match button {
+                mouse::Button::Left => {
+                    Some(Action::publish(crate::app::Message::ToggleClickSelect))
+                }
+                _ => Some(Action::publish(crate::app::Message::ToggleDismiss)),
+            },
+            Event::Keyboard(iced::keyboard::Event::KeyPressed { key, .. }) => {
+                if matches!(
+                    key,
+                    iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape)
+                ) {
+                    Some(Action::publish(crate::app::Message::ToggleDismiss))
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        }
+    }
 
     fn draw(
         &self,
