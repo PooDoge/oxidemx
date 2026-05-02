@@ -1,22 +1,18 @@
 //! JuhRadial MX settings GUI.
 //!
-//! A separate iced application that loads `~/.config/juhradial/config.json`,
-//! exposes per-element animation + visual controls, and writes the file
-//! back on every change. The overlay's inotify watcher picks up the
-//! save within ~150 ms, so edits preview live with no D-Bus or any
-//! extra IPC plumbing — the filesystem is the channel.
-//!
-//! Tabs:
-//!   - Visuals     — menu background opacity + slice highlight opacity
-//!   - Animation   — per-element (menu / submenu / slice highlight)
-//!                   enter/exit transition controls + chain stagger
-//!
-//! Save is debounced ~250 ms so dragging a slider doesn't hammer
-//! the filesystem (and doesn't trigger 60 reload events per second
-//! at the overlay).
+//! Layout mirrors the legacy juhradial settings dialog: a left
+//! sidebar with the 9 top-level sections (Buttons by default), a
+//! header, the section's main + side content in the middle, and a
+//! footer with credits + exit. The on-disk channel to the live
+//! overlay is unchanged — every edit is debounced + atomic-written
+//! back to `~/.config/juhradial/config.json` and the overlay's
+//! existing inotify watcher previews changes within ~150 ms.
 
 mod tabs {
     pub mod animation;
+    pub mod buttons;
+    pub mod placeholder;
+    pub mod settings_page;
     pub mod visuals;
 }
 mod persist;
@@ -30,33 +26,88 @@ use juhradial_shared::{
 use std::time::{Duration, Instant};
 use tracing::{info, warn};
 
-/// Which tab is currently visible.
+// ============================================================================
+// Tabs
+// ============================================================================
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tab {
-    Visuals,
-    Animation,
+    Buttons,
+    PointScroll,
+    Haptic,
+    Devices,
+    EasySwitch,
+    Flow,
+    Macros,
+    Gaming,
+    Settings,
 }
+
+impl Tab {
+    pub fn label(&self) -> &'static str {
+        match self {
+            Tab::Buttons => "Buttons",
+            Tab::PointScroll => "Point & Scroll",
+            Tab::Haptic => "Haptic Feedback",
+            Tab::Devices => "Devices",
+            Tab::EasySwitch => "Easy-Switch",
+            Tab::Flow => "Flow",
+            Tab::Macros => "Macros",
+            Tab::Gaming => "Gaming",
+            Tab::Settings => "Settings",
+        }
+    }
+
+    /// Single-glyph icon shown in the sidebar. Picked to read at
+    /// a glance; the legacy UI uses bespoke SVGs which we'll
+    /// substitute later when we add an icon resolver here too.
+    pub fn glyph(&self) -> &'static str {
+        match self {
+            Tab::Buttons => "M",
+            Tab::PointScroll => "S",
+            Tab::Haptic => "H",
+            Tab::Devices => "D",
+            Tab::EasySwitch => "E",
+            Tab::Flow => "F",
+            Tab::Macros => "P",
+            Tab::Gaming => "G",
+            Tab::Settings => "*",
+        }
+    }
+
+    pub const ALL: [Tab; 9] = [
+        Tab::Buttons,
+        Tab::PointScroll,
+        Tab::Haptic,
+        Tab::Devices,
+        Tab::EasySwitch,
+        Tab::Flow,
+        Tab::Macros,
+        Tab::Gaming,
+        Tab::Settings,
+    ];
+}
+
+// ============================================================================
+// Messages
+// ============================================================================
 
 #[derive(Debug, Clone)]
 pub enum Message {
     SwitchTab(Tab),
-    /// One of the visuals sliders moved — `(field, new_value)`.
     SetVisual(VisualField, f32),
-    /// One of the animation controls changed — element, direction,
-    /// + the new TransitionConfig (the panel rebuilds the whole
-    /// config locally and ships it). Simpler than 30 message
-    /// variants for each individual field.
     SetTransition(AnimElement, AnimDirection, TransitionConfig),
-    /// Per-item chain stagger changed for an element.
     SetChainStagger(AnimElement, u32),
-    /// Reset one element's animation to its built-in default.
     ResetElementAnimation(AnimElement),
-    /// Reset everything to defaults.
     ResetAll,
+    /// Easy-Switch shortcut toggle (Buttons tab right column).
+    SetEasySwitchShortcuts(bool),
+    /// Quit the settings window.
+    Exit,
     /// Debounced save tick — fires every 200 ms; if there's an
     /// unsaved edit older than 250 ms we flush to disk.
     SaveTick,
-    /// Persist completed. Used to toast the user with a status.
+    /// Persist completed.
     Saved(Result<(), String>),
 }
 
@@ -152,21 +203,16 @@ impl AnimDirection {
     }
 }
 
-/// Top-level model.
+// ============================================================================
+// State
+// ============================================================================
+
 pub struct State {
-    /// Currently-loaded config — the source of truth the UI edits.
     pub config: AppConfig,
-    /// Active tab.
     pub tab: Tab,
-    /// Path the config was loaded from / will be saved to. None
-    /// when no XDG_CONFIG_HOME / HOME (extremely unlikely).
     pub config_path: Option<std::path::PathBuf>,
-    /// Most recent edit timestamp; the SaveTick consults this so it
-    /// only saves once the user has stopped fiddling for 250 ms.
     pub last_edit: Option<Instant>,
-    /// True after a save flush; reset on the next edit.
     pub saved_pending: bool,
-    /// Last save status — shown in the footer toast.
     pub status: String,
 }
 
@@ -179,7 +225,7 @@ impl Default for State {
             .unwrap_or_default();
         State {
             config,
-            tab: Tab::Animation,
+            tab: Tab::Buttons,
             config_path: path,
             last_edit: None,
             saved_pending: false,
@@ -205,10 +251,7 @@ impl State {
         let path = self.config_path.clone()?;
         let cfg = self.config.clone();
         self.saved_pending = false;
-        Some(Task::perform(
-            persist::save(path, cfg),
-            Message::Saved,
-        ))
+        Some(Task::perform(persist::save(path, cfg), Message::Saved))
     }
 }
 
@@ -259,6 +302,12 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             state.touch();
             Task::none()
         }
+        Message::SetEasySwitchShortcuts(on) => {
+            state.config.radial_menu.easy_switch_shortcuts = on;
+            state.touch();
+            Task::none()
+        }
+        Message::Exit => iced::window::latest().and_then(iced::window::close),
         Message::SaveTick => state.maybe_save().unwrap_or_else(Task::none),
         Message::Saved(Ok(())) => {
             info!("config saved");
@@ -273,76 +322,167 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
     }
 }
 
+// ============================================================================
+// View — the shell
+// ============================================================================
+
 fn view(state: &State) -> Element<'_, Message> {
-    let header = row![
-        text("JuhRadial Settings").size(22),
-        Space::new().width(Length::Fill),
-        button("Reset all to defaults").on_press(Message::ResetAll),
-    ]
-    .align_y(iced::Alignment::Center)
-    .padding(12)
-    .spacing(12);
-
-    let tab_row = row![
-        tab_button("Visuals", state.tab == Tab::Visuals, Tab::Visuals),
-        tab_button("Animation", state.tab == Tab::Animation, Tab::Animation),
-    ]
-    .spacing(4)
-    .padding([0, 12]);
-
+    let header = header_view();
+    let sidebar = sidebar_view(state);
     let body: Element<Message> = match state.tab {
-        Tab::Visuals => tabs::visuals::view(state),
-        Tab::Animation => tabs::animation::view(state),
+        Tab::Buttons => tabs::buttons::view(state),
+        Tab::Settings => tabs::settings_page::view(state),
+        Tab::PointScroll => tabs::placeholder::view(
+            "Point & Scroll",
+            "Pointer speed, scroll direction, and acceleration. \
+             Coming soon — track in the daemon's button-mapping module.",
+        ),
+        Tab::Haptic => tabs::placeholder::view(
+            "Haptic Feedback",
+            "Per-event haptic intensity for slice changes, gesture recognition, \
+             and dispatch. Coming soon.",
+        ),
+        Tab::Devices => tabs::placeholder::view(
+            "Devices",
+            "Paired Logitech devices + battery + firmware status. Coming soon.",
+        ),
+        Tab::EasySwitch => tabs::placeholder::view(
+            "Easy-Switch",
+            "Configure each Easy-Switch host slot (label, OS icon). Coming soon.",
+        ),
+        Tab::Flow => tabs::placeholder::view(
+            "Flow",
+            "Cross-machine cursor-and-clipboard hand-off. Coming soon.",
+        ),
+        Tab::Macros => tabs::placeholder::view(
+            "Macros",
+            "Record and edit macros that slices can dispatch via the daemon. \
+             Coming soon.",
+        ),
+        Tab::Gaming => tabs::placeholder::view(
+            "Gaming",
+            "Per-game profiles + DPI overrides + low-latency mode. Coming soon.",
+        ),
     };
 
-    let footer_status: Element<Message> = if state.saved_pending {
-        text("Editing… (autosaves shortly)").size(12).into()
-    } else if !state.status.is_empty() {
-        text(state.status.as_str()).size(12).into()
-    } else {
-        text("Idle.").size(12).into()
-    };
-
-    let footer = row![
-        text(
-            state
-                .config_path
-                .as_ref()
-                .map(|p| p.display().to_string())
-                .unwrap_or_else(|| "(no config path)".into())
-        )
-        .size(11),
-        Space::new().width(Length::Fill),
-        footer_status,
+    let main_area = row![
+        sidebar,
+        container(scrollable(container(body).padding(20)))
+            .padding(0)
+            .width(Length::Fill)
+            .height(Length::Fill),
     ]
-    .padding(10)
-    .spacing(12);
+    .height(Length::Fill);
+
+    let footer = footer_view(state);
 
     container(
-        column![
-            header,
-            tab_row,
-            rule::horizontal(1),
-            scrollable(container(body).padding(16)).height(Length::Fill),
-            rule::horizontal(1),
-            footer,
-        ]
-        .spacing(0),
+        column![header, rule::horizontal(1), main_area, rule::horizontal(1), footer,]
+            .spacing(0),
     )
+    .width(Length::Fill)
+    .height(Length::Fill)
     .into()
 }
 
-fn tab_button(label: &str, active: bool, target: Tab) -> Element<'_, Message> {
-    let mut b = button(text(label));
+// ----------------------------------------------------------------------------
+// Header
+// ----------------------------------------------------------------------------
+
+fn header_view<'a>() -> Element<'a, Message> {
+    row![
+        text("JuhRadial").size(20),
+        text("MX").size(13),
+        Space::new().width(Length::Fixed(16.0)),
+        chip("MX MASTER 4"),
+        Space::new().width(Length::Fill),
+        button(text("Exit").size(12))
+            .style(button::secondary)
+            .on_press(Message::Exit),
+    ]
+    .align_y(iced::Alignment::Center)
+    .spacing(8)
+    .padding(12)
+    .into()
+}
+
+fn chip<'a>(label: &str) -> Element<'a, Message> {
+    container(text(label.to_string()).size(11))
+        .padding([4, 10])
+        .style(container::bordered_box)
+        .into()
+}
+
+// ----------------------------------------------------------------------------
+// Sidebar
+// ----------------------------------------------------------------------------
+
+fn sidebar_view(state: &State) -> Element<'_, Message> {
+    let mut col = column![].spacing(6).padding(12);
+    for tab in Tab::ALL {
+        col = col.push(sidebar_button(tab, state.tab == tab));
+    }
+    container(col)
+        .width(Length::Fixed(220.0))
+        .height(Length::Fill)
+        .style(container::bordered_box)
+        .into()
+}
+
+fn sidebar_button(tab: Tab, active: bool) -> Element<'static, Message> {
+    let inner = row![
+        container(text(tab.glyph()).size(13))
+            .padding([2, 8])
+            .style(container::bordered_box),
+        text(tab.label()).size(13),
+    ]
+    .align_y(iced::Alignment::Center)
+    .spacing(10);
+
+    let mut b = button(inner).width(Length::Fill).padding([8, 10]);
     if !active {
         b = b.style(button::secondary);
     }
-    b.on_press(Message::SwitchTab(target)).into()
+    b.on_press(Message::SwitchTab(tab)).into()
 }
 
+// ----------------------------------------------------------------------------
+// Footer
+// ----------------------------------------------------------------------------
+
+fn footer_view(state: &State) -> Element<'_, Message> {
+    let path = state
+        .config_path
+        .as_ref()
+        .map(|p| p.display().to_string())
+        .unwrap_or_else(|| "(no config path)".into());
+
+    let status: Element<Message> = if state.saved_pending {
+        text("Editing… (autosaves shortly)").size(11).into()
+    } else if !state.status.is_empty() {
+        text(state.status.as_str()).size(11).into()
+    } else {
+        text("Idle.").size(11).into()
+    };
+
+    row![
+        text("JuhLabs · Free & open source software").size(11),
+        Space::new().width(Length::Fixed(16.0)),
+        text(path).size(10),
+        Space::new().width(Length::Fill),
+        status,
+    ]
+    .align_y(iced::Alignment::Center)
+    .spacing(8)
+    .padding(10)
+    .into()
+}
+
+// ============================================================================
+// Subscription + main
+// ============================================================================
+
 fn subscription(_state: &State) -> Subscription<Message> {
-    // Tick every 200 ms — checks the debounce window in the
-    // SaveTick handler. Cheap when there's nothing to save.
     iced::time::every(Duration::from_millis(200)).map(|_| Message::SaveTick)
 }
 
@@ -355,7 +495,7 @@ fn main() -> iced::Result {
         .init();
 
     let mut window = iced::window::Settings::default();
-    window.size = iced::Size::new(880.0, 720.0);
+    window.size = iced::Size::new(1280.0, 820.0);
     window.platform_specific.application_id = "org.juhlabs.juhradial.settings".into();
 
     iced::application(boot, update, view)
@@ -364,4 +504,3 @@ fn main() -> iced::Result {
         .subscription(subscription)
         .run()
 }
-

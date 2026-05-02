@@ -161,10 +161,31 @@ fn direction_panel<'a>(
     ]
     .spacing(12);
 
+    // Label conventions for the kind-specific knobs depend on the
+    // direction. The on-disk schema keeps fixed names
+    // (`initial_scale`, `initial_opacity`, `final_opacity`) but the
+    // *meaning* flips for an exit transition: when current=0 the
+    // element is fully gone, so `initial_scale` is actually the
+    // scale the element shrinks DOWN to before disappearing, and
+    // the opacity pair represents start (was-visible) → end
+    // (is-gone). Relabel to match what the user sees on screen.
+    let scale_label = match dir {
+        AnimDirection::Enter => "Initial scale",
+        AnimDirection::Exit => "End scale",
+    };
+    let opacity_a_label = match dir {
+        AnimDirection::Enter => "Initial opacity",
+        AnimDirection::Exit => "End opacity",
+    };
+    let opacity_b_label = match dir {
+        AnimDirection::Enter => "Final opacity",
+        AnimDirection::Exit => "Start opacity",
+    };
+
     if needs_scale {
         let cfg_for_msg = cfg_owned.clone();
         col = col.push(labeled_slider(
-            "Initial scale",
+            scale_label,
             cfg.initial_scale,
             0.0..=1.0,
             0.01,
@@ -179,7 +200,7 @@ fn direction_panel<'a>(
     if needs_opacity {
         let cfg_init = cfg_owned.clone();
         col = col.push(labeled_slider(
-            "Initial opacity",
+            opacity_a_label,
             cfg.initial_opacity,
             0.0..=1.0,
             0.01,
@@ -192,7 +213,7 @@ fn direction_panel<'a>(
         ));
         let cfg_final = cfg_owned.clone();
         col = col.push(labeled_slider(
-            "Final opacity",
+            opacity_b_label,
             cfg.final_opacity,
             0.0..=1.0,
             0.01,
