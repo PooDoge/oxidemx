@@ -1,0 +1,25 @@
+# Throwaway crate to validate the iced pivot before refactoring
+# overlay-rs. Single-purpose: render a radial menu on screen using
+# iced's Canvas widget so we can verify:
+#
+#   * iced 0.14 builds inside the distrobox dev environment.
+#   * Canvas / Path / Frame primitives can draw arcs + filled wedges
+#     suitable for the radial slices.
+#   * winit's xdg-shell window mapping works on Mutter (no
+#     wlr-layer-shell needed for the visual test).
+#   * HiDPI fractional scaling (1.25× on the dev host) doesn't
+#     introduce the coord-space gymnastics we hit with Qt+xcb.
+#
+# Once the spike paints correctly, overlay-rs gets the matching
+# refactor and this crate is deleted.
+
+[package]
+name = "spike-iced"
+version = "0.0.1"
+edition = "2021"
+publish = false
+
+[dependencies]
+juhradial-shared = { path = "../juhradial-shared" }
+iced = { version = "0.14", features = ["canvas", "wayland", "x11"] }
+serde_json = "1"
