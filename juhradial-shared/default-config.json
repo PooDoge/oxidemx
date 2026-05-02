@@ -1,0 +1,15 @@
+{
+  "theme": "juhradial-mx",
+  "radial_menu": {
+    "slices": [
+      {"label": "Play/Pause", "type": "exec", "command": "playerctl play-pause", "color": "green",    "icon": "media-playback-start-symbolic"},
+      {"label": "New Note",   "type": "exec", "command": "gnome-text-editor",    "color": "yellow",   "icon": "document-new-symbolic"},
+      {"label": "Terminal",   "type": "exec", "command": "ptyxis --new-window || gnome-terminal || konsole || xterm", "color": "teal", "icon": "utilities-terminal-symbolic"},
+      {"label": "Settings",   "type": "settings", "command": "",                 "color": "mauve",    "icon": "emblem-system-symbolic"},
+      {"label": "Screenshot", "type": "exec", "command": "gnome-screenshot -i || flatpak run be.alexandervanhee.gradia --screenshot=INTERACTIVE", "color": "peach", "icon": "camera-photo-symbolic"},
+      {"label": "Emoji",      "type": "exec", "command": "ibus emoji || flatpak run org.gnome.Characters", "color": "pink", "icon": "face-smile-symbolic"},
+      {"label": "Files",      "type": "exec", "command": "xdg-open . || nautilus || dolphin || thunar", "color": "sapphire", "icon": "folder-symbolic"},
+      {"label": "AI",         "type": "submenu", "command": "",                  "color": "lavender", "icon": "applications-science-symbolic"}
+    ]
+  }
+}

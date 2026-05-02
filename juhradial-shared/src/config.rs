@@ -90,6 +90,28 @@ pub fn default_config_path() -> Option<PathBuf> {
     dirs_config_dir().map(|d| d.join("juhradial").join("config.json"))
 }
 
+/// Bundled starter config — written to `~/.config/juhradial/config.json`
+/// the first time the overlay can't find one. Gives users a working
+/// 8-slice menu on first run instead of an empty ring; they edit
+/// from there in the settings UI (or by hand). Stored as raw JSON so
+/// the file's schema is the single source of truth — no duplicated
+/// Rust struct literal that would drift from the on-disk version.
+pub const DEFAULT_CONFIG_JSON: &str = include_str!("../default-config.json");
+
+/// Write the bundled starter config to `path` if no file exists
+/// there yet. Returns `true` if the file was created (a fresh
+/// seed), `false` if it already existed.
+pub fn seed_default_config_if_missing(path: &Path) -> Result<bool, ConfigError> {
+    if path.exists() {
+        return Ok(false);
+    }
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(ConfigError::Io)?;
+    }
+    std::fs::write(path, DEFAULT_CONFIG_JSON).map_err(ConfigError::Io)?;
+    Ok(true)
+}
+
 /// Directory holding per-app profile overrides (one JSON file per profile).
 pub fn profiles_dir() -> Option<PathBuf> {
     dirs_config_dir().map(|d| d.join("juhradial").join("profiles"))

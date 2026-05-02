@@ -99,16 +99,22 @@ impl RadialState {
     }
 
     /// Hide the menu and dispatch the highlighted slice's action
-    /// (drag-select). Returns the slice that was selected, if any —
-    /// used by the app's update() to log + extend dispatch in the
-    /// future. The call to `actions::dispatch` happens inline so a
-    /// release with no highlight is a clean no-op.
+    /// (drag-select). Slices whose visible_if predicate is false
+    /// are skipped — the slot is invisible at render time, so
+    /// activating it would surprise the user.
     pub fn hide(&mut self) {
         self.visible = false;
         let selected = self.target_slice;
         if let Some(idx) = selected {
             if let Some(slice) = self.slices.get(idx) {
-                crate::actions::dispatch(slice);
+                let visible = slice
+                    .visible_if
+                    .as_ref()
+                    .map(|c| c.eval())
+                    .unwrap_or(true);
+                if visible {
+                    crate::actions::dispatch(slice);
+                }
             }
         }
         for a in &mut self.highlights {
@@ -203,6 +209,13 @@ impl<'a> canvas::Program<crate::app::Message> for Painter<'a> {
 
         for i in 0..8 {
             let highlight = self.state.highlights[i].current;
+            // Apply the slice's visible_if predicate. Slot stays
+            // empty (we still draw an unfilled wedge so the ring is
+            // continuous) when the predicate is false — preserves
+            // muscle-memory layout, only hides the glyph.
+            let slice_for_render = self.state.slices.get(i).filter(|s| {
+                s.visible_if.as_ref().map(|c| c.eval()).unwrap_or(true)
+            });
             crate::render::slices::draw_slice(
                 &mut frame,
                 center,
@@ -211,7 +224,7 @@ impl<'a> canvas::Program<crate::app::Message> for Painter<'a> {
                 icon_r,
                 ICON_BG_RADIUS,
                 i,
-                self.state.slices.get(i),
+                slice_for_render,
                 palette,
                 highlight,
                 &self.state.icons,
