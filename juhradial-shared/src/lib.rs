@@ -11,10 +11,15 @@
 //! (haptics, button-action mapping, easy-switch hosts, etc.) stay in
 //! `daemon/src/config.rs` and will migrate over here as they're touched.
 
+pub mod action;
+pub mod applications;
 pub mod config;
 pub mod theme;
-pub mod action;
 
+pub use action::ActionKind;
+pub use applications::{
+    clean_exec_line, enumerate_applications, parse_desktop_file, parse_desktop_string,
+    search as search_applications, DesktopEntry,
+};
 pub use config::{AppConfig, RadialMenuConfig, Slice};
 pub use theme::ThemeName;
-pub use action::ActionKind;
