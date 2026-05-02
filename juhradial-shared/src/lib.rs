@@ -14,6 +14,7 @@
 pub mod action;
 pub mod applications;
 pub mod config;
+pub mod profiles;
 pub mod theme;
 
 pub use action::ActionKind;
@@ -22,4 +23,5 @@ pub use applications::{
     search as search_applications, DesktopEntry,
 };
 pub use config::{AppConfig, RadialMenuConfig, Slice};
+pub use profiles::ProfileResolver;
 pub use theme::ThemeName;
