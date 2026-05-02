@@ -1,33 +1,31 @@
 //! Listener for the daemon's D-Bus signals on `org.kde.juhradialmx`.
 //!
-//! Wire format mirrors what the existing Python overlay subscribes to.
-//! Names and signatures are taken directly from
+//! Wire format mirrors what the Python overlay subscribes to. Names
+//! and signatures are taken directly from
 //! `daemon/src/dbus/interface.rs`:
 //!
-//!   * `MenuRequested(x: i32, y: i32)`  — Mutter logical pixels of the
-//!     gesture-button-press cursor location.
-//!   * `HideMenu()`                     — close the menu.
-//!   * `CursorMoved(x: i32, y: i32)`    — accumulated REL_X / REL_Y
-//!     deltas from the start of the press, used by drag-mode to map
-//!     cursor motion to slice angles. NOT absolute screen coords.
+//!   * `MenuRequested(x: i32, y: i32)` — Mutter logical pixels.
+//!   * `HideMenu()` — close the menu.
+//!   * `CursorMoved(x: i32, y: i32)` — accumulated REL_X / REL_Y
+//!     deltas from the start of the press, NOT absolute coords.
 //!
-//! Events are forwarded to the GTK main thread via an
-//! `async_channel::Sender` so window mutation stays single-threaded.
+//! Exposed as a `Stream<OverlayEvent>` so iced's
+//! `Subscription::run` pumps events into the application's update
+//! loop directly. Reconnects on disconnect with a 2 s backoff.
 
-use async_channel::Sender;
-use futures_util::StreamExt;
+use futures_util::stream::{Stream, StreamExt};
 use tracing::{debug, info, warn};
 use zbus::{proxy, Connection};
 
-/// Daemon's well-known service name. Matches `daemon/src/dbus/mod.rs::DBUS_NAME`.
-pub const DAEMON_SERVICE: &str = "org.kde.juhradialmx";
-/// Daemon's object path. Matches `daemon/src/dbus/mod.rs::DBUS_PATH`.
-pub const DAEMON_PATH: &str = "/org/kde/juhradialmx/Daemon";
+const DAEMON_PATH: &str = "/org/kde/juhradialmx/Daemon";
 
-/// Typed proxy for the subset of the daemon interface the overlay
-/// consumes. The proxy macro generates `DaemonProxy` plus
-/// `receive_<signal>()` helpers that return typed
-/// `Stream<Item = <SignalArgs>>` values.
+#[derive(Debug, Clone)]
+pub enum OverlayEvent {
+    Show { x: i32, y: i32 },
+    Hide,
+    CursorMoved { dx: i32, dy: i32 },
+}
+
 #[proxy(
     interface = "org.kde.juhradialmx.Daemon",
     default_service = "org.kde.juhradialmx",
@@ -44,24 +42,35 @@ trait Daemon {
     fn cursor_moved(&self, x: i32, y: i32) -> zbus::Result<()>;
 }
 
-/// Event the GTK side reacts to. All coords stay in their wire-format
-/// units (i32 logical pixels for the menu open, i32 accumulated deltas
-/// for cursor moves) — the radial widget is the only place that turns
-/// them into f64 polar coordinates.
-#[derive(Debug, Clone)]
-pub enum OverlayEvent {
-    Show { x: i32, y: i32 },
-    Hide,
-    CursorMoved { dx: i32, dy: i32 },
+/// Stream entry-point used by `iced::Subscription::run`. Spawns a
+/// background task that connects to the session bus, subscribes to
+/// the three signal streams, and forwards each onto an
+/// `async_channel`. We then convert the channel into a futures
+/// `Stream` for iced's consumption.
+pub fn stream() -> impl Stream<Item = OverlayEvent> {
+    let (tx, rx) = async_channel::unbounded::<OverlayEvent>();
+
+    // The background loop reconnects if zbus drops the connection.
+    iced::futures::executor::block_on(async {});
+    tokio::task::spawn(async move {
+        loop {
+            match run_listener(tx.clone()).await {
+                Ok(()) => {
+                    info!("dbus listener returned ok; exiting reconnect loop");
+                    break;
+                }
+                Err(e) => {
+                    warn!("dbus listener exited: {e}; reconnecting in 2s");
+                    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                }
+            }
+        }
+    });
+
+    rx
 }
 
-/// Subscribe to the daemon's three menu signals and forward each one
-/// onto `tx`. Spawns one local task per signal stream so each runs
-/// independently — Hide can fire even if a CursorMoved task is mid-
-/// await without blocking on it. Returns when the proxy is created;
-/// the spawned tasks live until either `tx` closes or any signal
-/// stream ends (which we treat as a fatal disconnect).
-pub async fn run_listener(tx: Sender<OverlayEvent>) -> zbus::Result<()> {
+async fn run_listener(tx: async_channel::Sender<OverlayEvent>) -> zbus::Result<()> {
     let conn = Connection::session().await?;
     let proxy = DaemonProxy::new(&conn).await?;
     info!(
@@ -79,24 +88,17 @@ pub async fn run_listener(tx: Sender<OverlayEvent>) -> zbus::Result<()> {
 
     let menu_task = async move {
         while let Some(sig) = menu_stream.next().await {
-            match sig.args() {
-                Ok(args) => {
-                    debug!(x = args.x, y = args.y, "MenuRequested");
-                    if tx_show
-                        .send(OverlayEvent::Show {
-                            x: args.x,
-                            y: args.y,
-                        })
-                        .await
-                        .is_err()
-                    {
-                        return;
-                    }
+            if let Ok(args) = sig.args() {
+                debug!(x = args.x, y = args.y, "MenuRequested");
+                if tx_show
+                    .send(OverlayEvent::Show { x: args.x, y: args.y })
+                    .await
+                    .is_err()
+                {
+                    return;
                 }
-                Err(e) => warn!("MenuRequested decode failed: {e}"),
             }
         }
-        warn!("MenuRequested signal stream ended");
     };
 
     let hide_task = async move {
@@ -106,33 +108,25 @@ pub async fn run_listener(tx: Sender<OverlayEvent>) -> zbus::Result<()> {
                 return;
             }
         }
-        warn!("HideMenu signal stream ended");
     };
 
     let cursor_task = async move {
         while let Some(sig) = cursor_stream.next().await {
-            match sig.args() {
-                Ok(args) => {
-                    if tx_cursor
-                        .send(OverlayEvent::CursorMoved {
-                            dx: args.x,
-                            dy: args.y,
-                        })
-                        .await
-                        .is_err()
-                    {
-                        return;
-                    }
+            if let Ok(args) = sig.args() {
+                if tx_cursor
+                    .send(OverlayEvent::CursorMoved {
+                        dx: args.x,
+                        dy: args.y,
+                    })
+                    .await
+                    .is_err()
+                {
+                    return;
                 }
-                Err(e) => warn!("CursorMoved decode failed: {e}"),
             }
         }
-        warn!("CursorMoved signal stream ended");
     };
 
-    // join_all wins when all three tasks have finished. In practice
-    // any one of them ending means the bus dropped — caller restarts.
     futures_util::future::join3(menu_task, hide_task, cursor_task).await;
-    info!("dbus listener: all signal streams closed");
     Ok(())
 }

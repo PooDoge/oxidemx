@@ -1,48 +1,47 @@
-//! JuhRadial MX — Rust + GTK4 + layer-shell overlay.
+//! JuhRadial MX overlay (Rust + iced + xdg-shell).
 //!
-//! Replacement for the legacy Python overlay/. Same daemon, same D-Bus
-//! contract (`org.kde.juhradialmx`), wildly simpler positioning thanks to
-//! the Wayland layer-shell protocol.
+//! Replacement for the legacy Python overlay/. Same daemon, same
+//! D-Bus contract (`org.kde.juhradialmx`). Mutter doesn't advertise
+//! `wlr-layer-shell` on stable GNOME, so positioning is delegated to
+//! the `juhradial-cursor` GNOME Shell extension's `MoveOverlay`
+//! D-Bus method — the overlay is a regular xdg-shell window that
+//! the extension places exactly where we want it after each show.
 //!
-//! High-level flow:
+//! Flow:
+//!   1. iced application opens a transparent, decorationless,
+//!      always-on-top xdg-shell window.
+//!   2. zbus listener subscribes to `MenuRequested(x, y)` /
+//!      `HideMenu()` / `CursorMoved(dx, dy)` from the daemon.
+//!   3. On a request: present the window, fire `MoveOverlay` to the
+//!      cursor position, paint the radial.
+//!   4. On hide: hide the window.
 //!
-//!   1. `gtk4_layer_shell` initialises a transparent overlay surface
-//!      anchored to the cursor's monitor.
-//!   2. A `zbus` listener subscribes to `MenuRequested(x, y)` /
-//!      `HideMenu()` from the daemon. On a request we set the layer-shell
-//!      margins to position the surface at the cursor and `present()`
-//!      the window.
-//!   3. A `gtk::DrawingArea` paints the radial wheel with cairo. Hover
-//!      and click hit-testing use cursor coords from the daemon (drag
-//!      mode) or `gtk::EventControllerMotion` (toggle mode); both are
-//!      monitor-local so there's no coord-space confusion.
-//!
-//! See `RUST_GTK4_OVERLAY_DESIGN.md` at the project root for the full
-//! design rationale.
+//! All rendering happens via iced's `canvas::Frame` — no cairo, no
+//! GTK, no `*-devel` rpm-ostree layering. Pure Rust dep tree.
 
-mod app;
-mod window;
-mod radial;
-mod theme;
 mod actions;
+mod app;
 mod config;
 mod dbus;
-mod input;
-mod tray;
-mod geometry;
-mod render {
-    pub mod slices;
-    pub mod icons;
-    pub mod animation;
-}
 mod editor {
-    pub mod window;
-    pub mod slice_panel;
     pub mod icon_picker;
     pub mod preview;
+    pub mod slice_panel;
+    pub mod window;
 }
+mod ext_positioner;
+mod geometry;
+mod input;
+mod radial;
+mod render {
+    pub mod animation;
+    pub mod icons;
+    pub mod slices;
+}
+mod theme;
+mod tray;
 
-fn main() -> glib::ExitCode {
+fn main() -> iced::Result {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()

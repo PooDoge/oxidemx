@@ -1,44 +1,64 @@
-//! The radial-menu drawing widget. Wraps a `gtk::DrawingArea` and
-//! holds the per-frame state (active theme, slice list, hover progress
-//! per slice). Render passes are dispatched to `crate::render::slices`.
+//! Application state + canvas Painter for the radial menu.
 //!
-//! State lives in a `RefCell<RadialState>` so callers (the D-Bus event
-//! pump, the config watcher, the editor preview) can mutate it
-//! without juggling channels for every minor update. The widget runs
-//! on the GTK main thread so single-threaded interior mutability is
-//! the right tool here.
+//! `RadialState` is the model `iced::application(boot, update, view)`
+//! drives. `Painter` is a per-frame snapshot that implements
+//! `canvas::Program` and renders the wedges / icons / centre puck
+//! into `iced::widget::canvas::Frame` (cairo-equivalent calls in
+//! pure Rust).
 
-use std::cell::RefCell;
-use std::rc::Rc;
+use iced::widget::canvas::{self, Frame, Geometry, Path, Stroke};
+use iced::{Color, Point, Rectangle, Renderer, Theme};
+use juhradial_shared::{theme::parse_hex_rgba, AppConfig, Slice};
 
-use gtk4 as gtk;
-use gtk::prelude::*;
-use juhradial_shared::{AppConfig, Slice};
-
-use crate::geometry::{Geometry, WINDOW_SIZE};
-use crate::render::icons::IconCache;
+use crate::geometry::{Geometry as RadialGeometry, MENU_RADIUS, WINDOW_SIZE};
 use crate::theme::ActiveTheme;
 
-#[derive(Clone)]
+const SLICE_DEGREES: f32 = 45.0;
+const RING_OUTER_INSET: f32 = 6.0;
+const RING_INNER_INSET: f32 = 6.0;
+const ICON_BG_RADIUS: f32 = 26.0;
+
+/// Per-slice highlight progress in [0.0, 1.0]. The 60Hz tick from
+/// `iced::time::every` advances each entry toward its target value
+/// using `ease_out_quad`-shaped steps.
+#[derive(Debug, Clone, Copy)]
+struct Animation {
+    current: f32,
+    target: f32,
+}
+
+impl Animation {
+    const fn at(value: f32) -> Self {
+        Self { current: value, target: value }
+    }
+    fn step(&mut self) {
+        let delta = self.target - self.current;
+        if delta.abs() < 0.001 {
+            self.current = self.target;
+            return;
+        }
+        // Geometric easing — fast at first, settles smoothly. Each
+        // tick covers ~25% of the remaining distance, giving a
+        // visually pleasing 4-6 frame transition between hover
+        // states without the jitter a linear ramp would produce.
+        self.current += delta * 0.25;
+    }
+}
+
+/// Top-level model for the iced app. Owns everything view() needs.
+#[derive(Debug)]
 pub struct RadialState {
     pub theme: ActiveTheme,
     pub slices: Vec<Slice>,
-    /// Per-slice hover progress in `[0.0, 1.0]`. Index `i` corresponds
-    /// to slot `i` clockwise from the top.
-    pub highlights: [f64; 8],
-    /// Currently highlighted slice index, or `None` when the cursor
-    /// is in the centre deadzone or outside the menu radius.
-    pub highlighted: Option<usize>,
-    /// Toggle-mode means the menu stays open after a quick tap and
-    /// closes on the next click; drag-mode closes on button release.
-    pub toggle_mode: bool,
-    /// Per-widget icon cache. Stored as `Rc<IconCache>` so cloning
-    /// `RadialState` shares the cache instead of duplicating it —
-    /// the cache fills as slices render and the contents stay
-    /// useful across reloads (cache key includes the icon source
-    /// string and the tint colour, both of which change on reload
-    /// for slices that the user actually edited).
-    pub icons: Rc<IconCache>,
+    /// Per-slice hover progress. Index `i` corresponds to slot `i`
+    /// clockwise from the top.
+    highlights: [Animation; 8],
+    /// Currently-targeted slice (or `None` for centre/outside).
+    /// Drives `highlights` via `step()`.
+    target_slice: Option<usize>,
+    /// Whether the menu is currently visible (Show received, Hide
+    /// not yet).
+    visible: bool,
 }
 
 impl RadialState {
@@ -48,96 +68,152 @@ impl RadialState {
         RadialState {
             theme,
             slices,
-            highlights: [0.0; 8],
-            highlighted: None,
-            toggle_mode: false,
-            icons: IconCache::new(),
-        }
-    }
-}
-
-pub struct RadialWidget {
-    pub drawing_area: gtk::DrawingArea,
-    pub state: Rc<RefCell<RadialState>>,
-}
-
-impl RadialWidget {
-    pub fn new(state: Rc<RefCell<RadialState>>) -> Self {
-        let area = gtk::DrawingArea::builder()
-            .content_width(WINDOW_SIZE as i32)
-            .content_height(WINDOW_SIZE as i32)
-            .can_focus(false)
-            .build();
-
-        let state_for_draw = state.clone();
-        area.set_draw_func(move |_area, cr, _w, _h| {
-            // Transparent background; the layer-shell surface already
-            // has its own alpha channel.
-            cr.set_source_rgba(0.0, 0.0, 0.0, 0.0);
-            cr.set_operator(cairo::Operator::Source);
-            let _ = cr.paint();
-            cr.set_operator(cairo::Operator::Over);
-
-            let s = state_for_draw.borrow();
-            let geom = Geometry::default();
-            crate::render::slices::draw_slices(
-                cr,
-                &geom,
-                &s.slices,
-                &s.theme,
-                &s.highlights,
-                &s.icons,
-            );
-            crate::render::slices::draw_center(cr, &geom, &s.theme);
-        });
-
-        // TODO: hook gtk::EventControllerMotion for toggle-mode hover
-        // (see `overlay/juhradial-overlay.py:mouseMoveEvent`).
-        //
-        // TODO: hook gtk::GestureClick for toggle-mode click selection
-        // (see `overlay/juhradial-overlay.py:mousePressEvent`).
-
-        RadialWidget {
-            drawing_area: area,
-            state,
+            highlights: [Animation::at(0.0); 8],
+            target_slice: None,
+            visible: false,
         }
     }
 
-    /// Drag-mode cursor delta from the daemon's CursorMoved signal.
-    /// `dx`/`dy` are accumulated REL_X / REL_Y values relative to the
-    /// gesture-button press point.
-    pub fn on_cursor_moved(&self, dx: i32, dy: i32) {
-        let new_slice = crate::input::slice_index_at(
+    pub fn show(&mut self) {
+        self.visible = true;
+        // Reset any stale highlights from a previous show.
+        for a in &mut self.highlights {
+            a.target = 0.0;
+        }
+        self.target_slice = None;
+    }
+
+    pub fn hide(&mut self) {
+        self.visible = false;
+        for a in &mut self.highlights {
+            a.target = 0.0;
+        }
+        self.target_slice = None;
+    }
+
+    /// Drag-mode delta from the daemon's CursorMoved signal.
+    /// `dx, dy` are accumulated REL_X / REL_Y values from the
+    /// gesture-button press point (NOT absolute screen coords).
+    pub fn on_cursor_moved(&mut self, dx: i32, dy: i32) {
+        let new_target = crate::input::slice_index_at(
             dx as f64,
             dy as f64,
             crate::geometry::CENTER_ZONE_RADIUS,
             crate::geometry::MENU_RADIUS,
         );
-
-        let mut s = self.state.borrow_mut();
-        if s.highlighted != new_slice {
-            // Drop the old highlight and bring up the new one.
-            if let Some(prev) = s.highlighted {
-                s.highlights[prev] = 0.0;
+        if new_target != self.target_slice {
+            // Drop the previously-targeted slice's highlight,
+            // raise the new one's.
+            if let Some(prev) = self.target_slice {
+                self.highlights[prev].target = 0.0;
             }
-            if let Some(idx) = new_slice {
-                s.highlights[idx] = 1.0;
+            if let Some(next) = new_target {
+                self.highlights[next].target = 1.0;
             }
-            s.highlighted = new_slice;
-            self.drawing_area.queue_draw();
+            self.target_slice = new_target;
         }
     }
 
-    /// Refresh the slice list + theme from a freshly-loaded config —
-    /// called after the config file is written by the editor or
-    /// edited by hand.
-    pub fn reload_from(&self, config: &AppConfig) {
-        let mut s = self.state.borrow_mut();
-        s.theme = ActiveTheme::resolve(&config.theme);
-        s.slices = config.radial_menu.slices.clone();
-        // Reset transient state so the next show starts clean.
-        s.highlights = [0.0; 8];
-        s.highlighted = None;
-        self.drawing_area.queue_draw();
+    /// Step the per-slice highlight animations one frame.
+    pub fn advance_animations(&mut self) {
+        for a in &mut self.highlights {
+            a.step();
+        }
+    }
+
+    /// Refresh from a freshly-loaded config (called by the inotify
+    /// watcher after the editor saves).
+    pub fn reload_from(&mut self, config: &AppConfig) {
+        self.theme = ActiveTheme::resolve(&config.theme);
+        self.slices = config.radial_menu.slices.clone();
+        for a in &mut self.highlights {
+            *a = Animation::at(0.0);
+        }
+        self.target_slice = None;
     }
 }
+
+/// Per-frame canvas state.
+pub struct Painter<'a> {
+    state: &'a RadialState,
+}
+
+impl<'a> Painter<'a> {
+    pub fn new(state: &'a RadialState) -> Self {
+        Self { state }
+    }
+}
+
+impl<'a> canvas::Program<crate::app::Message> for Painter<'a> {
+    type State = ();
+
+    fn draw(
+        &self,
+        _state: &(),
+        renderer: &Renderer,
+        _theme: &Theme,
+        bounds: Rectangle,
+        _cursor: iced::mouse::Cursor,
+    ) -> Vec<Geometry> {
+        let mut frame = Frame::new(renderer, bounds.size());
+
+        if !self.state.visible {
+            // Menu not requested — leave canvas transparent.
+            return vec![frame.into_geometry()];
+        }
+
+        let geom = RadialGeometry::default();
+        let center = Point::new(geom.cx as f32, geom.cy as f32);
+        let palette = &self.state.theme.theme.colors;
+
+        // Faint shadow halo so the disc reads against transparent
+        // backgrounds.
+        let halo = Path::circle(center, MENU_RADIUS as f32 + 6.0);
+        frame.fill(&halo, Color::from_rgba(0.0, 0.0, 0.0, 0.35));
+
+        let outer_r = (MENU_RADIUS as f32) - RING_OUTER_INSET;
+        let inner_r = (geom.center_radius as f32) + RING_INNER_INSET;
+        let icon_r = geom.icon_radius as f32;
+
+        for i in 0..8 {
+            let highlight = self.state.highlights[i].current;
+            crate::render::slices::draw_slice(
+                &mut frame,
+                center,
+                inner_r,
+                outer_r,
+                icon_r,
+                ICON_BG_RADIUS,
+                i,
+                self.state.slices.get(i),
+                palette,
+                highlight,
+            );
+        }
+
+        crate::render::slices::draw_center(
+            &mut frame,
+            center,
+            geom.center_radius as f32,
+            palette,
+        );
+
+        vec![frame.into_geometry()]
+    }
+}
+
+#[allow(dead_code)]
+fn _link_window_size() -> u32 {
+    WINDOW_SIZE as u32
+}
+
+#[allow(dead_code)]
+fn _link_parse() -> Option<(f64, f64, f64, f64)> {
+    parse_hex_rgba("#000000")
+}
+
+// Slice references kept private but visible to the painter via the
+// state borrow above; this `_use` ensures cargo doesn't drop the
+// type from the public surface when we add it elsewhere.
+#[allow(dead_code)]
+fn _slice_ref(_s: &Slice) {}

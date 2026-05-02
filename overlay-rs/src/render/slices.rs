@@ -1,217 +1,184 @@
-//! Vector-mode slice rendering. Cairo translation of
-//! `overlay/overlay_painting.py::_draw_slice` (line 360+).
+//! Slice rendering on iced's canvas Frame.
 //!
-//! Each slice is a 45° donut wedge with:
-//!   * a faint base fill (theme `surface0` @ alpha 80)
-//!   * a stroked border that brightens on hover (theme `surface2` →
-//!     white as `highlight` interpolates 0.0 → 1.0)
-//!   * a hover overlay (white fade-in)
-//!   * a circular icon background at `ICON_ZONE_RADIUS` along the
-//!     slice's bisector
-//!   * an icon glyph centred in that background (TODO; for now a
-//!     placeholder dot so the geometry is visible end-to-end).
+//! Port of `overlay/overlay_painting.py::_draw_slice` plus the cairo
+//! version that lived here previously. Same visual behaviour — the
+//! Path API differs but the geometry is identical:
+//!   * donut wedge (45° each, 8 slices)
+//!   * surface0-tinted base fill
+//!   * surface2 → white interpolated stroke on hover
+//!   * white fade-in fill on hover
+//!   * glow ring + icon-background disc on the slice's bisector
 //!
-//! Angles in cairo are clockwise radians starting at +X. We convert
-//! the Python overlay's "0° = top, +clockwise" convention to cairo's
-//! "0° = +X, +clockwise" by subtracting 90° (π/2 rad) wherever a slice
-//! index drives the angle.
+//! Icon glyph composition lives in `super::icons` and is called from
+//! here once the icon resolver picks up its first compile-clean
+//! iced surface API.
 
-use cairo::Context;
-use juhradial_shared::{Slice, ThemeColors};
+use iced::widget::canvas::{path::Arc, Frame, Path, Stroke};
+use iced::{Color, Point, Radians};
+use juhradial_shared::theme::{parse_hex_rgba, ThemeColors};
+use juhradial_shared::Slice;
 
-use crate::geometry::Geometry;
-use crate::render::icons::{draw_icon, IconCache};
-use crate::theme::ActiveTheme;
-use juhradial_shared::theme::parse_hex_rgba;
+const SLICE_DEGREES: f32 = 45.0;
 
-/// The width of each slice in degrees (8 slices = 360°/8).
-const SLICE_DEGREES: f64 = 45.0;
-
-/// Inner / outer radii inset slightly from the absolute geometry so
-/// adjacent slices don't visually merge at the borders. Match the
-/// Python overlay's `outer_r = MENU_RADIUS - 6` /
-/// `inner_r = CENTER_ZONE_RADIUS + 6`.
-const RING_OUTER_INSET: f64 = 6.0;
-const RING_INNER_INSET: f64 = 6.0;
-
-/// Radius of the per-slice icon background circle.
-const ICON_BG_RADIUS: f64 = 26.0;
-
-/// Render a single slice. `highlight` is the per-slice hover progress
-/// in `[0.0, 1.0]` driven by the animation system (1.0 = fully
-/// highlighted). `slice` carries the user-configured label / colour /
-/// icon for slot `index`.
+/// Render a single slice. `highlight` is per-slice hover progress in
+/// `[0.0, 1.0]`; `slice` carries the user-configured label / colour /
+/// icon for slot `index`. `slice = None` means the slot is unused
+/// (we still draw an empty wedge so the ring stays visually
+/// continuous — same as the Python overlay).
 pub fn draw_slice(
-    cr: &Context,
-    geom: &Geometry,
+    frame: &mut Frame,
+    center: Point,
+    inner_r: f32,
+    outer_r: f32,
+    icon_r: f32,
+    icon_bg_radius: f32,
     index: usize,
-    slice: &Slice,
-    theme: &ActiveTheme,
-    highlight: f64,
-    icons: &IconCache,
+    slice: Option<&Slice>,
+    palette: &ThemeColors,
+    highlight: f32,
 ) {
-    let palette = &theme.theme.colors;
-
     // Slice angular range in cairo coords (clockwise from +X axis,
     // radians). Python uses `index * 45 - 22.5 - 90` with degrees;
-    // the −90 rotates "0° = top" into cairo's "0° = right".
-    let start_deg = index as f64 * SLICE_DEGREES - SLICE_DEGREES / 2.0 - 90.0;
+    // the −90 rotates "0° = top" into iced's "0° = right".
+    let start_deg = (index as f32) * SLICE_DEGREES - SLICE_DEGREES / 2.0 - 90.0;
     let end_deg = start_deg + SLICE_DEGREES;
     let start_rad = start_deg.to_radians();
     let end_rad = end_deg.to_radians();
 
-    let outer_r = geom.menu_radius - RING_OUTER_INSET;
-    let inner_r = geom.center_radius + RING_INNER_INSET;
+    let wedge = build_wedge(center, inner_r, outer_r, start_rad, end_rad);
 
-    // Build the donut-wedge path once and re-use for fill + stroke +
-    // hover overlay.
-    cr.new_path();
-    let inner_start = polar(geom.cx, geom.cy, inner_r, start_rad);
-    cr.move_to(inner_start.0, inner_start.1);
-    let outer_start = polar(geom.cx, geom.cy, outer_r, start_rad);
-    cr.line_to(outer_start.0, outer_start.1);
-    cr.arc(geom.cx, geom.cy, outer_r, start_rad, end_rad);
-    let inner_end = polar(geom.cx, geom.cy, inner_r, end_rad);
-    cr.line_to(inner_end.0, inner_end.1);
-    // Inner arc backwards.
-    cr.arc_negative(geom.cx, geom.cy, inner_r, end_rad, start_rad);
-    cr.close_path();
+    // Base fill — surface0 @ alpha 80/255.
+    frame.fill(&wedge, rgba(&palette.surface0, 80.0 / 255.0));
 
-    // Base fill — theme surface0 @ alpha 80/255.
-    let (r, g, b, _) = parse_hex_rgba(&palette.surface0).unwrap_or((0.2, 0.2, 0.3, 1.0));
-    cr.set_source_rgba(r, g, b, 80.0 / 255.0);
-    let _ = cr.fill_preserve();
-
-    // Border — interpolate surface2 -> white on hover, alpha 60..120,
-    // line width 1.0..1.5.
-    let (br, bg, bb, _) = parse_hex_rgba(&palette.surface2).unwrap_or((0.4, 0.4, 0.5, 1.0));
-    let lr = lerp(br, 1.0, highlight);
-    let lg = lerp(bg, 1.0, highlight);
-    let lb = lerp(bb, 1.0, highlight);
+    // Stroke — interpolate surface2 → white, alpha 60..120, line
+    // width 1.0..1.5.
+    let stroke_color = lerp(rgba(&palette.surface2, 1.0), Color::WHITE, highlight);
     let alpha = (60.0 + 60.0 * highlight) / 255.0;
-    cr.set_source_rgba(lr, lg, lb, alpha);
-    cr.set_line_width(1.0 + 0.5 * highlight);
-    let _ = cr.stroke_preserve();
+    frame.stroke(
+        &wedge,
+        Stroke::default()
+            .with_color(Color { a: alpha, ..stroke_color })
+            .with_width(1.0 + 0.5 * highlight),
+    );
 
-    // Hover overlay — white fade-in at alpha 45 * highlight.
+    // Hover fade-in.
     if highlight > 0.0 {
-        cr.set_source_rgba(1.0, 1.0, 1.0, 45.0 / 255.0 * highlight);
-        let _ = cr.fill();
-    } else {
-        cr.new_path(); // discard the preserved path
+        frame.fill(
+            &wedge,
+            Color::from_rgba(1.0, 1.0, 1.0, 45.0 / 255.0 * highlight),
+        );
     }
 
-    // Icon position (centre of slice along bisector).
-    let icon_angle = (index as f64 * SLICE_DEGREES - 90.0).to_radians();
-    let (icon_x, icon_y) = polar(geom.cx, geom.cy, geom.icon_radius, icon_angle);
+    // Icon centre on the slice bisector.
+    let icon_angle = ((index as f32) * SLICE_DEGREES - 90.0).to_radians();
+    let icon_pos = polar(center, icon_r, icon_angle);
 
     // Glow ring on hover.
     if highlight > 0.0 {
-        cr.set_source_rgba(1.0, 1.0, 1.0, 40.0 / 255.0 * highlight);
-        cr.set_line_width(3.0);
-        cr.arc(icon_x, icon_y, ICON_BG_RADIUS + 2.0, 0.0, std::f64::consts::TAU);
-        let _ = cr.stroke();
+        let glow = Path::circle(icon_pos, icon_bg_radius + 2.0);
+        frame.stroke(
+            &glow,
+            Stroke::default()
+                .with_color(Color::from_rgba(
+                    1.0, 1.0, 1.0, 40.0 / 255.0 * highlight,
+                ))
+                .with_width(3.0),
+        );
     }
 
     // Icon background — interpolate surface1 → surface2.
-    let (s1r, s1g, s1b, _) = parse_hex_rgba(&palette.surface1).unwrap_or((0.3, 0.3, 0.4, 1.0));
-    let (s2r, s2g, s2b, _) = parse_hex_rgba(&palette.surface2).unwrap_or((0.4, 0.4, 0.5, 1.0));
-    let bg_r = lerp(s1r, s2r, highlight);
-    let bg_g = lerp(s1g, s2g, highlight);
-    let bg_b = lerp(s1b, s2b, highlight);
-    let bg_a = (230.0 + 25.0 * highlight) / 255.0;
-    cr.set_source_rgba(bg_r, bg_g, bg_b, bg_a);
-    cr.arc(icon_x, icon_y, ICON_BG_RADIUS, 0.0, std::f64::consts::TAU);
-    let _ = cr.fill();
+    let s1 = rgba(&palette.surface1, 1.0);
+    let s2 = rgba(&palette.surface2, 1.0);
+    let bg = lerp(s1, s2, highlight);
+    let bg_alpha = (230.0 + 25.0 * highlight) / 255.0;
+    frame.fill(
+        &Path::circle(icon_pos, icon_bg_radius),
+        Color { a: bg_alpha, ..bg },
+    );
 
-    // Icon glyph — slice colour tint, sized to ~70% of the icon
-    // background so it sits inside the disc with a small margin.
-    // Falls back to a small placeholder dot when the icon source
-    // can't be resolved (lets the user *see* a slice with a typo'd
-    // icon name rather than rendering blank).
-    let glyph_size = (ICON_BG_RADIUS * 1.4) as i32;
-    let glyph_color = icon_color(palette, highlight);
-    let icon_source = pick_icon_source(slice);
-    if let Some(surface) = icons.resolve(icon_source, glyph_size, glyph_color) {
-        draw_icon(cr, icon_x, icon_y, &surface);
-    } else {
-        cr.set_source_rgba(
-            glyph_color.0,
-            glyph_color.1,
-            glyph_color.2,
-            glyph_color.3,
-        );
-        cr.arc(icon_x, icon_y, ICON_BG_RADIUS * 0.35, 0.0, std::f64::consts::TAU);
-        let _ = cr.fill();
-    }
+    // Slice colour placeholder. The icon resolver port comes next
+    // — until then, paint a tinted dot in the slot's configured
+    // colour so the ring has a visible identity per slot.
+    let slot_color_key = slice
+        .map(|s| s.color.as_str())
+        .filter(|s| !s.is_empty())
+        .unwrap_or("accent");
+    let (sr, sg, sb, _) = palette.slice_color_rgba(slot_color_key);
+    let dot_color = Color::from_rgb(sr as f32, sg as f32, sb as f32);
+    frame.fill(&Path::circle(icon_pos, icon_bg_radius * 0.35), dot_color);
 }
 
-/// Pick the icon source string from a slice — for a typical
-/// configuration this is `slice.icon`. Empty strings are normalised
-/// so the resolver short-circuits without trying to look up an empty
-/// icon name (which the cache would treat as a real key otherwise).
-fn pick_icon_source(slice: &Slice) -> &str {
-    if slice.icon.is_empty() {
-        ""
-    } else {
-        slice.icon.as_str()
-    }
-}
-
-/// Render every slice in `slices` at its angular slot. `highlights`
-/// is a parallel 8-element array of per-slice hover progress values.
-pub fn draw_slices(
-    cr: &Context,
-    geom: &Geometry,
-    slices: &[Slice],
-    theme: &ActiveTheme,
-    highlights: &[f64; 8],
-    icons: &IconCache,
+/// Centre puck — small filled circle with stroked accent ring,
+/// drawn over the slices. Ports `_draw_center` from the Python
+/// overlay (centre text overlay lands in a follow-up commit when
+/// Pango/iced text rendering is wired in).
+pub fn draw_center(
+    frame: &mut Frame,
+    center: Point,
+    radius: f32,
+    palette: &ThemeColors,
 ) {
-    for (i, slice) in slices.iter().enumerate().take(8) {
-        draw_slice(cr, geom, i, slice, theme, highlights[i], icons);
-    }
-}
-
-/// Centre puck — a small filled circle with an optional label, drawn
-/// over the slices. Cairo translation of
-/// `overlay/overlay_painting.py::_draw_center` (skeleton only — the
-/// dynamic-text bits land in a follow-up commit).
-pub fn draw_center(cr: &Context, geom: &Geometry, theme: &ActiveTheme) {
-    let palette = &theme.theme.colors;
-    let (r, g, b, _) = parse_hex_rgba(&palette.surface0).unwrap_or((0.1, 0.1, 0.15, 1.0));
-    cr.set_source_rgba(r, g, b, 220.0 / 255.0);
-    cr.arc(geom.cx, geom.cy, geom.center_radius, 0.0, std::f64::consts::TAU);
-    let _ = cr.fill_preserve();
-
-    let (br, bg_, bb, _) = parse_hex_rgba(&palette.accent_dim).unwrap_or((0.3, 0.5, 0.7, 1.0));
-    cr.set_source_rgba(br, bg_, bb, 140.0 / 255.0);
-    cr.set_line_width(2.0);
-    let _ = cr.stroke();
+    let puck = Path::circle(center, radius);
+    frame.fill(&puck, rgba(&palette.surface0, 220.0 / 255.0));
+    frame.stroke(
+        &puck,
+        Stroke::default()
+            .with_color(rgba(&palette.accent_dim, 140.0 / 255.0))
+            .with_width(2.0),
+    );
 }
 
 // =============================================================================
 // helpers
 // =============================================================================
 
-/// Convert polar (radius, angle) to cartesian, offset from `(cx, cy)`.
-fn polar(cx: f64, cy: f64, r: f64, angle_rad: f64) -> (f64, f64) {
-    (cx + r * angle_rad.cos(), cy + r * angle_rad.sin())
+fn build_wedge(
+    center: Point,
+    inner_r: f32,
+    outer_r: f32,
+    start_rad: f32,
+    end_rad: f32,
+) -> Path {
+    Path::new(|p| {
+        let inner_start = polar(center, inner_r, start_rad);
+        let outer_start = polar(center, outer_r, start_rad);
+        let inner_end = polar(center, inner_r, end_rad);
+        p.move_to(inner_start);
+        p.line_to(outer_start);
+        p.arc(Arc {
+            center,
+            radius: outer_r,
+            start_angle: Radians(start_rad),
+            end_angle: Radians(end_rad),
+        });
+        p.line_to(inner_end);
+        p.arc(Arc {
+            center,
+            radius: inner_r,
+            start_angle: Radians(end_rad),
+            end_angle: Radians(start_rad),
+        });
+        p.close();
+    })
 }
 
-/// Linear interpolation between `a` and `b` at parameter `t ∈ [0, 1]`.
-fn lerp(a: f64, b: f64, t: f64) -> f64 {
-    a + (b - a) * t
-}
-
-/// Icon foreground colour: interpolate subtext1 → text on hover.
-fn icon_color(palette: &ThemeColors, highlight: f64) -> (f64, f64, f64, f64) {
-    let (a_r, a_g, a_b, _) = parse_hex_rgba(&palette.subtext1).unwrap_or((0.7, 0.7, 0.7, 1.0));
-    let (b_r, b_g, b_b, _) = parse_hex_rgba(&palette.text).unwrap_or((1.0, 1.0, 1.0, 1.0));
-    (
-        lerp(a_r, b_r, highlight),
-        lerp(a_g, b_g, highlight),
-        lerp(a_b, b_b, highlight),
-        1.0,
+fn polar(center: Point, radius: f32, angle_rad: f32) -> Point {
+    Point::new(
+        center.x + radius * angle_rad.cos(),
+        center.y + radius * angle_rad.sin(),
     )
+}
+
+fn rgba(hex: &str, override_alpha: f32) -> Color {
+    let (r, g, b, _a) = parse_hex_rgba(hex).unwrap_or((1.0, 1.0, 1.0, 1.0));
+    Color::from_rgba(r as f32, g as f32, b as f32, override_alpha)
+}
+
+fn lerp(a: Color, b: Color, t: f32) -> Color {
+    Color {
+        r: a.r + (b.r - a.r) * t,
+        g: a.g + (b.g - a.g) * t,
+        b: a.b + (b.b - a.b) * t,
+        a: a.a + (b.a - a.a) * t,
+    }
 }

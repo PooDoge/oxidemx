@@ -2,7 +2,7 @@
 name = "juhradial-overlay-rs"
 version = "0.0.1"
 edition = "2021"
-description = "JuhRadial MX radial-menu overlay (Rust + GTK4 + layer-shell)"
+description = "JuhRadial MX radial-menu overlay (Rust + iced + xdg-shell)"
 license = "GPL-3.0"
 repository = "https://github.com/JuhLabs/juhradial-mx"
 
@@ -13,25 +13,28 @@ path = "src/main.rs"
 [dependencies]
 juhradial-shared = { path = "../juhradial-shared" }
 
-# GUI / compositor — gtk4-rs 0.9.x family.
-# These versions are starting points; resolve against what's actually
-# packaged on Bazzite/Fedora 44 once we pull deps for real.
-gtk4 = "0.9"
-gdk4 = "0.9"
-gio = "0.20"
-glib = "0.20"
-cairo-rs = "0.20"
-gdk-pixbuf = "0.20"
-pango = "0.20"
-gtk4-layer-shell = "0.5"
+# UI: iced 0.14 with canvas drawing + Wayland (xdg-shell via winit) +
+# X11 fallback. We rejected gtk4 + gtk4-layer-shell after confirming
+# Mutter doesn't advertise wlr-layer-shell on stable GNOME (verified
+# via wayland-info from the dev distrobox), and keeping the build
+# pure-Rust avoids the *-devel rpm-ostree pain on atomic Fedora.
+iced = { version = "0.14", features = ["canvas", "wayland", "x11", "tokio"] }
 
-# IPC with the daemon (signals on org.kde.juhradialmx)
+# IPC with the daemon (signals on org.kde.juhradialmx) and with the
+# GNOME shell extension (window positioning).
 zbus = "5"
 async-channel = "2"
 futures-util = "0.3"
+tokio = { version = "1", features = ["rt", "macros", "time"] }
 
-# Serde for config (re-exported via juhradial-shared but pinned here for
-# direct serde_json::Value usage in the editor preview).
+# Image loading for slice icons. iced::widget::svg + the `image`
+# crate cover SVG/PNG/JPEG; tiny-skia rasterises SVGs through resvg
+# when iced isn't doing it itself.
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+resvg = "0.44"
+
+# Config + serde-json (re-exported via juhradial-shared but kept
+# direct here for the editor's mutable JSON manipulation).
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
@@ -39,5 +42,5 @@ serde_json = "1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
-# File watching for config hot-reload (matches daemon)
+# Config inotify watcher — mirrors what daemon uses.
 notify = "6"
