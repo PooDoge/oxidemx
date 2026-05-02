@@ -36,13 +36,23 @@ pub enum Message {
 }
 
 pub fn run() -> iced::Result {
+    // Build window settings as a struct so we can set
+    // `platform_specific.application_id` — this becomes the
+    // xdg-toplevel app_id on Wayland, which is how the
+    // juhradial-cursor GNOME extension's MoveOverlay method finds
+    // our window. Without this, the extension's WM_CLASS lookup
+    // fails and the menu opens wherever Mutter chose.
+    let mut window = iced::window::Settings::default();
+    window.size = Size::new(WINDOW_SIZE as f32, WINDOW_SIZE as f32);
+    window.decorations = false;
+    window.transparent = true;
+    window.resizable = false;
+    window.level = window::Level::AlwaysOnTop;
+    window.platform_specific.application_id = APP_ID.to_string();
+
     iced::application(boot, update, view)
         .title("JuhRadial MX")
-        .window_size(Size::new(WINDOW_SIZE as f32, WINDOW_SIZE as f32))
-        .decorations(false)
-        .transparent(true)
-        .resizable(false)
-        .level(window::Level::AlwaysOnTop)
+        .window(window)
         .style(|_state, _theme| iced::theme::Style {
             background_color: Color::TRANSPARENT,
             text_color: Color::WHITE,
@@ -71,11 +81,20 @@ fn update(state: &mut RadialState, message: Message) -> Task<Message> {
         Message::Overlay(OverlayEvent::Show { x, y }) => {
             debug!(x, y, "Show event from daemon");
             state.show();
-            // Hand off to the GNOME extension to position the
-            // window — Mutter won't honour positioning requests
-            // from a regular xdg-shell client.
+            // Daemon's cursor coord is the *cursor position*; we
+            // want the window *centred* on it. MoveOverlay places
+            // the window's top-left, so subtract half the window
+            // size before sending. Pass monitor=-1 (absolute stage
+            // coords) — the extension figures out which monitor
+            // contains the requested point.
+            let half = (WINDOW_SIZE / 2.0) as i32;
             Task::perform(
-                crate::ext_positioner::move_overlay(APP_ID.to_string(), x, y, -1),
+                crate::ext_positioner::move_overlay(
+                    APP_ID.to_string(),
+                    x - half,
+                    y - half,
+                    -1,
+                ),
                 Message::Positioned,
             )
         }

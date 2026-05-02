@@ -197,13 +197,23 @@ export default class JuhRadialCursorExtension {
             }
         }
 
-        // Clamp to keep the entire frame on-screen — mutter would
-        // otherwise re-position partially off-screen windows on
-        // some configurations and that fights us.
+        // Pick the monitor for clamping based on the *requested*
+        // position, not the window's current frame. Without this,
+        // `get_monitor_index_for_rect(win.get_frame_rect())` always
+        // returns whichever monitor Mutter put the window on at
+        // startup, so subsequent moves to a different monitor get
+        // clamped right back to primary.
         const frame = win.get_frame_rect();
-        const targetMon = (monitor >= 0)
-            ? monitorGeometry(monitor)
-            : monitorGeometry(global.display.get_monitor_index_for_rect(frame));
+        let targetMon = null;
+        if (monitor >= 0) {
+            targetMon = monitorGeometry(monitor);
+        } else {
+            const probe = new Meta.Rectangle({
+                x: absX, y: absY, width: 1, height: 1,
+            });
+            const idx = global.display.get_monitor_index_for_rect(probe);
+            targetMon = monitorGeometry(idx);
+        }
         if (targetMon) {
             const maxX = targetMon.x + targetMon.width  - frame.width;
             const maxY = targetMon.y + targetMon.height - frame.height;
