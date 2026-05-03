@@ -9,6 +9,16 @@ use crate::hidpp::{HapticEvent, HapticManager};
 use crate::macros::events_to_actions;
 use super::service::JuhRadialService;
 
+/// True iff any field that actually drives the HID++ SmartShift
+/// write differs between the two configs. Smooth-scroll + natural-
+/// scroll don't go through HID++, so changes there don't trigger
+/// a device write.
+fn scroll_changed(a: &ScrollConfig, b: &ScrollConfig) -> bool {
+    a.mode != b.mode
+        || a.smartshift != b.smartshift
+        || a.smartshift_threshold != b.smartshift_threshold
+}
+
 /// Translate the user's `ScrollConfig` into a HID++ SmartShift call
 /// and apply it to the device. Best-effort — silently logs and
 /// continues if SmartShift isn't supported (older mouse, generic
@@ -186,7 +196,21 @@ impl JuhRadialService {
         match Config::load_default() {
             Ok(new_config) => {
                 let haptic_config = new_config.haptics.clone();
-                let scroll_config = new_config.scroll.clone();
+                let new_scroll = new_config.scroll.clone();
+
+                // Snapshot the previous scroll config so we only
+                // re-issue the HID++ SmartShift write when the
+                // user actually changed those fields. The settings
+                // GUI autosaves on every keystroke; without this
+                // gate we'd flood the mouse with redundant HID++
+                // commands and (per a real-world incident) put it
+                // in a state where the cursor freezes.
+                let prev_scroll = self
+                    .config
+                    .read()
+                    .ok()
+                    .map(|c| c.scroll.clone())
+                    .unwrap_or_default();
 
                 match self.config.write() {
                     Ok(mut config) => {
@@ -219,12 +243,17 @@ impl JuhRadialService {
                             "Haptic manager updated with new patterns"
                         );
 
-                        // Apply SmartShift / wheel-mode via HID++.
-                        // Best-effort: if the device doesn't support
-                        // SmartShift (older mouse, currently
-                        // disconnected), the call returns
-                        // NotSupported and we just log it.
-                        apply_scroll_to_device(&mut *manager, &scroll_config);
+                        // Only apply if the scroll-relevant fields
+                        // actually changed. Repeated identical HID++
+                        // SmartShift writes have been observed to
+                        // wedge the device.
+                        if scroll_changed(&prev_scroll, &new_scroll) {
+                            apply_scroll_to_device(&mut *manager, &new_scroll);
+                        } else {
+                            tracing::debug!(
+                                "Scroll config unchanged — skipping HID++ apply"
+                            );
+                        }
                     }
                     Err(e) => {
                         tracing::error!(error = %e, "Failed to lock haptic manager for update");
