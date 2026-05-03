@@ -147,10 +147,22 @@ export default class JuhRadialCursorExtension {
                 return;
             }
             case 'RaiseOverlay': {
+                // Raise + activate (un-minimise + switch workspace + focus).
+                // We must use win.activate(timestamp) — Wayland's focus-
+                // stealing prevention blocks app-side focus requests, but
+                // the Shell process is privileged and `activate` is the
+                // canonical Mutter API for "bring this window forward and
+                // give it keyboard focus". Used by every legitimate
+                // launcher / dock / app switcher.
                 const [appId] = params.deep_unpack();
                 const win = findWindowByAppId(appId);
                 if (win) {
+                    const ts = global.get_current_time();
+                    if (win.minimized) {
+                        win.unminimize();
+                    }
                     win.raise();
+                    win.activate(ts);
                     invocation.return_value(new GLib.Variant('(b)', [true]));
                 } else {
                     invocation.return_value(new GLib.Variant('(b)', [false]));

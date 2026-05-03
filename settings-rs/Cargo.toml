@@ -30,9 +30,11 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # the overlay.
 tokio = { version = "1", features = ["rt", "macros", "time"] }
 
-# Singleton enforcement: the first instance claims a well-known
-# D-Bus name + serves a `Focus` method; second instance sees the
-# name's taken, calls Focus on the existing one, exits.
+# Singleton enforcement + the GNOME extension's RaiseOverlay focus
+# bypass: the second instance calls Focus on the primary; the
+# primary then asks the juhradial-cursor GNOME extension to raise
+# + activate its window (Wayland blocks app-side focus, but the
+# extension runs inside Mutter and isn't subject to that).
 zbus = "5"
 async-channel = "2"
 futures-util = "0.3"

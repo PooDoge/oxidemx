@@ -16,6 +16,7 @@ mod tabs {
     pub mod visuals;
 }
 mod persist;
+mod raise;
 mod singleton;
 mod widgets;
 
@@ -120,6 +121,10 @@ pub enum Message {
     SaveTick,
     /// Persist completed.
     Saved(Result<(), String>),
+    /// Sentinel for fire-and-forget Tasks whose completion we don't
+    /// need to react to (e.g. the RaiseOverlay D-Bus call from the
+    /// Focus handler).
+    Noop,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -320,13 +325,23 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
         }
         Message::Exit => iced::window::latest().and_then(iced::window::close),
         Message::Focus => {
-            // Un-minimize then steal focus. `set_mode(Windowed)`
-            // brings a minimized window back; `gain_focus` then
-            // raises it above siblings.
-            iced::window::latest().and_then(|id| {
-                iced::window::set_mode(id, iced::window::Mode::Windowed)
-                    .chain(iced::window::gain_focus(id))
-            })
+            // Wayland blocks app-side focus-steal, so do this in two
+            // tracks at once:
+            //   1. Fire-and-forget RaiseOverlay to the GNOME
+            //      extension — it runs inside Mutter and can
+            //      raise + activate the window even when the
+            //      compositor would block us doing it ourselves.
+            //   2. Locally tell iced to un-minimise + try to
+            //      gain_focus. Cheap, handles minimisation, and
+            //      acts as fallback when the extension is missing
+            //      or hasn't been reloaded since the v4 update.
+            Task::batch([
+                Task::perform(raise::raise_settings_window(), |_| Message::Noop),
+                iced::window::latest().and_then(|id| {
+                    iced::window::set_mode(id, iced::window::Mode::Windowed)
+                        .chain(iced::window::gain_focus(id))
+                }),
+            ])
         }
         Message::SaveTick => state.maybe_save().unwrap_or_else(Task::none),
         Message::Saved(Ok(())) => {
@@ -339,6 +354,7 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             state.status = format!("Save error: {e}");
             Task::none()
         }
+        Message::Noop => Task::none(),
     }
 }
 
