@@ -3,6 +3,7 @@
 //! never blocked waiting for the launched program to exit.
 
 use juhradial_shared::{ActionKind, Slice};
+use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use tracing::{info, warn};
 
@@ -14,15 +15,22 @@ pub fn dispatch(slice: &Slice) {
             spawn_shell(&slice.command, &slice.label);
         }
         ActionKind::Settings => {
-            // The Settings slice opens the dedicated settings GUI
-            // binary. Falls back to executing `slice.command` if
-            // the user has overridden it explicitly.
-            let cmd = if slice.command.trim().is_empty() {
-                "juhradial-settings"
+            // Resolve the settings binary in this order so it works
+            // for both `cargo build`-style dev runs (binary in
+            // target/release/, not on PATH) and packaged installs:
+            //   1. user override in slice.command
+            //   2. sibling next to the running overlay binary
+            //      (target/release/juhradial-settings)
+            //   3. PATH lookup for `juhradial-settings`
+            let user_override = slice.command.trim();
+            let resolved = if !user_override.is_empty() {
+                user_override.to_string()
+            } else if let Some(sibling) = sibling_binary("juhradial-settings") {
+                sibling.display().to_string()
             } else {
-                slice.command.as_str()
+                "juhradial-settings".to_string()
             };
-            spawn_shell(cmd, &slice.label);
+            spawn_shell(&resolved, &slice.label);
         }
         ActionKind::Submenu => {
             // Submenu opens are handled in the radial widget on
@@ -42,6 +50,22 @@ pub fn dispatch(slice: &Slice) {
             warn!("EasySwitch dispatch not yet implemented (slice: {})", slice.label);
         }
         ActionKind::None => {}
+    }
+}
+
+/// Resolve a sibling binary in the same directory as the running
+/// overlay executable. Returns `Some(path)` only if the file
+/// actually exists + is readable; lets the dev-mode "binary in
+/// target/release/, not on PATH" workflow Just Work without the
+/// user having to install anything.
+fn sibling_binary(name: &str) -> Option<PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    let dir = exe.parent()?;
+    let candidate = dir.join(name);
+    if candidate.exists() {
+        Some(candidate)
+    } else {
+        None
     }
 }
 
