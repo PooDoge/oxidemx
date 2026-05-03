@@ -255,22 +255,26 @@ fn draw_slot(
                     .with_color(Color::from_rgba(0.0, 0.0, 0.0, 0.35))
                     .with_width(1.0),
             );
-            // Glyph for the action kind.
-            let glyph = match s.kind {
-                ActionKind::Submenu => "▸",
-                ActionKind::Macro => "M",
-                ActionKind::EasySwitch => "⇄",
-                ActionKind::Settings => "⚙",
-                ActionKind::Emoji => "☻",
-                ActionKind::Shortcut => "⌘",
-                ActionKind::Exec => "▶",
-                ActionKind::None => "•",
+            // Pick a recognisable glyph: prefer one mapped from the
+            // slice's freedesktop icon name, fall back to the
+            // action kind. Real SVG/PNG icon rendering is a
+            // separate follow-up (would need an XDG resolver
+            // similar to overlay-rs/src/render/icons.rs).
+            let glyph = glyph_for_slice(s);
+            // Wider chars (emoji) need a smaller font so they don't
+            // spill outside the disc; ASCII glyphs can go bigger.
+            let (size, x_off, y_off) = if glyph.chars().count() > 1 {
+                (12.0, 8.0, 7.0)
+            } else if glyph.chars().any(|c| (c as u32) > 0x2000) {
+                (14.0, 7.0, 8.0)
+            } else {
+                (16.0, 5.0, 8.0)
             };
             frame.fill_text(Text {
                 content: glyph.to_string(),
-                position: Point::new(icon_pos.x - 5.0, icon_pos.y - 7.0),
+                position: Point::new(icon_pos.x - x_off, icon_pos.y - y_off),
                 color: Color::WHITE,
-                size: 14.0.into(),
+                size: size.into(),
                 ..Text::default()
             });
         } else {
@@ -360,6 +364,94 @@ fn slice_color(pal: &Palette, slice: &Slice) -> (f32, f32, f32) {
     };
     (c.r, c.g, c.b)
 }
+
+/// Pick a recognisable glyph for a slice. Prefers a mapping of the
+/// freedesktop icon name (so "media-playback-start-symbolic"
+/// renders as ▶, "folder-symbolic" as 🗀, etc.). Falls back to the
+/// action kind when the icon is missing or unmapped, then to a
+/// dot. Real PNG/SVG icon rendering is a separate follow-up.
+fn glyph_for_slice(s: &Slice) -> &'static str {
+    let icon = s.icon.as_str();
+    if let Some(g) = ICON_GLYPH_MAP
+        .iter()
+        .find(|(name, _)| {
+            icon == *name
+                // Treat the trailing "-symbolic" as optional so the
+                // map covers both "folder" and "folder-symbolic".
+                || icon == name.trim_end_matches("-symbolic")
+        })
+        .map(|(_, glyph)| *glyph)
+    {
+        return g;
+    }
+    match s.kind {
+        ActionKind::Submenu => "▸",
+        ActionKind::Macro => "M",
+        ActionKind::EasySwitch => "⇄",
+        ActionKind::Settings => "⚙",
+        ActionKind::Emoji => "☻",
+        ActionKind::Shortcut => "⌘",
+        ActionKind::Exec => "▶",
+        ActionKind::None => "•",
+    }
+}
+
+/// Mapping table — freedesktop icon name → unicode glyph. Add
+/// entries as users hit defaults that look generic. Anything
+/// not listed falls back to the kind glyph.
+const ICON_GLYPH_MAP: &[(&str, &str)] = &[
+    // Media
+    ("media-playback-start-symbolic", "▶"),
+    ("media-playback-pause-symbolic", "❚❚"),
+    ("media-playback-stop-symbolic", "■"),
+    ("media-skip-forward-symbolic", "⏭"),
+    ("media-skip-backward-symbolic", "⏮"),
+    // Audio
+    ("audio-volume-high-symbolic", "🔊"),
+    ("audio-volume-medium-symbolic", "🔉"),
+    ("audio-volume-low-symbolic", "🔈"),
+    ("audio-volume-muted-symbolic", "🔇"),
+    ("audio-speakers-symbolic", "🔉"),
+    // Documents / files
+    ("document-new-symbolic", "📝"),
+    ("document-open-symbolic", "📂"),
+    ("document-save-symbolic", "💾"),
+    ("folder-symbolic", "🗀"),
+    ("system-file-manager-symbolic", "🗀"),
+    // System / settings
+    ("emblem-system-symbolic", "⚙"),
+    ("preferences-system-symbolic", "⚙"),
+    ("system-lock-screen-symbolic", "🔒"),
+    ("computer-symbolic", "🖥"),
+    // Comms / smileys
+    ("face-smile-symbolic", "☻"),
+    ("dialog-information-symbolic", "ⓘ"),
+    // Apps
+    ("utilities-terminal-symbolic", ">_"),
+    ("camera-photo-symbolic", "📷"),
+    ("applications-science-symbolic", "🧪"),
+    ("applications-development-symbolic", "🔧"),
+    ("applications-graphics-symbolic", "🖼"),
+    ("input-mouse-symbolic", "🖱"),
+    ("input-gaming-symbolic", "🎮"),
+    ("input-keyboard-symbolic", "⌨"),
+    // Editing
+    ("edit-copy-symbolic", "⎘"),
+    ("edit-paste-symbolic", "⎗"),
+    ("edit-undo-symbolic", "↶"),
+    ("edit-redo-symbolic", "↷"),
+    ("edit-cut-symbolic", "✂"),
+    ("edit-select-all-symbolic", "≡"),
+    // Window
+    ("window-close-symbolic", "✕"),
+    ("window-minimize-symbolic", "—"),
+    ("window-maximize-symbolic", "□"),
+    // Network / sharing
+    ("network-wireless-symbolic", "📶"),
+    ("view-grid-symbolic", "▦"),
+    ("view-list-symbolic", "≡"),
+    ("view-dual-symbolic", "▤"),
+];
 
 fn short_label(s: &str) -> String {
     if s.chars().count() > 10 {

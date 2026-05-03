@@ -81,9 +81,13 @@ pub const MX_MASTER_4_BUTTONS: &[Callout] = &[
     },
 ];
 
-/// Canvas program that paints the mouse photo + callouts.
+/// Canvas program that paints the mouse callouts (chips + connector
+/// lines + dots). Doesn't draw the photo — iced's `Frame::draw_image`
+/// composites on a separate layer that always sits ABOVE path
+/// strokes, which would hide our connector lines. Solution: render
+/// the image with the regular `iced::widget::image` below this
+/// canvas via `iced::widget::Stack` (see `mouse_widget`).
 pub struct MousePainter {
-    image: canvas::Image,
     image_aspect: f32,
     callouts: &'static [Callout],
     accent: Color,
@@ -94,16 +98,12 @@ pub struct MousePainter {
 }
 
 impl MousePainter {
-    /// Construct a painter for the MX Master 4. `image_path` should
-    /// point at `assets/devices/logitechmouse.png`. Pixel dimensions
-    /// drive the aspect ratio used in `draw()`; if the image can't
-    /// be opened we fall back to a 4:3 box so the layout doesn't
-    /// collapse.
-    pub fn mx_master_4(palette: &Palette, image_path: std::path::PathBuf) -> Self {
-        let aspect = probe_aspect(&image_path).unwrap_or(1.33);
-        let handle = canvas::Image::new(iced_image::Handle::from_path(image_path));
+    /// Construct a painter for the MX Master 4. `image_path` is used
+    /// only for aspect-ratio probing; the actual rendering happens
+    /// via `iced::widget::image` underneath the canvas.
+    pub fn mx_master_4(palette: &Palette, image_path: &std::path::Path) -> Self {
+        let aspect = probe_aspect(image_path).unwrap_or(1.33);
         Self {
-            image: handle,
             image_aspect: aspect,
             callouts: MX_MASTER_4_BUTTONS,
             accent: palette.accent,
@@ -128,12 +128,10 @@ impl<Message> canvas::Program<Message> for MousePainter {
     ) -> Vec<Geometry> {
         let mut frame = Frame::new(renderer, bounds.size());
 
-        // Compute the image rect — the largest rectangle of the
-        // photo's aspect ratio that fits in `bounds`, centred.
-        // Matches the legacy "fit + centre" placement.
+        // The image rect mirrors the aspect-fit applied by the
+        // image widget below us in the Stack so the dot positions
+        // line up with the actual photo pixels.
         let img_rect = fit_image_rect(bounds.size(), self.image_aspect);
-
-        frame.draw_image(img_rect, self.image.clone());
 
         for callout in self.callouts {
             draw_callout(&mut frame, &img_rect, callout, self);
@@ -300,16 +298,27 @@ fn probe_aspect(path: &std::path::Path) -> Option<f32> {
     }
 }
 
-/// Convenience: a `Canvas` widget at the canonical size used in
-/// the Buttons tab. Returns an `Element` ready to drop into the
-/// page.
+/// Convenience: a Stack widget combining the photo (rendered with
+/// `iced::widget::image`, base layer) and a transparent canvas
+/// drawing the callouts on top. The two share an aspect-fit
+/// algorithm so the dots land on the right pixels.
 pub fn mouse_widget<'a, Message: 'a>(
     palette: &Palette,
     image_path: std::path::PathBuf,
     width_px: f32,
     height_px: f32,
 ) -> iced::Element<'a, Message> {
-    iced::widget::canvas(MousePainter::mx_master_4(palette, image_path))
+    let img = iced::widget::image(iced_image::Handle::from_path(&image_path))
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .content_fit(iced::ContentFit::Contain);
+
+    let painter = MousePainter::mx_master_4(palette, &image_path);
+    let callouts = iced::widget::canvas(painter)
+        .width(Length::Fill)
+        .height(Length::Fill);
+
+    iced::widget::stack![img, callouts]
         .width(Length::Fixed(width_px))
         .height(Length::Fixed(height_px))
         .into()
