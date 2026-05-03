@@ -1,6 +1,7 @@
 use crate::action::ActionKind;
 use crate::animation::AnimationConfig;
 use crate::conditions::Condition;
+use crate::haptics::HapticsConfig;
 use crate::theme::ThemeName;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -122,6 +123,12 @@ pub struct AppConfig {
 
     #[serde(default)]
     pub radial_menu: RadialMenuConfig,
+
+    /// Per-event haptic feedback patterns + debounce timings.
+    /// Optional in the JSON; missing = sensible defaults from
+    /// `HapticsConfig::default()`.
+    #[serde(default)]
+    pub haptics: HapticsConfig,
 
     /// Per-app menu profile names. When the focused window's WM_CLASS (or
     /// equivalent) matches a key here, the daemon points the overlay at

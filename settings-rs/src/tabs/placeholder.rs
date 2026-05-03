@@ -1,20 +1,25 @@
-//! Placeholder for tabs we haven't implemented yet — keeps the
-//! sidebar shape matching the legacy UI without forcing us to ship
-//! every section at once.
+//! Placeholder for tabs not yet implemented.
 
 use crate::widgets::section_header;
-use crate::Message;
-use iced::widget::{column, container, text};
-use iced::Element;
+use crate::{style, Message, State};
+use iced::widget::{column, container, rule, text, Space};
+use iced::{Element, Length};
 
-pub fn view<'a>(title: &str, body: &str) -> Element<'a, Message> {
+pub fn view<'a>(state: &'a State, title: &str, body: &str) -> Element<'a, Message> {
+    let pal = &state.palette;
     container(
         column![
             section_header(title),
-            text(body.to_string()).size(13),
-            text("This section will land in a future update.").size(11),
+            text(body.to_string()).size(13).style(style::text_dim(pal)),
+            Space::new().height(Length::Fixed(8.0)),
+            rule::horizontal(1).style(style::rule_style(pal)),
+            text("This section will land in a future update.")
+                .size(11)
+                .style(style::text_faint(pal)),
         ]
         .spacing(12),
     )
+    .padding(14)
+    .style(style::card(pal))
     .into()
 }

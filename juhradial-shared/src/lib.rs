@@ -16,6 +16,7 @@ pub mod animation;
 pub mod applications;
 pub mod conditions;
 pub mod config;
+pub mod haptics;
 pub mod profiles;
 pub mod theme;
 
@@ -29,5 +30,6 @@ pub use applications::{
 };
 pub use conditions::Condition;
 pub use config::{AppConfig, RadialMenuConfig, Slice, VisualSettings};
+pub use haptics::{HapticsConfig, PerEventPatterns, HAPTIC_PATTERNS};
 pub use profiles::ProfileResolver;
 pub use theme::{Theme, ThemeName};

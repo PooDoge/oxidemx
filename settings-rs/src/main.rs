@@ -11,13 +11,18 @@
 mod tabs {
     pub mod animation;
     pub mod buttons;
+    pub mod haptics;
     pub mod placeholder;
     pub mod settings_page;
     pub mod visuals;
 }
+mod mouse_callouts;
+mod palette;
 mod persist;
+mod radial_preview;
 mod raise;
 mod singleton;
+mod style;
 mod widgets;
 
 use iced::widget::{button, column, container, row, rule, scrollable, text, Space};
@@ -125,6 +130,31 @@ pub enum Message {
     /// need to react to (e.g. the RaiseOverlay D-Bus call from the
     /// Focus handler).
     Noop,
+    /// Theme picker selection — re-resolves the palette and writes
+    /// the theme name into the config (autosave will persist it).
+    SetTheme(String),
+
+    // --- Slices editor (Buttons tab right column) ---
+    AddSlice,
+    DeleteSlice(usize),
+    MoveSliceUp(usize),
+    MoveSliceDown(usize),
+    SetSliceLabel(usize, String),
+    SetSliceCommand(usize, String),
+    SetSliceKind(usize, juhradial_shared::ActionKind),
+    SetSliceColor(usize, String),
+    /// Radial preview interactions.
+    SelectSlice(usize),
+    DismissSliceSelection,
+    SwapSlices { from: usize, to: usize },
+
+    // --- Haptics tab ---
+    SetHapticsEnabled(bool),
+    SetHapticsPerEvent(tabs::haptics::HapticsEvent, String),
+    SetHapticsDefaultPattern(String),
+    SetHapticsDebounce(u32),
+    SetHapticsSliceDebounce(u32),
+    SetHapticsReentryDebounce(u32),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -225,11 +255,17 @@ impl AnimDirection {
 
 pub struct State {
     pub config: AppConfig,
+    /// Resolved colour palette derived from `config.theme`. Rebuilt
+    /// on every theme change so all styled widgets re-skin live.
+    pub palette: palette::Palette,
     pub tab: Tab,
     pub config_path: Option<std::path::PathBuf>,
     pub last_edit: Option<Instant>,
     pub saved_pending: bool,
     pub status: String,
+    /// Currently-selected slot in the radial preview, if any.
+    /// Drives the per-slice editor in the Buttons-tab right column.
+    pub selected_slice: Option<usize>,
 }
 
 impl Default for State {
@@ -239,13 +275,31 @@ impl Default for State {
             .as_ref()
             .and_then(|p| AppConfig::load_from(p).ok())
             .unwrap_or_default();
+        let pal = palette::Palette::resolve(&config.theme);
         State {
             config,
+            palette: pal,
             tab: Tab::Buttons,
             config_path: path,
             last_edit: None,
             saved_pending: false,
             status: String::new(),
+            selected_slice: None,
+        }
+    }
+}
+
+// `From<radial_preview::Action>` glue so the Canvas program can
+// produce one of our top-level Messages without importing the
+// whole enum tree.
+impl From<radial_preview::Action> for Message {
+    fn from(a: radial_preview::Action) -> Self {
+        match a {
+            radial_preview::Action::SelectSlice(i) => Message::SelectSlice(i),
+            radial_preview::Action::DismissSelection => Message::DismissSliceSelection,
+            radial_preview::Action::SwapSlices { from, to } => {
+                Message::SwapSlices { from, to }
+            }
         }
     }
 }
@@ -355,6 +409,156 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             Task::none()
         }
         Message::Noop => Task::none(),
+        Message::SetTheme(name) => {
+            // Update both the persisted config and the in-memory
+            // palette so the UI re-skins immediately. Auto-save
+            // catches the config change.
+            state.config.theme = juhradial_shared::theme::ThemeName::from(name.as_str());
+            state.palette = palette::Palette::resolve(&state.config.theme);
+            state.touch();
+            Task::none()
+        }
+        // --- Slices editor handlers ---
+        Message::AddSlice => {
+            let slices = &mut state.config.radial_menu.slices;
+            slices.push(juhradial_shared::Slice {
+                action_id: None,
+                label: "New slice".into(),
+                kind: juhradial_shared::ActionKind::Exec,
+                command: String::new(),
+                color: "accent".into(),
+                icon: String::new(),
+                submenu: Vec::new(),
+                visible_if: None,
+            });
+            state.touch();
+            Task::none()
+        }
+        Message::DeleteSlice(i) => {
+            let slices = &mut state.config.radial_menu.slices;
+            if i < slices.len() {
+                slices.remove(i);
+                state.touch();
+            }
+            Task::none()
+        }
+        Message::MoveSliceUp(i) => {
+            let slices = &mut state.config.radial_menu.slices;
+            if i > 0 && i < slices.len() {
+                slices.swap(i, i - 1);
+                state.touch();
+            }
+            Task::none()
+        }
+        Message::MoveSliceDown(i) => {
+            let slices = &mut state.config.radial_menu.slices;
+            if i + 1 < slices.len() {
+                slices.swap(i, i + 1);
+                state.touch();
+            }
+            Task::none()
+        }
+        Message::SetSliceLabel(i, s) => {
+            if let Some(slice) = state.config.radial_menu.slices.get_mut(i) {
+                slice.label = s;
+                state.touch();
+            }
+            Task::none()
+        }
+        Message::SetSliceCommand(i, s) => {
+            if let Some(slice) = state.config.radial_menu.slices.get_mut(i) {
+                slice.command = s;
+                state.touch();
+            }
+            Task::none()
+        }
+        Message::SetSliceKind(i, k) => {
+            if let Some(slice) = state.config.radial_menu.slices.get_mut(i) {
+                slice.kind = k;
+                state.touch();
+            }
+            Task::none()
+        }
+        Message::SetSliceColor(i, s) => {
+            if let Some(slice) = state.config.radial_menu.slices.get_mut(i) {
+                slice.color = s;
+                state.touch();
+            }
+            Task::none()
+        }
+
+        // --- Radial preview interactions ---
+        Message::SelectSlice(i) => {
+            state.selected_slice = Some(i);
+            Task::none()
+        }
+        Message::DismissSliceSelection => {
+            state.selected_slice = None;
+            Task::none()
+        }
+        Message::SwapSlices { from, to } => {
+            let slices = &mut state.config.radial_menu.slices;
+            // Pad to N_SLICES so the user can drop into an empty slot.
+            while slices.len() < 8.max(from + 1).max(to + 1) {
+                slices.push(juhradial_shared::Slice {
+                    action_id: None,
+                    label: "(empty)".into(),
+                    kind: juhradial_shared::ActionKind::None,
+                    command: String::new(),
+                    color: "accent".into(),
+                    icon: String::new(),
+                    submenu: Vec::new(),
+                    visible_if: None,
+                });
+            }
+            if from < slices.len() && to < slices.len() {
+                slices.swap(from, to);
+                // Follow the moved slice — the user usually wants to
+                // continue editing it.
+                state.selected_slice = Some(to);
+                state.touch();
+            }
+            Task::none()
+        }
+
+        // --- Haptics handlers ---
+        Message::SetHapticsEnabled(on) => {
+            state.config.haptics.enabled = on;
+            state.touch();
+            Task::none()
+        }
+        Message::SetHapticsPerEvent(evt, pattern) => {
+            use tabs::haptics::HapticsEvent;
+            let pe = &mut state.config.haptics.per_event;
+            match evt {
+                HapticsEvent::MenuAppear => pe.menu_appear = pattern,
+                HapticsEvent::SliceChange => pe.slice_change = pattern,
+                HapticsEvent::Confirm => pe.confirm = pattern,
+                HapticsEvent::Invalid => pe.invalid = pattern,
+            }
+            state.touch();
+            Task::none()
+        }
+        Message::SetHapticsDefaultPattern(p) => {
+            state.config.haptics.default_pattern = p;
+            state.touch();
+            Task::none()
+        }
+        Message::SetHapticsDebounce(ms) => {
+            state.config.haptics.debounce_ms = ms;
+            state.touch();
+            Task::none()
+        }
+        Message::SetHapticsSliceDebounce(ms) => {
+            state.config.haptics.slice_debounce_ms = ms;
+            state.touch();
+            Task::none()
+        }
+        Message::SetHapticsReentryDebounce(ms) => {
+            state.config.haptics.reentry_debounce_ms = ms;
+            state.touch();
+            Task::none()
+        }
     }
 }
 
@@ -363,39 +567,35 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
 // ============================================================================
 
 fn view(state: &State) -> Element<'_, Message> {
-    let header = header_view();
+    let header = header_view(state);
     let sidebar = sidebar_view(state);
     let body: Element<Message> = match state.tab {
         Tab::Buttons => tabs::buttons::view(state),
         Tab::Settings => tabs::settings_page::view(state),
-        Tab::PointScroll => tabs::placeholder::view(
+        Tab::PointScroll => tabs::placeholder::view(state, 
             "Point & Scroll",
             "Pointer speed, scroll direction, and acceleration. \
              Coming soon — track in the daemon's button-mapping module.",
         ),
-        Tab::Haptic => tabs::placeholder::view(
-            "Haptic Feedback",
-            "Per-event haptic intensity for slice changes, gesture recognition, \
-             and dispatch. Coming soon.",
-        ),
-        Tab::Devices => tabs::placeholder::view(
+        Tab::Haptic => tabs::haptics::view(state),
+        Tab::Devices => tabs::placeholder::view(state, 
             "Devices",
             "Paired Logitech devices + battery + firmware status. Coming soon.",
         ),
-        Tab::EasySwitch => tabs::placeholder::view(
+        Tab::EasySwitch => tabs::placeholder::view(state, 
             "Easy-Switch",
             "Configure each Easy-Switch host slot (label, OS icon). Coming soon.",
         ),
-        Tab::Flow => tabs::placeholder::view(
+        Tab::Flow => tabs::placeholder::view(state, 
             "Flow",
             "Cross-machine cursor-and-clipboard hand-off. Coming soon.",
         ),
-        Tab::Macros => tabs::placeholder::view(
+        Tab::Macros => tabs::placeholder::view(state, 
             "Macros",
             "Record and edit macros that slices can dispatch via the daemon. \
              Coming soon.",
         ),
-        Tab::Gaming => tabs::placeholder::view(
+        Tab::Gaming => tabs::placeholder::view(state, 
             "Gaming",
             "Per-game profiles + DPI overrides + low-latency mode. Coming soon.",
         ),
@@ -403,19 +603,30 @@ fn view(state: &State) -> Element<'_, Message> {
 
     let main_area = row![
         sidebar,
-        container(scrollable(container(body).padding(20)))
-            .padding(0)
-            .width(Length::Fill)
-            .height(Length::Fill),
+        container(
+            scrollable(container(body).padding(20))
+                .style(style::scrollable_style(&state.palette))
+        )
+        .padding(0)
+        .style(style::page(&state.palette))
+        .width(Length::Fill)
+        .height(Length::Fill),
     ]
     .height(Length::Fill);
 
     let footer = footer_view(state);
 
     container(
-        column![header, rule::horizontal(1), main_area, rule::horizontal(1), footer,]
-            .spacing(0),
+        column![
+            header,
+            rule::horizontal(1).style(style::rule_style(&state.palette)),
+            main_area,
+            rule::horizontal(1).style(style::rule_style(&state.palette)),
+            footer,
+        ]
+        .spacing(0),
     )
+    .style(style::window(&state.palette))
     .width(Length::Fill)
     .height(Length::Fill)
     .into()
@@ -425,27 +636,34 @@ fn view(state: &State) -> Element<'_, Message> {
 // Header
 // ----------------------------------------------------------------------------
 
-fn header_view<'a>() -> Element<'a, Message> {
-    row![
-        text("JuhRadial").size(20),
-        text("MX").size(13),
-        Space::new().width(Length::Fixed(16.0)),
-        chip("MX MASTER 4"),
-        Space::new().width(Length::Fill),
-        button(text("Exit").size(12))
-            .style(button::secondary)
-            .on_press(Message::Exit),
-    ]
-    .align_y(iced::Alignment::Center)
-    .spacing(8)
+fn header_view(state: &State) -> Element<'_, Message> {
+    let pal = &state.palette;
+    container(
+        row![
+            text("JuhRadial").size(20),
+            text("MX").size(13).style(style::text_accent(pal)),
+            text("MOUSE CONFIGURATION")
+                .size(10)
+                .style(style::text_faint(pal)),
+            Space::new().width(Length::Fixed(16.0)),
+            chip(state, "MX MASTER 4"),
+            Space::new().width(Length::Fill),
+            button(text("Exit").size(12))
+                .style(style::btn_secondary(pal))
+                .on_press(Message::Exit),
+        ]
+        .align_y(iced::Alignment::Center)
+        .spacing(10),
+    )
+    .style(style::header(pal))
     .padding(12)
     .into()
 }
 
-fn chip<'a>(label: &str) -> Element<'a, Message> {
+fn chip<'a>(state: &'a State, label: &str) -> Element<'a, Message> {
     container(text(label.to_string()).size(11))
         .padding([4, 10])
-        .style(container::bordered_box)
+        .style(style::chip(&state.palette))
         .into()
 }
 
@@ -454,32 +672,31 @@ fn chip<'a>(label: &str) -> Element<'a, Message> {
 // ----------------------------------------------------------------------------
 
 fn sidebar_view(state: &State) -> Element<'_, Message> {
-    let mut col = column![].spacing(6).padding(12);
+    let mut col = column![].spacing(2).padding(12);
     for tab in Tab::ALL {
-        col = col.push(sidebar_button(tab, state.tab == tab));
+        col = col.push(sidebar_button(state, tab, state.tab == tab));
     }
     container(col)
         .width(Length::Fixed(220.0))
         .height(Length::Fill)
-        .style(container::bordered_box)
+        .style(style::sidebar(&state.palette))
         .into()
 }
 
-fn sidebar_button(tab: Tab, active: bool) -> Element<'static, Message> {
+fn sidebar_button<'a>(state: &'a State, tab: Tab, active: bool) -> Element<'a, Message> {
     let inner = row![
-        container(text(tab.glyph()).size(13))
-            .padding([2, 8])
-            .style(container::bordered_box),
+        text(tab.glyph()).size(13),
         text(tab.label()).size(13),
     ]
     .align_y(iced::Alignment::Center)
-    .spacing(10);
+    .spacing(12);
 
-    let mut b = button(inner).width(Length::Fill).padding([8, 10]);
-    if !active {
-        b = b.style(button::secondary);
-    }
-    b.on_press(Message::SwitchTab(tab)).into()
+    button(inner)
+        .width(Length::Fill)
+        .padding([10, 14])
+        .style(style::nav_item(&state.palette, active))
+        .on_press(Message::SwitchTab(tab))
+        .into()
 }
 
 // ----------------------------------------------------------------------------
@@ -487,6 +704,7 @@ fn sidebar_button(tab: Tab, active: bool) -> Element<'static, Message> {
 // ----------------------------------------------------------------------------
 
 fn footer_view(state: &State) -> Element<'_, Message> {
+    let pal = &state.palette;
     let path = state
         .config_path
         .as_ref()
@@ -494,22 +712,33 @@ fn footer_view(state: &State) -> Element<'_, Message> {
         .unwrap_or_else(|| "(no config path)".into());
 
     let status: Element<Message> = if state.saved_pending {
-        text("Editing… (autosaves shortly)").size(11).into()
+        text("Editing… (autosaves shortly)")
+            .size(11)
+            .style(style::text_dim(pal))
+            .into()
     } else if !state.status.is_empty() {
-        text(state.status.as_str()).size(11).into()
+        text(state.status.as_str())
+            .size(11)
+            .style(style::text_accent(pal))
+            .into()
     } else {
-        text("Idle.").size(11).into()
+        text("Idle.").size(11).style(style::text_faint(pal)).into()
     };
 
-    row![
-        text("JuhLabs · Free & open source software").size(11),
-        Space::new().width(Length::Fixed(16.0)),
-        text(path).size(10),
-        Space::new().width(Length::Fill),
-        status,
-    ]
-    .align_y(iced::Alignment::Center)
-    .spacing(8)
+    container(
+        row![
+            text("JuhLabs · Free & open source software")
+                .size(11)
+                .style(style::text_dim(pal)),
+            Space::new().width(Length::Fixed(16.0)),
+            text(path).size(10).style(style::text_faint(pal)),
+            Space::new().width(Length::Fill),
+            status,
+        ]
+        .align_y(iced::Alignment::Center)
+        .spacing(8),
+    )
+    .style(style::footer(pal))
     .padding(10)
     .into()
 }
@@ -575,6 +804,16 @@ fn main() -> iced::Result {
     iced::application(boot, update, view)
         .title("JuhRadial Settings")
         .window(window)
+        .theme(|state: &State| {
+            // Anchor iced's built-in theme to our palette's dark/light
+            // orientation so widgets we haven't custom-styled still
+            // look right.
+            if state.palette.is_dark {
+                iced::Theme::Dark
+            } else {
+                iced::Theme::Light
+            }
+        })
         .subscription(subscription)
         .run()
 }

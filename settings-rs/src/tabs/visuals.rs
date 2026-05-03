@@ -1,12 +1,13 @@
 //! "Visuals" tab — static visual knobs (background opacity,
 //! highlight intensity).
 
-use crate::widgets::{labeled_slider, section_header};
-use crate::{Message, State, VisualField};
+use crate::widgets::labeled_slider;
+use crate::{style, Message, State, VisualField};
 use iced::widget::{column, container, text};
 use iced::Element;
 
 pub fn view(state: &State) -> Element<'_, Message> {
+    let pal = &state.palette;
     let v = &state.config.radial_menu.visuals;
 
     let bg = labeled_slider(
@@ -28,12 +29,12 @@ pub fn view(state: &State) -> Element<'_, Message> {
 
     container(
         column![
-            section_header("Wheel appearance"),
             text(
                 "Tweak the static look of the radial menu. Animations are configured \
                  separately under the Animation tab.",
             )
-            .size(12),
+            .size(12)
+            .style(style::text_dim(pal)),
             container(column![bg, hl].spacing(20)).padding(12),
         ]
         .spacing(12),

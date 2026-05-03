@@ -16,7 +16,11 @@ juhradial-shared = { path = "../juhradial-shared" }
 # iced 0.14 — same toolkit as the overlay so we share render
 # tech and don't drag in a separate UI dep tree. Standard widgets
 # only (no canvas), wayland + x11.
-iced = { version = "0.14", features = ["wayland", "x11", "tokio"] }
+iced = { version = "0.14", features = ["wayland", "x11", "tokio", "image", "canvas"] }
+
+# Image dimension probe for aspect-ratio-aware mouse-photo
+# rendering. PNG-only is enough for assets/devices/.
+image = { version = "0.25", default-features = false, features = ["png"] }
 
 # Config IO: load + save the same JSON the overlay watches.
 serde = { version = "1", features = ["derive"] }
