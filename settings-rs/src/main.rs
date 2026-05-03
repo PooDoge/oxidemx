@@ -172,6 +172,9 @@ pub enum Message {
     SetScrollSmartshiftThreshold(u32),
     SetScrollMode(String),
 
+    // --- Mouse-button assignments (Buttons tab) ---
+    SetButtonAssignment(juhradial_shared::MouseButton, juhradial_shared::ButtonAction),
+
     // --- Battery (UPower poll) ---
     /// Periodic tick — kicks off a UPower probe.
     BatteryTick,
@@ -653,6 +656,11 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
         }
         Message::SetScrollMode(s) => {
             state.config.scroll.mode = s;
+            state.touch();
+            Task::none()
+        }
+        Message::SetButtonAssignment(button, action) => {
+            button.set(&mut state.config.buttons, action);
             state.touch();
             Task::none()
         }

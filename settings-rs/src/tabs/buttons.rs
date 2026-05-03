@@ -36,19 +36,9 @@ pub fn view(state: &State) -> Element<'_, Message> {
 fn center_panel(state: &State) -> Element<'_, Message> {
     let pal = &state.palette;
 
-    let buttons: &[(&str, &str)] = &[
-        ("Middle Button", "Middle Click"),
-        ("Shift Wheel Mode", "SmartShift"),
-        ("Forward", "Forward"),
-        ("Back", "Back"),
-        ("Horizontal Scroll", "Scroll Left/Right"),
-        ("Gestures", "Virtual desktops"),
-        ("Show Actions Ring", "Radial Menu"),
-    ];
-
-    let mut button_col = column![].spacing(2);
-    for (label, mapped) in buttons {
-        button_col = button_col.push(button_row(state, label, mapped));
+    let mut button_col = column![].spacing(4);
+    for mb in juhradial_shared::MouseButton::all() {
+        button_col = button_col.push(button_assignment_row(state, *mb));
     }
 
     let mouse_image = mouse_photo(state);
@@ -56,15 +46,12 @@ fn center_panel(state: &State) -> Element<'_, Message> {
     container(
         column![
             section_header("MX Master 4"),
-            text("Each button can be remapped to a different action.")
+            text("Click any action below to remap that button.")
                 .size(12)
                 .style(style::text_dim(pal)),
             container(mouse_image)
                 .padding(8)
                 .center_x(Length::Fill),
-            // Below-photo button list — kept as a stable reference
-            // because the on-photo callouts can be hard to scan if
-            // the user lowers their text scaling.
             container(button_col)
                 .padding(12)
                 .style(style::card_quiet(pal))
@@ -103,28 +90,45 @@ fn locate_mouse_image() -> PathBuf {
     PathBuf::from(MOUSE_IMAGE_PATH)
 }
 
-fn button_row<'a>(state: &'a State, name: &'a str, mapped: &'a str) -> Element<'a, Message> {
+fn button_assignment_row(state: &State, mb: juhradial_shared::MouseButton) -> Element<'_, Message> {
     let pal = &state.palette;
+    let current = mb.get(&state.config.buttons);
+
+    let options: Vec<ActionOption> = juhradial_shared::ButtonAction::all()
+        .iter()
+        .map(|a| ActionOption(*a))
+        .collect();
+    let selected = ActionOption(current);
+
+    let picker = pick_list(options, Some(selected), move |opt: ActionOption| {
+        Message::SetButtonAssignment(mb, opt.0)
+    })
+    .style(style::pick_list_style(pal))
+    .text_size(12);
+
     container(
         row![
             container(text("⌖").size(13).style(style::text_dim(pal)))
                 .padding([4, 8])
                 .style(style::chip(pal)),
-            column![
-                text(name.to_string()).size(13),
-                text(mapped.to_string())
-                    .size(11)
-                    .style(style::text_dim(pal)),
-            ]
-            .spacing(2),
+            text(mb.label()).size(13),
             Space::new().width(Length::Fill),
-            text("›").size(15).style(style::text_faint(pal)),
+            picker,
         ]
         .align_y(Alignment::Center)
         .spacing(12)
         .padding([6, 8]),
     )
     .into()
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ActionOption(juhradial_shared::ButtonAction);
+
+impl std::fmt::Display for ActionOption {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.0.label())
+    }
 }
 
 // ============================================================================

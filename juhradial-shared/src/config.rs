@@ -1,5 +1,6 @@
 use crate::action::ActionKind;
 use crate::animation::AnimationConfig;
+use crate::buttons::ButtonsConfig;
 use crate::conditions::Condition;
 use crate::haptics::HapticsConfig;
 use crate::pointer::{PointerConfig, ScrollConfig};
@@ -155,6 +156,11 @@ pub struct AppConfig {
     /// Scroll wheel behaviour (Point & Scroll tab → Scroll).
     #[serde(default)]
     pub scroll: ScrollConfig,
+
+    /// Per-button action assignments. Same on-disk shape as the
+    /// daemon's `daemon::config::ButtonsConfig`.
+    #[serde(default)]
+    pub buttons: ButtonsConfig,
 
     /// Per-app menu profile names. When the focused window's WM_CLASS (or
     /// equivalent) matches a key here, the daemon points the overlay at

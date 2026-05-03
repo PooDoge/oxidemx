@@ -14,6 +14,7 @@
 pub mod action;
 pub mod animation;
 pub mod applications;
+pub mod buttons;
 pub mod conditions;
 pub mod config;
 pub mod haptics;
@@ -31,6 +32,7 @@ pub use applications::{
 };
 pub use conditions::Condition;
 pub use config::{AppConfig, RadialMenuConfig, Slice, VisualSettings};
+pub use buttons::{ButtonAction, ButtonsConfig, MouseButton};
 pub use haptics::{HapticsConfig, PerEventPatterns, HAPTIC_PATTERNS};
 pub use pointer::{PointerConfig, ScrollConfig};
 pub use profiles::ProfileResolver;
