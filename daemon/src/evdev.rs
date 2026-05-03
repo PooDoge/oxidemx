@@ -242,6 +242,9 @@ impl EvdevHandler {
                 .unwrap_or(u32::MAX)
         });
 
+        let mut perm_denied = 0_usize;
+        let mut total_event_devices = 0_usize;
+
         for entry in sorted_entries {
             let path = entry.path();
             let filename = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
@@ -250,6 +253,7 @@ impl EvdevHandler {
             if !filename.starts_with("event") {
                 continue;
             }
+            total_event_devices += 1;
 
             match Self::check_device(&path) {
                 Ok(Some(info)) => {
@@ -267,11 +271,29 @@ impl EvdevHandler {
                     }
                 }
                 Ok(None) => continue,
+                Err(EvdevError::PermissionDenied) => {
+                    perm_denied += 1;
+                    tracing::debug!("Permission denied opening {:?}", path);
+                    continue;
+                }
                 Err(e) => {
                     tracing::debug!("Could not check device {:?}: {:?}", path, e);
                     continue;
                 }
             }
+        }
+
+        // Surface a clearer hint when we can't open ANY event device —
+        // almost always a missing `input` group membership.
+        if perm_denied > 0 && perm_denied >= total_event_devices.saturating_sub(2) {
+            tracing::warn!(
+                "Permission denied on {} of {} /dev/input/event* devices. \
+                 The user running juhradiald likely isn't in the `input` \
+                 group. Run `sudo usermod -aG input $USER` then restart \
+                 the daemon (or log out + back in).",
+                perm_denied,
+                total_event_devices,
+            );
         }
 
         tracing::warn!("MX Master 4 not found. Waiting for connection...");
