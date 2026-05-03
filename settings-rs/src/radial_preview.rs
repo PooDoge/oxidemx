@@ -58,6 +58,11 @@ pub struct RadialPreview {
     pub palette: Palette,
     pub icons: std::rc::Rc<IconCache>,
     pub iced_handles: std::rc::Rc<RefCell<HashMap<IconKey, Handle>>>,
+    /// Font for the centre label. `iced::Font::DEFAULT` if no
+    /// override configured.
+    pub font: iced::Font,
+    /// Centre-label font size in px. 0 = label disabled.
+    pub center_label_size: f32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -220,20 +225,27 @@ where
         // hint). Mirrors the legacy overlay's centre text. Truncate
         // to ~14 chars to stop long labels from spilling outside
         // the puck.
-        let center_text = st
-            .drag_from
-            .or(self.selected)
-            .and_then(|i| self.slices.get(i))
-            .map(|s| short_label(&s.label));
-        if let Some(label) = center_text {
-            let approx_w = label.chars().count() as f32 * 6.5;
-            frame.fill_text(Text {
-                content: label,
-                position: Point::new(center.x - approx_w / 2.0, center.y - 8.0),
-                color: pal.text,
-                size: 13.0.into(),
-                ..Text::default()
-            });
+        if self.center_label_size > 0.5 {
+            let center_text = st
+                .drag_from
+                .or(self.selected)
+                .and_then(|i| self.slices.get(i))
+                .map(|s| short_label(&s.label));
+            if let Some(label) = center_text {
+                let label_size = self.center_label_size;
+                let approx_w = label.chars().count() as f32 * label_size * 0.55;
+                frame.fill_text(Text {
+                    content: label,
+                    position: Point::new(
+                        center.x - approx_w / 2.0,
+                        center.y - label_size / 2.0,
+                    ),
+                    color: pal.text,
+                    size: label_size.into(),
+                    font: self.font,
+                    ..Text::default()
+                });
+            }
         }
 
         // Drag ghost — render the dragged slice's chip at the
@@ -597,6 +609,8 @@ pub fn radial_preview_widget<'a, Message>(
     selected: Option<usize>,
     icons: std::rc::Rc<IconCache>,
     iced_handles: std::rc::Rc<RefCell<HashMap<IconKey, Handle>>>,
+    font: iced::Font,
+    center_label_size: f32,
     size_px: f32,
 ) -> iced::Element<'a, Message>
 where
@@ -608,6 +622,8 @@ where
         selected,
         icons,
         iced_handles,
+        font,
+        center_label_size,
     };
     iced::widget::canvas(painter)
         .width(Length::Fixed(size_px))

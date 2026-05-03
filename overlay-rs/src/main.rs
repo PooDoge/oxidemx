@@ -24,6 +24,7 @@ mod anim;
 mod app;
 mod config;
 mod dbus;
+mod fonts;
 mod editor {
     pub mod icon_picker;
     pub mod preview;

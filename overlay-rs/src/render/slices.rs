@@ -298,6 +298,7 @@ pub fn draw_center(
     bg_opacity: f32,
     label: Option<&str>,
     label_size: f32,
+    label_font: iced::Font,
 ) {
     let mo = menu_opacity.clamp(0.0, 1.0);
     let bgo = bg_opacity.clamp(0.0, 1.0);
@@ -334,6 +335,7 @@ pub fn draw_center(
                 ),
                 color: iced::Color::from_rgba(tr as f32, tg as f32, tb as f32, mo),
                 size: label_size.into(),
+                font: label_font,
                 ..iced::widget::canvas::Text::default()
             });
         }

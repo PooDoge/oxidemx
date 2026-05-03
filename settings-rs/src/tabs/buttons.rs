@@ -149,12 +149,16 @@ fn right_panel(state: &State) -> Element<'_, Message> {
 /// onto another slot to swap them.
 fn radial_preview_card(state: &State) -> Element<'_, Message> {
     let pal = &state.palette;
+    let v = &state.config.radial_menu.visuals;
+    let font = crate::fonts::resolve(&v.font_family);
     let preview = radial_preview_widget(
         pal,
         &state.config.radial_menu.slices,
         state.selected_slice,
         state.icons.clone(),
         state.iced_handles.clone(),
+        font,
+        v.center_label_size,
         320.0,
     );
     container(

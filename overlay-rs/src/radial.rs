@@ -658,6 +658,7 @@ impl<'a> canvas::Program<crate::app::Message> for Painter<'a> {
             bg_op,
             center_label.as_deref(),
             self.state.visuals.center_label_size,
+            crate::fonts::resolve(&self.state.visuals.font_family),
         );
 
         // Submenu pop-out (drawn AFTER the centre so its sub-items

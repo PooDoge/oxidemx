@@ -2,6 +2,7 @@ use crate::action::ActionKind;
 use crate::animation::AnimationConfig;
 use crate::conditions::Condition;
 use crate::haptics::HapticsConfig;
+use crate::pointer::{PointerConfig, ScrollConfig};
 use crate::theme::ThemeName;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -146,6 +147,14 @@ pub struct AppConfig {
     /// `HapticsConfig::default()`.
     #[serde(default)]
     pub haptics: HapticsConfig,
+
+    /// Pointer speed + acceleration (Point & Scroll tab → Pointer).
+    #[serde(default)]
+    pub pointer: PointerConfig,
+
+    /// Scroll wheel behaviour (Point & Scroll tab → Scroll).
+    #[serde(default)]
+    pub scroll: ScrollConfig,
 
     /// Per-app menu profile names. When the focused window's WM_CLASS (or
     /// equivalent) matches a key here, the daemon points the overlay at

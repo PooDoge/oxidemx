@@ -11,11 +11,14 @@
 mod tabs {
     pub mod animation;
     pub mod buttons;
+    pub mod devices;
     pub mod haptics;
     pub mod placeholder;
+    pub mod scroll;
     pub mod settings_page;
     pub mod visuals;
 }
+mod fonts;
 mod mouse_callouts;
 mod palette;
 mod persist;
@@ -110,6 +113,9 @@ impl Tab {
 pub enum Message {
     SwitchTab(Tab),
     SetVisual(VisualField, f32),
+    /// Font family override for rendered text (Visuals tab).
+    /// Empty string = system default.
+    SetFontFamily(String),
     SetTransition(AnimElement, AnimDirection, TransitionConfig),
     SetChainStagger(AnimElement, u32),
     ResetElementAnimation(AnimElement),
@@ -155,12 +161,23 @@ pub enum Message {
     SetHapticsDebounce(u32),
     SetHapticsSliceDebounce(u32),
     SetHapticsReentryDebounce(u32),
+
+    // --- Point & Scroll tab ---
+    SetPointerSpeed(u32),
+    SetPointerAcceleration(bool),
+    SetScrollNatural(bool),
+    SetScrollSmooth(bool),
+    SetScrollSmartshift(bool),
+    SetScrollSmartshiftThreshold(u32),
+    SetScrollMode(String),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VisualField {
     MenuBackgroundOpacity,
     SliceHighlightOpacity,
+    /// Centre-label font size in px (Visuals tab → "Centre label size").
+    CenterLabelSize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -350,15 +367,28 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             Task::none()
         }
         Message::SetVisual(field, v) => {
-            let v = v.clamp(0.0, 1.0);
             match field {
                 VisualField::MenuBackgroundOpacity => {
-                    state.config.radial_menu.visuals.menu_background_opacity = v;
+                    state.config.radial_menu.visuals.menu_background_opacity =
+                        v.clamp(0.0, 1.0);
                 }
                 VisualField::SliceHighlightOpacity => {
-                    state.config.radial_menu.visuals.slice_highlight_opacity = v;
+                    state.config.radial_menu.visuals.slice_highlight_opacity =
+                        v.clamp(0.0, 1.0);
+                }
+                VisualField::CenterLabelSize => {
+                    // 0 = disabled (the renderer skips drawing); cap
+                    // at 32 so an accidental drag doesn't spawn
+                    // ridiculous text.
+                    state.config.radial_menu.visuals.center_label_size =
+                        v.clamp(0.0, 32.0);
                 }
             }
+            state.touch();
+            Task::none()
+        }
+        Message::SetFontFamily(s) => {
+            state.config.radial_menu.visuals.font_family = s;
             state.touch();
             Task::none()
         }
@@ -573,6 +603,43 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             state.touch();
             Task::none()
         }
+
+        // --- Point & Scroll handlers ---
+        Message::SetPointerSpeed(v) => {
+            state.config.pointer.speed = v;
+            state.touch();
+            Task::none()
+        }
+        Message::SetPointerAcceleration(on) => {
+            state.config.pointer.acceleration = on;
+            state.touch();
+            Task::none()
+        }
+        Message::SetScrollNatural(on) => {
+            state.config.scroll.natural = on;
+            state.touch();
+            Task::none()
+        }
+        Message::SetScrollSmooth(on) => {
+            state.config.scroll.smooth = on;
+            state.touch();
+            Task::none()
+        }
+        Message::SetScrollSmartshift(on) => {
+            state.config.scroll.smartshift = on;
+            state.touch();
+            Task::none()
+        }
+        Message::SetScrollSmartshiftThreshold(v) => {
+            state.config.scroll.smartshift_threshold = v;
+            state.touch();
+            Task::none()
+        }
+        Message::SetScrollMode(s) => {
+            state.config.scroll.mode = s;
+            state.touch();
+            Task::none()
+        }
     }
 }
 
@@ -586,16 +653,9 @@ fn view(state: &State) -> Element<'_, Message> {
     let body: Element<Message> = match state.tab {
         Tab::Buttons => tabs::buttons::view(state),
         Tab::Settings => tabs::settings_page::view(state),
-        Tab::PointScroll => tabs::placeholder::view(state, 
-            "Point & Scroll",
-            "Pointer speed, scroll direction, and acceleration. \
-             Coming soon — track in the daemon's button-mapping module.",
-        ),
+        Tab::PointScroll => tabs::scroll::view(state),
         Tab::Haptic => tabs::haptics::view(state),
-        Tab::Devices => tabs::placeholder::view(state, 
-            "Devices",
-            "Paired Logitech devices + battery + firmware status. Coming soon.",
-        ),
+        Tab::Devices => tabs::devices::view(state),
         Tab::EasySwitch => tabs::placeholder::view(state, 
             "Easy-Switch",
             "Configure each Easy-Switch host slot (label, OS icon). Coming soon.",
