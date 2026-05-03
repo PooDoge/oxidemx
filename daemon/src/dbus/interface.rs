@@ -4,10 +4,63 @@
 //! This must be a single `#[interface]` impl block per zbus requirements.
 
 use zbus::{interface, object_server::SignalEmitter, fdo};
-use crate::config::Config;
-use crate::hidpp::HapticEvent;
+use crate::config::{Config, ScrollConfig};
+use crate::hidpp::{HapticEvent, HapticManager};
 use crate::macros::events_to_actions;
 use super::service::JuhRadialService;
+
+/// Translate the user's `ScrollConfig` into a HID++ SmartShift call
+/// and apply it to the device. Best-effort — silently logs and
+/// continues if SmartShift isn't supported (older mouse, generic
+/// device, or currently disconnected).
+fn apply_scroll_to_device(manager: &mut HapticManager, scroll: &ScrollConfig) {
+    if !manager.smartshift_supported() {
+        tracing::debug!(
+            "SmartShift not supported on this device — skipping scroll apply"
+        );
+        return;
+    }
+
+    // wheel_mode: 1 = Freespin, 2 = Ratchet
+    let wheel_mode: u8 = match scroll.mode.as_str() {
+        "free" => 1,
+        // "ratchet" + "smartshift" both use the device's Ratchet
+        // mode; the difference is whether auto-disengage is on,
+        // which is what the threshold byte controls.
+        _ => 2,
+    };
+
+    // auto_disengage: 1..254 = N/4 turns/sec, 255 = always engaged.
+    // When SmartShift is OFF (or mode == "ratchet"), pin to 255 so
+    // the wheel never auto-disengages. Otherwise scale the user's
+    // 1..100 threshold linearly into the 1..254 device range.
+    let auto_disengage: u8 = if !scroll.smartshift || scroll.mode == "ratchet" {
+        255
+    } else {
+        let t = scroll.smartshift_threshold.clamp(1, 100);
+        let scaled = ((t as f32 / 100.0) * 254.0).round().clamp(1.0, 254.0);
+        scaled as u8
+    };
+
+    // Don't touch the on-device default — pass 0 ("no change").
+    match manager.set_smartshift(wheel_mode, auto_disengage, 0) {
+        Ok(_) => {
+            tracing::info!(
+                wheel_mode,
+                auto_disengage,
+                requested_mode = %scroll.mode,
+                smartshift = scroll.smartshift,
+                "Applied SmartShift / wheel mode to device"
+            );
+        }
+        Err(e) => {
+            tracing::warn!(
+                error = ?e,
+                "SmartShift apply failed (device may be disconnected)"
+            );
+        }
+    }
+}
 
 #[interface(name = "org.kde.juhradialmx.Daemon")]
 impl JuhRadialService {
@@ -133,6 +186,7 @@ impl JuhRadialService {
         match Config::load_default() {
             Ok(new_config) => {
                 let haptic_config = new_config.haptics.clone();
+                let scroll_config = new_config.scroll.clone();
 
                 match self.config.write() {
                     Ok(mut config) => {
@@ -141,6 +195,9 @@ impl JuhRadialService {
                             haptics_enabled = config.haptics.enabled,
                             default_pattern = %config.haptics.default_pattern,
                             theme = %config.theme,
+                            scroll_mode = %config.scroll.mode,
+                            smartshift = config.scroll.smartshift,
+                            pointer_speed = config.pointer.speed,
                             "Configuration reloaded successfully"
                         );
                     }
@@ -161,6 +218,13 @@ impl JuhRadialService {
                             invalid = %haptic_config.per_event.invalid,
                             "Haptic manager updated with new patterns"
                         );
+
+                        // Apply SmartShift / wheel-mode via HID++.
+                        // Best-effort: if the device doesn't support
+                        // SmartShift (older mouse, currently
+                        // disconnected), the call returns
+                        // NotSupported and we just log it.
+                        apply_scroll_to_device(&mut *manager, &scroll_config);
                     }
                     Err(e) => {
                         tracing::error!(error = %e, "Failed to lock haptic manager for update");
@@ -176,6 +240,10 @@ impl JuhRadialService {
             }
         }
     }
+
+    // Helper kept inline as a free function (rather than a method
+    // on impl) so it can run while we hold the haptic_manager lock
+    // without the borrow checker confusing receiver lifetimes.
 
     /// Called by KWin script to report cursor position and show menu
     async fn show_menu_at_cursor(

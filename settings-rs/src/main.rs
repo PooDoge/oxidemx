@@ -18,6 +18,7 @@ mod tabs {
     pub mod settings_page;
     pub mod visuals;
 }
+mod battery;
 mod fonts;
 mod mouse_callouts;
 mod palette;
@@ -170,6 +171,12 @@ pub enum Message {
     SetScrollSmartshift(bool),
     SetScrollSmartshiftThreshold(u32),
     SetScrollMode(String),
+
+    // --- Battery (UPower poll) ---
+    /// Periodic tick — kicks off a UPower probe.
+    BatteryTick,
+    /// Probe finished; latest reading.
+    BatteryUpdate(Option<battery::BatteryStatus>),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -283,6 +290,9 @@ pub struct State {
     /// Currently-selected slot in the radial preview, if any.
     /// Drives the per-slice editor in the Buttons-tab right column.
     pub selected_slice: Option<usize>,
+    /// Latest UPower battery reading. None until the first poll
+    /// completes (or if UPower / a Logitech mouse aren't around).
+    pub battery: Option<battery::BatteryStatus>,
     /// Shared rasterised icon cache (XDG resolver + tinting). Lives
     /// at State level so it persists across re-renders and across
     /// theme changes (colours change → new cache entries; old
@@ -316,6 +326,7 @@ impl Default for State {
             iced_handles: std::rc::Rc::new(std::cell::RefCell::new(
                 std::collections::HashMap::new(),
             )),
+            battery: None,
         }
     }
 }
@@ -356,8 +367,13 @@ impl State {
     }
 }
 
-fn boot() -> State {
-    State::default()
+fn boot() -> (State, Task<Message>) {
+    // Kick off an initial battery probe immediately on launch so
+    // the indicator doesn't sit blank for 30 s.
+    (
+        State::default(),
+        Task::perform(battery::poll(), Message::BatteryUpdate),
+    )
 }
 
 fn update(state: &mut State, message: Message) -> Task<Message> {
@@ -640,6 +656,13 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             state.touch();
             Task::none()
         }
+
+        // --- Battery ---
+        Message::BatteryTick => Task::perform(battery::poll(), Message::BatteryUpdate),
+        Message::BatteryUpdate(s) => {
+            state.battery = s;
+            Task::none()
+        }
     }
 }
 
@@ -721,6 +744,8 @@ fn header_view(state: &State) -> Element<'_, Message> {
                 .style(style::text_faint(pal)),
             Space::new().width(Length::Fixed(16.0)),
             chip(state, "MX MASTER 4"),
+            Space::new().width(Length::Fixed(10.0)),
+            battery::widget(pal, state.battery, 86.0),
             Space::new().width(Length::Fill),
             button(text("Exit").size(12))
                 .style(style::btn_secondary(pal))
@@ -822,7 +847,13 @@ fn footer_view(state: &State) -> Element<'_, Message> {
 // ============================================================================
 
 fn subscription(_state: &State) -> Subscription<Message> {
-    let mut subs = vec![iced::time::every(Duration::from_millis(200)).map(|_| Message::SaveTick)];
+    let mut subs = vec![
+        iced::time::every(Duration::from_millis(200)).map(|_| Message::SaveTick),
+        // UPower poll — 30 s is plenty for steady state. The first
+        // probe fires from `boot()` so the indicator isn't blank
+        // for the full 30 s after launch.
+        iced::time::every(Duration::from_secs(30)).map(|_| Message::BatteryTick),
+    ];
     if FOCUS_RX.get().is_some() {
         // The singleton handshake gave us a receiver — wire it in
         // so subsequent `juhradial-settings` invocations call

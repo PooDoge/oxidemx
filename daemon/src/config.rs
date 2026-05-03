@@ -287,9 +287,79 @@ pub struct Config {
     #[serde(default)]
     pub buttons: ButtonsConfig,
 
+    /// Pointer feel — speed + acceleration. Mirrors the legacy
+    /// Python overlay's `pointer.*` keys + the new
+    /// `juhradial_shared::PointerConfig`.
+    #[serde(default)]
+    pub pointer: PointerConfig,
+
+    /// Scroll wheel behaviour — natural / smooth / SmartShift /
+    /// wheel mode. Same shape as `juhradial_shared::ScrollConfig`.
+    #[serde(default)]
+    pub scroll: ScrollConfig,
+
     /// Configuration file path (not serialized)
     #[serde(skip)]
     pub config_path: Option<PathBuf>,
+}
+
+/// Pointer settings persisted under `pointer` in config.json. The
+/// settings UI writes these via `juhradial_shared::PointerConfig`;
+/// the daemon reads them here to drive its (still-TODO) device-
+/// side apply path.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PointerConfig {
+    #[serde(default = "default_pointer_speed")]
+    pub speed: u32,
+    #[serde(default = "default_true")]
+    pub acceleration: bool,
+}
+
+fn default_pointer_speed() -> u32 {
+    10
+}
+
+impl Default for PointerConfig {
+    fn default() -> Self {
+        PointerConfig {
+            speed: default_pointer_speed(),
+            acceleration: true,
+        }
+    }
+}
+
+/// Scroll settings persisted under `scroll` in config.json.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ScrollConfig {
+    #[serde(default)]
+    pub natural: bool,
+    #[serde(default = "default_true")]
+    pub smooth: bool,
+    #[serde(default = "default_true")]
+    pub smartshift: bool,
+    #[serde(default = "default_smartshift_threshold")]
+    pub smartshift_threshold: u32,
+    #[serde(default = "default_scroll_mode")]
+    pub mode: String,
+}
+
+fn default_smartshift_threshold() -> u32 {
+    50
+}
+fn default_scroll_mode() -> String {
+    "smartshift".to_string()
+}
+
+impl Default for ScrollConfig {
+    fn default() -> Self {
+        ScrollConfig {
+            natural: false,
+            smooth: true,
+            smartshift: true,
+            smartshift_threshold: default_smartshift_threshold(),
+            mode: default_scroll_mode(),
+        }
+    }
 }
 
 fn default_theme() -> String {
@@ -303,6 +373,8 @@ impl Default for Config {
             theme: default_theme(),
             blur_enabled: true,
             buttons: ButtonsConfig::default(),
+            pointer: PointerConfig::default(),
+            scroll: ScrollConfig::default(),
             config_path: None,
         }
     }
