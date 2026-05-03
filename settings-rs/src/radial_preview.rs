@@ -16,9 +16,13 @@
 //! slot under the release point.
 
 use crate::palette::Palette;
-use iced::widget::canvas::{self, path::Builder, Frame, Geometry, Path, Stroke, Text};
+use iced::widget::canvas::{self, path::Builder, Frame, Geometry, Image, Path, Stroke, Text};
+use iced::widget::image::Handle;
 use iced::{mouse, Color, Length, Point, Rectangle, Renderer, Theme};
+use juhradial_icons::{IconCache, RasterIcon};
 use juhradial_shared::{ActionKind, Slice};
+use std::cell::RefCell;
+use std::collections::HashMap;
 
 const N_SLICES: usize = 8;
 const SLICE_DEG: f32 = 360.0 / N_SLICES as f32;
@@ -45,11 +49,54 @@ pub struct InteractionState {
 
 /// Painter for the radial preview. Holds owned colour + slice data
 /// so it can be recreated cheaply per render without borrowing
-/// from State.
+/// from State. The icon cache is wrapped in `Rc<RefCell<…>>` so
+/// repeated draws share their resolved + tinted icons (the iced
+/// canvas program is `&self`, so we need interior mutability).
 pub struct RadialPreview {
     pub slices: Vec<Slice>,
     pub selected: Option<usize>,
     pub palette: Palette,
+    pub icons: std::rc::Rc<IconCache>,
+    pub iced_handles: std::rc::Rc<RefCell<HashMap<IconKey, Handle>>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct IconKey {
+    source: String,
+    size: u32,
+    color: u32,
+}
+
+impl RadialPreview {
+    /// Resolve the slice's icon to an iced Handle, going through
+    /// the shared rasterised cache and a per-process iced handle
+    /// cache to avoid re-uploading pixels per frame.
+    fn resolve_icon(&self, source: &str, size_px: u32, tint: Color) -> Option<Handle> {
+        if source.is_empty() || size_px == 0 {
+            return None;
+        }
+        let color = pack_color((tint.r, tint.g, tint.b, tint.a));
+        let key = IconKey {
+            source: source.to_string(),
+            size: size_px,
+            color,
+        };
+        if let Some(h) = self.iced_handles.borrow().get(&key) {
+            return Some(h.clone());
+        }
+        let icon: RasterIcon =
+            self.icons.resolve(source, size_px, (tint.r, tint.g, tint.b, tint.a))?;
+        let handle = Handle::from_rgba(icon.size, icon.size, icon.rgba);
+        self.iced_handles
+            .borrow_mut()
+            .insert(key, handle.clone());
+        Some(handle)
+    }
+}
+
+fn pack_color((r, g, b, a): (f32, f32, f32, f32)) -> u32 {
+    let to_u8 = |v: f32| (v.clamp(0.0, 1.0) * 255.0) as u32;
+    (to_u8(a) << 24) | (to_u8(r) << 16) | (to_u8(g) << 8) | to_u8(b)
 }
 
 impl<Message: Clone> canvas::Program<Message> for RadialPreview
@@ -154,6 +201,7 @@ where
                 pal,
                 self.selected == Some(slot),
                 st.drag_from == Some(slot),
+                self,
             );
         }
 
@@ -166,6 +214,27 @@ where
                 .with_color(with_alpha(pal.accent_dim, 0.7))
                 .with_width(1.5),
         );
+
+        // Centre label — show the selected slice's name (or the
+        // currently-dragged slice's name as a stronger feedback
+        // hint). Mirrors the legacy overlay's centre text. Truncate
+        // to ~14 chars to stop long labels from spilling outside
+        // the puck.
+        let center_text = st
+            .drag_from
+            .or(self.selected)
+            .and_then(|i| self.slices.get(i))
+            .map(|s| short_label(&s.label));
+        if let Some(label) = center_text {
+            let approx_w = label.chars().count() as f32 * 6.5;
+            frame.fill_text(Text {
+                content: label,
+                position: Point::new(center.x - approx_w / 2.0, center.y - 8.0),
+                color: pal.text,
+                size: 13.0.into(),
+                ..Text::default()
+            });
+        }
 
         // Drag ghost — render the dragged slice's chip at the
         // cursor so the user gets clear feedback.
@@ -208,6 +277,7 @@ fn draw_slot(
     pal: &Palette,
     selected: bool,
     being_dragged: bool,
+    painter: &RadialPreview,
 ) {
     let start_deg = slot as f32 * SLICE_DEG - SLICE_DEG / 2.0 - 90.0;
     let end_deg = start_deg + SLICE_DEG;
@@ -243,40 +313,52 @@ fn draw_slot(
         center.x + icon_r * icon_angle.cos(),
         center.y + icon_r * icon_angle.sin(),
     );
-    let bg_radius = (outer_r - inner_r) * 0.32;
+    // Icon disc — 36 % of the wedge thickness fits inside the slot
+    // without crowding adjacent slices.
+    let bg_radius = (outer_r - inner_r) * 0.36;
     if !being_dragged {
         let bg = Path::circle(icon_pos, bg_radius);
         if let Some(s) = slice {
             let (r, g, b) = slice_color(pal, s);
-            frame.fill(&bg, Color::from_rgba(r, g, b, 0.85));
+            frame.fill(&bg, Color::from_rgba(r, g, b, 0.92));
             frame.stroke(
                 &bg,
                 Stroke::default()
                     .with_color(Color::from_rgba(0.0, 0.0, 0.0, 0.35))
                     .with_width(1.0),
             );
-            // Pick a recognisable glyph: prefer one mapped from the
-            // slice's freedesktop icon name, fall back to the
-            // action kind. Real SVG/PNG icon rendering is a
-            // separate follow-up (would need an XDG resolver
-            // similar to overlay-rs/src/render/icons.rs).
-            let glyph = glyph_for_slice(s);
-            // Wider chars (emoji) need a smaller font so they don't
-            // spill outside the disc; ASCII glyphs can go bigger.
-            let (size, x_off, y_off) = if glyph.chars().count() > 1 {
-                (12.0, 8.0, 7.0)
-            } else if glyph.chars().any(|c| (c as u32) > 0x2000) {
-                (14.0, 7.0, 8.0)
+            // Try to render the slice's actual freedesktop icon —
+            // tinted white so it pops against the slice colour.
+            // Falls back to a unicode glyph if the resolver can't
+            // find an SVG/PNG (icon name unknown / no theme).
+            // Sized to ~85 % of the disc diameter so there's a
+            // visible coloured ring around the glyph.
+            let glyph_size = bg_radius * 0.95;
+            let icon_size_px = glyph_size.round().max(8.0) as u32;
+            if let Some(handle) = painter.resolve_icon(s.icon.as_str(), icon_size_px, Color::WHITE)
+            {
+                let bounds = Rectangle::new(
+                    Point::new(icon_pos.x - glyph_size / 2.0, icon_pos.y - glyph_size / 2.0),
+                    iced::Size::new(glyph_size, glyph_size),
+                );
+                frame.draw_image(bounds, Image::new(handle));
             } else {
-                (16.0, 5.0, 8.0)
-            };
-            frame.fill_text(Text {
-                content: glyph.to_string(),
-                position: Point::new(icon_pos.x - x_off, icon_pos.y - y_off),
-                color: Color::WHITE,
-                size: size.into(),
-                ..Text::default()
-            });
+                // Fallback unicode glyph — bigger than before so
+                // it actually reads at the new disc size.
+                let glyph = glyph_for_slice(s);
+                let size = bg_radius * 0.95;
+                let approx_w = glyph.chars().count() as f32 * size * 0.55;
+                frame.fill_text(Text {
+                    content: glyph.to_string(),
+                    position: Point::new(
+                        icon_pos.x - approx_w / 2.0,
+                        icon_pos.y - size / 2.0,
+                    ),
+                    color: Color::WHITE,
+                    size: size.into(),
+                    ..Text::default()
+                });
+            }
         } else {
             frame.fill(&bg, with_alpha(pal.surface1, 0.7));
         }
@@ -480,12 +562,16 @@ fn hit_slot(p: Point, center: Point, bounds: Rectangle) -> Option<usize> {
     Some(((angle + SLICE_DEG / 2.0) / SLICE_DEG) as usize % N_SLICES)
 }
 
-/// Convenience: ready-to-use Canvas widget with a sensible default
-/// size for the Buttons tab right column.
+/// Convenience: ready-to-use Canvas widget. The icon + handle
+/// caches are passed in by the parent (typically owned by `State`)
+/// so they survive across re-renders — recreating the cache every
+/// frame would force every icon back through resvg/tiny-skia.
 pub fn radial_preview_widget<'a, Message>(
     palette: &Palette,
     slices: &[Slice],
     selected: Option<usize>,
+    icons: std::rc::Rc<IconCache>,
+    iced_handles: std::rc::Rc<RefCell<HashMap<IconKey, Handle>>>,
     size_px: f32,
 ) -> iced::Element<'a, Message>
 where
@@ -495,6 +581,8 @@ where
         palette: palette.clone(),
         slices: slices.to_vec(),
         selected,
+        icons,
+        iced_handles,
     };
     iced::widget::canvas(painter)
         .width(Length::Fixed(size_px))

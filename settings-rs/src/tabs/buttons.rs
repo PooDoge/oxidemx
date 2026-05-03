@@ -153,6 +153,8 @@ fn radial_preview_card(state: &State) -> Element<'_, Message> {
         pal,
         &state.config.radial_menu.slices,
         state.selected_slice,
+        state.icons.clone(),
+        state.iced_handles.clone(),
         320.0,
     );
     container(

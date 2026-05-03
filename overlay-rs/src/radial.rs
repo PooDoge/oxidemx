@@ -627,6 +627,28 @@ impl<'a> canvas::Program<crate::app::Message> for Painter<'a> {
             );
         }
 
+        // Centre label: prefer the hovered submenu item (deepest
+        // selection wins) → the hovered top-level slice → nothing.
+        let center_label: Option<String> = self
+            .state
+            .submenu
+            .as_ref()
+            .and_then(|sub| {
+                sub.highlighted.and_then(|child_idx| {
+                    self.state
+                        .slices
+                        .get(sub.parent)
+                        .and_then(|p| p.submenu.get(child_idx))
+                        .map(|s| s.label.clone())
+                })
+            })
+            .or_else(|| {
+                self.state
+                    .target_slice
+                    .and_then(|i| self.state.slices.get(i))
+                    .map(|s| s.label.clone())
+            });
+
         crate::render::slices::draw_center(
             &mut frame,
             center,
@@ -634,6 +656,8 @@ impl<'a> canvas::Program<crate::app::Message> for Painter<'a> {
             palette,
             mopacity,
             bg_op,
+            center_label.as_deref(),
+            self.state.visuals.center_label_size,
         );
 
         // Submenu pop-out (drawn AFTER the centre so its sub-items

@@ -12,6 +12,7 @@ path = "src/main.rs"
 
 [dependencies]
 juhradial-shared = { path = "../juhradial-shared" }
+juhradial-icons = { path = "../juhradial-icons" }
 
 # iced 0.14 — same toolkit as the overlay so we share render
 # tech and don't drag in a separate UI dep tree. Standard widgets

@@ -285,9 +285,10 @@ pub fn draw_submenu(
 }
 
 /// Centre puck — small filled circle with stroked accent ring,
-/// drawn over the slices. Ports `_draw_center` from the Python
-/// overlay (centre text overlay lands in a follow-up commit when
-/// Pango/iced text rendering is wired in).
+/// optionally with a label drawn inside (the hovered slice's name).
+/// Ports `_draw_center` from the Python overlay; the centre-text
+/// rendering is the long-promised "/* text overlay lands in a
+/// follow-up */" finally landing here.
 pub fn draw_center(
     frame: &mut Frame,
     center: Point,
@@ -295,6 +296,8 @@ pub fn draw_center(
     palette: &ThemeColors,
     menu_opacity: f32,
     bg_opacity: f32,
+    label: Option<&str>,
+    label_size: f32,
 ) {
     let mo = menu_opacity.clamp(0.0, 1.0);
     let bgo = bg_opacity.clamp(0.0, 1.0);
@@ -306,6 +309,35 @@ pub fn draw_center(
             .with_color(rgba(&palette.accent_dim, (140.0 / 255.0) * mo * bgo))
             .with_width(2.0),
     );
+
+    if let Some(text) = label {
+        if !text.is_empty() {
+            // Truncate aggressively so long labels don't run off the
+            // puck. The puck is ~90 px in diameter at the default
+            // CENTER_ZONE_RADIUS=45, so ~10 chars max keeps
+            // everything inside.
+            let max_chars = ((radius * 2.0 / (label_size * 0.55)).max(4.0)) as usize;
+            let display: String = if text.chars().count() > max_chars {
+                let mut out: String = text.chars().take(max_chars.saturating_sub(1)).collect();
+                out.push('…');
+                out
+            } else {
+                text.to_string()
+            };
+            let approx_w = display.chars().count() as f32 * label_size * 0.55;
+            let (tr, tg, tb, _) = parse_hex_rgba(&palette.text).unwrap_or((1.0, 1.0, 1.0, 1.0));
+            frame.fill_text(iced::widget::canvas::Text {
+                content: display,
+                position: iced::Point::new(
+                    center.x - approx_w / 2.0,
+                    center.y - label_size / 2.0,
+                ),
+                color: iced::Color::from_rgba(tr as f32, tg as f32, tb as f32, mo),
+                size: label_size.into(),
+                ..iced::widget::canvas::Text::default()
+            });
+        }
+    }
 }
 
 // =============================================================================

@@ -19,6 +19,7 @@
 resolver = "2"
 members = [
     "daemon",
+    "juhradial-icons",
     "juhradial-shared",
     "overlay-rs",
     "settings-rs",

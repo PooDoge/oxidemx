@@ -71,6 +71,18 @@ pub struct VisualSettings {
     /// Useful for users who find the hover flash too loud.
     #[serde(default = "default_slice_highlight_opacity")]
     pub slice_highlight_opacity: f32,
+
+    /// Font size (px) for the centre-puck label that shows the
+    /// currently-hovered slice's name. 0 disables the label
+    /// entirely; sensible range ~10-20.
+    #[serde(default = "default_center_label_size")]
+    pub center_label_size: f32,
+
+    /// Optional font family override for the centre label and
+    /// (future) other rendered text. Empty = iced's default
+    /// system font.
+    #[serde(default)]
+    pub font_family: String,
 }
 
 fn default_menu_bg_opacity() -> f32 {
@@ -79,12 +91,17 @@ fn default_menu_bg_opacity() -> f32 {
 fn default_slice_highlight_opacity() -> f32 {
     1.0
 }
+fn default_center_label_size() -> f32 {
+    13.0
+}
 
 impl Default for VisualSettings {
     fn default() -> Self {
         VisualSettings {
             menu_background_opacity: default_menu_bg_opacity(),
             slice_highlight_opacity: default_slice_highlight_opacity(),
+            center_label_size: default_center_label_size(),
+            font_family: String::new(),
         }
     }
 }

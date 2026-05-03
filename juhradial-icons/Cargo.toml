@@ -1,0 +1,18 @@
+[package]
+name = "juhradial-icons"
+version = "0.0.1"
+edition = "2021"
+description = "XDG icon-theme resolver + SVG/PNG rasteriser + tinting (toolkit-agnostic)"
+license = "GPL-3.0"
+
+[lib]
+name = "juhradial_icons"
+path = "src/lib.rs"
+
+[dependencies]
+# Toolkit-free: this crate returns raw RGBA + size so iced (overlay
+# + settings) and any future GTK fallback can wrap it in their own
+# image types.
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+resvg = "0.44"
+tiny-skia = "0.11"

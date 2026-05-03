@@ -266,6 +266,16 @@ pub struct State {
     /// Currently-selected slot in the radial preview, if any.
     /// Drives the per-slice editor in the Buttons-tab right column.
     pub selected_slice: Option<usize>,
+    /// Shared rasterised icon cache (XDG resolver + tinting). Lives
+    /// at State level so it persists across re-renders and across
+    /// theme changes (colours change → new cache entries; old
+    /// entries stay for free).
+    pub icons: std::rc::Rc<juhradial_icons::IconCache>,
+    /// Iced-Handle cache layered on top — saves the GPU-upload step
+    /// every render, keyed by (source, size, colour).
+    pub iced_handles: std::rc::Rc<
+        std::cell::RefCell<std::collections::HashMap<radial_preview::IconKey, iced::widget::image::Handle>>,
+    >,
 }
 
 impl Default for State {
@@ -285,6 +295,10 @@ impl Default for State {
             saved_pending: false,
             status: String::new(),
             selected_slice: None,
+            icons: std::rc::Rc::new(juhradial_icons::IconCache::new()),
+            iced_handles: std::rc::Rc::new(std::cell::RefCell::new(
+                std::collections::HashMap::new(),
+            )),
         }
     }
 }
