@@ -4,19 +4,80 @@
 //! This must be a single `#[interface]` impl block per zbus requirements.
 
 use zbus::{interface, object_server::SignalEmitter, fdo};
-use crate::config::{Config, ScrollConfig};
+use crate::config::{Config, PointerConfig, ScrollConfig};
 use crate::hidpp::{HapticEvent, HapticManager};
 use crate::macros::events_to_actions;
 use super::service::JuhRadialService;
 
 /// True iff any field that actually drives the HID++ SmartShift
-/// write differs between the two configs. Smooth-scroll + natural-
-/// scroll don't go through HID++, so changes there don't trigger
-/// a device write.
-fn scroll_changed(a: &ScrollConfig, b: &ScrollConfig) -> bool {
+/// write differs between the two configs.
+fn scroll_smartshift_changed(a: &ScrollConfig, b: &ScrollConfig) -> bool {
     a.mode != b.mode
         || a.smartshift != b.smartshift
         || a.smartshift_threshold != b.smartshift_threshold
+}
+
+/// True iff any field that needs a `gsettings` write differs.
+/// Natural-scroll lives here (GNOME's
+/// `org.gnome.desktop.peripherals.mouse natural-scroll`); smooth
+/// scrolling is compositor-level and not exposed via gsettings.
+fn scroll_gsettings_changed(a: &ScrollConfig, b: &ScrollConfig) -> bool {
+    a.natural != b.natural
+}
+
+fn pointer_changed(a: &PointerConfig, b: &PointerConfig) -> bool {
+    a.speed != b.speed || a.acceleration != b.acceleration
+}
+
+/// Apply pointer + scroll preferences to GNOME via `gsettings`.
+/// No-op (logs a debug line) when gsettings isn't available — KDE
+/// + COSMIC have their own paths and aren't wired yet.
+fn apply_pointer_to_gnome(pointer: &PointerConfig) {
+    // gsettings expects a double in [-1.0, 1.0] for `speed`.
+    // Map our 1..20 dial linearly: 10 → 0, 1 → -1, 20 → 1.
+    let speed = ((pointer.speed.clamp(1, 20) as f64) - 10.0) / 10.0;
+    run_gsettings(
+        "org.gnome.desktop.peripherals.mouse",
+        "speed",
+        &format!("{speed:.3}"),
+    );
+    let accel_profile = if pointer.acceleration { "default" } else { "flat" };
+    run_gsettings(
+        "org.gnome.desktop.peripherals.mouse",
+        "accel-profile",
+        &format!("'{accel_profile}'"),
+    );
+}
+
+fn apply_scroll_to_gnome(scroll: &ScrollConfig) {
+    run_gsettings(
+        "org.gnome.desktop.peripherals.mouse",
+        "natural-scroll",
+        if scroll.natural { "true" } else { "false" },
+    );
+}
+
+fn run_gsettings(schema: &str, key: &str, value: &str) {
+    use std::process::{Command, Stdio};
+    let result = Command::new("gsettings")
+        .args(["set", schema, key, value])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn();
+    match result {
+        Ok(child) => {
+            // Don't block — fire and forget. Reaping happens via
+            // the OS once the child exits.
+            std::mem::drop(child);
+            tracing::info!(schema, key, value, "Applied gsettings");
+        }
+        Err(e) => {
+            // First failure is enough to know — debug-level so we
+            // don't spam on non-GNOME systems.
+            tracing::debug!(error = %e, schema, key, "gsettings unavailable");
+        }
+    }
 }
 
 /// Translate the user's `ScrollConfig` into a HID++ SmartShift call
@@ -197,19 +258,21 @@ impl JuhRadialService {
             Ok(new_config) => {
                 let haptic_config = new_config.haptics.clone();
                 let new_scroll = new_config.scroll.clone();
+                let new_pointer = new_config.pointer.clone();
 
-                // Snapshot the previous scroll config so we only
-                // re-issue the HID++ SmartShift write when the
-                // user actually changed those fields. The settings
-                // GUI autosaves on every keystroke; without this
-                // gate we'd flood the mouse with redundant HID++
-                // commands and (per a real-world incident) put it
-                // in a state where the cursor freezes.
-                let prev_scroll = self
+                // Snapshot the previous scroll + pointer configs so
+                // we only re-issue device / gsettings writes when
+                // the user actually changed those fields. The
+                // settings GUI autosaves on every keystroke;
+                // without these gates we'd flood the mouse with
+                // redundant HID++ commands (which froze the cursor
+                // in a prior incident) and shell out to gsettings
+                // dozens of times per minute.
+                let (prev_scroll, prev_pointer) = self
                     .config
                     .read()
                     .ok()
-                    .map(|c| c.scroll.clone())
+                    .map(|c| (c.scroll.clone(), c.pointer.clone()))
                     .unwrap_or_default();
 
                 match self.config.write() {
@@ -243,15 +306,15 @@ impl JuhRadialService {
                             "Haptic manager updated with new patterns"
                         );
 
-                        // Only apply if the scroll-relevant fields
-                        // actually changed. Repeated identical HID++
-                        // SmartShift writes have been observed to
-                        // wedge the device.
-                        if scroll_changed(&prev_scroll, &new_scroll) {
+                        // Only apply if the SmartShift-relevant
+                        // fields actually changed. Repeated
+                        // identical HID++ writes wedged the device
+                        // in a prior incident.
+                        if scroll_smartshift_changed(&prev_scroll, &new_scroll) {
                             apply_scroll_to_device(&mut *manager, &new_scroll);
                         } else {
                             tracing::debug!(
-                                "Scroll config unchanged — skipping HID++ apply"
+                                "Scroll SmartShift config unchanged — skipping HID++ apply"
                             );
                         }
                     }
@@ -259,6 +322,17 @@ impl JuhRadialService {
                         tracing::error!(error = %e, "Failed to lock haptic manager for update");
                         return Err(fdo::Error::Failed(format!("Haptic manager lock error: {}", e)));
                     }
+                }
+
+                // GNOME-side application via gsettings — pointer
+                // speed/acceleration + natural-scroll. Same
+                // change-gating logic so a settings-edit storm
+                // doesn't fork-bomb gsettings.
+                if pointer_changed(&prev_pointer, &new_pointer) {
+                    apply_pointer_to_gnome(&new_pointer);
+                }
+                if scroll_gsettings_changed(&prev_scroll, &new_scroll) {
+                    apply_scroll_to_gnome(&new_scroll);
                 }
 
                 Ok(())

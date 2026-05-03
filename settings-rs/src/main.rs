@@ -13,6 +13,7 @@ mod tabs {
     pub mod buttons;
     pub mod devices;
     pub mod haptics;
+    pub mod macros;
     pub mod placeholder;
     pub mod scroll;
     pub mod settings_page;
@@ -180,6 +181,11 @@ pub enum Message {
     BatteryTick,
     /// Probe finished; latest reading.
     BatteryUpdate(Option<battery::BatteryStatus>),
+
+    // --- Macros tab ---
+    RefreshMacros,
+    OpenMacrosFolder,
+    DeleteMacro(String),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -296,6 +302,9 @@ pub struct State {
     /// Latest UPower battery reading. None until the first poll
     /// completes (or if UPower / a Logitech mouse aren't around).
     pub battery: Option<battery::BatteryStatus>,
+    /// Cached list of macros in `~/.config/juhradial/macros/`.
+    /// Refreshed on tab switch + user-triggered Refresh.
+    pub macros: Vec<tabs::macros::MacroSummary>,
     /// Shared rasterised icon cache (XDG resolver + tinting). Lives
     /// at State level so it persists across re-renders and across
     /// theme changes (colours change → new cache entries; old
@@ -330,6 +339,7 @@ impl Default for State {
                 std::collections::HashMap::new(),
             )),
             battery: None,
+            macros: tabs::macros::list(),
         }
     }
 }
@@ -383,6 +393,11 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
     match message {
         Message::SwitchTab(t) => {
             state.tab = t;
+            // Refresh tab-specific caches on entry. Cheap when the
+            // tab doesn't need it.
+            if t == Tab::Macros {
+                state.macros = tabs::macros::list();
+            }
             Task::none()
         }
         Message::SetVisual(field, v) => {
@@ -671,6 +686,35 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             state.battery = s;
             Task::none()
         }
+
+        // --- Macros ---
+        Message::RefreshMacros => {
+            state.macros = tabs::macros::list();
+            Task::none()
+        }
+        Message::OpenMacrosFolder => {
+            if let Some(dir) = tabs::macros::macros_dir() {
+                let _ = std::fs::create_dir_all(&dir);
+                let _ = std::process::Command::new("xdg-open")
+                    .arg(&dir)
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .spawn();
+            }
+            Task::none()
+        }
+        Message::DeleteMacro(id) => {
+            match tabs::macros::delete_macro(&id) {
+                Ok(_) => {
+                    state.status = format!("Deleted macro {id}");
+                    state.macros = tabs::macros::list();
+                }
+                Err(e) => {
+                    state.status = format!("Delete failed: {e}");
+                }
+            }
+            Task::none()
+        }
     }
 }
 
@@ -695,11 +739,7 @@ fn view(state: &State) -> Element<'_, Message> {
             "Flow",
             "Cross-machine cursor-and-clipboard hand-off. Coming soon.",
         ),
-        Tab::Macros => tabs::placeholder::view(state, 
-            "Macros",
-            "Record and edit macros that slices can dispatch via the daemon. \
-             Coming soon.",
-        ),
+        Tab::Macros => tabs::macros::view(state),
         Tab::Gaming => tabs::placeholder::view(state, 
             "Gaming",
             "Per-game profiles + DPI overrides + low-latency mode. Coming soon.",
