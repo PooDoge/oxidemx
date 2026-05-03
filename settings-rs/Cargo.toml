@@ -29,3 +29,10 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # Tokio for iced::time::every (debounced auto-save) — same dep as
 # the overlay.
 tokio = { version = "1", features = ["rt", "macros", "time"] }
+
+# Singleton enforcement: the first instance claims a well-known
+# D-Bus name + serves a `Focus` method; second instance sees the
+# name's taken, calls Focus on the existing one, exits.
+zbus = "5"
+async-channel = "2"
+futures-util = "0.3"

@@ -16,6 +16,7 @@ mod tabs {
     pub mod visuals;
 }
 mod persist;
+mod singleton;
 mod widgets;
 
 use iced::widget::{button, column, container, row, rule, scrollable, text, Space};
@@ -23,8 +24,15 @@ use iced::{Element, Length, Subscription, Task};
 use juhradial_shared::{
     AnimationConfig, AppConfig, ElementAnimation, TransitionConfig, VisualSettings,
 };
+use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 use tracing::{info, warn};
+
+/// Receiver for D-Bus Focus events. Set once during main() after
+/// the singleton handshake; `subscription()` reads it to wire the
+/// focus stream into iced. Only `Some` when we're the primary
+/// instance — secondary instances exit before iced starts.
+static FOCUS_RX: OnceLock<async_channel::Receiver<()>> = OnceLock::new();
 
 // ============================================================================
 // Tabs
@@ -104,6 +112,9 @@ pub enum Message {
     SetEasySwitchShortcuts(bool),
     /// Quit the settings window.
     Exit,
+    /// Another `juhradial-settings` invocation called Focus on us
+    /// via D-Bus; raise + focus the window.
+    Focus,
     /// Debounced save tick — fires every 200 ms; if there's an
     /// unsaved edit older than 250 ms we flush to disk.
     SaveTick,
@@ -308,6 +319,15 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             Task::none()
         }
         Message::Exit => iced::window::latest().and_then(iced::window::close),
+        Message::Focus => {
+            // Un-minimize then steal focus. `set_mode(Windowed)`
+            // brings a minimized window back; `gain_focus` then
+            // raises it above siblings.
+            iced::window::latest().and_then(|id| {
+                iced::window::set_mode(id, iced::window::Mode::Windowed)
+                    .chain(iced::window::gain_focus(id))
+            })
+        }
         Message::SaveTick => state.maybe_save().unwrap_or_else(Task::none),
         Message::Saved(Ok(())) => {
             info!("config saved");
@@ -483,7 +503,25 @@ fn footer_view(state: &State) -> Element<'_, Message> {
 // ============================================================================
 
 fn subscription(_state: &State) -> Subscription<Message> {
-    iced::time::every(Duration::from_millis(200)).map(|_| Message::SaveTick)
+    let mut subs = vec![iced::time::every(Duration::from_millis(200)).map(|_| Message::SaveTick)];
+    if FOCUS_RX.get().is_some() {
+        // The singleton handshake gave us a receiver — wire it in
+        // so subsequent `juhradial-settings` invocations call
+        // `Focus` on us and the running window pops to the front.
+        // iced::Subscription::run takes a fn() pointer (no
+        // captures), so the stream builder reads the receiver out
+        // of the OnceLock.
+        subs.push(Subscription::run(focus_subscription_builder).map(|_| Message::Focus));
+    }
+    Subscription::batch(subs)
+}
+
+fn focus_subscription_builder() -> impl futures_util::stream::Stream<Item = ()> {
+    let rx = FOCUS_RX
+        .get()
+        .cloned()
+        .expect("FOCUS_RX present; checked in subscription()");
+    singleton::focus_stream(rx)
 }
 
 fn main() -> iced::Result {
@@ -493,6 +531,26 @@ fn main() -> iced::Result {
                 .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
         )
         .init();
+
+    // Singleton enforcement BEFORE iced starts. If another
+    // settings process is already running, this sends Focus to it
+    // and exits cleanly — the user gets the existing window
+    // raised instead of a duplicate.
+    match singleton::try_acquire_or_focus_existing() {
+        singleton::Acquisition::Primary(rx) => {
+            FOCUS_RX
+                .set(rx)
+                .map_err(|_| ())
+                .expect("FOCUS_RX set once");
+        }
+        singleton::Acquisition::SecondaryFocused => {
+            info!("Existing settings instance focused; exiting.");
+            return Ok(());
+        }
+        singleton::Acquisition::BusUnavailable => {
+            warn!("Session bus unavailable; running without singleton enforcement.");
+        }
+    }
 
     let mut window = iced::window::Settings::default();
     window.size = iced::Size::new(1280.0, 820.0);
