@@ -21,12 +21,91 @@ pub fn view(state: &State) -> Element<'_, Message> {
         .style(style::text_dim(pal)),
         rule::horizontal(1).style(style::rule_style(pal)),
         Space::new().height(Length::Fixed(8.0)),
+        dpi_card(state),
+        Space::new().height(Length::Fixed(12.0)),
         pointer_card(state),
         Space::new().height(Length::Fixed(12.0)),
         scroll_card(state),
     ]
     .spacing(10)
     .into()
+}
+
+// ============================================================================
+// DPI card — live read + write via daemon over D-Bus
+// ============================================================================
+
+fn dpi_card(state: &State) -> Element<'_, Message> {
+    let pal = &state.palette;
+    let dpi = state.daemon.dpi.unwrap_or(1000);
+    let supported = state.daemon.dpi_supported;
+
+    let header = row![
+        text("Sensitivity (DPI)").size(14),
+        Space::new().width(Length::Fill),
+        text(if supported {
+            format!("{dpi}")
+        } else {
+            "—".into()
+        })
+        .size(13)
+        .style(style::text_dim(pal)),
+    ]
+    .align_y(Alignment::Center);
+
+    let body: Element<Message> = if supported {
+        column![
+            text(
+                "Pointer DPI on the device (HID++). Slider applies live \
+                 to the mouse — no daemon reload needed."
+            )
+            .size(11)
+            .style(style::text_dim(pal)),
+            crate::widgets::labeled_int_slider(
+                "DPI",
+                dpi as u32,
+                400..=8000,
+                |v| format!("{v} DPI"),
+                |v| Message::SetDpi(v as u16),
+            ),
+            // Quick presets — each writes immediately.
+            row![
+                preset_button(state, "400", 400),
+                preset_button(state, "800", 800),
+                preset_button(state, "1200", 1200),
+                preset_button(state, "1600", 1600),
+                preset_button(state, "2400", 2400),
+                preset_button(state, "3200", 3200),
+            ]
+            .spacing(6),
+        ]
+        .spacing(10)
+        .into()
+    } else {
+        text(
+            "DPI is not supported on this device, or the daemon \
+             hasn't connected yet. Make sure juhradiald is running \
+             and the mouse is paired via the Bolt receiver.",
+        )
+        .size(12)
+        .style(style::text_dim(pal))
+        .into()
+    };
+
+    container(
+        column![header, rule::horizontal(1).style(style::rule_style(pal)), body].spacing(10),
+    )
+    .padding(14)
+    .style(style::card(pal))
+    .into()
+}
+
+fn preset_button<'a>(state: &'a State, label: &str, value: u16) -> Element<'a, Message> {
+    let pal = &state.palette;
+    iced::widget::button(text(label.to_string()).size(11))
+        .style(style::btn_secondary(pal))
+        .on_press(Message::SetDpi(value))
+        .into()
 }
 
 // ============================================================================

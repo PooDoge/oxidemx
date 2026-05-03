@@ -12,6 +12,7 @@ mod tabs {
     pub mod animation;
     pub mod buttons;
     pub mod devices;
+    pub mod easyswitch;
     pub mod haptics;
     pub mod macros;
     pub mod placeholder;
@@ -20,6 +21,7 @@ mod tabs {
     pub mod visuals;
 }
 mod battery;
+mod daemon;
 mod fonts;
 mod mouse_callouts;
 mod palette;
@@ -186,6 +188,21 @@ pub enum Message {
     RefreshMacros,
     OpenMacrosFolder,
     DeleteMacro(String),
+
+    // --- Daemon snapshot (battery + name + DPI + Easy-Switch) ---
+    DaemonTick,
+    DaemonSnapshotReceived(daemon::DaemonSnapshot),
+
+    // --- DPI (Point & Scroll tab) ---
+    /// User dragged the DPI slider. Fired on release; the change-
+    /// gating is in the daemon's update path.
+    SetDpi(u16),
+    /// Result of the SetDpi async call.
+    DpiSet(Result<(), String>),
+
+    // --- Easy-Switch tab ---
+    SwitchHost(u8),
+    HostSwitched(Result<(), String>),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -305,6 +322,10 @@ pub struct State {
     /// Cached list of macros in `~/.config/juhradial/macros/`.
     /// Refreshed on tab switch + user-triggered Refresh.
     pub macros: Vec<tabs::macros::MacroSummary>,
+    /// Latest snapshot from the daemon — battery, device name,
+    /// DPI, Easy-Switch state. Refreshed on a 5s timer + on tab
+    /// entry where it matters.
+    pub daemon: daemon::DaemonSnapshot,
     /// Shared rasterised icon cache (XDG resolver + tinting). Lives
     /// at State level so it persists across re-renders and across
     /// theme changes (colours change → new cache entries; old
@@ -340,6 +361,7 @@ impl Default for State {
             )),
             battery: None,
             macros: tabs::macros::list(),
+            daemon: daemon::DaemonSnapshot::default(),
         }
     }
 }
@@ -381,11 +403,14 @@ impl State {
 }
 
 fn boot() -> (State, Task<Message>) {
-    // Kick off an initial battery probe immediately on launch so
-    // the indicator doesn't sit blank for 30 s.
+    // Kick off both probes immediately so the indicators aren't
+    // blank for the full poll interval after launch.
     (
         State::default(),
-        Task::perform(battery::poll(), Message::BatteryUpdate),
+        Task::batch([
+            Task::perform(battery::poll(), Message::BatteryUpdate),
+            Task::perform(daemon::poll(), Message::DaemonSnapshotReceived),
+        ]),
     )
 }
 
@@ -715,6 +740,55 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             }
             Task::none()
         }
+
+        // --- Daemon snapshot ---
+        Message::DaemonTick => Task::perform(daemon::poll(), Message::DaemonSnapshotReceived),
+        Message::DaemonSnapshotReceived(snap) => {
+            // Prefer the daemon's battery reading over UPower when
+            // it's present — it's instant rather than UPower's
+            // ~30s lag. Fall back to UPower if daemon battery is
+            // missing.
+            if let Some((p, c)) = snap.battery {
+                state.battery = Some(battery::BatteryStatus {
+                    percent: p,
+                    charging: c,
+                });
+            }
+            state.daemon = snap;
+            Task::none()
+        }
+
+        // --- DPI ---
+        Message::SetDpi(dpi) => {
+            // Optimistic update so the slider doesn't snap back.
+            state.daemon.dpi = Some(dpi);
+            Task::perform(daemon::set_dpi(dpi), Message::DpiSet)
+        }
+        Message::DpiSet(Ok(_)) => {
+            state.status = format!("DPI updated");
+            Task::none()
+        }
+        Message::DpiSet(Err(e)) => {
+            state.status = format!("DPI set failed: {e}");
+            Task::none()
+        }
+
+        // --- Easy-Switch ---
+        Message::SwitchHost(idx) => {
+            if let Some(es) = state.daemon.easy_switch.as_mut() {
+                es.current_host = idx;
+            }
+            Task::perform(daemon::set_host(idx), Message::HostSwitched)
+        }
+        Message::HostSwitched(Ok(_)) => {
+            state.status = format!("Host switched");
+            // Re-poll so we get the device's actual confirmed slot.
+            Task::perform(daemon::poll(), Message::DaemonSnapshotReceived)
+        }
+        Message::HostSwitched(Err(e)) => {
+            state.status = format!("Host switch failed: {e}");
+            Task::none()
+        }
     }
 }
 
@@ -731,10 +805,7 @@ fn view(state: &State) -> Element<'_, Message> {
         Tab::PointScroll => tabs::scroll::view(state),
         Tab::Haptic => tabs::haptics::view(state),
         Tab::Devices => tabs::devices::view(state),
-        Tab::EasySwitch => tabs::placeholder::view(state, 
-            "Easy-Switch",
-            "Configure each Easy-Switch host slot (label, OS icon). Coming soon.",
-        ),
+        Tab::EasySwitch => tabs::easyswitch::view(state),
         Tab::Flow => tabs::placeholder::view(state, 
             "Flow",
             "Cross-machine cursor-and-clipboard hand-off. Coming soon.",
@@ -791,7 +862,15 @@ fn header_view(state: &State) -> Element<'_, Message> {
                 .size(10)
                 .style(style::text_faint(pal)),
             Space::new().width(Length::Fixed(16.0)),
-            chip(state, "MX MASTER 4"),
+            chip(
+                state,
+                &state
+                    .daemon
+                    .device_name
+                    .clone()
+                    .unwrap_or_else(|| "MX MASTER 4".to_string())
+                    .to_uppercase(),
+            ),
             Space::new().width(Length::Fixed(10.0)),
             battery::widget(pal, state.battery, 86.0),
             Space::new().width(Length::Fill),
@@ -901,6 +980,10 @@ fn subscription(_state: &State) -> Subscription<Message> {
         // probe fires from `boot()` so the indicator isn't blank
         // for the full 30 s after launch.
         iced::time::every(Duration::from_secs(30)).map(|_| Message::BatteryTick),
+        // Daemon snapshot — tighter cadence (5 s) since DPI / host
+        // / battery from HID++ are essentially free to query
+        // compared to UPower.
+        iced::time::every(Duration::from_secs(5)).map(|_| Message::DaemonTick),
     ];
     if FOCUS_RX.get().is_some() {
         // The singleton handshake gave us a receiver — wire it in

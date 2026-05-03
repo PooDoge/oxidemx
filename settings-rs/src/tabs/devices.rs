@@ -18,26 +18,31 @@ use iced::{Alignment, Element, Length};
 pub fn view(state: &State) -> Element<'_, Message> {
     let pal = &state.palette;
 
+    let name = state
+        .daemon
+        .device_name
+        .clone()
+        .unwrap_or_else(|| "MX Master 4".to_string());
+    let (battery_pct, status) = match state.daemon.battery {
+        Some((p, _)) => (Some(p as u32), DeviceStatus::Connected),
+        None => match state.battery.map(|b| b.percent) {
+            Some(p) => (Some(p as u32), DeviceStatus::Connected),
+            None => (None, DeviceStatus::Disconnected),
+        },
+    };
+
     column![
         section_header("Devices"),
         text(
             "Paired Logitech devices + battery + transport status. Live \
-             values come from the daemon over D-Bus; static fallbacks are \
-             shown until the daemon's device-info methods are exposed in \
-             juhradial-shared.",
+             values come from the daemon over D-Bus; UPower is used as a \
+             fallback when the daemon battery isn't reported."
         )
         .size(12)
         .style(style::text_dim(pal)),
         rule::horizontal(1).style(style::rule_style(pal)),
         Space::new().height(Length::Fixed(8.0)),
-        device_card(
-            state,
-            "MX Master 4",
-            "Logi Bolt USB",
-            "Logitech",
-            DeviceStatus::Connected,
-            Some(95),
-        ),
+        device_card(state, &name, "Logi Bolt USB", "Logitech", status, battery_pct),
     ]
     .spacing(10)
     .into()
