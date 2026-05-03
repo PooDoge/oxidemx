@@ -317,25 +317,52 @@ fn draw_slot(
     // without crowding adjacent slices.
     let bg_radius = (outer_r - inner_r) * 0.36;
     if !being_dragged {
+        // Replicates overlay-rs/src/render/slices.rs::draw_slice
+        // exactly so the preview reads as the actual menu:
+        //   - icon disc background = surface1 → surface2 lerp
+        //     (brightens when the slot is selected/hovered),
+        //     NOT the slice's colour
+        //   - icon glyph itself is tinted with the slice colour
+        //   - placeholder when the icon resolver misses is a dot
+        //     in the slice colour, again matching the overlay.
         let bg = Path::circle(icon_pos, bg_radius);
         if let Some(s) = slice {
+            // Selection brightens the disc the same way hover does
+            // in the overlay (overlay uses `hl` 0..1; here we use
+            // the binary selected flag).
+            let lift = if selected { 1.0 } else { 0.0 };
+            let s1 = pal.surface1;
+            let s2 = pal.surface2;
+            let disc_bg = Color {
+                r: s1.r + (s2.r - s1.r) * lift,
+                g: s1.g + (s2.g - s1.g) * lift,
+                b: s1.b + (s2.b - s1.b) * lift,
+                a: 230.0 / 255.0 + (25.0 / 255.0) * lift,
+            };
+            frame.fill(&bg, disc_bg);
+
+            // Glow ring on selected — same per-slice "you're
+            // hovering this" affordance as the overlay.
+            if selected {
+                let glow = Path::circle(icon_pos, bg_radius + 2.0);
+                frame.stroke(
+                    &glow,
+                    Stroke::default()
+                        .with_color(Color::from_rgba(1.0, 1.0, 1.0, 40.0 / 255.0))
+                        .with_width(3.0),
+                );
+            }
+
+            // Resolve the slice's freedesktop icon, tinted with
+            // the slice's configured colour. Falls back to a
+            // unicode glyph (also coloured) when the resolver
+            // can't find anything.
             let (r, g, b) = slice_color(pal, s);
-            frame.fill(&bg, Color::from_rgba(r, g, b, 0.92));
-            frame.stroke(
-                &bg,
-                Stroke::default()
-                    .with_color(Color::from_rgba(0.0, 0.0, 0.0, 0.35))
-                    .with_width(1.0),
-            );
-            // Try to render the slice's actual freedesktop icon —
-            // tinted white so it pops against the slice colour.
-            // Falls back to a unicode glyph if the resolver can't
-            // find an SVG/PNG (icon name unknown / no theme).
-            // Sized to ~85 % of the disc diameter so there's a
-            // visible coloured ring around the glyph.
-            let glyph_size = bg_radius * 0.95;
+            let tint = Color::from_rgba(r, g, b, 1.0);
+            let glyph_size = bg_radius * 1.1;
             let icon_size_px = glyph_size.round().max(8.0) as u32;
-            if let Some(handle) = painter.resolve_icon(s.icon.as_str(), icon_size_px, Color::WHITE)
+            if let Some(handle) =
+                painter.resolve_icon(s.icon.as_str(), icon_size_px, tint)
             {
                 let bounds = Rectangle::new(
                     Point::new(icon_pos.x - glyph_size / 2.0, icon_pos.y - glyph_size / 2.0),
@@ -343,8 +370,6 @@ fn draw_slot(
                 );
                 frame.draw_image(bounds, Image::new(handle));
             } else {
-                // Fallback unicode glyph — bigger than before so
-                // it actually reads at the new disc size.
                 let glyph = glyph_for_slice(s);
                 let size = bg_radius * 0.95;
                 let approx_w = glyph.chars().count() as f32 * size * 0.55;
@@ -354,7 +379,7 @@ fn draw_slot(
                         icon_pos.x - approx_w / 2.0,
                         icon_pos.y - size / 2.0,
                     ),
-                    color: Color::WHITE,
+                    color: tint,
                     size: size.into(),
                     ..Text::default()
                 });
