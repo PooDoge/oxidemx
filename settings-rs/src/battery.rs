@@ -142,18 +142,18 @@ impl<Message> canvas::Program<Message> for BatteryPainter {
     ) -> Vec<Geometry> {
         let mut frame = Frame::new(renderer, bounds.size());
 
-        // Layout: leave the right ~30 % for the percentage label so
-        // we get [body][nub][gap][45%] horizontally. The nub is the
-        // small bump at the right end of the battery body.
+        // The whole canvas is the battery icon. The body fills
+        // ~92 % of the width (leaving room for the nub on the
+        // right edge), the nub takes the remaining ~8 %.
         let total_w = bounds.width;
         let total_h = bounds.height;
-        let body_w = total_w * 0.55;
-        let body_h = total_h * 0.7;
-        let body_x = 1.0;
+        let body_w = total_w * 0.90;
+        let body_h = total_h * 0.78;
+        let body_x = 0.5;
         let body_y = (total_h - body_h) / 2.0;
-        let nub_w = body_w * 0.06;
+        let nub_w = total_w * 0.06;
         let nub_h = body_h * 0.45;
-        let nub_x = body_x + body_w;
+        let nub_x = body_x + body_w + 1.0;
         let nub_y = body_y + (body_h - nub_h) / 2.0;
 
         // Outer body.
@@ -191,23 +191,51 @@ impl<Message> canvas::Program<Message> for BatteryPainter {
                 frame.fill(&bar, fill_color);
             }
 
-            // Charging bolt overlay — thin lightning glyph centred
-            // on the body. Drawn as two triangles to read at small
-            // sizes.
-            if s.charging {
-                let cx = body_x + body_w / 2.0;
-                let cy = body_y + body_h / 2.0;
-                let bolt = lightning_path(cx, cy, body_h * 0.4);
-                frame.fill(&bolt, self.text);
-                frame.stroke(
-                    &bolt,
-                    Stroke::default()
-                        .with_color(Color::from_rgba(0.0, 0.0, 0.0, 0.4))
-                        .with_width(0.5),
-                );
-            }
+            // Percentage text — centred on the body, rendered both
+            // black and white-ish so it stays readable over the
+            // coloured fill regardless of palette. Shadow first
+            // (subtle outline), then the main glyph. When
+            // charging we prefix a `⚡` so the lightning is part
+            // of the same centred glyph string (no second-element
+            // layout needed).
+            let prefix = if s.charging { "⚡" } else { "" };
+            let label = if s.percent >= 100 {
+                format!("{prefix}100%")
+            } else {
+                format!("{prefix}{}%", s.percent)
+            };
+            // Sized to ~50 % of body height so 100% (4 chars) stays
+            // inside the body even at small icon widths.
+            let label_size = body_h * 0.55;
+            let approx_w = label.chars().count() as f32 * label_size * 0.55;
+            let cx = body_x + body_w / 2.0 - approx_w / 2.0;
+            let cy = body_y + body_h / 2.0 - label_size * 0.6;
+
+            // Subtle shadow for readability over the colour bar.
+            frame.fill_text(canvas::Text {
+                content: label.clone(),
+                position: Point::new(cx + 0.5, cy + 0.5),
+                color: Color::from_rgba(0.0, 0.0, 0.0, 0.55),
+                size: label_size.into(),
+                ..canvas::Text::default()
+            });
+            // Main glyph — opposite of the body stroke so it stays
+            // visible on dark + light themes.
+            let label_color = if self.stroke == Color::WHITE {
+                Color::WHITE
+            } else {
+                Color::BLACK
+            };
+            frame.fill_text(canvas::Text {
+                content: label,
+                position: Point::new(cx, cy),
+                color: label_color,
+                size: label_size.into(),
+                ..canvas::Text::default()
+            });
+
         } else {
-            // No data — show a single dim diagonal.
+            // No data — single dim diagonal across the body.
             let mut b = Builder::new();
             b.move_to(Point::new(body_x + 2.0, body_y + 2.0));
             b.line_to(Point::new(body_x + body_w - 2.0, body_y + body_h - 2.0));
@@ -219,26 +247,10 @@ impl<Message> canvas::Program<Message> for BatteryPainter {
             );
         }
 
-        // Percentage text at the right.
-        let label_x = nub_x + nub_w + 6.0;
-        let label_y = total_h / 2.0 - total_h * 0.4;
-        let label_size = total_h * 0.65;
-        let label = match self.status {
-            Some(s) if s.percent >= 100 => "100%".to_string(),
-            Some(s) => format!("{:>3}%", s.percent),
-            None => " — ".to_string(),
-        };
-        frame.fill_text(canvas::Text {
-            content: label,
-            position: Point::new(label_x, label_y),
-            color: self.text,
-            size: label_size.into(),
-            ..canvas::Text::default()
-        });
-
         vec![frame.into_geometry()]
     }
 }
+
 
 // ============================================================================
 // Path helpers
@@ -260,16 +272,3 @@ fn rounded_rect(x: f32, y: f32, w: f32, h: f32, r: f32) -> Path {
     b.build()
 }
 
-fn lightning_path(cx: f32, cy: f32, h: f32) -> Path {
-    let half_h = h / 2.0;
-    let w = h * 0.55;
-    let mut b = Builder::new();
-    b.move_to(Point::new(cx - w * 0.1, cy - half_h));
-    b.line_to(Point::new(cx + w * 0.4, cy - half_h * 0.1));
-    b.line_to(Point::new(cx + w * 0.05, cy - half_h * 0.1));
-    b.line_to(Point::new(cx + w * 0.4, cy + half_h));
-    b.line_to(Point::new(cx - w * 0.4, cy + half_h * 0.05));
-    b.line_to(Point::new(cx - w * 0.05, cy + half_h * 0.05));
-    b.close();
-    b.build()
-}

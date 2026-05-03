@@ -79,6 +79,14 @@ impl Tab {
         }
     }
 
+    /// True when the tab's content is still a stub / placeholder
+    /// (no real wiring to the daemon or device yet). Drives the
+    /// `STUB` badge on the sidebar so users can tell at a glance
+    /// which tabs do anything.
+    pub fn is_stub(&self) -> bool {
+        matches!(self, Tab::Flow | Tab::Gaming)
+    }
+
     /// Single-glyph icon shown in the sidebar. Picked to read at
     /// a glance; the legacy UI uses bespoke SVGs which we'll
     /// substitute later when we add an icon resolver here too.
@@ -872,7 +880,10 @@ fn header_view(state: &State) -> Element<'_, Message> {
                     .to_uppercase(),
             ),
             Space::new().width(Length::Fixed(10.0)),
-            battery::widget(pal, state.battery, 86.0),
+            // Battery icon — body + nub fit in the canvas, % text
+            // overlaid on the body. Compact (50 px) since we don't
+            // need to leave room for an external label any more.
+            battery::widget(pal, state.battery, 56.0),
             Space::new().width(Length::Fill),
             button(text("Exit").size(12))
                 .style(style::btn_secondary(pal))
@@ -910,17 +921,27 @@ fn sidebar_view(state: &State) -> Element<'_, Message> {
 }
 
 fn sidebar_button<'a>(state: &'a State, tab: Tab, active: bool) -> Element<'a, Message> {
-    let inner = row![
+    let pal = &state.palette;
+    let mut inner = row![
         text(tab.glyph()).size(13),
         text(tab.label()).size(13),
     ]
     .align_y(iced::Alignment::Center)
     .spacing(12);
 
+    if tab.is_stub() {
+        inner = inner.push(Space::new().width(Length::Fill));
+        inner = inner.push(
+            container(text("STUB").size(8))
+                .padding([1, 5])
+                .style(style::chip(pal)),
+        );
+    }
+
     button(inner)
         .width(Length::Fill)
         .padding([10, 14])
-        .style(style::nav_item(&state.palette, active))
+        .style(style::nav_item(pal, active))
         .on_press(Message::SwitchTab(tab))
         .into()
 }

@@ -203,12 +203,12 @@ fn scroll_card(state: &State) -> Element<'_, Message> {
                 s.natural,
                 Message::SetScrollNatural,
             ),
-            switch_row(
+            stub_switch_row(
                 state,
                 "Smooth scrolling",
-                "Sub-line smoothing instead of ratcheted line steps.",
+                "Compositor-level smoothing — not yet wired to libinput \
+                 / GNOME. Toggle is read-only until that lands.",
                 s.smooth,
-                Message::SetScrollSmooth,
             ),
             switch_row(
                 state,
@@ -251,6 +251,41 @@ fn switch_row<'a>(
         .spacing(2),
         Space::new().width(Length::Fill),
         toggler(on).on_toggle(msg).style(style::toggler_style(pal)),
+    ]
+    .align_y(Alignment::Center)
+    .spacing(12)
+    .into()
+}
+
+/// Same shape as `switch_row` but the toggler has no on_toggle
+/// callback, so iced renders it as disabled. Use this for any
+/// setting whose apply path isn't wired yet — gives users a
+/// visible signal that the control isn't live.
+fn stub_switch_row<'a>(
+    state: &'a State,
+    label: &str,
+    description: &str,
+    on: bool,
+) -> Element<'a, Message> {
+    let pal = &state.palette;
+    row![
+        column![
+            row![
+                text(label.to_string()).size(13),
+                Space::new().width(Length::Fixed(8.0)),
+                container(text("STUB").size(9))
+                    .padding([2, 6])
+                    .style(style::chip(pal)),
+            ]
+            .align_y(Alignment::Center),
+            text(description.to_string())
+                .size(11)
+                .style(style::text_dim(pal)),
+        ]
+        .spacing(2),
+        Space::new().width(Length::Fill),
+        // No on_toggle → iced disables the control.
+        toggler(on).style(style::toggler_style(pal)),
     ]
     .align_y(Alignment::Center)
     .spacing(12)

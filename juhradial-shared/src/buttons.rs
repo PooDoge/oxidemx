@@ -62,6 +62,8 @@ impl ButtonAction {
     }
 
     /// Full enumeration in the order the picker should display.
+    /// `Custom` is intentionally excluded — that variant requires a
+    /// shell-out / per-action editor that isn't built yet.
     pub fn all() -> &'static [ButtonAction] {
         &[
             ButtonAction::RadialMenu,
@@ -83,7 +85,6 @@ impl ButtonAction {
             ButtonAction::ZoomIn,
             ButtonAction::ZoomOut,
             ButtonAction::None,
-            ButtonAction::Custom,
         ]
     }
 }

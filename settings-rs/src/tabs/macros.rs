@@ -78,9 +78,18 @@ pub fn view(state: &State) -> Element<'_, Message> {
     let pal = &state.palette;
     let macros = &state.macros;
 
+    // "Record" button intentionally has no on_press until the
+    // daemon's StartMacroRecording bridge is wired into a UI flow.
+    // iced disables the button visually when on_press is missing,
+    // so users see it's a planned feature, not a working one.
     let header = row![
         section_header("Macros"),
+        Space::new().width(Length::Fixed(12.0)),
+        container(text("RECORDING — COMING SOON").size(9))
+            .padding([2, 6])
+            .style(style::chip(pal)),
         Space::new().width(Length::Fill),
+        button(text("Record").size(11)).style(style::btn_secondary(pal)),
         button(text("Refresh").size(11))
             .style(style::btn_secondary(pal))
             .on_press(Message::RefreshMacros),
