@@ -26,7 +26,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TARGET="$ROOT/target/release"
 RUNDIR="${XDG_RUNTIME_DIR:-/tmp}/juhradial-dev"
 DISTROBOX="${JUHRADIAL_DISTROBOX:-claude_development}"
-LOG_LEVEL="${JUHRADIAL_LOG:-info,juhradial_overlay_rs=debug,juhradial_settings=debug}"
+LOG_LEVEL="${JUHRADIAL_LOG:-info,juhradial_overlay_rs=debug,juhradial_settings=debug,usvg=error}"
 
 mkdir -p "$RUNDIR"
 

@@ -44,10 +44,15 @@ mod theme;
 mod tray;
 
 fn main() -> iced::Result {
+    // Default filter: info-level for our crates, error-only for usvg
+    // (which spams "Failed to parse marker-start value: 'none'." for
+    // every freedesktop icon — the parser warns on perfectly valid
+    // CSS the icons use, and the rendering is unaffected).
+    let default_filter = "info,usvg=error";
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(default_filter)),
         )
         .init();
 

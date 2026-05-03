@@ -844,10 +844,14 @@ fn focus_subscription_builder() -> impl futures_util::stream::Stream<Item = ()> 
 }
 
 fn main() -> iced::Result {
+    // Default filter: info for our crates, error-only for usvg (it
+    // floods at warn level on freedesktop icons that use legitimate
+    // `marker-start="none"` CSS — rendering is unaffected).
+    let default_filter = "info,usvg=error";
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(default_filter)),
         )
         .init();
 
