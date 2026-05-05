@@ -72,6 +72,87 @@ pub struct IconKey {
     color: u32,
 }
 
+/// Install a pre-rasterised `RasterIcon` (from a worker thread)
+/// into the iced_handles cache. Companion to `peek_icon_handle`:
+/// the picker's pre-warmer rasterises icons in tokio (where
+/// `IconCache` can't go because of !Send), then routes the
+/// resulting `RasterIcon` back through a message and calls this
+/// to register the iced `Handle`. Subsequent `peek` calls find
+/// the entry and the cell renders the thumbnail.
+pub fn install_icon_handle(
+    iced_handles: &std::rc::Rc<RefCell<HashMap<IconKey, Handle>>>,
+    source: &str,
+    size_px: u32,
+    tint: Color,
+    icon: RasterIcon,
+) {
+    if source.is_empty() || size_px == 0 {
+        return;
+    }
+    let color = pack_color((tint.r, tint.g, tint.b, tint.a));
+    let key = IconKey {
+        source: source.to_string(),
+        size: size_px,
+        color,
+    };
+    let handle = Handle::from_rgba(icon.size, icon.size, icon.rgba);
+    iced_handles.borrow_mut().insert(key, handle);
+}
+
+/// Cache-only lookup: returns the cached `Handle` if one exists
+/// for `(source, size, tint)`, otherwise `None` *without* doing
+/// any rasterisation. Used by surfaces like the icon picker that
+/// want progressive rendering — first frame shows placeholders,
+/// background work warms the cache, subsequent frames find hits.
+pub fn peek_icon_handle(
+    iced_handles: &std::rc::Rc<RefCell<HashMap<IconKey, Handle>>>,
+    source: &str,
+    size_px: u32,
+    tint: Color,
+) -> Option<Handle> {
+    if source.is_empty() || size_px == 0 {
+        return None;
+    }
+    let color = pack_color((tint.r, tint.g, tint.b, tint.a));
+    let key = IconKey {
+        source: source.to_string(),
+        size: size_px,
+        color,
+    };
+    iced_handles.borrow().get(&key).cloned()
+}
+
+/// Resolve an XDG icon name (or absolute path) into an iced
+/// `Handle`, going through the shared rasterised cache and the
+/// per-process iced handle cache. Same caching path as the
+/// radial preview — extracted here so other surfaces (e.g. the
+/// icon-picker dialog) reuse the work without re-rasterising.
+pub fn resolve_icon_handle(
+    icons: &std::rc::Rc<IconCache>,
+    iced_handles: &std::rc::Rc<RefCell<HashMap<IconKey, Handle>>>,
+    source: &str,
+    size_px: u32,
+    tint: Color,
+) -> Option<Handle> {
+    if source.is_empty() || size_px == 0 {
+        return None;
+    }
+    let color = pack_color((tint.r, tint.g, tint.b, tint.a));
+    let key = IconKey {
+        source: source.to_string(),
+        size: size_px,
+        color,
+    };
+    if let Some(h) = iced_handles.borrow().get(&key) {
+        return Some(h.clone());
+    }
+    let icon: RasterIcon =
+        icons.resolve(source, size_px, (tint.r, tint.g, tint.b, tint.a))?;
+    let handle = Handle::from_rgba(icon.size, icon.size, icon.rgba);
+    iced_handles.borrow_mut().insert(key, handle.clone());
+    Some(handle)
+}
+
 impl RadialPreview {
     /// Resolve the slice's icon to an iced Handle, going through
     /// the shared rasterised cache and a per-process iced handle

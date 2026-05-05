@@ -27,6 +27,14 @@
  *                                                  # returns: b success
  *     RaiseOverlay(s app_id) -> b success
  *     ListMonitors() -> a(iiii)                    # [(idx, x, y, w, h), ...]
+ *     GetFocusedWindowClass(s ignore_app_id) -> s  # WM_CLASS / app_id of
+ *                                                  # currently focused window;
+ *                                                  # empty string when none.
+ *                                                  # Skips windows matching
+ *                                                  # `ignore_app_id` so the
+ *                                                  # overlay's own focus
+ *                                                  # doesn't poison the
+ *                                                  # result.
  *
  * SPDX-License-Identifier: GPL-3.0
  */
@@ -34,6 +42,30 @@
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 import Meta from 'gi://Meta';
+
+// `display.get_monitor_index_for_rect()` requires a real
+// MetaRectangle / MtkRectangle GObject — plain JS objects fail
+// with "not a subclass of GObject_Struct", and `Meta.Rectangle`
+// was removed in GNOME 50. Rather than depend on whichever module
+// happens to expose the constructor in this Mutter version, we
+// just walk the monitor list ourselves: the geometry returned by
+// `display.get_monitor_geometry()` is a plain struct we *can*
+// read (no constructor needed for output structs), so a simple
+// containment loop replaces the Mutter helper. Works on every
+// supported GNOME version (45+).
+function monitorIndexForPoint(x, y) {
+    const display = global.display;
+    if (!display) return -1;
+    const n = display.get_n_monitors();
+    for (let i = 0; i < n; i++) {
+        const g = display.get_monitor_geometry(i);
+        if (x >= g.x && x < g.x + g.width &&
+            y >= g.y && y < g.y + g.height) {
+            return i;
+        }
+    }
+    return display.get_primary_monitor();  // fallback when point is off-screen
+}
 
 const DBUS_IFACE = `
 <node>
@@ -55,6 +87,10 @@ const DBUS_IFACE = `
     </method>
     <method name="ListMonitors">
       <arg type="a(iiii)" direction="out" name="monitors"/>
+    </method>
+    <method name="GetFocusedWindowClass">
+      <arg type="s" direction="in" name="ignore_app_id"/>
+      <arg type="s" direction="out" name="class"/>
     </method>
   </interface>
 </node>`;
@@ -86,7 +122,8 @@ function findWindowByAppId(appId) {
 }
 
 /**
- * Resolve an `idx` into a Meta.Rectangle. `idx = -1` → primary.
+ * Resolve an `idx` into a rectangle ({x, y, width, height}).
+ * `idx = -1` → primary monitor.
  * Returns null when the index is out of range.
  */
 function monitorGeometry(idx) {
@@ -182,7 +219,74 @@ export default class JuhRadialCursorExtension {
                 invocation.return_value(new GLib.Variant('(a(iiii))', [out]));
                 return;
             }
+            case 'GetFocusedWindowClass': {
+                const [ignoreAppId] = params.deep_unpack();
+                const cls = this._focusedWindowClass(ignoreAppId);
+                invocation.return_value(new GLib.Variant('(s)', [cls || '']));
+                return;
+            }
         }
+    }
+
+    /**
+     * Resolve the currently-focused MetaWindow into a usable
+     * application class string (WM_CLASS preferred, then GTK app id,
+     * then sandbox app id). The caller passes its own app_id in
+     * `ignoreAppId`; if focus happens to be on that window we walk
+     * the window-actor list in stacking order to find the next
+     * focused-eligible window underneath. Returns null when no
+     * suitable window is focused.
+     */
+    _focusedWindowClass(ignoreAppId) {
+        const display = global.display;
+        if (!display) return null;
+        const focus = display.get_focus_window?.();
+        const tryClass = (win) => {
+            if (!win) return null;
+            const candidates = [
+                win.get_wm_class?.(),
+                win.get_gtk_application_id?.(),
+                win.get_sandboxed_app_id?.(),
+                win.get_wm_class_instance?.(),
+            ];
+            for (const c of candidates) {
+                if (c) return String(c);
+            }
+            return null;
+        };
+        const isIgnored = (win) => {
+            if (!win || !ignoreAppId) return false;
+            const candidates = [
+                win.get_gtk_application_id?.(),
+                win.get_wm_class?.(),
+                win.get_wm_class_instance?.(),
+                win.get_sandboxed_app_id?.(),
+            ];
+            return candidates.some((c) => c && c === ignoreAppId);
+        };
+        if (focus && !isIgnored(focus)) {
+            const cls = tryClass(focus);
+            if (cls) return cls;
+        }
+        // Either no focus_window (rare) or focus is on the overlay
+        // itself (toggle mode). Walk window actors top-down for the
+        // first eligible app window.
+        const actors = global.get_window_actors();
+        for (let i = actors.length - 1; i >= 0; i--) {
+            const win = actors[i].get_meta_window?.();
+            if (!win) continue;
+            if (isIgnored(win)) continue;
+            // Skip non-app surfaces (DESKTOP, DOCK, etc.) — only
+            // NORMAL / DIALOG windows make sense as a "currently
+            // active app".
+            const type = win.get_window_type?.();
+            if (type !== Meta.WindowType.NORMAL && type !== Meta.WindowType.DIALOG) {
+                continue;
+            }
+            const cls = tryClass(win);
+            if (cls) return cls;
+        }
+        return null;
     }
 
     /**
@@ -220,10 +324,7 @@ export default class JuhRadialCursorExtension {
         if (monitor >= 0) {
             targetMon = monitorGeometry(monitor);
         } else {
-            const probe = new Meta.Rectangle({
-                x: absX, y: absY, width: 1, height: 1,
-            });
-            const idx = global.display.get_monitor_index_for_rect(probe);
+            const idx = monitorIndexForPoint(absX, absY);
             targetMon = monitorGeometry(idx);
         }
         if (targetMon) {

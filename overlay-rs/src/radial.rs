@@ -9,14 +9,14 @@
 use iced::widget::canvas::{self, Action, Frame, Geometry, Path};
 use iced::{mouse, Color, Event, Point, Rectangle, Renderer, Theme};
 use juhradial_shared::{
-    theme::parse_hex_rgba, ActionKind, AnimationConfig, AppConfig, ElementAnimation, Slice,
-    VisualSettings,
+    theme::parse_hex_rgba, ActionKind, AnimationConfig, AppConfig, ElementAnimation, RadialPage,
+    Slice, VisualSettings,
 };
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use crate::anim::Tween;
-use crate::geometry::{Geometry as RadialGeometry, MENU_RADIUS, WINDOW_SIZE};
+use crate::geometry::{Geometry as RadialGeometry, CENTER_ZONE_RADIUS, MENU_RADIUS, WINDOW_SIZE};
 use crate::render::icons::IconCache;
 use crate::theme::ActiveTheme;
 
@@ -77,7 +77,30 @@ impl SubmenuState {
 /// Top-level model for the iced app. Owns everything view() needs.
 pub struct RadialState {
     pub theme: ActiveTheme,
+    /// Slices of the currently active page. Mirror of
+    /// `pages[active_page].slices`, refreshed via
+    /// [`Self::refresh_active_slices`] whenever `active_page`
+    /// changes — keeps the painter / hit-test path unchanged from
+    /// the single-page era.
     pub slices: Vec<Slice>,
+    /// All pages (default page + optional app-context / scroll-cycle
+    /// pages). After every reload this is guaranteed to contain at
+    /// least one page (the loader's `normalize_pages` ensures it).
+    pub pages: Vec<RadialPage>,
+    /// Index into `pages` for the page currently being rendered.
+    /// Driven by the scroll-wheel cycle (toggle mode) and by
+    /// app-focus matching at `show()` time.
+    pub active_page: usize,
+    /// Cached list of page indices that participate in the
+    /// scroll-wheel cycle (global pages + app-context pages with
+    /// `include_in_scroll = true`). Rebuilt on every config reload
+    /// so we don't recompute it per scroll event.
+    cycle_pages_cache: Vec<usize>,
+    /// Window class of the most recently focused window (or None).
+    /// Set by the daemon's focus-tracking signal in Phase 2; today
+    /// it stays None and `show()` falls back to the last-active
+    /// page index.
+    pub focused_class: Option<String>,
     /// User-tweakable animation parameters for menu / submenu /
     /// slice highlight. Reloaded by the inotify watcher so the
     /// user can iterate on feel without restarting.
@@ -137,12 +160,18 @@ impl std::fmt::Debug for RadialState {
 impl RadialState {
     pub fn new(config: &AppConfig) -> Self {
         let theme = ActiveTheme::resolve(&config.theme);
-        let slices = config.radial_menu.slices.clone();
+        let pages = pages_from_config(config);
+        let cycle_pages_cache = config.radial_menu.cycle_pages();
+        let slices = pages.first().map(|p| p.slices.clone()).unwrap_or_default();
         let anim_config = config.radial_menu.animation.clone();
         let visuals = config.radial_menu.visuals.clone();
         RadialState {
             theme,
             slices,
+            pages,
+            active_page: 0,
+            cycle_pages_cache,
+            focused_class: None,
             anim_config,
             visuals,
             highlights: [Tween::at(0.0); 8],
@@ -160,12 +189,143 @@ impl RadialState {
         self.menu.set_target(1.0, &self.anim_config.menu.enter);
         self.show_time = Some(Instant::now());
         self.toggle_mode = false;
+        // Pick the page based on the current focused-class cache.
+        // The cache is repopulated by `apply_focused_class` from
+        // the GNOME-extension query that fires alongside Show, so
+        // the first frame may use a stale value; the swap-on-arrival
+        // path handles the correction transparently during fade-in.
+        //
+        // When the cache is empty OR the class doesn't match any
+        // app-context page, default to page 0 — gives the user a
+        // predictable "menu reopened" baseline rather than leaving
+        // them on whatever page the wheel last cycled to.
+        let target = self
+            .focused_class
+            .as_deref()
+            .and_then(|c| match_page_for_class(&self.pages, c))
+            .unwrap_or(0);
+        self.set_active_page(target);
         // Reset any stale highlights from a previous show.
         for a in &mut self.highlights {
             a.set_target(0.0, &self.anim_config.slice_highlight.exit);
         }
         self.target_slice = None;
         self.submenu = None;
+    }
+
+    /// Update the cached focused window class and, when the menu
+    /// is currently open, swap to the matching app-context page if
+    /// one exists. Called by the GNOME-extension focus query that
+    /// fires alongside every `Show` — the class typically arrives
+    /// during the menu's open fade-in, so the page swap is hidden
+    /// inside the entry animation.
+    ///
+    /// Idempotent — a second call with the same class is a no-op.
+    /// Stays a no-op when the menu is closed (the cached class is
+    /// still updated for the next `show()`, but no slices are
+    /// rebuilt).
+    pub fn apply_focused_class(&mut self, class: Option<String>) {
+        // Normalise: empty strings collapse to None so callers
+        // don't have to special-case them.
+        let class = class.filter(|s| !s.is_empty());
+        let unchanged = self.focused_class.as_deref() == class.as_deref();
+        self.focused_class = class.clone();
+        if unchanged {
+            return;
+        }
+        if !self.is_open() {
+            return;
+        }
+        // Resolve to a target page: matching app-context page if the
+        // class hits one, else page 0. Mirrors `show()` so a Show
+        // followed by a stale-then-fresh class arrives at the same
+        // page state the next Show would.
+        let target_page = class
+            .as_deref()
+            .and_then(|cls| match_page_for_class(&self.pages, cls))
+            .unwrap_or(0);
+        if target_page != self.active_page {
+            // Drop hover state on the old page so the new page
+            // doesn't briefly flash a slot the user wasn't aiming at.
+            for a in &mut self.highlights {
+                a.set_target(0.0, &self.anim_config.slice_highlight.exit);
+            }
+            self.target_slice = None;
+            self.submenu = None;
+            self.set_active_page(target_page);
+        }
+    }
+
+    /// Replace the active page index; refresh the cached `slices`
+    /// snapshot so painter/hit-test see the new page. Clamps to a
+    /// valid index when given garbage (defensive — keeps the
+    /// overlay alive after a config reload deletes the active page).
+    pub fn set_active_page(&mut self, idx: usize) {
+        if self.pages.is_empty() {
+            self.active_page = 0;
+            self.slices.clear();
+            return;
+        }
+        self.active_page = idx.min(self.pages.len() - 1);
+        self.refresh_active_slices();
+    }
+
+    fn refresh_active_slices(&mut self) {
+        self.slices = self
+            .pages
+            .get(self.active_page)
+            .map(|p| p.slices.clone())
+            .unwrap_or_default();
+    }
+
+    /// Cycle the active page by `direction` (+1 next, -1 previous)
+    /// through `cycle_pages_cache`. No-op when fewer than two pages
+    /// are in the cycle. Resets per-slice highlights / target so
+    /// the new page starts in a clean visual state.
+    pub fn cycle_page(&mut self, direction: i32) {
+        if self.cycle_pages_cache.len() < 2 || direction == 0 {
+            return;
+        }
+        // Find where the current active page sits in the cycle
+        // list. If the active page isn't in the cycle (an
+        // app-context page reachable only via focus), step from
+        // the start of the cycle in the requested direction.
+        let n = self.cycle_pages_cache.len() as i32;
+        let pos = self
+            .cycle_pages_cache
+            .iter()
+            .position(|&i| i == self.active_page)
+            .map(|p| p as i32)
+            .unwrap_or(if direction > 0 { -1 } else { 0 });
+        let next = ((pos + direction).rem_euclid(n)) as usize;
+        let new_active = self.cycle_pages_cache[next];
+        if new_active == self.active_page {
+            return;
+        }
+        // Drop hover state on the old page so the new page doesn't
+        // light up a slot the user wasn't aiming at.
+        for a in &mut self.highlights {
+            a.set_target(0.0, &self.anim_config.slice_highlight.exit);
+        }
+        self.target_slice = None;
+        self.submenu = None;
+        self.set_active_page(new_active);
+    }
+
+    /// Number of pages eligible for the scroll cycle. Used by the
+    /// painter to decide whether to render the page-indicator dots.
+    pub fn cycle_page_count(&self) -> usize {
+        self.cycle_pages_cache.len()
+    }
+
+    /// Position of the active page within the scroll cycle, or None
+    /// if the active page isn't part of the cycle (app-context
+    /// page with `include_in_scroll = false`). Drives the
+    /// page-indicator dots in the centre puck.
+    pub fn cycle_page_position(&self) -> Option<usize> {
+        self.cycle_pages_cache
+            .iter()
+            .position(|&i| i == self.active_page)
     }
 
     /// True when the menu is currently visible OR mid-exit-fade.
@@ -441,7 +601,19 @@ impl RadialState {
     /// indices may have changed.
     pub fn reload_from(&mut self, config: &AppConfig) {
         self.theme = ActiveTheme::resolve(&config.theme);
-        self.slices = config.radial_menu.slices.clone();
+        self.pages = pages_from_config(config);
+        self.cycle_pages_cache = config.radial_menu.cycle_pages();
+        // Try to keep the same active page across reloads — if the
+        // user just edited a slice on page 1, don't yank them back
+        // to page 0. Falls back to 0 when the index is now stale
+        // (page deleted, or out of range after a shrink).
+        let keep = self.active_page;
+        if keep < self.pages.len() {
+            self.active_page = keep;
+        } else {
+            self.active_page = 0;
+        }
+        self.refresh_active_slices();
         self.anim_config = config.radial_menu.animation.clone();
         self.visuals = config.radial_menu.visuals.clone();
         for a in &mut self.highlights {
@@ -450,6 +622,43 @@ impl RadialState {
         self.target_slice = None;
         self.submenu = None;
     }
+}
+
+/// Build the page list to seed `RadialState`. Mirrors the
+/// loader's `normalize_pages` semantics so a config built in code
+/// (e.g. `AppConfig::default()`) still yields a non-empty page
+/// vec.
+fn pages_from_config(config: &AppConfig) -> Vec<RadialPage> {
+    let mut pages = config.radial_menu.pages.clone();
+    if pages.is_empty() {
+        // Defensive: should never happen post-`normalize_pages`,
+        // but a hand-built `AppConfig::default()` (used by the
+        // overlay's panic path) has pages.is_empty()==true.
+        if !config.radial_menu.slices.is_empty() {
+            pages.push(RadialPage {
+                name: "Default".into(),
+                slices: config.radial_menu.slices.clone(),
+                app_classes: Vec::new(),
+                include_in_scroll: true,
+            });
+        } else {
+            pages.push(RadialPage::default());
+        }
+    }
+    pages
+}
+
+/// Find the first page whose `app_classes` contains the given
+/// focused window class (case-insensitive). Empty class returns
+/// None so the caller keeps whatever page was previously active.
+fn match_page_for_class(pages: &[RadialPage], class: &str) -> Option<usize> {
+    if class.is_empty() {
+        return None;
+    }
+    let lc = class.to_lowercase();
+    pages.iter().position(|p| {
+        p.app_classes.iter().any(|c| c.to_lowercase() == lc)
+    })
 }
 
 /// Hit-test the sub-items of slot `parent`. Returns the index of the
@@ -516,6 +725,37 @@ impl<'a> canvas::Program<crate::app::Message> for Painter<'a> {
                     x: p.x as f64,
                     y: p.y as f64,
                 }))
+            }
+            Event::Mouse(mouse::Event::WheelScrolled { delta }) => {
+                // Page cycling fires only when the cursor is sitting
+                // over the centre puck — keeps the user from
+                // accidentally swapping pages while drag-aiming a
+                // slice. Drag mode skips this branch entirely
+                // (drag has no real cursor; the daemon sends REL_X
+                // / REL_Y deltas). With fewer than two cycle pages
+                // the cycle is a no-op, so we don't publish.
+                if self.state.cycle_page_count() < 2 {
+                    return None;
+                }
+                let p = cursor.position_in(bounds)?;
+                let dx = p.x as f64 - WINDOW_SIZE / 2.0;
+                let dy = p.y as f64 - WINDOW_SIZE / 2.0;
+                let dist_sq = dx * dx + dy * dy;
+                if dist_sq > CENTER_ZONE_RADIUS * CENTER_ZONE_RADIUS {
+                    return None;
+                }
+                let dy_scroll = match delta {
+                    mouse::ScrollDelta::Lines { y, .. } => *y,
+                    mouse::ScrollDelta::Pixels { y, .. } => *y,
+                };
+                if dy_scroll.abs() < f32::EPSILON {
+                    return None;
+                }
+                // Scroll up (positive y) → previous page; scroll
+                // down → next page. Matches typical browser-tab
+                // wheel cycling.
+                let direction = if dy_scroll > 0.0 { -1 } else { 1 };
+                Some(Action::publish(crate::app::Message::CyclePage(direction)))
             }
             Event::Mouse(mouse::Event::ButtonPressed(button)) => match button {
                 mouse::Button::Left => {
@@ -649,16 +889,30 @@ impl<'a> canvas::Program<crate::app::Message> for Painter<'a> {
                     .map(|s| s.label.clone())
             });
 
+        let center_radius = (geom.center_radius as f32) * mscale;
         crate::render::slices::draw_center(
             &mut frame,
             center,
-            (geom.center_radius as f32) * mscale,
+            center_radius,
             palette,
             mopacity,
             bg_op,
             center_label.as_deref(),
             self.state.visuals.center_label_size,
             crate::fonts::resolve(&self.state.visuals.font_family),
+        );
+
+        // Page indicator dots — only appear when the menu has more
+        // than one page in the scroll cycle. Sits inside the centre
+        // puck, below any hover label.
+        crate::render::slices::draw_page_indicator(
+            &mut frame,
+            center,
+            center_radius,
+            palette,
+            mopacity,
+            self.state.cycle_page_count(),
+            self.state.cycle_page_position(),
         );
 
         // Submenu pop-out (drawn AFTER the centre so its sub-items

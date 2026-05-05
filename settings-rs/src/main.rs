@@ -22,13 +22,16 @@ mod tabs {
     pub mod visuals;
 }
 mod battery;
+mod cursor_helper;
 mod daemon;
 mod fonts;
+mod icon_picker;
 mod mouse_callouts;
 mod palette;
 mod persist;
 mod radial_preview;
 mod raise;
+mod recents;
 mod singleton;
 mod style;
 mod widgets;
@@ -162,6 +165,24 @@ pub enum Message {
     SetSliceCommand(usize, String),
     SetSliceKind(usize, juhradial_shared::ActionKind),
     SetSliceColor(usize, String),
+    /// Set the icon name (freedesktop symbolic name, an absolute
+    /// path to an SVG/PNG, or the legacy internal id) for a slice
+    /// on the active page.
+    SetSliceIcon(usize, String),
+    /// Replace a slice's visibility predicate. `None` clears the
+    /// predicate (slice is always visible). `Some(Always)` is
+    /// equivalent at runtime; we write the slimmer `None` shape on
+    /// disk for that case.
+    SetSliceVisibility { slice: usize, condition: Option<juhradial_shared::Condition> },
+    /// Spawn the slice's command via `sh -c` so the user can
+    /// validate shell quoting + that the command actually launches
+    /// before relying on the radial menu to dispatch it. Non-Exec
+    /// slice kinds (Macro, EasySwitch, …) emit a status hint
+    /// instead — those round-trip through the daemon and aren't
+    /// useful to test in isolation.
+    TestSliceAction(usize),
+    /// Same as TestSliceAction but for a submenu sub-item.
+    TestSubItemAction { parent: usize, idx: usize },
     /// Radial preview interactions.
     SelectSlice(usize),
     DismissSliceSelection,
@@ -272,12 +293,92 @@ pub enum Message {
     /// Custom theme save completed.
     CustomThemeSaved(Result<String, String>),
 
+    // --- Multi-page menu (Buttons tab right column) ---
+    /// User picked a different page in the page picker. The slice
+    /// editor + radial preview both pin to this index.
+    SetActivePage(usize),
+    /// Append a new empty global page; auto-selects it.
+    AddPage,
+    /// Delete a page by index. Won't go below one page (pages list
+    /// always retains at least one entry).
+    DeletePage(usize),
+    /// Rename the page at `idx`.
+    SetPageName { page: usize, name: String },
+    /// Update the comma-separated app-classes list for `page`.
+    /// Empty string clears the list (turns the page into a global
+    /// page); non-empty makes it an app-context page.
+    SetPageAppClasses { page: usize, value: String },
+    /// Toggle whether an app-context page also participates in the
+    /// scroll-wheel cycle.
+    SetPageIncludeInScroll { page: usize, value: bool },
+    /// Move page left in the order (lower index → earlier in cycle).
+    MovePageLeft(usize),
+    /// Move page right in the order.
+    MovePageRight(usize),
+    /// Kick off a GNOME-extension call to capture the currently
+    /// focused window's class. Used by the "Detect from focused
+    /// window" button on the page editor — saves the user from
+    /// having to look up the WM_CLASS by hand.
+    DetectFocusedClass(usize),
+    /// Result of `DetectFocusedClass`. When `Some`, append it to
+    /// the target page's app_classes; when `None`, surface a hint
+    /// in the status bar. `generation` filters stale results from
+    /// a previously-cancelled run.
+    DetectedFocusedClass { page: usize, generation: u64, class: Option<String> },
+    /// Cancel an in-flight detect (the user changed their mind
+    /// before the 4-second sample fired).
+    CancelFocusedClassDetect,
+
+    // --- Visual icon picker (slice + sub-item editor) ---
+    /// Open the icon picker against a slice or sub-item. Replaces
+    /// any currently-open picker.
+    OpenIconPicker(icon_picker::IconPickerTarget),
+    /// Close the picker without applying an icon.
+    CloseIconPicker,
+    /// Live filter — case-insensitive substring match against the
+    /// curated icon name list.
+    SetIconPickerSearch(String),
+    /// User clicked an icon thumbnail — apply it to the picker's
+    /// stored target and close.
+    PickIcon(String),
+    /// Async write of the recents list completed; result is the
+    /// updated list (most-recent first). Used to update the
+    /// in-memory `recent_icons` so the picker re-renders with
+    /// the new ordering on the next message.
+    RecentIconsPersisted(Vec<String>),
+    /// Open a native file dialog to pick an icon from disk
+    /// (PNG/SVG). The chosen path's absolute string lands in the
+    /// target's icon field. Target identifies which slice or
+    /// sub-item to apply to.
+    BrowseIconFile(icon_picker::IconPickerTarget),
+    /// Result of the file dialog. `Some(path)` = user picked a
+    /// file, `None` = cancelled.
+    IconFileChosen { target: icon_picker::IconPickerTarget, path: Option<String> },
+    /// Bulk-rasterise the icon-picker catalogue off the UI thread.
+    /// Carries the tint colour (so the worker thread can tint
+    /// without referencing palette state) and reports back via
+    /// `IconsPrewarmed` once everything is rasterised. Single
+    /// message → single re-render of the settings UI when results
+    /// arrive (vs. the older trickle approach which fired N
+    /// messages and triggered N re-renders).
+    PrewarmIcons,
+    /// Result of the off-thread prewarm. The Vec is the full
+    /// catalogue with one entry per icon — `Some(RasterIcon)` when
+    /// the icon resolved, `None` when it didn't (theme miss). The
+    /// handler installs every Some into the iced_handles cache,
+    /// then the next render finds them all in one go.
+    IconsPrewarmed(Vec<(String, Option<juhradial_icons::RasterIcon>)>),
+
     // --- Submenu sub-items (slice editor) ---
     AddSubItem(usize),
     DeleteSubItem(usize, usize),
     SetSubItemLabel(usize, usize, String),
     SetSubItemCommand(usize, usize, String),
     SetSubItemColor(usize, usize, String),
+    /// Icon name / path for a submenu sub-item.
+    SetSubItemIcon(usize, usize, String),
+    /// Action kind (Exec / Macro / EasySwitch / etc.) for a sub-item.
+    SetSubItemKind(usize, usize, juhradial_shared::ActionKind),
     MoveSubItemUp(usize, usize),
     MoveSubItemDown(usize, usize),
 }
@@ -424,6 +525,32 @@ pub struct State {
     /// In-flight "Add application binding" form. Lives at State
     /// level so the typed text survives re-renders.
     pub app_binding_draft: AppBindingDraft,
+    /// Currently-edited radial page. The slice editor + radial
+    /// preview both work against this index. Persists across edits
+    /// so navigating away and back keeps the same page open.
+    pub active_page: usize,
+    /// Per-page raw text for the "App classes" input — keeps the
+    /// user's literal typing (incl. trailing commas / spaces)
+    /// across re-renders. Without this the textbox would erase
+    /// trailing commas as the user types because the canonical
+    /// `Vec<String>` filters empties.
+    pub app_classes_drafts: std::collections::BTreeMap<usize, String>,
+    /// In-flight focused-class detection: which page asked + when
+    /// the sample fires. The view uses this to render a countdown
+    /// + Cancel button while waiting; the deferred Task::perform
+    /// races independently. `None` = no detect in flight.
+    pub detect_in_flight: Option<DetectInFlight>,
+    /// Visual icon-picker dialog state. `Some` while the picker
+    /// is open against a slice or sub-item; `None` when closed.
+    /// Picker `target` is set when opening and consumed when an
+    /// icon is clicked.
+    pub icon_picker: Option<icon_picker::IconPickerState>,
+    /// Most-recently-used icon names. Front of the list is the
+    /// last-picked icon. Persisted to
+    /// `~/.config/juhradial/recent-icons.json` after each pick;
+    /// surfaces as a row at the top of the icon picker so common
+    /// choices are one click away.
+    pub recent_icons: Vec<String>,
     /// Shared rasterised icon cache (XDG resolver + tinting). Lives
     /// at State level so it persists across re-renders and across
     /// theme changes (colours change → new cache entries; old
@@ -439,10 +566,14 @@ pub struct State {
 impl Default for State {
     fn default() -> Self {
         let path = juhradial_shared::config::default_config_path();
-        let config = path
+        let mut config = path
             .as_ref()
             .and_then(|p| AppConfig::load_from(p).ok())
             .unwrap_or_default();
+        // `unwrap_or_default()` skips the loader's normalize step,
+        // so make sure the multi-page invariant holds (>=1 page)
+        // before any slice-editor message can mutate state.
+        config.radial_menu.normalize_pages();
         let pal = palette::Palette::resolve(&config.theme);
         State {
             config,
@@ -464,6 +595,11 @@ impl Default for State {
             theme_editor: None,
             macro_edit: None,
             app_binding_draft: AppBindingDraft::default(),
+            active_page: 0,
+            app_classes_drafts: std::collections::BTreeMap::new(),
+            detect_in_flight: None,
+            icon_picker: None,
+            recent_icons: recents::load(),
         }
     }
 }
@@ -472,6 +608,20 @@ impl Default for State {
 pub struct AppBindingDraft {
     pub class: String,
     pub profile: String,
+}
+
+/// Active focused-class detection state.
+#[derive(Debug, Clone, Copy)]
+pub struct DetectInFlight {
+    /// Page index the detect was triggered for.
+    pub page: usize,
+    /// Wall-clock when the deferred sample will fire. The view
+    /// uses this to render the remaining seconds; the actual
+    /// sampling happens in a Task::perform that races us.
+    pub deadline: Instant,
+    /// Generation counter so cancel + restart don't deliver a
+    /// stale `DetectedFocusedClass` from a prior run.
+    pub generation: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -527,6 +677,79 @@ fn set_theme_color_field(c: &mut juhradial_shared::theme::ThemeColors, field: &s
         "sapphire" => c.sapphire = value,
         "lavender" => c.lavender = value,
         _ => {}
+    }
+}
+
+/// Spawn a slice's Exec command via `sh -c` so the user can
+/// validate it from the editor without going through the radial
+/// menu. Mirrors the daemon's exec convention (see
+/// `daemon/src/actions.rs::execute_command`) so what tests here
+/// is what the daemon will run later. Status messages surface
+/// failures; the spawn itself is non-blocking.
+fn run_test_action(state: &mut State, slice: Option<&juhradial_shared::Slice>) {
+    let slice = match slice {
+        Some(s) => s,
+        None => {
+            state.status = "Couldn't find slice to test.".into();
+            return;
+        }
+    };
+    if !matches!(slice.kind, juhradial_shared::ActionKind::Exec) {
+        state.status = format!(
+            "Test only supports Exec actions; this slice is {:?}. \
+             Trigger via the radial menu to test other kinds.",
+            slice.kind
+        );
+        return;
+    }
+    let cmd = slice.command.trim();
+    if cmd.is_empty() {
+        state.status = "Cannot test: command is empty.".into();
+        return;
+    }
+    match std::process::Command::new("sh")
+        .args(["-c", cmd])
+        .spawn()
+    {
+        Ok(child) => {
+            state.status = format!("Spawned (PID {}): {}", child.id(), cmd);
+        }
+        Err(e) => {
+            state.status = format!("Failed to spawn: {e}");
+        }
+    }
+}
+
+/// Apply an icon name (or absolute file path) to whichever picker
+/// target the caller specifies. Used by both the inline icon-grid
+/// picker and the native file-dialog flow so they share the same
+/// "where does this land?" logic.
+fn apply_icon_to_target(
+    state: &mut State,
+    target: Option<icon_picker::IconPickerTarget>,
+    name: String,
+) {
+    let target = match target {
+        Some(t) => t,
+        None => return,
+    };
+    match target {
+        icon_picker::IconPickerTarget::Slice(idx) => {
+            if let Some(slice) = state.active_slices_mut().get_mut(idx) {
+                slice.icon = name;
+                state.touch();
+            }
+        }
+        icon_picker::IconPickerTarget::SubItem { parent, idx } => {
+            if let Some(item) = state
+                .active_slices_mut()
+                .get_mut(parent)
+                .and_then(|p| p.submenu.get_mut(idx))
+            {
+                item.icon = name;
+                state.touch();
+            }
+        }
     }
 }
 
@@ -592,6 +815,36 @@ impl State {
         self.last_edit = Some(Instant::now());
         self.saved_pending = true;
     }
+
+    /// Mutable access to the slice list of the currently-active
+    /// page. Guarantees `pages` is non-empty + clamps
+    /// `active_page` to a valid index — defensive against state
+    /// arriving from a partially-migrated config.
+    fn active_slices_mut(&mut self) -> &mut Vec<juhradial_shared::Slice> {
+        if self.config.radial_menu.pages.is_empty() {
+            self.config
+                .radial_menu
+                .pages
+                .push(juhradial_shared::RadialPage::default());
+        }
+        let max = self.config.radial_menu.pages.len() - 1;
+        if self.active_page > max {
+            self.active_page = max;
+        }
+        &mut self.config.radial_menu.pages[self.active_page].slices
+    }
+
+    /// Read-only counterpart for view code. Returns an empty slice
+    /// rather than panicking when the index is stale.
+    fn active_slices(&self) -> &[juhradial_shared::Slice] {
+        self.config
+            .radial_menu
+            .pages
+            .get(self.active_page)
+            .map(|p| p.slices.as_slice())
+            .unwrap_or(&[])
+    }
+
 
     fn maybe_save(&mut self) -> Option<Task<Message>> {
         let last = self.last_edit?;
@@ -727,9 +980,9 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             state.touch();
             Task::none()
         }
-        // --- Slices editor handlers ---
+        // --- Slices editor handlers (operate on the active page) ---
         Message::AddSlice => {
-            let slices = &mut state.config.radial_menu.slices;
+            let slices = state.active_slices_mut();
             slices.push(juhradial_shared::Slice {
                 action_id: None,
                 label: "New slice".into(),
@@ -744,7 +997,7 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             Task::none()
         }
         Message::DeleteSlice(i) => {
-            let slices = &mut state.config.radial_menu.slices;
+            let slices = state.active_slices_mut();
             if i < slices.len() {
                 slices.remove(i);
                 state.touch();
@@ -752,7 +1005,7 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             Task::none()
         }
         Message::MoveSliceUp(i) => {
-            let slices = &mut state.config.radial_menu.slices;
+            let slices = state.active_slices_mut();
             if i > 0 && i < slices.len() {
                 slices.swap(i, i - 1);
                 state.touch();
@@ -760,7 +1013,7 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             Task::none()
         }
         Message::MoveSliceDown(i) => {
-            let slices = &mut state.config.radial_menu.slices;
+            let slices = state.active_slices_mut();
             if i + 1 < slices.len() {
                 slices.swap(i, i + 1);
                 state.touch();
@@ -768,29 +1021,62 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             Task::none()
         }
         Message::SetSliceLabel(i, s) => {
-            if let Some(slice) = state.config.radial_menu.slices.get_mut(i) {
+            if let Some(slice) = state.active_slices_mut().get_mut(i) {
                 slice.label = s;
                 state.touch();
             }
             Task::none()
         }
         Message::SetSliceCommand(i, s) => {
-            if let Some(slice) = state.config.radial_menu.slices.get_mut(i) {
+            if let Some(slice) = state.active_slices_mut().get_mut(i) {
                 slice.command = s;
                 state.touch();
             }
             Task::none()
         }
         Message::SetSliceKind(i, k) => {
-            if let Some(slice) = state.config.radial_menu.slices.get_mut(i) {
+            if let Some(slice) = state.active_slices_mut().get_mut(i) {
                 slice.kind = k;
                 state.touch();
             }
             Task::none()
         }
         Message::SetSliceColor(i, s) => {
-            if let Some(slice) = state.config.radial_menu.slices.get_mut(i) {
+            if let Some(slice) = state.active_slices_mut().get_mut(i) {
                 slice.color = s;
+                state.touch();
+            }
+            Task::none()
+        }
+        Message::SetSliceIcon(i, s) => {
+            if let Some(slice) = state.active_slices_mut().get_mut(i) {
+                slice.icon = s;
+                state.touch();
+            }
+            Task::none()
+        }
+        Message::TestSliceAction(idx) => {
+            let slice = state.active_slices().get(idx).cloned();
+            run_test_action(state, slice.as_ref());
+            Task::none()
+        }
+        Message::TestSubItemAction { parent, idx } => {
+            let item = state
+                .active_slices()
+                .get(parent)
+                .and_then(|p| p.submenu.get(idx))
+                .cloned();
+            run_test_action(state, item.as_ref());
+            Task::none()
+        }
+        Message::SetSliceVisibility { slice, condition } => {
+            if let Some(s) = state.active_slices_mut().get_mut(slice) {
+                // Collapse `Always` to None so the on-disk shape is
+                // minimal (Some(Always) and None evaluate the same).
+                s.visible_if = match condition {
+                    Some(juhradial_shared::Condition::Always) | None => None,
+                    other => other,
+                };
                 state.touch();
             }
             Task::none()
@@ -798,15 +1084,31 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
 
         // --- Radial preview interactions ---
         Message::SelectSlice(i) => {
+            // Close the icon picker if it was bound to a different
+            // slot — leaving it open would render the picker
+            // panel under the editor for a slot the user just
+            // navigated away from, which is confusing.
+            if let Some(picker) = state.icon_picker.as_ref() {
+                let still_relevant = matches!(
+                    picker.target,
+                    icon_picker::IconPickerTarget::Slice(t) if t == i
+                );
+                if !still_relevant {
+                    state.icon_picker = None;
+                }
+            }
             state.selected_slice = Some(i);
             Task::none()
         }
         Message::DismissSliceSelection => {
             state.selected_slice = None;
+            // The picker was bound to whatever slot is being
+            // deselected; leaving it open would orphan the panel.
+            state.icon_picker = None;
             Task::none()
         }
         Message::SwapSlices { from, to } => {
-            let slices = &mut state.config.radial_menu.slices;
+            let slices = state.active_slices_mut();
             // Pad to N_SLICES so the user can drop into an empty slot.
             while slices.len() < 8.max(from + 1).max(to + 1) {
                 slices.push(juhradial_shared::Slice {
@@ -1317,9 +1619,9 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             Task::none()
         }
 
-        // --- Submenu sub-item editor ---
+        // --- Submenu sub-item editor (active page) ---
         Message::AddSubItem(parent) => {
-            if let Some(slice) = state.config.radial_menu.slices.get_mut(parent) {
+            if let Some(slice) = state.active_slices_mut().get_mut(parent) {
                 slice.submenu.push(juhradial_shared::Slice {
                     action_id: None,
                     label: "New item".into(),
@@ -1335,7 +1637,7 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             Task::none()
         }
         Message::DeleteSubItem(parent, idx) => {
-            if let Some(slice) = state.config.radial_menu.slices.get_mut(parent) {
+            if let Some(slice) = state.active_slices_mut().get_mut(parent) {
                 if idx < slice.submenu.len() {
                     slice.submenu.remove(idx);
                     state.touch();
@@ -1345,9 +1647,7 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
         }
         Message::SetSubItemLabel(parent, idx, s) => {
             if let Some(item) = state
-                .config
-                .radial_menu
-                .slices
+                .active_slices_mut()
                 .get_mut(parent)
                 .and_then(|p| p.submenu.get_mut(idx))
             {
@@ -1358,9 +1658,7 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
         }
         Message::SetSubItemCommand(parent, idx, s) => {
             if let Some(item) = state
-                .config
-                .radial_menu
-                .slices
+                .active_slices_mut()
                 .get_mut(parent)
                 .and_then(|p| p.submenu.get_mut(idx))
             {
@@ -1371,9 +1669,7 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
         }
         Message::SetSubItemColor(parent, idx, s) => {
             if let Some(item) = state
-                .config
-                .radial_menu
-                .slices
+                .active_slices_mut()
                 .get_mut(parent)
                 .and_then(|p| p.submenu.get_mut(idx))
             {
@@ -1382,8 +1678,30 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             }
             Task::none()
         }
+        Message::SetSubItemIcon(parent, idx, s) => {
+            if let Some(item) = state
+                .active_slices_mut()
+                .get_mut(parent)
+                .and_then(|p| p.submenu.get_mut(idx))
+            {
+                item.icon = s;
+                state.touch();
+            }
+            Task::none()
+        }
+        Message::SetSubItemKind(parent, idx, k) => {
+            if let Some(item) = state
+                .active_slices_mut()
+                .get_mut(parent)
+                .and_then(|p| p.submenu.get_mut(idx))
+            {
+                item.kind = k;
+                state.touch();
+            }
+            Task::none()
+        }
         Message::MoveSubItemUp(parent, idx) => {
-            if let Some(slice) = state.config.radial_menu.slices.get_mut(parent) {
+            if let Some(slice) = state.active_slices_mut().get_mut(parent) {
                 if idx > 0 && idx < slice.submenu.len() {
                     slice.submenu.swap(idx, idx - 1);
                     state.touch();
@@ -1392,10 +1710,353 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             Task::none()
         }
         Message::MoveSubItemDown(parent, idx) => {
-            if let Some(slice) = state.config.radial_menu.slices.get_mut(parent) {
+            if let Some(slice) = state.active_slices_mut().get_mut(parent) {
                 if idx + 1 < slice.submenu.len() {
                     slice.submenu.swap(idx, idx + 1);
                     state.touch();
+                }
+            }
+            Task::none()
+        }
+
+        // --- Multi-page editor handlers ---
+        Message::SetActivePage(idx) => {
+            if idx < state.config.radial_menu.pages.len() {
+                state.active_page = idx;
+                // Drop drafts so the textboxes pick up the canonical
+                // value when re-rendering for the new page.
+                state.app_classes_drafts.clear();
+                // Selected slice index belonged to the old page —
+                // reset to avoid pointing at a stale slot. Same for
+                // the icon picker (its slot index is page-relative).
+                state.selected_slice = None;
+                state.icon_picker = None;
+            }
+            Task::none()
+        }
+        Message::AddPage => {
+            state.config.radial_menu.pages.push(juhradial_shared::RadialPage {
+                name: format!("Page {}", state.config.radial_menu.pages.len() + 1),
+                slices: Vec::new(),
+                app_classes: Vec::new(),
+                include_in_scroll: true,
+            });
+            state.active_page = state.config.radial_menu.pages.len() - 1;
+            state.app_classes_drafts.clear();
+            state.selected_slice = None;
+            state.touch();
+            Task::none()
+        }
+        Message::DeletePage(idx) => {
+            // Refuse to delete the last page — the menu always has
+            // at least one slice list to render.
+            if state.config.radial_menu.pages.len() <= 1 {
+                state.status = "Can't delete the only page.".into();
+                return Task::none();
+            }
+            if idx < state.config.radial_menu.pages.len() {
+                state.config.radial_menu.pages.remove(idx);
+                if state.active_page >= state.config.radial_menu.pages.len() {
+                    state.active_page = state.config.radial_menu.pages.len() - 1;
+                }
+                state.app_classes_drafts.clear();
+                state.selected_slice = None;
+                state.touch();
+            }
+            Task::none()
+        }
+        Message::SetPageName { page, name } => {
+            if let Some(p) = state.config.radial_menu.pages.get_mut(page) {
+                p.name = name;
+                state.touch();
+            }
+            Task::none()
+        }
+        Message::SetPageAppClasses { page, value } => {
+            // Parse the comma-separated draft into a clean Vec for
+            // the on-disk + overlay-side semantics. Keep the raw
+            // string in `app_classes_drafts` so the textbox doesn't
+            // erase trailing commas mid-typing.
+            let parsed: Vec<String> = value
+                .split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect();
+            if let Some(p) = state.config.radial_menu.pages.get_mut(page) {
+                p.app_classes = parsed;
+                state.app_classes_drafts.insert(page, value);
+                state.touch();
+            }
+            Task::none()
+        }
+        Message::SetPageIncludeInScroll { page, value } => {
+            if let Some(p) = state.config.radial_menu.pages.get_mut(page) {
+                p.include_in_scroll = value;
+                state.touch();
+            }
+            Task::none()
+        }
+        Message::MovePageLeft(idx) => {
+            if idx > 0 && idx < state.config.radial_menu.pages.len() {
+                state.config.radial_menu.pages.swap(idx, idx - 1);
+                if state.active_page == idx {
+                    state.active_page = idx - 1;
+                } else if state.active_page == idx - 1 {
+                    state.active_page = idx;
+                }
+                state.app_classes_drafts.clear();
+                state.touch();
+            }
+            Task::none()
+        }
+        Message::MovePageRight(idx) => {
+            if idx + 1 < state.config.radial_menu.pages.len() {
+                state.config.radial_menu.pages.swap(idx, idx + 1);
+                if state.active_page == idx {
+                    state.active_page = idx + 1;
+                } else if state.active_page == idx + 1 {
+                    state.active_page = idx;
+                }
+                state.app_classes_drafts.clear();
+                state.touch();
+            }
+            Task::none()
+        }
+        Message::DetectFocusedClass(page) => {
+            // 4-second deferred sample. Clicking the button steals
+            // focus to the settings window, so an immediate
+            // GetFocusedWindowClass would just return our own
+            // class (or fall back to the next-most-recent app via
+            // the extension's stack walk — usually not what the
+            // user means). The countdown lets the user alt-tab or
+            // click into the target app before the sample fires.
+            let delay_secs: u64 = 4;
+            let generation = state
+                .detect_in_flight
+                .map(|d| d.generation.wrapping_add(1))
+                .unwrap_or(1);
+            state.detect_in_flight = Some(DetectInFlight {
+                page,
+                deadline: Instant::now() + Duration::from_secs(delay_secs),
+                generation,
+            });
+            state.status = format!(
+                "Switch to your target app — sampling focused window in {delay_secs}s…"
+            );
+            Task::perform(
+                async move {
+                    let class = crate::cursor_helper::detect_focused_class_after(delay_secs).await;
+                    (page, generation, class)
+                },
+                |(page, generation, class)| Message::DetectedFocusedClass {
+                    page,
+                    generation,
+                    class,
+                },
+            )
+        }
+        Message::OpenIconPicker(target) => {
+            state.icon_picker = Some(icon_picker::IconPickerState {
+                target,
+                search: String::new(),
+            });
+            // Kick off the trickle-prewarmer. The first batch fires
+            // immediately; subsequent batches schedule themselves.
+            Task::done(Message::PrewarmIcons)
+        }
+        Message::PrewarmIcons => {
+            // Skip when picker isn't actually open (can happen if
+            // user closed before the message landed) OR when the
+            // cache is already warm (every catalogue icon present
+            // in iced_handles).
+            if state.icon_picker.is_none() {
+                return Task::none();
+            }
+            let tint = state.palette.text;
+            // Combine catalogue + recents so the user's picked
+            // icons (which may be absolute paths outside the
+            // curated catalogue) also get thumbnails. Filter
+            // entries already in cache so reopens don't re-do
+            // work.
+            let mut candidates: Vec<&str> =
+                icon_picker::COMMON_ICONS.iter().copied().collect();
+            for r in state.recent_icons.iter() {
+                if !candidates.iter().any(|c| *c == r.as_str()) {
+                    candidates.push(r.as_str());
+                }
+            }
+            let pending: Vec<String> = candidates
+                .into_iter()
+                .filter(|n| {
+                    radial_preview::peek_icon_handle(
+                        &state.iced_handles,
+                        n,
+                        icon_picker::THUMB_PX,
+                        tint,
+                    )
+                    .is_none()
+                })
+                .map(|s| s.to_string())
+                .collect();
+            if pending.is_empty() {
+                return Task::none();
+            }
+            let size = icon_picker::THUMB_PX;
+            let color = (tint.r, tint.g, tint.b, tint.a);
+            // Single Task::perform runs the whole batch on a tokio
+            // worker thread — file IO + SVG decode + tinting are
+            // pure functions over Send data, no IconCache needed.
+            // When done, ONE message lands on the main thread and
+            // ONE re-render shows every newly-cached icon.
+            Task::perform(
+                async move {
+                    tokio::task::spawn_blocking(move || {
+                        pending
+                            .into_iter()
+                            .map(|name| {
+                                let icon =
+                                    juhradial_icons::rasterize_icon(&name, size, color);
+                                (name, icon)
+                            })
+                            .collect::<Vec<_>>()
+                    })
+                    .await
+                    .unwrap_or_default()
+                },
+                Message::IconsPrewarmed,
+            )
+        }
+        Message::IconsPrewarmed(results) => {
+            // Picker may have closed during the worker pass —
+            // installing handles is still cheap and keeps the cache
+            // useful for next time, so we don't bail.
+            let tint = state.palette.text;
+            for (name, icon) in results {
+                if let Some(icon) = icon {
+                    radial_preview::install_icon_handle(
+                        &state.iced_handles,
+                        &name,
+                        icon_picker::THUMB_PX,
+                        tint,
+                        icon,
+                    );
+                }
+            }
+            Task::none()
+        }
+        Message::CloseIconPicker => {
+            state.icon_picker = None;
+            Task::none()
+        }
+        Message::SetIconPickerSearch(q) => {
+            if let Some(p) = state.icon_picker.as_mut() {
+                p.search = q;
+            }
+            Task::none()
+        }
+        Message::PickIcon(name) => {
+            // Apply the picked icon to whichever target the picker
+            // was opened against, then close. Mirrors the existing
+            // SetSliceIcon / SetSubItemIcon paths so the autosave
+            // tick fires the same way.
+            apply_icon_to_target(state, state.icon_picker.as_ref().map(|p| p.target), name.clone());
+            state.icon_picker = None;
+            // Persist the recents list so next session opens with
+            // the user's frequently-reached icons at the top of
+            // the picker. Async because file IO; result message
+            // updates state.recent_icons when the write lands.
+            let prev = state.recent_icons.clone();
+            Task::perform(
+                recents::save_after_pick(name, prev),
+                Message::RecentIconsPersisted,
+            )
+        }
+        Message::RecentIconsPersisted(items) => {
+            state.recent_icons = items;
+            Task::none()
+        }
+        Message::BrowseIconFile(target) => {
+            // Native file dialog (xdg-desktop-portal on Wayland).
+            // Filtered to common icon formats. The dialog blocks
+            // until the user picks or cancels — done off the iced
+            // runtime via Task::perform so the UI stays responsive.
+            Task::perform(
+                async move {
+                    let chosen = rfd::AsyncFileDialog::new()
+                        .set_title("Pick an icon file")
+                        .add_filter("Icons", &["svg", "png", "jpg", "jpeg", "webp", "ico"])
+                        .add_filter("All files", &["*"])
+                        .pick_file()
+                        .await
+                        .map(|h| h.path().to_string_lossy().into_owned());
+                    (target, chosen)
+                },
+                |(target, path)| Message::IconFileChosen { target, path },
+            )
+        }
+        Message::IconFileChosen { target, path } => {
+            if let Some(p) = path {
+                apply_icon_to_target(state, Some(target), p.clone());
+                // Close any open inline picker — the user used the
+                // file dialog instead, no reason to leave the grid
+                // open over the editor.
+                state.icon_picker = None;
+                // File-picker selections feed into recents the
+                // same way grid clicks do, so the next time the
+                // user opens the inline picker the file path is
+                // one click away (with a thumbnail, since the
+                // prewarmer rasterises recents too).
+                let prev = state.recent_icons.clone();
+                return Task::perform(
+                    recents::save_after_pick(p, prev),
+                    Message::RecentIconsPersisted,
+                );
+            }
+            Task::none()
+        }
+        Message::CancelFocusedClassDetect => {
+            // The Task::perform sleep is still running, but we
+            // bump the generation by clearing detect_in_flight
+            // and the result handler will discard the stale
+            // sample when it finally fires.
+            state.detect_in_flight = None;
+            state.status = "Detect cancelled.".into();
+            Task::none()
+        }
+        Message::DetectedFocusedClass { page, generation, class } => {
+            // Drop stale samples from runs the user cancelled or
+            // restarted before this one finished.
+            let in_flight = state.detect_in_flight;
+            let stale = match in_flight {
+                Some(d) => d.generation != generation,
+                None => true, // cancelled
+            };
+            if stale {
+                return Task::none();
+            }
+            state.detect_in_flight = None;
+            match class {
+                Some(c) => {
+                    if let Some(p) = state.config.radial_menu.pages.get_mut(page) {
+                        // Only append when the class isn't already
+                        // present — repeated clicks shouldn't grow
+                        // the list with duplicates.
+                        if !p.app_classes.iter().any(|existing| existing == &c) {
+                            p.app_classes.push(c.clone());
+                            state.touch();
+                        }
+                        // Drop any in-flight CSV draft so the input
+                        // re-renders from the canonical Vec — gives
+                        // the user immediate visual feedback that
+                        // the class landed.
+                        state.app_classes_drafts.remove(&page);
+                        state.status = format!("Captured class \"{c}\"");
+                    }
+                }
+                None => {
+                    state.status =
+                        "Couldn't detect a focused window (extension missing, or focus is on the desktop?)"
+                            .into();
                 }
             }
             Task::none()

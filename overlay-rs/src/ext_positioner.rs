@@ -31,6 +31,7 @@ trait CursorHelper {
     fn raise_overlay(&self, app_id: &str) -> zbus::Result<bool>;
     #[allow(dead_code)]
     fn list_monitors(&self) -> zbus::Result<Vec<(i32, i32, i32, i32, i32)>>;
+    fn get_focused_window_class(&self, ignore_app_id: &str) -> zbus::Result<String>;
 }
 
 /// Ask the extension to position our window at `(x, y)` in stage
@@ -68,6 +69,36 @@ pub async fn list_monitors() -> zbus::Result<Vec<(i32, i32, i32, i32, i32)>> {
     let conn = Connection::session().await?;
     let proxy = CursorHelperProxy::new(&conn).await?;
     proxy.list_monitors().await
+}
+
+/// Ask the GNOME extension for the currently-focused window's
+/// application class. `ignore_app_id` is the overlay's own app_id —
+/// the extension skips that window so toggle-mode focus on the
+/// overlay itself doesn't poison the result.
+///
+/// Returns `Some(class)` when focus resolves to a real app window,
+/// `None` when the call fails (extension missing) or no eligible
+/// window is focused. Empty strings are treated as `None` so the
+/// caller doesn't have to special-case them.
+pub async fn get_focused_window_class(ignore_app_id: String) -> Option<String> {
+    match try_get_focused(&ignore_app_id).await {
+        Ok(s) if !s.is_empty() => Some(s),
+        Ok(_) => None,
+        Err(e) => {
+            warn!(
+                "GetFocusedWindowClass D-Bus call failed: {e} \
+                 (extension {HELPER_SERVICE} not enabled, or running \
+                 against an old version that doesn't expose this method)"
+            );
+            None
+        }
+    }
+}
+
+async fn try_get_focused(ignore_app_id: &str) -> zbus::Result<String> {
+    let conn = Connection::session().await?;
+    let proxy = CursorHelperProxy::new(&conn).await?;
+    proxy.get_focused_window_class(ignore_app_id).await
 }
 
 #[cfg(test)]

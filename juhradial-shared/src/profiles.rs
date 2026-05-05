@@ -191,8 +191,13 @@ impl ProfileResolver {
         &mut self,
         profiles_dir: &Path,
         name: &str,
-        menu: RadialMenuConfig,
+        mut menu: RadialMenuConfig,
     ) -> Result<(), ConfigError> {
+        // Make sure the menu is in the multi-page shape before
+        // either caching or writing — keeps the on-disk file and
+        // the cache identical to what the loader would produce, so
+        // callers don't have to remember to normalize.
+        menu.normalize_pages();
         // Profile files use the full AppConfig schema for forward
         // compatibility — today they only carry radial_menu, but
         // future fields (hotkeys, conditional-slice predicates)
@@ -261,11 +266,11 @@ mod tests {
         let main = write(tmp.path(), "config.json", &main_with_bindings(&[]));
         let resolver = ProfileResolver::load_from(&main, &tmp.path().join("profiles")).unwrap();
         assert_eq!(
-            resolver.menu_for(Some("firefox")).slices[0].label,
+            resolver.menu_for(Some("firefox")).pages[0].slices[0].label,
             "Default Slice"
         );
         assert_eq!(
-            resolver.menu_for(None).slices[0].label,
+            resolver.menu_for(None).pages[0].slices[0].label,
             "Default Slice"
         );
     }
@@ -282,12 +287,12 @@ mod tests {
         write(&profiles_dir, "browsing.json", &profile_body("Browsing Slice"));
         let resolver = ProfileResolver::load_from(&main, &profiles_dir).unwrap();
         assert_eq!(
-            resolver.menu_for(Some("firefox")).slices[0].label,
+            resolver.menu_for(Some("firefox")).pages[0].slices[0].label,
             "Browsing Slice"
         );
         // Non-matching class falls back to main.
         assert_eq!(
-            resolver.menu_for(Some("konsole")).slices[0].label,
+            resolver.menu_for(Some("konsole")).pages[0].slices[0].label,
             "Default Slice"
         );
     }
@@ -303,7 +308,7 @@ mod tests {
         let resolver = ProfileResolver::load_from(&main, &tmp.path().join("profiles")).unwrap();
         // 'ghost' isn't on disk — fall back to main.
         assert_eq!(
-            resolver.menu_for(Some("firefox")).slices[0].label,
+            resolver.menu_for(Some("firefox")).pages[0].slices[0].label,
             "Default Slice"
         );
     }
@@ -322,7 +327,7 @@ mod tests {
         // Window class "firefox" (lowercase) still resolves the
         // "Firefox" (capitalised) binding.
         assert_eq!(
-            resolver.menu_for(Some("firefox")).slices[0].label,
+            resolver.menu_for(Some("firefox")).pages[0].slices[0].label,
             "Browsing Slice"
         );
     }
@@ -347,7 +352,7 @@ mod tests {
         // Cache updated.
         resolver.set_binding("foo".into(), "test".into());
         assert_eq!(
-            resolver.menu_for(Some("foo")).slices[0].label,
+            resolver.menu_for(Some("foo")).pages[0].slices[0].label,
             "Saved"
         );
 
@@ -369,7 +374,7 @@ mod tests {
         let resolver = ProfileResolver::load_from(&main, &profiles_dir).unwrap();
         // Malformed profile -> no entry -> falls back.
         assert_eq!(
-            resolver.menu_for(Some("firefox")).slices[0].label,
+            resolver.menu_for(Some("firefox")).pages[0].slices[0].label,
             "Default Slice"
         );
     }
@@ -380,7 +385,7 @@ mod tests {
         let main = write(tmp.path(), "config.json", &main_with_bindings(&[]));
         let resolver = ProfileResolver::load_from(&main, &tmp.path().join("profiles")).unwrap();
         assert_eq!(
-            resolver.menu_for(Some("")).slices[0].label,
+            resolver.menu_for(Some("")).pages[0].slices[0].label,
             "Default Slice"
         );
     }

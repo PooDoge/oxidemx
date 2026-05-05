@@ -31,7 +31,7 @@ pub use applications::{
     search as search_applications, DesktopEntry,
 };
 pub use conditions::Condition;
-pub use config::{AppConfig, RadialMenuConfig, Slice, VisualSettings};
+pub use config::{AppConfig, RadialMenuConfig, RadialPage, Slice, VisualSettings};
 pub use buttons::{ButtonAction, ButtonsConfig, MouseButton};
 pub use haptics::{HapticsConfig, PerEventPatterns, HAPTIC_PATTERNS};
 pub use pointer::{PointerConfig, ScrollConfig};

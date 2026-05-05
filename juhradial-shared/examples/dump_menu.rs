@@ -71,10 +71,15 @@ fn main() {
     );
 
     let menu = resolver.menu_for(focused_class.as_deref());
+    let slices = menu.default_slices();
     println!();
-    println!("Active menu — {} slot(s):", menu.slices.len());
+    println!(
+        "Active menu — {} page(s), default page has {} slot(s):",
+        menu.pages.len(),
+        slices.len()
+    );
 
-    for (i, slice) in menu.slices.iter().enumerate().take(8) {
+    for (i, slice) in slices.iter().enumerate().take(8) {
         let visible = slice
             .visible_if
             .as_ref()

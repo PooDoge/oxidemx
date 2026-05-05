@@ -102,6 +102,34 @@ impl IconCache {
     }
 }
 
+/// Cache-free rasterise + tint: load `source` from disk (XDG name
+/// or absolute path), rasterise to `size × size` RGBA8, tint to
+/// `color_rgba`. Identical to the body of [`IconCache::resolve`]
+/// minus the cache lookup/insert.
+///
+/// Why this exists separately: callers that need to do work
+/// off the UI thread (e.g. settings-rs's icon picker pre-warmer)
+/// can't move `IconCache` (it's `!Send` due to interior `RefCell`)
+/// into a tokio task. The output `RasterIcon` is `Send` though, so
+/// callers send it back to the main thread via a message and
+/// insert into both their `IconCache` and `iced_handles` caches
+/// there.
+pub fn rasterize_icon(
+    source: &str,
+    size: u32,
+    color_rgba: (f32, f32, f32, f32),
+) -> Option<RasterIcon> {
+    if source.is_empty() || size == 0 {
+        return None;
+    }
+    let raw = load_raw_rgba(source, size)?;
+    let tinted = tint_alpha_mask(&raw, color_rgba);
+    Some(RasterIcon {
+        size,
+        rgba: tinted,
+    })
+}
+
 // =============================================================================
 // loading
 // =============================================================================

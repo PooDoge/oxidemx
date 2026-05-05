@@ -57,6 +57,51 @@ pub struct Slice {
     pub visible_if: Option<Condition>,
 }
 
+/// One page of a multi-page radial menu — a named slice list with
+/// optional app-context targeting. The menu always has at least one
+/// page (the default global page); users can add more for
+/// app-specific workflows that auto-activate when the menu opens
+/// with a matching focused window, and/or extra global pages
+/// reachable via the scroll-wheel cycle.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RadialPage {
+    /// Display name shown in the settings page picker and hover-tip
+    /// over the page indicator dots in the overlay.
+    pub name: String,
+
+    #[serde(default)]
+    pub slices: Vec<Slice>,
+
+    /// Window classes (WM_CLASS / xdg-toplevel app_id) that
+    /// auto-select this page when the menu opens with one of them
+    /// focused. Empty = global page (always available, default
+    /// active when no app-specific page matches).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub app_classes: Vec<String>,
+
+    /// Whether this page participates in the scroll-wheel cycle.
+    /// Implicitly true for global pages (empty `app_classes`); for
+    /// app-context pages, set false to make the page only reachable
+    /// through app focus (not via scroll cycling from another page).
+    #[serde(default = "default_include_in_scroll")]
+    pub include_in_scroll: bool,
+}
+
+fn default_include_in_scroll() -> bool {
+    true
+}
+
+impl Default for RadialPage {
+    fn default() -> Self {
+        RadialPage {
+            name: "Default".into(),
+            slices: Vec::new(),
+            app_classes: Vec::new(),
+            include_in_scroll: true,
+        }
+    }
+}
+
 /// Visual knobs the user controls directly from the settings UI.
 /// These don't animate — they're the "this is how I want it to
 /// look at rest" multipliers applied on top of the theme palette.
@@ -110,8 +155,20 @@ impl Default for VisualSettings {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct RadialMenuConfig {
-    #[serde(default)]
+    /// Legacy single-page slice list. Pre-multipage configs only
+    /// have this. Loaders should call [`Self::normalize_pages`] —
+    /// it lifts these into `pages[0]` and clears the field so
+    /// downstream code only reads from `pages`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub slices: Vec<Slice>,
+
+    /// Multi-page menu. Page 0 is the default page (always
+    /// reachable via the scroll cycle). Additional pages are either
+    /// extra global pages or app-context pages that auto-select on
+    /// focus. After [`Self::normalize_pages`] runs, this is
+    /// guaranteed to contain at least one page.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pages: Vec<RadialPage>,
 
     /// Replaces the configured slot 5 (Emoji) with an Easy-Switch submenu
     /// when true. Mirrors the existing daemon behaviour.
@@ -133,6 +190,81 @@ pub struct RadialMenuConfig {
     /// the user controls directly from the settings UI.
     #[serde(default)]
     pub visuals: VisualSettings,
+}
+
+impl RadialMenuConfig {
+    /// Migrate legacy `slices` (pre-multipage configs) into
+    /// `pages[0]` and ensure at least one page exists. Idempotent;
+    /// safe to call on already-migrated configs. Run after every
+    /// load/parse so the rest of the codebase only has to read
+    /// from `pages`.
+    pub fn normalize_pages(&mut self) {
+        if !self.slices.is_empty() {
+            let legacy = std::mem::take(&mut self.slices);
+            if self.pages.is_empty() {
+                self.pages.push(RadialPage {
+                    name: "Default".into(),
+                    slices: legacy,
+                    app_classes: Vec::new(),
+                    include_in_scroll: true,
+                });
+            } else if self.pages[0].slices.is_empty() {
+                // Tolerate a config that has both fields populated by
+                // hand: prefer pages[0] if it has slices, otherwise
+                // backfill from the legacy field.
+                self.pages[0].slices = legacy;
+            }
+        }
+        if self.pages.is_empty() {
+            self.pages.push(RadialPage::default());
+        }
+    }
+
+    /// Indices of the pages that participate in the scroll-wheel
+    /// cycle. A global page (empty `app_classes`) is always in the
+    /// cycle; an app-context page is in the cycle only when
+    /// `include_in_scroll` is true.
+    pub fn cycle_pages(&self) -> Vec<usize> {
+        self.pages
+            .iter()
+            .enumerate()
+            .filter(|(_, p)| p.app_classes.is_empty() || p.include_in_scroll)
+            .map(|(i, _)| i)
+            .collect()
+    }
+
+    /// Page index to activate when the menu opens with the given
+    /// focused window class. First page whose `app_classes`
+    /// contains the class (case-insensitive); falls back to 0.
+    pub fn page_for_class(&self, class: Option<&str>) -> usize {
+        let class = match class {
+            Some(c) if !c.is_empty() => c,
+            _ => return 0,
+        };
+        let lc = class.to_lowercase();
+        self.pages
+            .iter()
+            .position(|p| p.app_classes.iter().any(|c| c.to_lowercase() == lc))
+            .unwrap_or(0)
+    }
+
+    /// Read access to the slices of a specific page index, with
+    /// graceful fallback to an empty slice if the index is out of
+    /// range — guards against a stale active-page index after a
+    /// page is deleted.
+    pub fn slices_of(&self, page_idx: usize) -> &[Slice] {
+        self.pages
+            .get(page_idx)
+            .map(|p| p.slices.as_slice())
+            .unwrap_or(&[])
+    }
+
+    /// Convenience: slices of page 0 (the default page). Used by
+    /// callers that don't yet support multi-page navigation —
+    /// daemon HID++ button mapping, the dump_menu example, etc.
+    pub fn default_slices(&self) -> &[Slice] {
+        self.slices_of(0)
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -220,13 +352,17 @@ impl AppConfig {
     /// if the file is missing — the daemon writes a fresh one on first
     /// run.
     pub fn load_from(path: &Path) -> Result<Self, ConfigError> {
-        match std::fs::read_to_string(path) {
-            Ok(s) => serde_json::from_str(&s).map_err(ConfigError::Parse),
+        let mut cfg = match std::fs::read_to_string(path) {
+            Ok(s) => serde_json::from_str::<Self>(&s).map_err(ConfigError::Parse)?,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                Ok(AppConfig::default())
+                let mut def = AppConfig::default();
+                def.radial_menu.normalize_pages();
+                return Ok(def);
             }
-            Err(e) => Err(ConfigError::Io(e)),
-        }
+            Err(e) => return Err(ConfigError::Io(e)),
+        };
+        cfg.radial_menu.normalize_pages();
+        Ok(cfg)
     }
 }
 
@@ -268,13 +404,42 @@ mod tests {
                 ]
             }
         }"#;
-        let cfg: AppConfig = serde_json::from_str(json).unwrap();
+        let mut cfg: AppConfig = serde_json::from_str(json).unwrap();
+        cfg.radial_menu.normalize_pages();
         assert_eq!(cfg.theme, ThemeName::Dracula);
-        assert_eq!(cfg.radial_menu.slices.len(), 1);
-        let s = &cfg.radial_menu.slices[0];
+        // Legacy slices migrated into pages[0].
+        assert!(cfg.radial_menu.slices.is_empty());
+        assert_eq!(cfg.radial_menu.pages.len(), 1);
+        let page = &cfg.radial_menu.pages[0];
+        assert_eq!(page.slices.len(), 1);
+        let s = &page.slices[0];
         assert_eq!(s.label, "Terminal");
         assert_eq!(s.kind, ActionKind::Exec);
         assert_eq!(s.command, "ptyxis");
+    }
+
+    #[test]
+    fn normalize_pages_is_idempotent() {
+        let json = r#"{
+            "radial_menu": {
+                "pages": [
+                    {"name": "Main", "slices": [
+                        {"label": "A", "type": "exec", "command": "true"}
+                    ]},
+                    {"name": "Dev", "app_classes": ["code"], "include_in_scroll": false,
+                     "slices": [{"label": "B", "type": "exec", "command": "true"}]}
+                ]
+            }
+        }"#;
+        let mut cfg: AppConfig = serde_json::from_str(json).unwrap();
+        cfg.radial_menu.normalize_pages();
+        cfg.radial_menu.normalize_pages();
+        assert_eq!(cfg.radial_menu.pages.len(), 2);
+        assert_eq!(cfg.radial_menu.cycle_pages(), vec![0]);
+        assert_eq!(cfg.radial_menu.page_for_class(Some("code")), 1);
+        assert_eq!(cfg.radial_menu.page_for_class(Some("Code")), 1);
+        assert_eq!(cfg.radial_menu.page_for_class(Some("firefox")), 0);
+        assert_eq!(cfg.radial_menu.page_for_class(None), 0);
     }
 
     #[test]

@@ -43,3 +43,10 @@ tokio = { version = "1", features = ["rt", "macros", "time"] }
 zbus = "5"
 async-channel = "2"
 futures-util = "0.3"
+
+# Native file picker for the icon editor's "Open file…" button.
+# rfd uses the platform's native portal (xdg-desktop-portal on
+# Wayland → KDE/GNOME's own file dialog), so no GTK4 / Qt6
+# runtime dep gets pulled in. Async API plays nicely with iced's
+# Task::perform.
+rfd = "0.15"

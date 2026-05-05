@@ -342,6 +342,56 @@ pub fn draw_center(
     }
 }
 
+/// Draw the multi-page indicator — small dots inside the centre
+/// puck showing how many pages are in the scroll cycle and which
+/// one is active. No-op for single-page menus.
+///
+/// Sits low in the puck (below the centre-hover label) so the
+/// label and the dots don't fight for the same pixels.
+pub fn draw_page_indicator(
+    frame: &mut Frame,
+    center: Point,
+    radius: f32,
+    palette: &ThemeColors,
+    menu_opacity: f32,
+    page_count: usize,
+    active: Option<usize>,
+) {
+    if page_count < 2 {
+        return;
+    }
+    let mo = menu_opacity.clamp(0.0, 1.0);
+    let dot_r: f32 = 2.5;
+    // Tighten the gap when there are many pages so the strip stays
+    // inside the puck (5 pages → 32 px wide at 8 px gap, fine
+    // inside a 90 px puck; 8 pages → cap gap to keep clearance).
+    let max_strip = radius * 1.4;
+    let mut gap: f32 = 8.0;
+    if (page_count as f32 - 1.0) * gap > max_strip {
+        gap = max_strip / (page_count as f32 - 1.0).max(1.0);
+    }
+    let total_w = (page_count as f32 - 1.0) * gap;
+    let start_x = center.x - total_w / 2.0;
+    let y = center.y + radius * 0.62;
+
+    let (ar, ag, ab, _) =
+        parse_hex_rgba(&palette.accent).unwrap_or((1.0, 1.0, 1.0, 1.0));
+    let (tr, tg, tb, _) =
+        parse_hex_rgba(&palette.text).unwrap_or((1.0, 1.0, 1.0, 1.0));
+
+    for i in 0..page_count {
+        let pos = Point::new(start_x + i as f32 * gap, y);
+        let path = Path::circle(pos, dot_r);
+        let is_active = active == Some(i);
+        let color = if is_active {
+            iced::Color::from_rgba(ar as f32, ag as f32, ab as f32, mo)
+        } else {
+            iced::Color::from_rgba(tr as f32, tg as f32, tb as f32, 0.35 * mo)
+        };
+        frame.fill(&path, color);
+    }
+}
+
 // =============================================================================
 // helpers
 // =============================================================================

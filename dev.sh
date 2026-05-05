@@ -9,12 +9,17 @@
 # session-bus signals.
 #
 # Usage:
-#   ./dev.sh start    [overlay|settings|all]   # default: overlay
-#   ./dev.sh stop     [overlay|settings|all]   # default: all
-#   ./dev.sh restart  [overlay|settings|all]   # default: overlay
+#   ./dev.sh start    [overlay|settings|daemon|all]   # default: overlay
+#   ./dev.sh stop     [overlay|settings|daemon|all]   # default: all
+#   ./dev.sh restart  [overlay|settings|daemon|all]   # default: overlay
 #   ./dev.sh status
-#   ./dev.sh logs     <overlay|settings> [-f]
-#   ./dev.sh build    [overlay|settings|all]   # default: all
+#   ./dev.sh logs     <overlay|settings|daemon> [-f]
+#   ./dev.sh build    [overlay|settings|daemon|all]   # default: all
+#
+# Note on daemon: needs hidraw + evdev access. If you're not in the
+# `input` group ('id -nG | grep input'), the daemon will crash at
+# startup trying to open /dev/input/event*. Fix: 'sudo usermod -aG
+# input $USER' + log out / back in. dev-test.sh checks this for you.
 #
 # Env overrides:
 #   JUHRADIAL_DISTROBOX  distrobox container name (default: claude_development)
@@ -33,19 +38,33 @@ mkdir -p "$RUNDIR"
 # Component → binary path
 overlay_bin="$TARGET/juhradial-overlay-rs"
 settings_bin="$TARGET/juhradial-settings"
+daemon_bin="$TARGET/juhradiald"
 
 # Component → cargo crate name (-p flag)
 overlay_crate="juhradial-overlay-rs"
 settings_crate="juhradial-settings-rs"
+daemon_crate="juhradiald"
 
-bin_for() { case "$1" in overlay) echo "$overlay_bin" ;; settings) echo "$settings_bin" ;; esac; }
-crate_for() { case "$1" in overlay) echo "$overlay_crate" ;; settings) echo "$settings_crate" ;; esac; }
+bin_for() {
+  case "$1" in
+    overlay)  echo "$overlay_bin" ;;
+    settings) echo "$settings_bin" ;;
+    daemon)   echo "$daemon_bin" ;;
+  esac
+}
+crate_for() {
+  case "$1" in
+    overlay)  echo "$overlay_crate" ;;
+    settings) echo "$settings_crate" ;;
+    daemon)   echo "$daemon_crate" ;;
+  esac
+}
 
 components_for_arg() {
   case "${1:-overlay}" in
-    all)              echo "overlay settings" ;;
-    overlay|settings) echo "$1" ;;
-    *) echo "Unknown component: $1 (want: overlay | settings | all)" >&2; exit 1 ;;
+    all)                     echo "daemon overlay settings" ;;
+    overlay|settings|daemon) echo "$1" ;;
+    *) echo "Unknown component: $1 (want: overlay | settings | daemon | all)" >&2; exit 1 ;;
   esac
 }
 
@@ -64,37 +83,65 @@ cmd_build() {
   distrobox enter "$DISTROBOX" -- bash -c "cd '$ROOT' && cargo build --release $crate_args"
 }
 
+ensure_daemon() {
+  # Auto-start the daemon when overlay or settings is requested —
+  # both are useless without it. The overlay's gesture-button
+  # handling, the settings UI's battery / DPI / Easy-Switch
+  # readouts, and the radial menu open path all live behind the
+  # daemon's D-Bus surface. No-op when the daemon is already up.
+  local daemon_pid="$RUNDIR/daemon.pid"
+  if is_running "$daemon_pid"; then
+    return 0
+  fi
+  echo "==> daemon not running — auto-starting (required by $1)"
+  start_one daemon
+}
+
+start_one() {
+  # Single-component start, factored out of cmd_start so
+  # ensure_daemon can call it without recursion / extra arg parsing.
+  local c="$1"
+  local bin pidfile logfile
+  bin="$(bin_for "$c")"
+  pidfile="$RUNDIR/$c.pid"
+  logfile="$RUNDIR/$c.log"
+  if [[ ! -x "$bin" ]]; then
+    echo "==> $c binary missing: $bin"
+    echo "    Build it first:  $0 build $c"
+    exit 1
+  fi
+  if is_running "$pidfile"; then
+    echo "==> $c already running (PID $(cat "$pidfile"))"
+    return 0
+  fi
+  echo "==> starting $c  →  $logfile"
+  # nohup + setsid → child outlives the shell that started it
+  setsid env RUST_LOG="$LOG_LEVEL" "$bin" >"$logfile" 2>&1 &
+  local pid=$!
+  echo "$pid" >"$pidfile"
+  # Give it a moment to either crash or settle
+  sleep 0.8
+  if is_running "$pidfile"; then
+    echo "    PID $pid alive"
+  else
+    echo "    !! failed to start. Last 15 log lines:"
+    tail -15 "$logfile" | sed 's/^/      /'
+    rm -f "$pidfile"
+    exit 1
+  fi
+}
+
 cmd_start() {
   local comps; comps="$(components_for_arg "${1:-overlay}")"
   for c in $comps; do
-    local bin pidfile logfile
-    bin="$(bin_for "$c")"
-    pidfile="$RUNDIR/$c.pid"
-    logfile="$RUNDIR/$c.log"
-    if [[ ! -x "$bin" ]]; then
-      echo "==> $c binary missing: $bin"
-      echo "    Build it first:  $0 build $c"
-      exit 1
+    # Bring the daemon up implicitly when overlay or settings is
+    # being launched — the user's mental model is "start the UI",
+    # not "remember to start the daemon first". `start all`
+    # already iterates daemon first, so this is a no-op there.
+    if [[ "$c" == "overlay" || "$c" == "settings" ]]; then
+      ensure_daemon "$c"
     fi
-    if is_running "$pidfile"; then
-      echo "==> $c already running (PID $(cat "$pidfile"))"
-      continue
-    fi
-    echo "==> starting $c  →  $logfile"
-    # nohup + setsid → child outlives the shell that started it
-    setsid env RUST_LOG="$LOG_LEVEL" "$bin" >"$logfile" 2>&1 &
-    local pid=$!
-    echo "$pid" >"$pidfile"
-    # Give it a moment to either crash or settle
-    sleep 0.8
-    if is_running "$pidfile"; then
-      echo "    PID $pid alive"
-    else
-      echo "    !! failed to start. Last 15 log lines:"
-      tail -15 "$logfile" | sed 's/^/      /'
-      rm -f "$pidfile"
-      exit 1
-    fi
+    start_one "$c"
   done
 }
 
@@ -139,7 +186,7 @@ cmd_restart() {
 
 cmd_status() {
   printf "%-10s  %-8s  %s\n" "COMPONENT" "STATE" "PID"
-  for c in overlay settings; do
+  for c in daemon overlay settings; do
     local pidfile="$RUNDIR/$c.pid"
     if is_running "$pidfile"; then
       printf "%-10s  %-8s  %s\n" "$c" "running" "$(cat "$pidfile")"
@@ -148,14 +195,14 @@ cmd_status() {
     fi
   done
   echo ""
-  echo "Logs:    $RUNDIR/{overlay,settings}.log"
-  echo "PIDs:    $RUNDIR/{overlay,settings}.pid"
+  echo "Logs:    $RUNDIR/{daemon,overlay,settings}.log"
+  echo "PIDs:    $RUNDIR/{daemon,overlay,settings}.pid"
 }
 
 cmd_logs() {
   local comp="${1:-overlay}"
-  if [[ "$comp" != "overlay" && "$comp" != "settings" ]]; then
-    echo "logs: component must be 'overlay' or 'settings'" >&2; exit 1
+  if [[ "$comp" != "overlay" && "$comp" != "settings" && "$comp" != "daemon" ]]; then
+    echo "logs: component must be 'overlay', 'settings', or 'daemon'" >&2; exit 1
   fi
   local logfile="$RUNDIR/$comp.log"
   if [[ ! -f "$logfile" ]]; then
@@ -172,20 +219,24 @@ cmd_help() {
   cat <<USAGE
 juhradial-mx dev runner
 
-  $0 build    [overlay|settings|all]   build inside distrobox=$DISTROBOX
-  $0 start    [overlay|settings|all]   run on host  (default: overlay)
-  $0 stop     [overlay|settings|all]   stop         (default: all)
-  $0 restart  [overlay|settings|all]                 (default: overlay)
-  $0 status                            list both components' state
-  $0 logs     <overlay|settings> [-f]  tail recent log (-f to follow)
+  $0 build    [overlay|settings|daemon|all]   build inside distrobox=$DISTROBOX
+  $0 start    [overlay|settings|daemon|all]   run on host  (default: overlay)
+  $0 stop     [overlay|settings|daemon|all]   stop         (default: all)
+  $0 restart  [overlay|settings|daemon|all]                  (default: overlay)
+  $0 status                                   list all three components' state
+  $0 logs     <overlay|settings|daemon> [-f]  tail recent log (-f to follow)
 
 Files:
-  PIDs   $RUNDIR/{overlay,settings}.pid
-  Logs   $RUNDIR/{overlay,settings}.log
+  PIDs   $RUNDIR/{daemon,overlay,settings}.pid
+  Logs   $RUNDIR/{daemon,overlay,settings}.log
 
 Env:
   JUHRADIAL_DISTROBOX=$DISTROBOX
   JUHRADIAL_LOG=$LOG_LEVEL
+
+Daemon prerequisites:
+  - User must be in 'input' group (sudo usermod -aG input \$USER + relogin)
+  - udev rules at /etc/udev/rules.d/99-juhradialmx.rules (from install.sh)
 USAGE
 }
 

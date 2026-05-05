@@ -42,6 +42,16 @@ pub enum Message {
     /// Toggle-mode dismiss without dispatching (right-click / Esc /
     /// click outside the menu).
     ToggleDismiss,
+    /// Mouse-wheel scroll over the centre puck — cycles to the
+    /// next/previous radial-menu page (positive = next, negative
+    /// = previous). Only emitted in toggle mode where there's a
+    /// real cursor over the canvas.
+    CyclePage(i32),
+    /// Result of asking the GNOME extension for the currently
+    /// focused window's class. Fired immediately after a `Show`
+    /// event so the menu can swap to the matching app-context
+    /// page. `None` = extension missing or no app focused.
+    FocusedClassResolved(Option<String>),
     /// Config reload from inotify watcher — replace theme + slices
     /// in the live state without restarting the overlay.
     ConfigReloaded(juhradial_shared::AppConfig),
@@ -100,15 +110,27 @@ fn update(state: &mut RadialState, message: Message) -> Task<Message> {
             // coords) — the extension figures out which monitor
             // contains the requested point.
             let half = (WINDOW_SIZE / 2.0) as i32;
-            Task::perform(
-                crate::ext_positioner::move_overlay(
-                    APP_ID.to_string(),
-                    x - half,
-                    y - half,
-                    -1,
+            // Run the position call AND the focused-class query in
+            // parallel — both are independent zbus round-trips, so
+            // batching them keeps the perceived open latency
+            // bounded by the slower of the two (~5 ms each on local
+            // session bus). The class result swaps to the matching
+            // app-context page during the menu's open fade-in.
+            Task::batch([
+                Task::perform(
+                    crate::ext_positioner::move_overlay(
+                        APP_ID.to_string(),
+                        x - half,
+                        y - half,
+                        -1,
+                    ),
+                    Message::Positioned,
                 ),
-                Message::Positioned,
-            )
+                Task::perform(
+                    crate::ext_positioner::get_focused_window_class(APP_ID.to_string()),
+                    Message::FocusedClassResolved,
+                ),
+            ])
         }
         Message::Overlay(OverlayEvent::Hide) => {
             debug!("Hide event from daemon");
@@ -141,6 +163,16 @@ fn update(state: &mut RadialState, message: Message) -> Task<Message> {
         Message::ToggleDismiss => {
             debug!("Toggle-mode dismiss");
             state.dismiss();
+            Task::none()
+        }
+        Message::CyclePage(direction) => {
+            debug!(direction, "Cycle radial-menu page");
+            state.cycle_page(direction);
+            Task::none()
+        }
+        Message::FocusedClassResolved(class) => {
+            debug!(?class, "Focused window class resolved");
+            state.apply_focused_class(class);
             Task::none()
         }
         Message::ConfigReloaded(cfg) => {
