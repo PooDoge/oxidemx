@@ -72,6 +72,49 @@ pub struct IconKey {
     color: u32,
 }
 
+/// Untinted variant of `peek_icon_handle` — used by the apps-source
+/// section of the icon picker, where preserving brand colours
+/// (Firefox orange, VSCode blue, etc.) on the picker thumbnail is
+/// what makes "yes, that's the app I meant" visually obvious. Keys
+/// the cache on `color = 0` so untinted entries don't collide with
+/// tinted ones.
+pub fn peek_icon_handle_untinted(
+    iced_handles: &std::rc::Rc<RefCell<HashMap<IconKey, Handle>>>,
+    source: &str,
+    size_px: u32,
+) -> Option<Handle> {
+    if source.is_empty() || size_px == 0 {
+        return None;
+    }
+    let key = IconKey {
+        source: source.to_string(),
+        size: size_px,
+        color: 0,
+    };
+    iced_handles.borrow().get(&key).cloned()
+}
+
+/// Install a pre-rasterised untinted `RasterIcon` (from a worker
+/// thread) into the iced_handles cache, keyed at `color = 0` so
+/// it doesn't collide with tinted variants.
+pub fn install_icon_handle_untinted(
+    iced_handles: &std::rc::Rc<RefCell<HashMap<IconKey, Handle>>>,
+    source: &str,
+    size_px: u32,
+    icon: RasterIcon,
+) {
+    if source.is_empty() || size_px == 0 {
+        return;
+    }
+    let key = IconKey {
+        source: source.to_string(),
+        size: size_px,
+        color: 0,
+    };
+    let handle = Handle::from_rgba(icon.size, icon.size, icon.rgba);
+    iced_handles.borrow_mut().insert(key, handle);
+}
+
 /// Install a pre-rasterised `RasterIcon` (from a worker thread)
 /// into the iced_handles cache. Companion to `peek_icon_handle`:
 /// the picker's pre-warmer rasterises icons in tokio (where

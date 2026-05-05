@@ -102,6 +102,21 @@ impl IconCache {
     }
 }
 
+/// Cache-free untinted rasterise: load `source` from disk and
+/// rasterise to `size × size` RGBA8 with original colours
+/// preserved. For full-colour app icons (PNGs, multi-colour SVGs)
+/// where tinting would destroy brand identity. Symbolic icons
+/// rendered through this path show as their underlying alpha
+/// mask in white-on-transparent — usually black-ish — which is
+/// fine for size estimation but loses theme tint.
+pub fn rasterize_icon_untinted(source: &str, size: u32) -> Option<RasterIcon> {
+    if source.is_empty() || size == 0 {
+        return None;
+    }
+    let raw = load_raw_rgba(source, size)?;
+    Some(RasterIcon { size, rgba: raw })
+}
+
 /// Cache-free rasterise + tint: load `source` from disk (XDG name
 /// or absolute path), rasterise to `size × size` RGBA8, tint to
 /// `color_rgba`. Identical to the body of [`IconCache::resolve`]

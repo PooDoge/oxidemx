@@ -14,17 +14,50 @@
 //! versa). Filter pass is a case-insensitive substring match on
 //! the icon name.
 
-use crate::radial_preview::peek_icon_handle;
+use crate::radial_preview::{peek_icon_handle, peek_icon_handle_untinted};
 use crate::{style, Message};
-use iced::widget::{button, column, container, image, row, scrollable, text, text_input, Space};
+use iced::widget::{button, column, container, image, pick_list, row, scrollable, text, text_input, Space};
 use iced::{Alignment, Element, Length};
 
 /// In-flight icon-picker state: which slice/sub-item the picked
-/// icon will be applied to + the current search filter text.
+/// icon will be applied to + the current search filter text +
+/// which icon source (curated catalogue vs installed apps) the
+/// grid is showing.
 #[derive(Debug, Clone)]
 pub struct IconPickerState {
     pub target: IconPickerTarget,
     pub search: String,
+    pub source: IconSource,
+}
+
+/// Where the picker pulls icons from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IconSource {
+    /// The hand-curated `-symbolic` catalogue baked into the
+    /// binary. Tinted to the theme text colour for a consistent
+    /// monochrome browse experience.
+    Catalogue,
+    /// Walk every installed `.desktop` file (system + user +
+    /// flatpak) and offer their declared `Icon=` field. Rendered
+    /// untinted in the picker so brand colours surface — the
+    /// radial menu still alpha-tints to slice colour at render
+    /// time, that's not a setting we control here.
+    Apps,
+}
+
+impl IconSource {
+    fn label(self) -> &'static str {
+        match self {
+            IconSource::Catalogue => "Catalogue (symbolic icons)",
+            IconSource::Apps => "Installed applications",
+        }
+    }
+}
+
+impl std::fmt::Display for IconSource {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.label())
+    }
 }
 
 /// Where the picked icon lands. Slice edits the active page's
@@ -321,15 +354,37 @@ pub const COMMON_ICONS: &[&str] = &[
 pub fn view<'a>(state: &'a crate::State, picker: &'a IconPickerState) -> Element<'a, Message> {
     let pal = &state.palette;
     let lc = picker.search.to_lowercase();
-    let matched: Vec<&'static &'static str> = COMMON_ICONS
-        .iter()
-        .filter(|n| picker.search.is_empty() || n.to_lowercase().contains(&lc))
-        .collect();
+
+    // Build the match list from whichever source is active. Both
+    // pipelines feed the same downstream rendering — search is a
+    // case-insensitive substring match on whatever text is shown
+    // in the cell label (icon name vs app display name).
+    let matched_count: usize = match picker.source {
+        IconSource::Catalogue => COMMON_ICONS
+            .iter()
+            .filter(|n| picker.search.is_empty() || n.to_lowercase().contains(&lc))
+            .count(),
+        IconSource::Apps => state
+            .installed_apps
+            .iter()
+            .filter(|a| picker.search.is_empty() || a.name.to_lowercase().contains(&lc))
+            .count(),
+    };
+
+    let source_picker = pick_list(
+        vec![IconSource::Catalogue, IconSource::Apps],
+        Some(picker.source),
+        Message::SetIconPickerSource,
+    )
+    .style(style::pick_list_style(pal))
+    .text_size(11);
 
     let header = row![
         text("Pick an icon").size(13),
+        Space::new().width(Length::Fixed(12.0)),
+        source_picker,
         Space::new().width(Length::Fill),
-        text(format!("{} match{}", matched.len(), if matched.len() == 1 { "" } else { "es" }))
+        text(format!("{} match{}", matched_count, if matched_count == 1 { "" } else { "es" }))
             .size(10)
             .style(style::text_faint(pal)),
         Space::new().width(Length::Fixed(8.0)),
@@ -339,16 +394,21 @@ pub fn view<'a>(state: &'a crate::State, picker: &'a IconPickerState) -> Element
     ]
     .align_y(Alignment::Center);
 
-    let search_input = text_input("Filter icons (e.g. \"edit\", \"folder\", \"play\")", &picker.search)
+    let search_placeholder = match picker.source {
+        IconSource::Catalogue => "Filter icons (e.g. \"edit\", \"folder\", \"play\")",
+        IconSource::Apps => "Filter apps (e.g. \"firefox\", \"vscode\", \"spotify\")",
+    };
+    let search_input = text_input(search_placeholder, &picker.search)
         .on_input(Message::SetIconPickerSearch)
         .padding(6)
         .size(12);
 
-    // Recently-used row — only rendered when the search bar is
-    // empty (otherwise the search filter is what the user is
-    // narrowing by). Surfaces frequently-reached icons at the top
-    // so the user doesn't have to filter or scroll for them.
-    let recents_row: Option<Element<Message>> = if picker.search.is_empty()
+    // Recents row only renders for the catalogue source — apps
+    // already show by name, and "recently picked apps" doesn't
+    // map cleanly onto the icon-string-based recents list (an
+    // app's icon string can be either an XDG name or a path).
+    let recents_row: Option<Element<Message>> = if picker.source == IconSource::Catalogue
+        && picker.search.is_empty()
         && !state.recent_icons.is_empty()
     {
         const COLS: usize = 6;
@@ -383,41 +443,146 @@ pub fn view<'a>(state: &'a crate::State, picker: &'a IconPickerState) -> Element
         None
     };
 
-    let body: Element<Message> = if matched.is_empty() {
-        text("No icons match that filter. Try something shorter, or type the name directly into the icon field above.")
-            .size(11)
-            .style(style::text_dim(pal))
-            .into()
-    } else {
-        const COLS: usize = 6;
-        let mut grid = column![].spacing(6);
-        let mut current = row![].spacing(6);
-        let mut count = 0usize;
-        for name in &matched {
-            current = current.push(icon_cell(state, name));
-            count += 1;
-            if count == COLS {
-                grid = grid.push(current);
-                current = row![].spacing(6);
-                count = 0;
+    // Body grid — different cell builder per source.
+    let body: Element<Message> = match picker.source {
+        IconSource::Catalogue => {
+            let matched: Vec<&'static &'static str> = COMMON_ICONS
+                .iter()
+                .filter(|n| picker.search.is_empty() || n.to_lowercase().contains(&lc))
+                .collect();
+            if matched.is_empty() {
+                text("No icons match that filter. Try something shorter, or type the name directly into the icon field above.")
+                    .size(11)
+                    .style(style::text_dim(pal))
+                    .into()
+            } else {
+                build_grid(matched.into_iter().map(|n| *n), |name| {
+                    icon_cell(state, name)
+                })
             }
         }
-        if count > 0 {
-            for _ in count..COLS {
-                current = current.push(Space::new().width(Length::FillPortion(1)));
+        IconSource::Apps => {
+            let matched: Vec<&juhradial_shared::DesktopEntry> = state
+                .installed_apps
+                .iter()
+                .filter(|a| picker.search.is_empty() || a.name.to_lowercase().contains(&lc))
+                .collect();
+            if matched.is_empty() {
+                text(if state.installed_apps.is_empty() {
+                    "No installed apps detected. (Empty $XDG_DATA_DIRS, or no .desktop files installed.)"
+                } else {
+                    "No apps match that filter."
+                })
+                .size(11)
+                .style(style::text_dim(pal))
+                .into()
+            } else {
+                build_grid(matched.into_iter(), |entry| app_cell(state, entry))
             }
-            grid = grid.push(current);
         }
-        scrollable(grid).height(Length::Fixed(280.0)).into()
     };
 
     let mut col = column![header, search_input].spacing(8);
     if let Some(recents) = recents_row {
         col = col.push(recents);
     }
-    col = col.push(text("All icons").size(11).style(style::text_dim(pal)));
+    let body_label = match picker.source {
+        IconSource::Catalogue => "All icons",
+        IconSource::Apps => "All apps",
+    };
+    col = col.push(text(body_label).size(11).style(style::text_dim(pal)));
     col = col.push(body);
     container(col).padding(10).style(style::card_quiet(pal)).into()
+}
+
+/// Wrap a sequence of cells into a 6-col scrollable grid. Pads the
+/// trailing row with empty Space so column widths stay stable.
+fn build_grid<'a, I, T, F>(items: I, mut make: F) -> Element<'a, Message>
+where
+    I: Iterator<Item = T>,
+    F: FnMut(T) -> Element<'a, Message>,
+{
+    const COLS: usize = 6;
+    let mut grid = column![].spacing(6);
+    let mut current = row![].spacing(6);
+    let mut count = 0usize;
+    for item in items {
+        current = current.push(make(item));
+        count += 1;
+        if count == COLS {
+            grid = grid.push(current);
+            current = row![].spacing(6);
+            count = 0;
+        }
+    }
+    if count > 0 {
+        for _ in count..COLS {
+            current = current.push(Space::new().width(Length::FillPortion(1)));
+        }
+        grid = grid.push(current);
+    }
+    scrollable(grid).height(Length::Fixed(280.0)).into()
+}
+
+/// One cell for the apps source. Click → applies the app's
+/// `Icon=` field (XDG name or absolute path) to the picker
+/// target, same downstream as catalogue clicks. The label is the
+/// app's display name (much friendlier than `firefox-symbolic`).
+fn app_cell<'a>(
+    state: &'a crate::State,
+    entry: &'a juhradial_shared::DesktopEntry,
+) -> Element<'a, Message> {
+    let pal = &state.palette;
+    let pick_msg = Message::PickIcon(entry.icon.clone());
+
+    let handle = peek_icon_handle_untinted(&state.iced_handles, &entry.icon, THUMB_PX);
+
+    let body: Element<Message> = if let Some(h) = handle {
+        column![
+            image(h)
+                .width(Length::Fixed(THUMB_PX as f32))
+                .height(Length::Fixed(THUMB_PX as f32)),
+            text(short_app_label(&entry.name))
+                .size(8)
+                .style(style::text_faint(pal)),
+        ]
+        .spacing(2)
+        .align_x(Alignment::Center)
+        .into()
+    } else {
+        let dot = Space::new()
+            .width(Length::Fixed(THUMB_PX as f32))
+            .height(Length::Fixed(THUMB_PX as f32));
+        column![
+            dot,
+            text(short_app_label(&entry.name))
+                .size(8)
+                .style(style::text_faint(pal)),
+        ]
+        .spacing(2)
+        .align_x(Alignment::Center)
+        .into()
+    };
+
+    button(body)
+        .padding(4)
+        .style(style::btn_secondary(pal))
+        .on_press(pick_msg)
+        .width(Length::FillPortion(1))
+        .into()
+}
+
+/// Trim long app names so they fit in a small grid cell. Picker
+/// label is just for recognition; the user can verify the full
+/// name via the live preview as the slice's icon.
+fn short_app_label(name: &str) -> String {
+    if name.chars().count() > 14 {
+        let mut out: String = name.chars().take(13).collect();
+        out.push('…');
+        out
+    } else {
+        name.to_string()
+    }
 }
 
 fn icon_cell<'a>(state: &'a crate::State, name: &'a str) -> Element<'a, Message> {

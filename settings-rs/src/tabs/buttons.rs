@@ -243,11 +243,16 @@ fn page_move_buttons(state: &State, active: usize) -> Element<'_, Message> {
     if active < last {
         right_btn = right_btn.on_press(Message::MovePageRight(active));
     }
+    // Duplicate is always available — even with one page, copying
+    // it gives the user a starting point for variant pages.
+    let dup_btn = button(text("Duplicate").size(11))
+        .style(style::btn_secondary(pal))
+        .on_press(Message::DuplicatePage(active));
     let mut delete_btn = button(text("Delete").size(11)).style(style::btn_danger(pal));
     if state.config.radial_menu.pages.len() > 1 {
         delete_btn = delete_btn.on_press(Message::DeletePage(active));
     }
-    row![left_btn, right_btn, delete_btn].spacing(6).into()
+    row![left_btn, right_btn, dup_btn, delete_btn].spacing(6).into()
 }
 
 fn page_props_editor(state: &State, active: usize) -> Element<'_, Message> {

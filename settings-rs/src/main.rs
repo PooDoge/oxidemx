@@ -315,6 +315,12 @@ pub enum Message {
     MovePageLeft(usize),
     /// Move page right in the order.
     MovePageRight(usize),
+    /// Clone the page at `idx` and append the copy to the end of
+    /// `pages`. The new page inherits the source's slices, app
+    /// classes (cleared so the original keeps its auto-select
+    /// claim), and include_in_scroll flag. Auto-selects the
+    /// duplicate so the user can immediately edit it.
+    DuplicatePage(usize),
     /// Kick off a GNOME-extension call to capture the currently
     /// focused window's class. Used by the "Detect from focused
     /// window" button on the page editor — saves the user from
@@ -335,9 +341,15 @@ pub enum Message {
     OpenIconPicker(icon_picker::IconPickerTarget),
     /// Close the picker without applying an icon.
     CloseIconPicker,
-    /// Live filter — case-insensitive substring match against the
-    /// curated icon name list.
+    /// Live filter — case-insensitive substring match. Filters
+    /// against icon name (Catalogue source) or app display name
+    /// (Apps source) depending on the current source.
     SetIconPickerSearch(String),
+    /// Switch picker source between the curated symbolic catalogue
+    /// and installed-applications. Resets the search filter so a
+    /// query that matched in one mode doesn't carry into the
+    /// other (where it would show zero results unhelpfully).
+    SetIconPickerSource(icon_picker::IconSource),
     /// User clicked an icon thumbnail — apply it to the picker's
     /// stored target and close.
     PickIcon(String),
@@ -368,6 +380,11 @@ pub enum Message {
     /// handler installs every Some into the iced_handles cache,
     /// then the next render finds them all in one go.
     IconsPrewarmed(Vec<(String, Option<juhradial_icons::RasterIcon>)>),
+    /// Result of the untinted (apps-source) prewarm pass — same
+    /// shape as `IconsPrewarmed` but the install path uses the
+    /// `peek/install_icon_handle_untinted` cache key (color = 0)
+    /// so app icons retain their brand colours in the picker.
+    AppIconsPrewarmed(Vec<(String, Option<juhradial_icons::RasterIcon>)>),
 
     // --- Submenu sub-items (slice editor) ---
     AddSubItem(usize),
@@ -551,6 +568,12 @@ pub struct State {
     /// surfaces as a row at the top of the icon picker so common
     /// choices are one click away.
     pub recent_icons: Vec<String>,
+    /// Snapshot of installed `.desktop` apps + their declared
+    /// `Icon=` fields. Used by the picker's "Apps" source so the
+    /// user can pick an icon by app rather than by symbolic name.
+    /// Loaded once at startup; static enough to skip live
+    /// reloading.
+    pub installed_apps: Vec<juhradial_shared::DesktopEntry>,
     /// Shared rasterised icon cache (XDG resolver + tinting). Lives
     /// at State level so it persists across re-renders and across
     /// theme changes (colours change → new cache entries; old
@@ -600,6 +623,7 @@ impl Default for State {
             detect_in_flight: None,
             icon_picker: None,
             recent_icons: recents::load(),
+            installed_apps: juhradial_shared::enumerate_applications(),
         }
     }
 }
@@ -1809,6 +1833,27 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             }
             Task::none()
         }
+        Message::DuplicatePage(idx) => {
+            if let Some(src) = state.config.radial_menu.pages.get(idx).cloned() {
+                let copy = juhradial_shared::RadialPage {
+                    name: format!("{} (copy)", src.name),
+                    slices: src.slices,
+                    // Clear app_classes on the copy: two pages
+                    // matching the same class would create an
+                    // ambiguous auto-select. The user can re-add
+                    // app classes deliberately.
+                    app_classes: Vec::new(),
+                    include_in_scroll: src.include_in_scroll,
+                };
+                state.config.radial_menu.pages.push(copy);
+                state.active_page = state.config.radial_menu.pages.len() - 1;
+                state.app_classes_drafts.clear();
+                state.selected_slice = None;
+                state.icon_picker = None;
+                state.touch();
+            }
+            Task::none()
+        }
         Message::MovePageRight(idx) => {
             if idx + 1 < state.config.radial_menu.pages.len() {
                 state.config.radial_menu.pages.swap(idx, idx + 1);
@@ -1859,72 +1904,144 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             state.icon_picker = Some(icon_picker::IconPickerState {
                 target,
                 search: String::new(),
+                source: icon_picker::IconSource::Catalogue,
             });
-            // Kick off the trickle-prewarmer. The first batch fires
-            // immediately; subsequent batches schedule themselves.
+            // Kick off the off-thread prewarm so the catalogue
+            // grid populates without blocking the UI thread.
+            Task::done(Message::PrewarmIcons)
+        }
+        Message::SetIconPickerSource(src) => {
+            if let Some(p) = state.icon_picker.as_mut() {
+                p.source = src;
+                p.search = String::new();
+            }
+            // Switching to Apps may need a different prewarm pass
+            // — the catalogue prewarm rasterised symbolic icons
+            // tinted to the theme text colour, but apps render
+            // untinted. Kick another pass; it filters cache hits
+            // so already-warmed entries are skipped.
             Task::done(Message::PrewarmIcons)
         }
         Message::PrewarmIcons => {
-            // Skip when picker isn't actually open (can happen if
-            // user closed before the message landed) OR when the
-            // cache is already warm (every catalogue icon present
-            // in iced_handles).
             if state.icon_picker.is_none() {
                 return Task::none();
             }
-            let tint = state.palette.text;
-            // Combine catalogue + recents so the user's picked
-            // icons (which may be absolute paths outside the
-            // curated catalogue) also get thumbnails. Filter
-            // entries already in cache so reopens don't re-do
-            // work.
-            let mut candidates: Vec<&str> =
-                icon_picker::COMMON_ICONS.iter().copied().collect();
-            for r in state.recent_icons.iter() {
-                if !candidates.iter().any(|c| *c == r.as_str()) {
-                    candidates.push(r.as_str());
+            let source = state
+                .icon_picker
+                .as_ref()
+                .map(|p| p.source)
+                .unwrap_or(icon_picker::IconSource::Catalogue);
+
+            match source {
+                icon_picker::IconSource::Catalogue => {
+                    // Catalogue source: rasterise tinted variants
+                    // of curated icons + recents.
+                    let tint = state.palette.text;
+                    let mut candidates: Vec<&str> =
+                        icon_picker::COMMON_ICONS.iter().copied().collect();
+                    for r in state.recent_icons.iter() {
+                        if !candidates.iter().any(|c| *c == r.as_str()) {
+                            candidates.push(r.as_str());
+                        }
+                    }
+                    let pending: Vec<String> = candidates
+                        .into_iter()
+                        .filter(|n| {
+                            radial_preview::peek_icon_handle(
+                                &state.iced_handles,
+                                n,
+                                icon_picker::THUMB_PX,
+                                tint,
+                            )
+                            .is_none()
+                        })
+                        .map(|s| s.to_string())
+                        .collect();
+                    if pending.is_empty() {
+                        return Task::none();
+                    }
+                    let size = icon_picker::THUMB_PX;
+                    let color = (tint.r, tint.g, tint.b, tint.a);
+                    Task::perform(
+                        async move {
+                            tokio::task::spawn_blocking(move || {
+                                pending
+                                    .into_iter()
+                                    .map(|name| {
+                                        let icon = juhradial_icons::rasterize_icon(&name, size, color);
+                                        (name, icon)
+                                    })
+                                    .collect::<Vec<_>>()
+                            })
+                            .await
+                            .unwrap_or_default()
+                        },
+                        Message::IconsPrewarmed,
+                    )
+                }
+                icon_picker::IconSource::Apps => {
+                    // Apps source: rasterise untinted variants
+                    // (preserve brand colours). Sentinel colour
+                    // 1.0,1.0,1.0,1.0 on the rasteriser keeps the
+                    // alpha mask from being repainted with a
+                    // single colour — it's still tint-aware, but
+                    // a white-on-white tint preserves the source
+                    // pixels.
+                    let pending: Vec<String> = state
+                        .installed_apps
+                        .iter()
+                        .filter_map(|a| {
+                            if a.icon.is_empty() {
+                                return None;
+                            }
+                            if radial_preview::peek_icon_handle_untinted(
+                                &state.iced_handles,
+                                &a.icon,
+                                icon_picker::THUMB_PX,
+                            )
+                            .is_some()
+                            {
+                                return None;
+                            }
+                            Some(a.icon.clone())
+                        })
+                        .collect();
+                    if pending.is_empty() {
+                        return Task::none();
+                    }
+                    let size = icon_picker::THUMB_PX;
+                    Task::perform(
+                        async move {
+                            tokio::task::spawn_blocking(move || {
+                                pending
+                                    .into_iter()
+                                    .map(|name| {
+                                        // True untinted path:
+                                        // preserves the original
+                                        // RGBA pixels of the
+                                        // app's icon (Firefox
+                                        // orange, Chromium blue,
+                                        // etc.). Symbolic icons
+                                        // routed through this
+                                        // path show as black-on-
+                                        // transparent, which is
+                                        // fine — the picker
+                                        // shouldn't have many
+                                        // symbolic-only apps.
+                                        let icon = juhradial_icons::rasterize_icon_untinted(
+                                            &name, size,
+                                        );
+                                        (name, icon)
+                                    })
+                                    .collect::<Vec<_>>()
+                            })
+                            .await
+                            .unwrap_or_default()
+                        },
+                        Message::AppIconsPrewarmed,
+                    )
                 }
             }
-            let pending: Vec<String> = candidates
-                .into_iter()
-                .filter(|n| {
-                    radial_preview::peek_icon_handle(
-                        &state.iced_handles,
-                        n,
-                        icon_picker::THUMB_PX,
-                        tint,
-                    )
-                    .is_none()
-                })
-                .map(|s| s.to_string())
-                .collect();
-            if pending.is_empty() {
-                return Task::none();
-            }
-            let size = icon_picker::THUMB_PX;
-            let color = (tint.r, tint.g, tint.b, tint.a);
-            // Single Task::perform runs the whole batch on a tokio
-            // worker thread — file IO + SVG decode + tinting are
-            // pure functions over Send data, no IconCache needed.
-            // When done, ONE message lands on the main thread and
-            // ONE re-render shows every newly-cached icon.
-            Task::perform(
-                async move {
-                    tokio::task::spawn_blocking(move || {
-                        pending
-                            .into_iter()
-                            .map(|name| {
-                                let icon =
-                                    juhradial_icons::rasterize_icon(&name, size, color);
-                                (name, icon)
-                            })
-                            .collect::<Vec<_>>()
-                    })
-                    .await
-                    .unwrap_or_default()
-                },
-                Message::IconsPrewarmed,
-            )
         }
         Message::IconsPrewarmed(results) => {
             // Picker may have closed during the worker pass —
@@ -1938,6 +2055,23 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                         &name,
                         icon_picker::THUMB_PX,
                         tint,
+                        icon,
+                    );
+                }
+            }
+            Task::none()
+        }
+        Message::AppIconsPrewarmed(results) => {
+            // Same install path as IconsPrewarmed but with the
+            // untinted cache key (color = 0). The picker's
+            // `peek_icon_handle_untinted` reads from the same key,
+            // so apps render in their original brand colours.
+            for (name, icon) in results {
+                if let Some(icon) = icon {
+                    radial_preview::install_icon_handle_untinted(
+                        &state.iced_handles,
+                        &name,
+                        icon_picker::THUMB_PX,
                         icon,
                     );
                 }
