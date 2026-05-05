@@ -170,6 +170,11 @@ pub enum Message {
     /// path to an SVG/PNG, or the legacy internal id) for a slice
     /// on the active page.
     SetSliceIcon(usize, String),
+    /// Set the slice's description / tooltip text. Stored as
+    /// metadata; not currently rendered in the overlay.
+    SetSliceDescription(usize, String),
+    /// Same for a submenu sub-item.
+    SetSubItemDescription { parent: usize, idx: usize, value: String },
     /// Replace a slice's visibility predicate. `None` clears the
     /// predicate (slice is always visible). `Some(Always)` is
     /// equivalent at runtime; we write the slimmer `None` shape on
@@ -1050,6 +1055,7 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                 submenu: Vec::new(),
                 visible_if: None,
                 icon_untinted: false,
+                description: String::new(),
             });
             state.touch();
             Task::none()
@@ -1118,6 +1124,24 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
         Message::SetSliceIcon(i, s) => {
             if let Some(slice) = state.active_slices_mut().get_mut(i) {
                 slice.icon = s;
+                state.touch();
+            }
+            Task::none()
+        }
+        Message::SetSliceDescription(i, s) => {
+            if let Some(slice) = state.active_slices_mut().get_mut(i) {
+                slice.description = s;
+                state.touch();
+            }
+            Task::none()
+        }
+        Message::SetSubItemDescription { parent, idx, value } => {
+            if let Some(item) = state
+                .active_slices_mut()
+                .get_mut(parent)
+                .and_then(|p| p.submenu.get_mut(idx))
+            {
+                item.description = value;
                 state.touch();
             }
             Task::none()
@@ -1196,6 +1220,7 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                     submenu: Vec::new(),
                     visible_if: None,
                 icon_untinted: false,
+                description: String::new(),
                 });
             }
             if from < slices.len() && to < slices.len() {
@@ -1709,6 +1734,7 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                     submenu: Vec::new(),
                     visible_if: None,
                 icon_untinted: false,
+                description: String::new(),
                 });
                 state.touch();
             }

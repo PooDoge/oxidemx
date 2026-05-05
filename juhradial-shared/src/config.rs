@@ -51,6 +51,15 @@ pub struct Slice {
     #[serde(default, skip_serializing_if = "is_false")]
     pub icon_untinted: bool,
 
+    /// Optional longer-form notes / tooltip text for the slice.
+    /// Today this is a settings-side notes field — use it for
+    /// "deploy to staging via shipit (don't run on prod!)" type
+    /// reminders. A future overlay change may display it as a
+    /// subtitle under the centre-puck label on hover; for now
+    /// it's a JSON-resident field that survives across edits.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub description: String,
+
     /// Sub-items shown when this slice is hovered with `kind = Submenu`.
     /// Empty for non-submenu slices.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

@@ -374,18 +374,26 @@ fn format_page_label(idx: usize, page: &RadialPage) -> String {
     } else {
         n.to_string()
     };
+    // Count slices that actually have content (non-empty label OR
+    // command). The schema may pre-pad to 8 slots with "(empty)"
+    // placeholders for the drag-to-swap UX, and those shouldn't
+    // inflate the count shown to the user.
+    let slice_count = page
+        .slices
+        .iter()
+        .filter(|s| !s.label.trim().is_empty() || !s.command.trim().is_empty())
+        .count();
+    let count_str = format!("{slice_count} slice{}", if slice_count == 1 { "" } else { "s" });
     if page.app_classes.is_empty() {
-        format!("{}: {}", idx + 1, display_name)
+        format!("{}: {} — {}", idx + 1, display_name, count_str)
     } else {
-        // Show up to two classes inline so the picker entry stays
-        // readable; longer lists collapse to "…".
         let preview: Vec<&str> = page.app_classes.iter().take(2).map(String::as_str).collect();
         let suffix = if page.app_classes.len() > preview.len() {
             format!("{}, …", preview.join(", "))
         } else {
             preview.join(", ")
         };
-        format!("{}: {} ({})", idx + 1, display_name, suffix)
+        format!("{}: {} ({}) — {}", idx + 1, display_name, suffix, count_str)
     }
 }
 
@@ -520,6 +528,13 @@ fn slice_editor_row<'a>(
         .on_input(move |s| Message::SetSliceLabel(idx, s))
         .padding(6)
         .size(12);
+    let desc_input = text_input(
+        "Description (notes / tooltip — optional)",
+        slice.description.as_str(),
+    )
+    .on_input(move |s| Message::SetSliceDescription(idx, s))
+    .padding(5)
+    .size(11);
     let cmd_input = text_input("Command", slice.command.as_str())
         .on_input(move |s| Message::SetSliceCommand(idx, s))
         .padding(6)
@@ -618,6 +633,7 @@ fn slice_editor_row<'a>(
     let mut col = column![
         header,
         label_input,
+        desc_input,
         row![kind_picker, color_picker, cmd_input.width(Length::Fill), app_pick_btn]
             .align_y(Alignment::Center)
             .spacing(8),
