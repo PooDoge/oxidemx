@@ -60,6 +60,30 @@ impl IconCache {
         self.handles.borrow_mut().insert(key, handle.clone());
         Some(handle)
     }
+
+    /// Resolve `source` at `size` pixels with **original colours
+    /// preserved** (no alpha-mask tint). Used for slices marked
+    /// `icon_untinted` — typically full-colour app icons where
+    /// brand identity matters more than slice-colour theming.
+    /// Cached separately from tinted entries via the `color = 0`
+    /// sentinel key.
+    pub fn resolve_untinted(&self, source: &str, size: u32) -> Option<Handle> {
+        if source.is_empty() || size == 0 {
+            return None;
+        }
+        let key = HandleKey {
+            source: source.to_string(),
+            size,
+            color: 0,
+        };
+        if let Some(h) = self.handles.borrow().get(&key) {
+            return Some(h.clone());
+        }
+        let icon: RasterIcon = self.raw.resolve_untinted(source, size)?;
+        let handle = Handle::from_rgba(icon.size, icon.size, icon.rgba);
+        self.handles.borrow_mut().insert(key, handle.clone());
+        Some(handle)
+    }
 }
 
 /// Composite an icon `handle` centred at `(cx, cy)` into `frame`.

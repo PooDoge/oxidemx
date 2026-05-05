@@ -221,6 +221,30 @@ impl RadialPreview {
             .insert(key, handle.clone());
         Some(handle)
     }
+
+    /// Untinted variant — preserves the icon's original RGBA so
+    /// full-colour app icons (Firefox orange, etc.) survive into
+    /// the preview without being repainted to the slice colour.
+    /// Mirrors the picker's untinted cache path (color = 0 key).
+    fn resolve_icon_untinted(&self, source: &str, size_px: u32) -> Option<Handle> {
+        if source.is_empty() || size_px == 0 {
+            return None;
+        }
+        let key = IconKey {
+            source: source.to_string(),
+            size: size_px,
+            color: 0,
+        };
+        if let Some(h) = self.iced_handles.borrow().get(&key) {
+            return Some(h.clone());
+        }
+        let icon: RasterIcon = self.icons.resolve_untinted(source, size_px)?;
+        let handle = Handle::from_rgba(icon.size, icon.size, icon.rgba);
+        self.iced_handles
+            .borrow_mut()
+            .insert(key, handle.clone());
+        Some(handle)
+    }
 }
 
 fn pack_color((r, g, b, a): (f32, f32, f32, f32)) -> u32 {
@@ -489,17 +513,21 @@ fn draw_slot(
                 );
             }
 
-            // Resolve the slice's freedesktop icon, tinted with
-            // the slice's configured colour. Falls back to a
-            // unicode glyph (also coloured) when the resolver
-            // can't find anything.
+            // Resolve the slice's freedesktop icon. Default path
+            // tints to the slice colour for symbolic-icon
+            // consistency; per-slice `icon_untinted` flag flips
+            // to the original-pixels path so full-colour app
+            // icons keep their brand colours in the preview too.
             let (r, g, b) = slice_color(pal, s);
             let tint = Color::from_rgba(r, g, b, 1.0);
             let glyph_size = bg_radius * 1.1;
             let icon_size_px = glyph_size.round().max(8.0) as u32;
-            if let Some(handle) =
+            let resolved = if s.icon_untinted {
+                painter.resolve_icon_untinted(s.icon.as_str(), icon_size_px)
+            } else {
                 painter.resolve_icon(s.icon.as_str(), icon_size_px, tint)
-            {
+            };
+            if let Some(handle) = resolved {
                 let bounds = Rectangle::new(
                     Point::new(icon_pos.x - glyph_size / 2.0, icon_pos.y - glyph_size / 2.0),
                     iced::Size::new(glyph_size, glyph_size),

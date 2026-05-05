@@ -169,6 +169,11 @@ pub enum Message {
     /// path to an SVG/PNG, or the legacy internal id) for a slice
     /// on the active page.
     SetSliceIcon(usize, String),
+    /// Toggle whether the slice icon renders at its original
+    /// colours (true) or tinted to the slice colour (false).
+    SetSliceIconUntinted(usize, bool),
+    /// Same toggle for a submenu sub-item.
+    SetSubItemIconUntinted { parent: usize, idx: usize, value: bool },
     /// Replace a slice's visibility predicate. `None` clears the
     /// predicate (slice is always visible). `Some(Always)` is
     /// equivalent at runtime; we write the slimmer `None` shape on
@@ -747,11 +752,15 @@ fn run_test_action(state: &mut State, slice: Option<&juhradial_shared::Slice>) {
 /// Apply an icon name (or absolute file path) to whichever picker
 /// target the caller specifies. Used by both the inline icon-grid
 /// picker and the native file-dialog flow so they share the same
-/// "where does this land?" logic.
+/// "where does this land?" logic. `prefer_untinted` is set when
+/// the source is naturally full-colour (Apps grid, file picker)
+/// so the slice's `icon_untinted` flag flips on automatically and
+/// the user gets brand colours by default.
 fn apply_icon_to_target(
     state: &mut State,
     target: Option<icon_picker::IconPickerTarget>,
     name: String,
+    prefer_untinted: bool,
 ) {
     let target = match target {
         Some(t) => t,
@@ -761,6 +770,9 @@ fn apply_icon_to_target(
         icon_picker::IconPickerTarget::Slice(idx) => {
             if let Some(slice) = state.active_slices_mut().get_mut(idx) {
                 slice.icon = name;
+                if prefer_untinted {
+                    slice.icon_untinted = true;
+                }
                 state.touch();
             }
         }
@@ -771,6 +783,9 @@ fn apply_icon_to_target(
                 .and_then(|p| p.submenu.get_mut(idx))
             {
                 item.icon = name;
+                if prefer_untinted {
+                    item.icon_untinted = true;
+                }
                 state.touch();
             }
         }
@@ -1016,6 +1031,7 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                 icon: String::new(),
                 submenu: Vec::new(),
                 visible_if: None,
+                icon_untinted: false,
             });
             state.touch();
             Task::none()
@@ -1075,6 +1091,24 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
         Message::SetSliceIcon(i, s) => {
             if let Some(slice) = state.active_slices_mut().get_mut(i) {
                 slice.icon = s;
+                state.touch();
+            }
+            Task::none()
+        }
+        Message::SetSliceIconUntinted(i, v) => {
+            if let Some(slice) = state.active_slices_mut().get_mut(i) {
+                slice.icon_untinted = v;
+                state.touch();
+            }
+            Task::none()
+        }
+        Message::SetSubItemIconUntinted { parent, idx, value } => {
+            if let Some(item) = state
+                .active_slices_mut()
+                .get_mut(parent)
+                .and_then(|p| p.submenu.get_mut(idx))
+            {
+                item.icon_untinted = value;
                 state.touch();
             }
             Task::none()
@@ -1144,6 +1178,7 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                     icon: String::new(),
                     submenu: Vec::new(),
                     visible_if: None,
+                icon_untinted: false,
                 });
             }
             if from < slices.len() && to < slices.len() {
@@ -1655,6 +1690,7 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                     icon: String::new(),
                     submenu: Vec::new(),
                     visible_if: None,
+                icon_untinted: false,
                 });
                 state.touch();
             }
@@ -2090,10 +2126,21 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
         }
         Message::PickIcon(name) => {
             // Apply the picked icon to whichever target the picker
-            // was opened against, then close. Mirrors the existing
-            // SetSliceIcon / SetSubItemIcon paths so the autosave
-            // tick fires the same way.
-            apply_icon_to_target(state, state.icon_picker.as_ref().map(|p| p.target), name.clone());
+            // was opened against, then close. The Apps source is
+            // naturally full-colour, so we flip icon_untinted on
+            // by default — that way the radial menu shows the
+            // brand colours the user picked the app for.
+            let prefer_untinted = state
+                .icon_picker
+                .as_ref()
+                .map(|p| p.source == icon_picker::IconSource::Apps)
+                .unwrap_or(false);
+            apply_icon_to_target(
+                state,
+                state.icon_picker.as_ref().map(|p| p.target),
+                name.clone(),
+                prefer_untinted,
+            );
             state.icon_picker = None;
             // Persist the recents list so next session opens with
             // the user's frequently-reached icons at the top of
@@ -2130,7 +2177,10 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
         }
         Message::IconFileChosen { target, path } => {
             if let Some(p) = path {
-                apply_icon_to_target(state, Some(target), p.clone());
+                // File-picker selections are typically PNGs/SVGs
+                // with their own colours — default to untinted so
+                // the user's chosen artwork survives unmodified.
+                apply_icon_to_target(state, Some(target), p.clone(), true);
                 // Close any open inline picker — the user used the
                 // file dialog instead, no reason to leave the grid
                 // open over the editor.

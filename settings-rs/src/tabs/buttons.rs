@@ -564,6 +564,31 @@ fn slice_editor_row<'a>(
         .align_y(Alignment::Center)
         .spacing(8);
 
+    // Original-colour toggle. The radial menu defaults to
+    // alpha-tinting the icon to the slice colour (great for
+    // symbolic icons, terrible for full-colour app/brand icons).
+    // Toggle on to keep the icon's pixels as-is.
+    let untinted_now = slice.icon_untinted;
+    let untinted_row = row![
+        column![
+            text("Use original icon colours").size(12),
+            text(
+                "Off: tint to slice colour (best for symbolic icons). On: \
+                 keep brand colours intact (best for app icons / custom \
+                 PNGs)."
+            )
+            .size(10)
+            .style(style::text_dim(pal)),
+        ]
+        .spacing(2),
+        Space::new().width(Length::Fill),
+        toggler(untinted_now)
+            .on_toggle(move |v| Message::SetSliceIconUntinted(idx, v))
+            .style(style::toggler_style(pal)),
+    ]
+    .align_y(Alignment::Center)
+    .spacing(12);
+
     let mut up_btn = button(text("↑").size(11)).style(style::btn_secondary(pal));
     if idx > 0 {
         up_btn = up_btn.on_press(Message::MoveSliceUp(idx));
@@ -604,6 +629,7 @@ fn slice_editor_row<'a>(
             .align_y(Alignment::Center)
             .spacing(8),
         icon_row,
+        untinted_row,
         visibility_editor(state, idx, slice.visible_if.as_ref()),
     ]
     .spacing(6);
@@ -1007,6 +1033,15 @@ fn submenu_item_row<'a>(
         .style(style::btn_secondary(pal))
         .on_press(Message::BrowseIconFile(sub_browse_target));
 
+    // Compact untinted toggle for sub-items — same semantics as
+    // the slice version but inline with the icon row.
+    let untinted_now = item.icon_untinted;
+    let untinted_toggle = toggler(untinted_now)
+        .on_toggle(move |v| Message::SetSubItemIconUntinted { parent, idx, value: v })
+        .label("Original")
+        .text_size(9)
+        .style(style::toggler_style(pal));
+
     let mut col = column![
         row![
             text(format!("{}.", idx + 1))
@@ -1022,7 +1057,7 @@ fn submenu_item_row<'a>(
         ]
         .align_y(Alignment::Center)
         .spacing(6),
-        row![kind_picker, icon_input.width(Length::Fill), sub_browse_btn, sub_file_btn]
+        row![kind_picker, icon_input.width(Length::Fill), sub_browse_btn, sub_file_btn, untinted_toggle]
             .align_y(Alignment::Center)
             .spacing(6),
     ]

@@ -43,6 +43,14 @@ pub struct Slice {
     #[serde(default)]
     pub icon: String,
 
+    /// When true, render the icon at its original colours instead of
+    /// tinting it to the slice colour. Useful for full-colour app
+    /// icons (Firefox, Chromium, GIMP, …) where the brand identity
+    /// matters; symbolic icons should leave this `false` so they
+    /// pick up the slice colour as a monochrome highlight.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub icon_untinted: bool,
+
     /// Sub-items shown when this slice is hovered with `kind = Submenu`.
     /// Empty for non-submenu slices.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -130,6 +138,13 @@ pub struct VisualSettings {
     /// system font.
     #[serde(default)]
     pub font_family: String,
+}
+
+/// Helper for `#[serde(skip_serializing_if = ...)]` on the
+/// `icon_untinted` flag — keeps default-`false` slices off-disk
+/// so the JSON stays minimal.
+fn is_false(b: &bool) -> bool {
+    !b
 }
 
 fn default_menu_bg_opacity() -> f32 {

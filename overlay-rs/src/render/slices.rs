@@ -132,7 +132,17 @@ pub fn draw_slice(
     let glyph_size = (icon_bg_radius * 1.4).max(8.0);
     let glyph_size_px = glyph_size.round() as u32;
 
-    if let Some(handle) = icons.resolve(icon_source, glyph_size_px, icon_color_rgba) {
+    // Per-slice override: when icon_untinted is set, render with
+    // the original RGBA pixels (preserves brand colours for app
+    // icons, custom artwork). Default path tints to the slice
+    // colour for symbolic-icon consistency.
+    let untinted = slice.map(|s| s.icon_untinted).unwrap_or(false);
+    let resolved = if untinted {
+        icons.resolve_untinted(icon_source, glyph_size_px)
+    } else {
+        icons.resolve(icon_source, glyph_size_px, icon_color_rgba)
+    };
+    if let Some(handle) = resolved {
         draw_icon(frame, icon_pos.x, icon_pos.y, glyph_size, &handle);
     } else {
         let dot_color = Color::from_rgba(sr as f32, sg as f32, sb as f32, mo);
@@ -273,7 +283,12 @@ pub fn draw_submenu(
         let icon_color = (sr as f32, sg as f32, sb as f32, item_opacity);
         let glyph_size = (scaled_radius * 1.4).max(6.0);
         let glyph_size_px = glyph_size.round().max(1.0) as u32;
-        if let Some(handle) = icons.resolve(item.icon.as_str(), glyph_size_px, icon_color) {
+        let resolved = if item.icon_untinted {
+            icons.resolve_untinted(item.icon.as_str(), glyph_size_px)
+        } else {
+            icons.resolve(item.icon.as_str(), glyph_size_px, icon_color)
+        };
+        if let Some(handle) = resolved {
             draw_icon(frame, item_pos.x, item_pos.y, glyph_size, &handle);
         } else {
             frame.fill(
