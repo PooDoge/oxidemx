@@ -213,6 +213,16 @@ pub enum Message {
     SwitchHost(u8),
     HostSwitched(Result<(), String>),
 
+    // --- Macros: in-place edit ---
+    /// Open inline edit form for an existing macro.
+    StartEditMacro(String),
+    /// User typed in the rename or trigger field.
+    EditMacroField { id: String, field: MacroEditField, value: String },
+    /// Persist changes to disk.
+    CommitMacroEdit(String),
+    /// Cancel without writing.
+    CancelMacroEdit,
+
     // --- Macros: recording ---
     /// User clicked Record (or Stop, depending on `recording_state`).
     ToggleMacroRecord,
@@ -239,6 +249,14 @@ pub enum Message {
     SetHiResScrollInvert(bool),
     SetHiResScrollTarget(bool),
     HiResScrollSet(Result<(), String>),
+
+    // --- Per-app profile bindings (Settings tab) ---
+    /// User typed in the WIP "app class" or "profile name" fields.
+    SetAppBindingDraft { class: String, profile: String },
+    /// Save the current draft as a new app→profile entry.
+    AddAppBinding,
+    /// Remove the binding for `class`.
+    RemoveAppBinding(String),
 
     // --- Custom theme palette editor (Settings tab → Theme card) ---
     /// Toggle the "Customise theme" expander.
@@ -270,6 +288,13 @@ pub enum VisualField {
     SliceHighlightOpacity,
     /// Centre-label font size in px (Visuals tab → "Centre label size").
     CenterLabelSize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MacroEditField {
+    Name,
+    Description,
+    Trigger,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -392,6 +417,13 @@ pub struct State {
     /// Custom-theme editor state. None = collapsed; Some =
     /// expanded with the WIP palette + the slug typed by the user.
     pub theme_editor: Option<ThemeEditor>,
+    /// In-place macro editor — when populated, the matching row in
+    /// the Macros list shows an inline form instead of the
+    /// read-only summary.
+    pub macro_edit: Option<MacroEditDraft>,
+    /// In-flight "Add application binding" form. Lives at State
+    /// level so the typed text survives re-renders.
+    pub app_binding_draft: AppBindingDraft,
     /// Shared rasterised icon cache (XDG resolver + tinting). Lives
     /// at State level so it persists across re-renders and across
     /// theme changes (colours change → new cache entries; old
@@ -430,8 +462,24 @@ impl Default for State {
             daemon: daemon::DaemonSnapshot::default(),
             recording: RecordingState::Idle,
             theme_editor: None,
+            macro_edit: None,
+            app_binding_draft: AppBindingDraft::default(),
         }
     }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct AppBindingDraft {
+    pub class: String,
+    pub profile: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct MacroEditDraft {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub trigger: String,
 }
 
 /// In-flight state of the custom-theme editor.
@@ -948,6 +996,90 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             Task::none()
         }
 
+        // --- Macros: in-place edit ---
+        Message::StartEditMacro(id) => {
+            // Pull current values from the on-disk JSON so the
+            // form fields seed correctly.
+            match tabs::macros::read_raw(&id) {
+                Ok(v) => {
+                    state.macro_edit = Some(MacroEditDraft {
+                        id: id.clone(),
+                        name: v
+                            .get("name")
+                            .and_then(|x| x.as_str())
+                            .unwrap_or("")
+                            .to_string(),
+                        description: v
+                            .get("description")
+                            .and_then(|x| x.as_str())
+                            .unwrap_or("")
+                            .to_string(),
+                        trigger: v
+                            .get("assigned_trigger")
+                            .and_then(|x| x.as_str())
+                            .unwrap_or("")
+                            .to_string(),
+                    });
+                }
+                Err(e) => {
+                    state.status = format!("Read failed: {e}");
+                }
+            }
+            Task::none()
+        }
+        Message::EditMacroField { id, field, value } => {
+            if let Some(draft) = state.macro_edit.as_mut() {
+                if draft.id == id {
+                    match field {
+                        MacroEditField::Name => draft.name = value,
+                        MacroEditField::Description => draft.description = value,
+                        MacroEditField::Trigger => draft.trigger = value,
+                    }
+                }
+            }
+            Task::none()
+        }
+        Message::CommitMacroEdit(id) => {
+            if let Some(draft) = state.macro_edit.take() {
+                if draft.id == id {
+                    if let Ok(mut v) = tabs::macros::read_raw(&id) {
+                        if let Some(obj) = v.as_object_mut() {
+                            obj.insert(
+                                "name".into(),
+                                serde_json::Value::String(draft.name.trim().to_string()),
+                            );
+                            obj.insert(
+                                "description".into(),
+                                serde_json::Value::String(draft.description.trim().to_string()),
+                            );
+                            obj.insert(
+                                "assigned_trigger".into(),
+                                if draft.trigger.trim().is_empty() {
+                                    serde_json::Value::Null
+                                } else {
+                                    serde_json::Value::String(draft.trigger.trim().to_string())
+                                },
+                            );
+                        }
+                        match tabs::macros::write_raw(&id, &v) {
+                            Ok(_) => {
+                                state.status = format!("Saved \"{}\"", draft.name);
+                                state.macros = tabs::macros::list();
+                            }
+                            Err(e) => {
+                                state.status = format!("Save failed: {e}");
+                            }
+                        }
+                    }
+                }
+            }
+            Task::none()
+        }
+        Message::CancelMacroEdit => {
+            state.macro_edit = None;
+            Task::none()
+        }
+
         // --- Macros: recording flow ---
         Message::ToggleMacroRecord => match &state.recording {
             RecordingState::Idle => {
@@ -1067,6 +1199,33 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
         }
         Message::GamingDpiCycled(Err(e)) => {
             state.status = format!("Cycle failed: {e}");
+            Task::none()
+        }
+
+        // --- App profile bindings ---
+        Message::SetAppBindingDraft { class, profile } => {
+            state.app_binding_draft = AppBindingDraft { class, profile };
+            Task::none()
+        }
+        Message::AddAppBinding => {
+            let class = state.app_binding_draft.class.trim().to_string();
+            let profile = state.app_binding_draft.profile.trim().to_string();
+            if class.is_empty() || profile.is_empty() {
+                state.status = "Both app class and profile name required".into();
+                return Task::none();
+            }
+            state
+                .config
+                .app_profiles
+                .insert(class.clone(), profile.clone());
+            state.app_binding_draft = AppBindingDraft::default();
+            state.status = format!("Bound {class} → {profile}");
+            state.touch();
+            Task::none()
+        }
+        Message::RemoveAppBinding(class) => {
+            state.config.app_profiles.remove(&class);
+            state.touch();
             Task::none()
         }
 

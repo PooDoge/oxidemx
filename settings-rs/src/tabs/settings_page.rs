@@ -35,8 +35,110 @@ pub fn view(state: &State) -> Element<'_, Message> {
         section_block(state, "Visuals", tabs::visuals::view(state)),
         Space::new().height(Length::Fixed(16.0)),
         section_block(state, "Animation", tabs::animation::view(state)),
+        Space::new().height(Length::Fixed(16.0)),
+        section_block(state, "Application bindings", app_bindings(state)),
     ]
     .spacing(10)
+    .into()
+}
+
+// ============================================================================
+// Per-app profile bindings — class → profile name
+// ============================================================================
+
+fn app_bindings(state: &State) -> Element<'_, Message> {
+    let pal = &state.palette;
+    let bindings: Vec<(String, String)> = state
+        .config
+        .app_profiles
+        .iter()
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect();
+
+    let intro = text(
+        "Map a focused-window class (matched against WM_CLASS / \
+         xdg-toplevel app_id) to a radial-menu profile. The daemon \
+         loads ~/.config/juhradial/profiles/<name>.json when that \
+         class focuses; falls back to the main config otherwise. \
+         Edit the per-profile slices by hand for now — the \
+         in-app profile editor is on the roadmap.",
+    )
+    .size(11)
+    .style(style::text_dim(pal));
+
+    let mut list_col = column![].spacing(6);
+    if bindings.is_empty() {
+        list_col = list_col.push(
+            text("No bindings configured.")
+                .size(11)
+                .style(style::text_faint(pal)),
+        );
+    } else {
+        for (class, profile) in &bindings {
+            list_col = list_col.push(binding_row(state, class, profile));
+        }
+    }
+
+    let class = state.app_binding_draft.class.clone();
+    let profile = state.app_binding_draft.profile.clone();
+    let class_for_msg = class.clone();
+    let profile_for_msg = profile.clone();
+
+    let add_form = row![
+        text_input("Window class (e.g. \"firefox\")", &class)
+            .on_input(move |v| Message::SetAppBindingDraft {
+                class: v,
+                profile: profile_for_msg.clone(),
+            })
+            .padding(6)
+            .size(12)
+            .width(Length::FillPortion(2)),
+        text("→").size(13).style(style::text_faint(pal)),
+        text_input("Profile name", &profile)
+            .on_input(move |v| Message::SetAppBindingDraft {
+                class: class_for_msg.clone(),
+                profile: v,
+            })
+            .padding(6)
+            .size(12)
+            .width(Length::FillPortion(2)),
+        button(text("+ Add").size(11))
+            .style(style::btn_secondary(pal))
+            .on_press(Message::AddAppBinding),
+    ]
+    .align_y(Alignment::Center)
+    .spacing(8);
+
+    column![
+        intro,
+        rule::horizontal(1).style(style::rule_style(pal)),
+        list_col,
+        Space::new().height(Length::Fixed(8.0)),
+        add_form,
+    ]
+    .spacing(8)
+    .into()
+}
+
+fn binding_row<'a>(state: &'a State, class: &str, profile: &str) -> Element<'a, Message> {
+    let pal = &state.palette;
+    let class_for_remove = class.to_string();
+    row![
+        container(text(class.to_string()).size(12))
+            .padding([3, 8])
+            .style(style::chip(pal))
+            .width(Length::FillPortion(2)),
+        text("→").size(11).style(style::text_faint(pal)),
+        text(profile.to_string())
+            .size(12)
+            .width(Length::FillPortion(2)),
+        Space::new().width(Length::Fill),
+        button(text("Remove").size(10))
+            .style(style::btn_danger(pal))
+            .on_press(Message::RemoveAppBinding(class_for_remove)),
+    ]
+    .align_y(Alignment::Center)
+    .spacing(8)
     .into()
 }
 

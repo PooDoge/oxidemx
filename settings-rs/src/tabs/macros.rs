@@ -7,7 +7,7 @@
 //! and a "Record" launcher that talks to the daemon over D-Bus.
 
 use crate::widgets::section_header;
-use crate::{style, Message, RecordingState, State};
+use crate::{style, MacroEditField, Message, RecordingState, State};
 use iced::widget::{button, column, container, row, rule, text, text_input, Space};
 use iced::{Alignment, Element, Length};
 use serde::Deserialize;
@@ -25,6 +25,32 @@ pub struct MacroSummary {
     pub assigned_trigger: Option<String>,
     #[serde(default)]
     pub actions: Vec<serde_json::Value>,
+}
+
+/// Read the raw JSON of a macro file. Returned as
+/// `serde_json::Value` so the UI can mutate just the user-editable
+/// fields and write the result back unchanged.
+pub fn read_raw(id: &str) -> Result<serde_json::Value, String> {
+    let dir = macros_dir().ok_or_else(|| "no config dir".to_string())?;
+    let path = dir.join(format!("{id}.json"));
+    let bytes = std::fs::read(&path).map_err(|e| format!("read {}: {e}", path.display()))?;
+    serde_json::from_slice(&bytes).map_err(|e| format!("parse {}: {e}", path.display()))
+}
+
+/// Write the raw JSON of a macro file. Used by the in-place
+/// editor; the daemon's SaveMacro D-Bus method takes the same
+/// shape but requires a parsed `MacroConfig` round-trip and
+/// re-validates triggers, which we don't want to do for a simple
+/// rename. Atomic temp-file + rename mirrors the daemon's writer.
+pub fn write_raw(id: &str, value: &serde_json::Value) -> Result<(), String> {
+    let dir = macros_dir().ok_or_else(|| "no config dir".to_string())?;
+    std::fs::create_dir_all(&dir).map_err(|e| format!("mkdir: {e}"))?;
+    let path = dir.join(format!("{id}.json"));
+    let json = serde_json::to_string_pretty(value).map_err(|e| format!("serialize: {e}"))?;
+    let tmp = path.with_extension("json.tmp");
+    std::fs::write(&tmp, json).map_err(|e| format!("write {}: {e}", tmp.display()))?;
+    std::fs::rename(&tmp, &path).map_err(|e| format!("rename: {e}"))?;
+    Ok(())
 }
 
 /// Walk `~/.config/juhradial/macros/*.json` and parse each into
@@ -197,6 +223,15 @@ pub fn view(state: &State) -> Element<'_, Message> {
 
 fn macro_card<'a>(state: &'a State, m: &'a MacroSummary) -> Element<'a, Message> {
     let pal = &state.palette;
+    let editing = state
+        .macro_edit
+        .as_ref()
+        .filter(|d| d.id == m.id);
+
+    if let Some(draft) = editing {
+        return edit_card(state, draft, m);
+    }
+
     let trigger_text = m
         .assigned_trigger
         .as_deref()
@@ -229,12 +264,85 @@ fn macro_card<'a>(state: &'a State, m: &'a MacroSummary) -> Element<'a, Message>
             ]
             .spacing(2),
             Space::new().width(Length::Fill),
+            button(text("Edit").size(11))
+                .style(style::btn_secondary(pal))
+                .on_press(Message::StartEditMacro(m.id.clone())),
             button(text("Delete").size(11))
                 .style(style::btn_danger(pal))
                 .on_press(Message::DeleteMacro(m.id.clone())),
         ]
         .align_y(Alignment::Center)
         .spacing(12),
+    )
+    .padding(14)
+    .style(style::card(pal))
+    .into()
+}
+
+fn edit_card<'a>(
+    state: &'a State,
+    draft: &'a crate::MacroEditDraft,
+    m: &'a MacroSummary,
+) -> Element<'a, Message> {
+    let pal = &state.palette;
+    let id_for_name = draft.id.clone();
+    let id_for_desc = draft.id.clone();
+    let id_for_trig = draft.id.clone();
+    let id_for_save = draft.id.clone();
+
+    container(
+        column![
+            row![
+                container(text("M").size(11).style(style::text_dim(pal)))
+                    .padding([4, 8])
+                    .style(style::chip(pal)),
+                text(format!("Editing \"{}\"", m.name)).size(14),
+                Space::new().width(Length::Fill),
+                button(text("Cancel").size(11))
+                    .style(style::btn_secondary(pal))
+                    .on_press(Message::CancelMacroEdit),
+                button(text("Save").size(11))
+                    .style(style::btn_secondary(pal))
+                    .on_press(Message::CommitMacroEdit(id_for_save)),
+            ]
+            .align_y(Alignment::Center)
+            .spacing(8),
+            text_input("Name", &draft.name)
+                .on_input(move |v| Message::EditMacroField {
+                    id: id_for_name.clone(),
+                    field: MacroEditField::Name,
+                    value: v,
+                })
+                .padding(6)
+                .size(12),
+            text_input("Description", &draft.description)
+                .on_input(move |v| Message::EditMacroField {
+                    id: id_for_desc.clone(),
+                    field: MacroEditField::Description,
+                    value: v,
+                })
+                .padding(6)
+                .size(12),
+            text_input(
+                "Assigned trigger (e.g. \"button:0x53\" — leave blank for none)",
+                &draft.trigger,
+            )
+            .on_input(move |v| Message::EditMacroField {
+                id: id_for_trig.clone(),
+                field: MacroEditField::Trigger,
+                value: v,
+            })
+            .padding(6)
+            .size(12),
+            text(
+                "Trigger format follows the daemon's macro::triggers parser. \
+                 Recorded actions stay unchanged — open the JSON file to \
+                 edit those by hand.",
+            )
+            .size(10)
+            .style(style::text_faint(pal)),
+        ]
+        .spacing(8),
     )
     .padding(14)
     .style(style::card(pal))
