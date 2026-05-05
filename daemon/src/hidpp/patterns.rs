@@ -41,6 +41,15 @@ pub mod haptic_profiles {
         intensity: 30,
         duration_ms: 50,
     };
+
+    /// Page change haptic (50% intensity, 20ms) — fired when the
+    /// user cycles between radial-menu pages via the scroll wheel.
+    /// Slightly weightier than slice_change to mark a bigger
+    /// transition (whole ring contents swap).
+    pub const PAGE_CHANGE: HapticPulse = HapticPulse {
+        intensity: 50,
+        duration_ms: 20,
+    };
 }
 
 /// Haptic pulse pattern type
@@ -212,6 +221,9 @@ pub enum HapticEvent {
     SelectionConfirm,
     /// User selects an empty or invalid slice
     InvalidAction,
+    /// User cycled between radial-menu pages via the scroll
+    /// wheel over the centre puck.
+    PageChange,
 }
 
 impl HapticEvent {
@@ -222,6 +234,7 @@ impl HapticEvent {
             HapticEvent::SliceChange => haptic_profiles::SLICE_CHANGE,
             HapticEvent::SelectionConfirm => haptic_profiles::CONFIRM,
             HapticEvent::InvalidAction => haptic_profiles::INVALID,
+            HapticEvent::PageChange => haptic_profiles::PAGE_CHANGE,
         }
     }
 
@@ -232,6 +245,7 @@ impl HapticEvent {
             HapticEvent::SliceChange => HapticPattern::Single,
             HapticEvent::SelectionConfirm => HapticPattern::Double,
             HapticEvent::InvalidAction => HapticPattern::Triple,
+            HapticEvent::PageChange => HapticPattern::Single,
         }
     }
 
@@ -260,6 +274,9 @@ impl HapticEvent {
             HapticEvent::SelectionConfirm => Mx4HapticPattern::Completed,
             // Invalid action: error/warning feel
             HapticEvent::InvalidAction => Mx4HapticPattern::AngryAlert,
+            // Page change: damped transition feel — heavier than
+            // slice_change since it's a bigger change of context.
+            HapticEvent::PageChange => Mx4HapticPattern::DampStateChange,
         }
     }
 }
@@ -271,6 +288,7 @@ impl fmt::Display for HapticEvent {
             HapticEvent::SliceChange => write!(f, "slice_change"),
             HapticEvent::SelectionConfirm => write!(f, "selection_confirm"),
             HapticEvent::InvalidAction => write!(f, "invalid_action"),
+            HapticEvent::PageChange => write!(f, "page_change"),
         }
     }
 }
@@ -286,6 +304,8 @@ pub struct PerEventPattern {
     pub confirm: Mx4HapticPattern,
     /// Pattern for invalid action
     pub invalid: Mx4HapticPattern,
+    /// Pattern for radial-menu page change (scroll-wheel cycle).
+    pub page_change: Mx4HapticPattern,
 }
 
 impl Default for PerEventPattern {
@@ -295,6 +315,7 @@ impl Default for PerEventPattern {
             slice_change: Mx4HapticPattern::SubtleCollision,
             confirm: Mx4HapticPattern::SharpStateChange,
             invalid: Mx4HapticPattern::AngryAlert,
+            page_change: Mx4HapticPattern::DampStateChange,
         }
     }
 }
@@ -307,6 +328,7 @@ impl PerEventPattern {
             HapticEvent::SliceChange => self.slice_change,
             HapticEvent::SelectionConfirm => self.confirm,
             HapticEvent::InvalidAction => self.invalid,
+            HapticEvent::PageChange => self.page_change,
         }
     }
 }

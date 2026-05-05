@@ -1222,6 +1222,7 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                 HapticsEvent::SliceChange => pe.slice_change = pattern,
                 HapticsEvent::Confirm => pe.confirm = pattern,
                 HapticsEvent::Invalid => pe.invalid = pattern,
+                HapticsEvent::PageChange => pe.page_change = pattern,
             }
             state.touch();
             Task::none()

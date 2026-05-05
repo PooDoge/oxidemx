@@ -203,8 +203,19 @@ fn update(state: &mut RadialState, message: Message) -> Task<Message> {
         }
         Message::CyclePage(direction) => {
             debug!(direction, "Cycle radial-menu page");
+            // cycle_page is a no-op when fewer than two pages are
+            // in the cycle, so detect actual transitions by
+            // comparing the active page index before/after.
+            let before = state.active_page;
             state.cycle_page(direction);
-            Task::none()
+            if state.active_page != before {
+                Task::perform(
+                    crate::haptic_client::trigger_haptic("page_change".to_string()),
+                    |_| Message::Noop,
+                )
+            } else {
+                Task::none()
+            }
         }
         Message::FocusedClassResolved(class) => {
             debug!(?class, "Focused window class resolved");
@@ -223,13 +234,21 @@ fn update(state: &mut RadialState, message: Message) -> Task<Message> {
 /// slot. No-op when the user enters empty space (target → None)
 /// — only positive transitions get a pulse, otherwise the daemon
 /// would burn the motor on every drag-to-cancel.
+///
+/// Calls `TriggerHaptic("slice_change")` directly rather than
+/// `NotifySliceHover(idx)` because the daemon's
+/// `notify_slice_hover` handler only emits a SliceSelected D-Bus
+/// signal — it doesn't touch the haptic motor. `trigger_haptic`
+/// is the haptic-firing method.
 fn haptic_on_target_change(before: Option<usize>, after: Option<usize>) -> Task<Message> {
     if before == after {
         return Task::none();
     }
-    let Some(idx) = after else { return Task::none(); };
+    if after.is_none() {
+        return Task::none();
+    }
     Task::perform(
-        crate::haptic_client::notify_slice_hover(idx as u8),
+        crate::haptic_client::trigger_haptic("slice_change".to_string()),
         |_| Message::Noop,
     )
 }

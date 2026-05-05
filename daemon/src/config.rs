@@ -40,6 +40,11 @@ pub struct HapticEventConfig {
     /// Pattern for invalid/blocked actions (default: angry_alert)
     #[serde(default = "default_invalid")]
     pub invalid: String,
+
+    /// Pattern when cycling between radial-menu pages via the
+    /// scroll wheel over the centre puck (default: damp_state_change).
+    #[serde(default = "default_page_change")]
+    pub page_change: String,
 }
 
 fn default_menu_appear() -> String {
@@ -54,6 +59,9 @@ fn default_confirm() -> String {
 fn default_invalid() -> String {
     "angry_alert".to_string()
 }
+fn default_page_change() -> String {
+    "damp_state_change".to_string()
+}
 
 impl Default for HapticEventConfig {
     fn default() -> Self {
@@ -62,6 +70,7 @@ impl Default for HapticEventConfig {
             slice_change: default_slice_change(),
             confirm: default_confirm(),
             invalid: default_invalid(),
+            page_change: default_page_change(),
         }
     }
 }

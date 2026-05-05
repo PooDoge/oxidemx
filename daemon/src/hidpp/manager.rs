@@ -98,6 +98,7 @@ impl HapticManager {
                 slice_change: Mx4HapticPattern::from_name(&config.per_event.slice_change),
                 confirm: Mx4HapticPattern::from_name(&config.per_event.confirm),
                 invalid: Mx4HapticPattern::from_name(&config.per_event.invalid),
+                page_change: Mx4HapticPattern::from_name(&config.per_event.page_change),
             },
             enabled: config.enabled,
             last_pulse_ms: 0,
@@ -121,6 +122,7 @@ impl HapticManager {
             slice_change: Mx4HapticPattern::from_name(&config.per_event.slice_change),
             confirm: Mx4HapticPattern::from_name(&config.per_event.confirm),
             invalid: Mx4HapticPattern::from_name(&config.per_event.invalid),
+            page_change: Mx4HapticPattern::from_name(&config.per_event.page_change),
         };
         self.enabled = config.enabled;
         self.debounce_ms = config.debounce_ms;

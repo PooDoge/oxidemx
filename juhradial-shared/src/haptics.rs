@@ -53,6 +53,13 @@ pub struct PerEventPatterns {
     pub confirm: String,
     #[serde(default = "default_invalid_pattern")]
     pub invalid: String,
+    /// Pattern fired when the user cycles to a different page via
+    /// the scroll-wheel-over-centre-puck gesture. Distinct from
+    /// `slice_change` because page transitions are bigger
+    /// movements (whole ring contents swap) and warrant a more
+    /// noticeable confirm. Defaults to `damp_state_change`.
+    #[serde(default = "default_page_change_pattern")]
+    pub page_change: String,
 }
 
 impl Default for PerEventPatterns {
@@ -62,6 +69,7 @@ impl Default for PerEventPatterns {
             slice_change: default_slice_change_pattern(),
             confirm: default_confirm_pattern(),
             invalid: default_invalid_pattern(),
+            page_change: default_page_change_pattern(),
         }
     }
 }
@@ -83,6 +91,9 @@ fn default_confirm_pattern() -> String {
 }
 fn default_invalid_pattern() -> String {
     "angry_alert".into()
+}
+fn default_page_change_pattern() -> String {
+    "damp_state_change".into()
 }
 fn default_per_event() -> PerEventPatterns {
     PerEventPatterns::default()

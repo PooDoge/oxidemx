@@ -51,6 +51,9 @@ pub fn view(state: &State) -> Element<'_, Message> {
             event_row(state, "Slice change", &h.per_event.slice_change, |s| {
                 Message::SetHapticsPerEvent(HapticsEvent::SliceChange, s)
             }),
+            event_row(state, "Page change", &h.per_event.page_change, |s| {
+                Message::SetHapticsPerEvent(HapticsEvent::PageChange, s)
+            }),
             event_row(state, "Confirm / dispatch", &h.per_event.confirm, |s| {
                 Message::SetHapticsPerEvent(HapticsEvent::Confirm, s)
             }),
@@ -154,6 +157,7 @@ pub enum HapticsEvent {
     SliceChange,
     Confirm,
     Invalid,
+    PageChange,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
