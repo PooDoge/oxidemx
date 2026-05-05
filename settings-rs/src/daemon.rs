@@ -24,6 +24,15 @@ trait Daemon {
     fn set_dpi(&self, dpi: u16) -> zbus::Result<()>;
     fn dpi_supported(&self) -> zbus::Result<bool>;
     fn get_smart_shift(&self) -> zbus::Result<(bool, u8)>;
+    fn set_smart_shift(&self, enabled: bool, threshold: u8) -> zbus::Result<()>;
+    fn smart_shift_supported(&self) -> zbus::Result<bool>;
+    fn get_hiresscroll_mode(&self) -> zbus::Result<(bool, bool, bool)>;
+    fn set_hiresscroll_mode(
+        &self,
+        hires: bool,
+        invert: bool,
+        target: bool,
+    ) -> zbus::Result<()>;
     fn get_host_names(&self) -> zbus::Result<Vec<String>>;
     fn get_easy_switch_info(&self) -> zbus::Result<(u8, u8)>;
     fn set_host(&self, host_index: u8) -> zbus::Result<bool>;
@@ -52,6 +61,16 @@ pub struct DaemonSnapshot {
     pub easy_switch: Option<EasySwitch>,
     pub gaming_mode: bool,
     pub macro_recording: bool,
+    /// Live HiResScroll mode triple (hires, invert, target).
+    /// `None` when the feature isn't supported.
+    pub hiresscroll: Option<HiResScroll>,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct HiResScroll {
+    pub hires: bool,
+    pub invert: bool,
+    pub target: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -111,6 +130,15 @@ pub async fn poll() -> DaemonSnapshot {
 
     let gaming_mode = proxy.get_gaming_mode().await.unwrap_or(false);
     let macro_recording = proxy.is_macro_running().await.unwrap_or(false);
+    let hiresscroll = proxy
+        .get_hiresscroll_mode()
+        .await
+        .ok()
+        .map(|(hires, invert, target)| HiResScroll {
+            hires,
+            invert,
+            target,
+        });
 
     DaemonSnapshot {
         battery,
@@ -120,6 +148,7 @@ pub async fn poll() -> DaemonSnapshot {
         easy_switch,
         gaming_mode,
         macro_recording,
+        hiresscroll,
     }
 }
 
@@ -186,6 +215,14 @@ pub async fn stop_macro_recording() -> Result<String, String> {
 /// doesn't need filesystem permissions.
 pub async fn save_macro(json: String) -> Result<(), String> {
     call_with_proxy(|p| async move { p.save_macro(json).await }).await
+}
+
+/// Apply a HiResScroll mode triple directly. Bypasses the config
+/// reload flow — useful for instant device feedback when the user
+/// flips a per-knob toggle. Idempotent on the daemon side.
+pub async fn set_hiresscroll(hires: bool, invert: bool, target: bool) -> Result<(), String> {
+    call_with_proxy(|p| async move { p.set_hiresscroll_mode(hires, invert, target).await })
+        .await
 }
 
 async fn call_with_proxy<F, Fut>(f: F) -> Result<(), String>

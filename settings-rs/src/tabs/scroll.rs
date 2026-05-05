@@ -26,8 +26,76 @@ pub fn view(state: &State) -> Element<'_, Message> {
         pointer_card(state),
         Space::new().height(Length::Fixed(12.0)),
         scroll_card(state),
+        Space::new().height(Length::Fixed(12.0)),
+        hires_scroll_card(state),
     ]
     .spacing(10)
+    .into()
+}
+
+// ============================================================================
+// HiResScroll card — three device-level wheel toggles (live HID++).
+// ============================================================================
+
+fn hires_scroll_card(state: &State) -> Element<'_, Message> {
+    let pal = &state.palette;
+    let hrs = state.daemon.hiresscroll;
+
+    let body: Element<Message> = match hrs {
+        Some(h) => column![
+            switch_row(
+                state,
+                "High-resolution wheel",
+                "More events per detent — gives smooth, sub-line scroll \
+                 in compatible apps (browsers, IDEs).",
+                h.hires,
+                Message::SetHiResScrollHires,
+            ),
+            switch_row(
+                state,
+                "Invert wheel direction",
+                "Flips the wheel direction at the device level. Stacks \
+                 with the OS-level natural-scroll toggle in Scroll above.",
+                h.invert,
+                Message::SetHiResScrollInvert,
+            ),
+            switch_row(
+                state,
+                "Target HID directly",
+                "Routes scroll events through HID instead of the device's \
+                 firmware-translated path. Default on; turn off only if \
+                 your DE consumes wheel events twice.",
+                h.target,
+                Message::SetHiResScrollTarget,
+            ),
+        ]
+        .spacing(10)
+        .into(),
+        None => text(
+            "HiResScroll isn't supported on this device, or the daemon \
+             hasn't connected yet.",
+        )
+        .size(12)
+        .style(style::text_dim(pal))
+        .into(),
+    };
+
+    container(
+        column![
+            text("HiResScroll (HID++)").size(14),
+            text(
+                "Direct wheel-protocol controls. Writes apply to the \
+                 device immediately — no daemon reload needed."
+            )
+            .size(11)
+            .style(style::text_dim(pal)),
+            rule::horizontal(1).style(style::rule_style(pal)),
+            body,
+        ]
+        .spacing(10),
+    )
+    .padding(14)
+    .style(style::card(pal))
     .into()
 }
 

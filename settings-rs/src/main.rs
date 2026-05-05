@@ -234,6 +234,26 @@ pub enum Message {
     CycleGamingDpi,
     GamingDpiCycled(Result<String, String>),
 
+    // --- HiResScroll (Point & Scroll tab) ---
+    SetHiResScrollHires(bool),
+    SetHiResScrollInvert(bool),
+    SetHiResScrollTarget(bool),
+    HiResScrollSet(Result<(), String>),
+
+    // --- Custom theme palette editor (Settings tab → Theme card) ---
+    /// Toggle the "Customise theme" expander.
+    ToggleThemeCustomiser,
+    /// Edit one palette field. Field name is one of the
+    /// ThemeColors keys ("crust", "accent", etc.); value is the
+    /// new "#rrggbb" hex.
+    SetThemeColor { field: String, value: String },
+    /// Save the active palette as a user theme with the typed slug.
+    SaveCustomTheme,
+    /// Slug being typed into the "Save as" input.
+    SetCustomThemeName(String),
+    /// Custom theme save completed.
+    CustomThemeSaved(Result<String, String>),
+
     // --- Submenu sub-items (slice editor) ---
     AddSubItem(usize),
     DeleteSubItem(usize, usize),
@@ -369,6 +389,9 @@ pub struct State {
     /// / naming-after-stop. Drives the Macros-tab Record button
     /// + the post-record name form.
     pub recording: RecordingState,
+    /// Custom-theme editor state. None = collapsed; Some =
+    /// expanded with the WIP palette + the slug typed by the user.
+    pub theme_editor: Option<ThemeEditor>,
     /// Shared rasterised icon cache (XDG resolver + tinting). Lives
     /// at State level so it persists across re-renders and across
     /// theme changes (colours change → new cache entries; old
@@ -406,8 +429,85 @@ impl Default for State {
             macros: tabs::macros::list(),
             daemon: daemon::DaemonSnapshot::default(),
             recording: RecordingState::Idle,
+            theme_editor: None,
         }
     }
+}
+
+/// In-flight state of the custom-theme editor.
+#[derive(Debug, Clone)]
+pub struct ThemeEditor {
+    /// Working palette — starts as a clone of the active theme's
+    /// colours and accumulates the user's edits. Saved on click.
+    pub working: juhradial_shared::theme::ThemeColors,
+    /// is_dark flag for the working theme. Mirrors the theme this
+    /// was forked from.
+    pub is_dark: bool,
+    /// Slug typed into the "Save as" input. Becomes both the
+    /// filename and the picker entry on save.
+    pub slug: String,
+}
+
+/// Apply a `#rrggbb` (or any string the user typed) to the named
+/// field on a `ThemeColors`. Unknown field name → no-op. Used by
+/// the custom-palette editor to thread one Message back into the
+/// working struct.
+fn set_theme_color_field(c: &mut juhradial_shared::theme::ThemeColors, field: &str, value: String) {
+    match field {
+        "crust" => c.crust = value,
+        "mantle" => c.mantle = value,
+        "base" => c.base = value,
+        "surface0" => c.surface0 = value,
+        "surface1" => c.surface1 = value,
+        "surface2" => c.surface2 = value,
+        "overlay0" => c.overlay0 = value,
+        "overlay1" => c.overlay1 = value,
+        "text" => c.text = value,
+        "subtext1" => c.subtext1 = value,
+        "subtext0" => c.subtext0 = value,
+        "accent" => c.accent = value,
+        "accent2" => c.accent2 = value,
+        "accent_dim" => c.accent_dim = value,
+        "green" => c.green = value,
+        "yellow" => c.yellow = value,
+        "red" => c.red = value,
+        "blue" => c.blue = value,
+        "mauve" => c.mauve = value,
+        "pink" => c.pink = value,
+        "peach" => c.peach = value,
+        "teal" => c.teal = value,
+        "sapphire" => c.sapphire = value,
+        "lavender" => c.lavender = value,
+        _ => {}
+    }
+}
+
+/// Lower-case + replace anything non-alphanumeric with `-`. Used
+/// for both the custom-theme save filename and the macro id.
+fn sanitize_slug(s: &str) -> String {
+    s.trim()
+        .to_lowercase()
+        .chars()
+        .map(|c| if c.is_alphanumeric() { c } else { '-' })
+        .collect::<String>()
+        .trim_matches('-')
+        .to_string()
+}
+
+/// Optimistically update the HiResScroll snapshot field + fire the
+/// async D-Bus write. The 5s daemon poll will reconcile if the
+/// device reports something different.
+fn apply_hiresscroll_field<F>(state: &mut State, mutate: F) -> Task<Message>
+where
+    F: FnOnce(&mut daemon::HiResScroll),
+{
+    let mut current = state.daemon.hiresscroll.unwrap_or_default();
+    mutate(&mut current);
+    state.daemon.hiresscroll = Some(current);
+    Task::perform(
+        daemon::set_hiresscroll(current.hires, current.invert, current.target),
+        Message::HiResScrollSet,
+    )
 }
 
 /// Three-state model for the Macros-tab record flow.
@@ -967,6 +1067,94 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
         }
         Message::GamingDpiCycled(Err(e)) => {
             state.status = format!("Cycle failed: {e}");
+            Task::none()
+        }
+
+        // --- Custom theme editor ---
+        Message::ToggleThemeCustomiser => {
+            state.theme_editor = match state.theme_editor.take() {
+                Some(_) => None,
+                None => {
+                    let active = juhradial_shared::theme::Theme::load(&state.config.theme)
+                        .unwrap_or_else(|| {
+                            juhradial_shared::theme::Theme::load(
+                                &juhradial_shared::theme::ThemeName::CatppuccinMocha,
+                            )
+                            .expect("bundled mocha")
+                        });
+                    Some(ThemeEditor {
+                        working: active.colors.clone(),
+                        is_dark: active.is_dark,
+                        slug: String::new(),
+                    })
+                }
+            };
+            Task::none()
+        }
+        Message::SetThemeColor { field, value } => {
+            if let Some(editor) = state.theme_editor.as_mut() {
+                set_theme_color_field(&mut editor.working, &field, value);
+                // Live-preview the WIP palette on the running UI.
+                let preview = juhradial_shared::theme::Theme {
+                    name: "(custom)".into(),
+                    description: String::new(),
+                    is_dark: editor.is_dark,
+                    radial_image: None,
+                    radial_params: None,
+                    colors: editor.working.clone(),
+                };
+                state.palette = palette::Palette::from_theme(&preview);
+            }
+            Task::none()
+        }
+        Message::SetCustomThemeName(s) => {
+            if let Some(editor) = state.theme_editor.as_mut() {
+                editor.slug = s;
+            }
+            Task::none()
+        }
+        Message::SaveCustomTheme => {
+            if let Some(editor) = state.theme_editor.as_ref() {
+                let slug = sanitize_slug(&editor.slug);
+                if slug.is_empty() {
+                    state.status = "Theme name required".into();
+                    return Task::none();
+                }
+                let theme = juhradial_shared::theme::Theme {
+                    name: editor.slug.trim().to_string(),
+                    description: "User-customised theme".into(),
+                    is_dark: editor.is_dark,
+                    radial_image: None,
+                    radial_params: None,
+                    colors: editor.working.clone(),
+                };
+                let result = juhradial_shared::theme::save_user_theme(&slug, &theme)
+                    .map(|_| slug)
+                    .map_err(|e| e.to_string());
+                return Task::perform(async move { result }, Message::CustomThemeSaved);
+            }
+            Task::none()
+        }
+        Message::CustomThemeSaved(Ok(slug)) => {
+            state.config.theme = juhradial_shared::theme::ThemeName::from(slug.as_str());
+            state.palette = palette::Palette::resolve(&state.config.theme);
+            state.theme_editor = None;
+            state.status = format!("Saved custom theme \"{slug}\"");
+            state.touch();
+            Task::none()
+        }
+        Message::CustomThemeSaved(Err(e)) => {
+            state.status = format!("Save failed: {e}");
+            Task::none()
+        }
+
+        // --- HiResScroll ---
+        Message::SetHiResScrollHires(v) => apply_hiresscroll_field(state, |h| h.hires = v),
+        Message::SetHiResScrollInvert(v) => apply_hiresscroll_field(state, |h| h.invert = v),
+        Message::SetHiResScrollTarget(v) => apply_hiresscroll_field(state, |h| h.target = v),
+        Message::HiResScrollSet(Ok(_)) => Task::none(),
+        Message::HiResScrollSet(Err(e)) => {
+            state.status = format!("HiResScroll set failed: {e}");
             Task::none()
         }
 

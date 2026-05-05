@@ -311,6 +311,31 @@ impl Theme {
     }
 }
 
+/// Public: where user-overlay themes live. Settings UI uses this
+/// to write custom palettes that the bundled-theme catalogue then
+/// picks up automatically.
+pub fn user_themes_dir_pub() -> Option<PathBuf> {
+    user_themes_dir()
+}
+
+/// Persist a `Theme` as `{user_themes_dir}/{slug}.json`. Settings
+/// UI calls this from its custom-palette editor. The slug is also
+/// what the picker sees as the theme name on next reload.
+pub fn save_user_theme(slug: &str, theme: &Theme) -> Result<PathBuf, std::io::Error> {
+    let dir = user_themes_dir().ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "no XDG_DATA_HOME / HOME for user-theme dir",
+        )
+    })?;
+    std::fs::create_dir_all(&dir)?;
+    let path = dir.join(format!("{slug}.json"));
+    let json = serde_json::to_string_pretty(theme)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+    std::fs::write(&path, json)?;
+    Ok(path)
+}
+
 fn user_themes_dir() -> Option<PathBuf> {
     if let Some(xdg) = std::env::var_os("XDG_DATA_HOME") {
         let p = PathBuf::from(xdg);
