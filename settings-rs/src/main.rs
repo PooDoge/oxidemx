@@ -13,6 +13,7 @@ mod tabs {
     pub mod buttons;
     pub mod devices;
     pub mod easyswitch;
+    pub mod gaming;
     pub mod haptics;
     pub mod macros;
     pub mod placeholder;
@@ -84,7 +85,7 @@ impl Tab {
     /// `STUB` badge on the sidebar so users can tell at a glance
     /// which tabs do anything.
     pub fn is_stub(&self) -> bool {
-        matches!(self, Tab::Flow | Tab::Gaming)
+        matches!(self, Tab::Flow)
     }
 
     /// Single-glyph icon shown in the sidebar. Picked to read at
@@ -211,6 +212,36 @@ pub enum Message {
     // --- Easy-Switch tab ---
     SwitchHost(u8),
     HostSwitched(Result<(), String>),
+
+    // --- Macros: recording ---
+    /// User clicked Record (or Stop, depending on `recording_state`).
+    ToggleMacroRecord,
+    /// Daemon ack'd start.
+    MacroRecordStarted(Result<(), String>),
+    /// Daemon returned the captured events JSON.
+    MacroRecordStopped(Result<String, String>),
+    /// User typed in the post-record name field.
+    EditRecordedName(String),
+    /// User clicked Save in the post-record form.
+    SaveRecordedMacro,
+    /// User clicked Discard in the post-record form.
+    DiscardRecordedMacro,
+    MacroSaved(Result<(), String>),
+
+    // --- Gaming ---
+    SetGamingMode(bool),
+    GamingModeSet(Result<(), String>),
+    CycleGamingDpi,
+    GamingDpiCycled(Result<String, String>),
+
+    // --- Submenu sub-items (slice editor) ---
+    AddSubItem(usize),
+    DeleteSubItem(usize, usize),
+    SetSubItemLabel(usize, usize, String),
+    SetSubItemCommand(usize, usize, String),
+    SetSubItemColor(usize, usize, String),
+    MoveSubItemUp(usize, usize),
+    MoveSubItemDown(usize, usize),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -334,6 +365,10 @@ pub struct State {
     /// DPI, Easy-Switch state. Refreshed on a 5s timer + on tab
     /// entry where it matters.
     pub daemon: daemon::DaemonSnapshot,
+    /// Macro recording flow state. Three values: idle / recording
+    /// / naming-after-stop. Drives the Macros-tab Record button
+    /// + the post-record name form.
+    pub recording: RecordingState,
     /// Shared rasterised icon cache (XDG resolver + tinting). Lives
     /// at State level so it persists across re-renders and across
     /// theme changes (colours change → new cache entries; old
@@ -370,8 +405,23 @@ impl Default for State {
             battery: None,
             macros: tabs::macros::list(),
             daemon: daemon::DaemonSnapshot::default(),
+            recording: RecordingState::Idle,
         }
     }
+}
+
+/// Three-state model for the Macros-tab record flow.
+#[derive(Debug, Clone, Default)]
+pub enum RecordingState {
+    /// Outside the recording flow — Record button is enabled.
+    #[default]
+    Idle,
+    /// Daemon's recorder is buffering events; Record becomes Stop.
+    Recording,
+    /// Recording stopped — `events_json` is the daemon's
+    /// `{events, actions}` payload. The UI swaps in a name field
+    /// + Save / Discard buttons until the user picks one.
+    Naming { events_json: String, name: String },
 }
 
 // `From<radial_preview::Action>` glue so the Canvas program can
@@ -797,6 +847,212 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             state.status = format!("Host switch failed: {e}");
             Task::none()
         }
+
+        // --- Macros: recording flow ---
+        Message::ToggleMacroRecord => match &state.recording {
+            RecordingState::Idle => {
+                state.status = "Starting macro recording…".into();
+                Task::perform(daemon::start_macro_recording(), Message::MacroRecordStarted)
+            }
+            RecordingState::Recording => {
+                state.status = "Stopping recording…".into();
+                Task::perform(daemon::stop_macro_recording(), Message::MacroRecordStopped)
+            }
+            RecordingState::Naming { .. } => Task::none(),
+        },
+        Message::MacroRecordStarted(Ok(_)) => {
+            state.recording = RecordingState::Recording;
+            state.status = "Recording — press buttons / keys, then click Stop".into();
+            Task::none()
+        }
+        Message::MacroRecordStarted(Err(e)) => {
+            state.status = format!("Record failed: {e}");
+            Task::none()
+        }
+        Message::MacroRecordStopped(Ok(events_json)) => {
+            state.recording = RecordingState::Naming {
+                events_json,
+                name: String::new(),
+            };
+            state.status = "Recording captured — name it and Save".into();
+            Task::none()
+        }
+        Message::MacroRecordStopped(Err(e)) => {
+            state.recording = RecordingState::Idle;
+            state.status = format!("Stop failed: {e}");
+            Task::none()
+        }
+        Message::EditRecordedName(s) => {
+            if let RecordingState::Naming { name, .. } = &mut state.recording {
+                *name = s;
+            }
+            Task::none()
+        }
+        Message::SaveRecordedMacro => {
+            // Pull the events JSON + name from state, build a
+            // MacroConfig, ship it through the daemon's SaveMacro.
+            if let RecordingState::Naming { events_json, name } = &state.recording {
+                if name.trim().is_empty() {
+                    state.status = "Macro needs a name".into();
+                    return Task::none();
+                }
+                let id = name
+                    .trim()
+                    .to_lowercase()
+                    .chars()
+                    .map(|c| if c.is_alphanumeric() { c } else { '-' })
+                    .collect::<String>();
+                // The daemon's stop_macro_recording returns
+                // `{events, actions}`; we wrap into a MacroConfig.
+                // Pull `actions` out and embed.
+                let parsed: serde_json::Value =
+                    serde_json::from_str(events_json).unwrap_or_default();
+                let actions = parsed
+                    .get("actions")
+                    .cloned()
+                    .unwrap_or_else(|| serde_json::json!([]));
+                let cfg = serde_json::json!({
+                    "id": id,
+                    "name": name.trim(),
+                    "description": "",
+                    "repeat_mode": "once",
+                    "repeat_count": 1,
+                    "actions": actions,
+                    "standard_delay_ms": 50,
+                    "use_standard_delay": false,
+                    "assigned_trigger": null,
+                });
+                let json = cfg.to_string();
+                state.recording = RecordingState::Idle;
+                Task::perform(daemon::save_macro(json), Message::MacroSaved)
+            } else {
+                Task::none()
+            }
+        }
+        Message::DiscardRecordedMacro => {
+            state.recording = RecordingState::Idle;
+            state.status = "Recording discarded".into();
+            Task::none()
+        }
+        Message::MacroSaved(Ok(_)) => {
+            state.status = "Macro saved".into();
+            state.macros = tabs::macros::list();
+            Task::none()
+        }
+        Message::MacroSaved(Err(e)) => {
+            state.status = format!("Save failed: {e}");
+            Task::none()
+        }
+
+        // --- Gaming ---
+        Message::SetGamingMode(on) => {
+            state.daemon.gaming_mode = on;
+            Task::perform(daemon::set_gaming_mode(on), Message::GamingModeSet)
+        }
+        Message::GamingModeSet(Ok(_)) => Task::none(),
+        Message::GamingModeSet(Err(e)) => {
+            state.status = format!("Gaming mode failed: {e}");
+            Task::none()
+        }
+        Message::CycleGamingDpi => {
+            Task::perform(daemon::cycle_gaming_dpi(), Message::GamingDpiCycled)
+        }
+        Message::GamingDpiCycled(Ok(label)) => {
+            state.status = if label.is_empty() {
+                "DPI cycled".into()
+            } else {
+                format!("DPI → {label}")
+            };
+            Task::perform(daemon::poll(), Message::DaemonSnapshotReceived)
+        }
+        Message::GamingDpiCycled(Err(e)) => {
+            state.status = format!("Cycle failed: {e}");
+            Task::none()
+        }
+
+        // --- Submenu sub-item editor ---
+        Message::AddSubItem(parent) => {
+            if let Some(slice) = state.config.radial_menu.slices.get_mut(parent) {
+                slice.submenu.push(juhradial_shared::Slice {
+                    action_id: None,
+                    label: "New item".into(),
+                    kind: juhradial_shared::ActionKind::Exec,
+                    command: String::new(),
+                    color: "accent".into(),
+                    icon: String::new(),
+                    submenu: Vec::new(),
+                    visible_if: None,
+                });
+                state.touch();
+            }
+            Task::none()
+        }
+        Message::DeleteSubItem(parent, idx) => {
+            if let Some(slice) = state.config.radial_menu.slices.get_mut(parent) {
+                if idx < slice.submenu.len() {
+                    slice.submenu.remove(idx);
+                    state.touch();
+                }
+            }
+            Task::none()
+        }
+        Message::SetSubItemLabel(parent, idx, s) => {
+            if let Some(item) = state
+                .config
+                .radial_menu
+                .slices
+                .get_mut(parent)
+                .and_then(|p| p.submenu.get_mut(idx))
+            {
+                item.label = s;
+                state.touch();
+            }
+            Task::none()
+        }
+        Message::SetSubItemCommand(parent, idx, s) => {
+            if let Some(item) = state
+                .config
+                .radial_menu
+                .slices
+                .get_mut(parent)
+                .and_then(|p| p.submenu.get_mut(idx))
+            {
+                item.command = s;
+                state.touch();
+            }
+            Task::none()
+        }
+        Message::SetSubItemColor(parent, idx, s) => {
+            if let Some(item) = state
+                .config
+                .radial_menu
+                .slices
+                .get_mut(parent)
+                .and_then(|p| p.submenu.get_mut(idx))
+            {
+                item.color = s;
+                state.touch();
+            }
+            Task::none()
+        }
+        Message::MoveSubItemUp(parent, idx) => {
+            if let Some(slice) = state.config.radial_menu.slices.get_mut(parent) {
+                if idx > 0 && idx < slice.submenu.len() {
+                    slice.submenu.swap(idx, idx - 1);
+                    state.touch();
+                }
+            }
+            Task::none()
+        }
+        Message::MoveSubItemDown(parent, idx) => {
+            if let Some(slice) = state.config.radial_menu.slices.get_mut(parent) {
+                if idx + 1 < slice.submenu.len() {
+                    slice.submenu.swap(idx, idx + 1);
+                    state.touch();
+                }
+            }
+            Task::none()
+        }
     }
 }
 
@@ -819,10 +1075,7 @@ fn view(state: &State) -> Element<'_, Message> {
             "Cross-machine cursor-and-clipboard hand-off. Coming soon.",
         ),
         Tab::Macros => tabs::macros::view(state),
-        Tab::Gaming => tabs::placeholder::view(state, 
-            "Gaming",
-            "Per-game profiles + DPI overrides + low-latency mode. Coming soon.",
-        ),
+        Tab::Gaming => tabs::gaming::view(state),
     };
 
     let main_area = row![

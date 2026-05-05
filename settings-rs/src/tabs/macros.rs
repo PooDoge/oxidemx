@@ -7,8 +7,8 @@
 //! and a "Record" launcher that talks to the daemon over D-Bus.
 
 use crate::widgets::section_header;
-use crate::{style, Message, State};
-use iced::widget::{button, column, container, row, rule, text, Space};
+use crate::{style, Message, RecordingState, State};
+use iced::widget::{button, column, container, row, rule, text, text_input, Space};
 use iced::{Alignment, Element, Length};
 use serde::Deserialize;
 use std::path::PathBuf;
@@ -78,37 +78,88 @@ pub fn view(state: &State) -> Element<'_, Message> {
     let pal = &state.palette;
     let macros = &state.macros;
 
-    // "Record" button intentionally has no on_press until the
-    // daemon's StartMacroRecording bridge is wired into a UI flow.
-    // iced disables the button visually when on_press is missing,
-    // so users see it's a planned feature, not a working one.
-    let header = row![
-        section_header("Macros"),
-        Space::new().width(Length::Fixed(12.0)),
-        container(text("RECORDING — COMING SOON").size(9))
-            .padding([2, 6])
-            .style(style::chip(pal)),
-        Space::new().width(Length::Fill),
-        button(text("Record").size(11)).style(style::btn_secondary(pal)),
-        button(text("Refresh").size(11))
-            .style(style::btn_secondary(pal))
-            .on_press(Message::RefreshMacros),
-        button(text("Open folder").size(11))
-            .style(style::btn_secondary(pal))
-            .on_press(Message::OpenMacrosFolder),
-    ]
-    .align_y(Alignment::Center)
-    .spacing(8);
+    // Record button label depends on the flow's state.
+    let (record_label, record_chip) = match &state.recording {
+        RecordingState::Idle => ("● Record", None),
+        RecordingState::Recording => ("■ Stop", Some("RECORDING")),
+        RecordingState::Naming { .. } => ("● Record", Some("NAMING")),
+    };
+    let record_btn_disabled = matches!(state.recording, RecordingState::Naming { .. });
+    let mut record_btn = button(text(record_label.to_string()).size(11))
+        .style(style::btn_secondary(pal));
+    if !record_btn_disabled {
+        record_btn = record_btn.on_press(Message::ToggleMacroRecord);
+    }
+
+    let mut header_row = row![section_header("Macros")];
+    if let Some(chip_label) = record_chip {
+        header_row = header_row
+            .push(Space::new().width(Length::Fixed(12.0)))
+            .push(
+                container(text(chip_label.to_string()).size(9))
+                    .padding([2, 6])
+                    .style(style::chip(pal)),
+            );
+    }
+    header_row = header_row
+        .push(Space::new().width(Length::Fill))
+        .push(record_btn)
+        .push(
+            button(text("Refresh").size(11))
+                .style(style::btn_secondary(pal))
+                .on_press(Message::RefreshMacros),
+        )
+        .push(
+            button(text("Open folder").size(11))
+                .style(style::btn_secondary(pal))
+                .on_press(Message::OpenMacrosFolder),
+        );
+    let header = header_row.align_y(Alignment::Center).spacing(8);
 
     let intro = text(
-        "Macros are stored as JSON files in ~/.config/juhradial/macros/. \
-         Recording new macros happens in the daemon's record mode; this \
-         page is the management surface — see what's stored, delete the \
-         ones you don't want, and edit names / triggers in the JSON \
-         directly until the in-app editor lands.",
+        "Click Record, then trigger your shortcut sequence on the keyboard \
+         or mouse. Click Stop and name the macro to save it. Stored as \
+         JSON in ~/.config/juhradial/macros/ — open the folder for \
+         hand-edits, or delete the ones you don't want.",
     )
     .size(12)
     .style(style::text_dim(pal));
+
+    // Naming form sits above the list when present.
+    let naming_section: Option<Element<Message>> = match &state.recording {
+        RecordingState::Naming { name, .. } => Some(
+            container(
+                column![
+                    text("Name your macro").size(14),
+                    text("Choose something memorable — the name doubles as \
+                          the file slug. Triggers can be assigned later via \
+                          the JSON file.")
+                    .size(11)
+                    .style(style::text_dim(pal)),
+                    text_input("e.g. \"open editor\"", name)
+                        .on_input(Message::EditRecordedName)
+                        .on_submit(Message::SaveRecordedMacro)
+                        .padding(8)
+                        .size(13)
+                        .width(Length::Fill),
+                    row![
+                        button(text("Save").size(11))
+                            .style(style::btn_secondary(pal))
+                            .on_press(Message::SaveRecordedMacro),
+                        button(text("Discard").size(11))
+                            .style(style::btn_danger(pal))
+                            .on_press(Message::DiscardRecordedMacro),
+                    ]
+                    .spacing(8),
+                ]
+                .spacing(10),
+            )
+            .padding(14)
+            .style(style::card(pal))
+            .into(),
+        ),
+        _ => None,
+    };
 
     let list_section: Element<Message> = if macros.is_empty() {
         container(
@@ -134,15 +185,14 @@ pub fn view(state: &State) -> Element<'_, Message> {
         col.into()
     };
 
-    column![
-        header,
-        intro,
-        rule::horizontal(1).style(style::rule_style(pal)),
-        Space::new().height(Length::Fixed(8.0)),
-        list_section,
-    ]
-    .spacing(10)
-    .into()
+    let mut col = column![header, intro, rule::horizontal(1).style(style::rule_style(pal))]
+        .spacing(10);
+    if let Some(naming) = naming_section {
+        col = col.push(naming);
+    }
+    col.push(Space::new().height(Length::Fixed(8.0)))
+        .push(list_section)
+        .into()
 }
 
 fn macro_card<'a>(state: &'a State, m: &'a MacroSummary) -> Element<'a, Message> {

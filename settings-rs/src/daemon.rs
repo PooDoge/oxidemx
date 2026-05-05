@@ -27,6 +27,17 @@ trait Daemon {
     fn get_host_names(&self) -> zbus::Result<Vec<String>>;
     fn get_easy_switch_info(&self) -> zbus::Result<(u8, u8)>;
     fn set_host(&self, host_index: u8) -> zbus::Result<bool>;
+
+    // Macros
+    fn start_macro_recording(&self) -> zbus::Result<()>;
+    fn stop_macro_recording(&self) -> zbus::Result<String>;
+    fn save_macro(&self, json: String) -> zbus::Result<()>;
+    fn is_macro_running(&self) -> zbus::Result<bool>;
+
+    // Gaming
+    fn get_gaming_mode(&self) -> zbus::Result<bool>;
+    fn set_gaming_mode(&self, enabled: bool) -> zbus::Result<()>;
+    fn cycle_gaming_dpi(&self) -> zbus::Result<String>;
 }
 
 /// Snapshot of everything the settings UI cares about. Single
@@ -39,6 +50,8 @@ pub struct DaemonSnapshot {
     pub dpi: Option<u16>,
     pub dpi_supported: bool,
     pub easy_switch: Option<EasySwitch>,
+    pub gaming_mode: bool,
+    pub macro_recording: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -96,12 +109,17 @@ pub async fn poll() -> DaemonSnapshot {
         _ => None,
     };
 
+    let gaming_mode = proxy.get_gaming_mode().await.unwrap_or(false);
+    let macro_recording = proxy.is_macro_running().await.unwrap_or(false);
+
     DaemonSnapshot {
         battery,
         device_name,
         dpi,
         dpi_supported,
         easy_switch,
+        gaming_mode,
+        macro_recording,
     }
 }
 
@@ -118,6 +136,56 @@ pub async fn set_host(idx: u8) -> Result<(), String> {
         Ok(())
     })
     .await
+}
+
+/// Toggle gaming mode on/off via the daemon.
+pub async fn set_gaming_mode(enabled: bool) -> Result<(), String> {
+    call_with_proxy(|p| async move { p.set_gaming_mode(enabled).await }).await
+}
+
+/// Cycle the gaming DPI preset. Returns the daemon's reported new
+/// DPI label (e.g. "1600 DPI") or empty string on failure.
+pub async fn cycle_gaming_dpi() -> Result<String, String> {
+    let conn = Connection::session()
+        .await
+        .map_err(|e| format!("session bus: {e}"))?;
+    let proxy = DaemonProxy::new(&conn)
+        .await
+        .map_err(|e| format!("daemon proxy: {e}"))?;
+    proxy
+        .cycle_gaming_dpi()
+        .await
+        .map_err(|e| format!("daemon call: {e}"))
+}
+
+/// Tell the daemon to start capturing keyboard / mouse events.
+/// The daemon's recorder buffers them until `stop_macro_recording`
+/// is called.
+pub async fn start_macro_recording() -> Result<(), String> {
+    call_with_proxy(|p| async move { p.start_macro_recording().await }).await
+}
+
+/// Stop the recorder and return the captured event/action stream.
+/// The result is the daemon's JSON of `{events, actions}`; the
+/// caller wraps it into a `MacroConfig` before saving.
+pub async fn stop_macro_recording() -> Result<String, String> {
+    let conn = Connection::session()
+        .await
+        .map_err(|e| format!("session bus: {e}"))?;
+    let proxy = DaemonProxy::new(&conn)
+        .await
+        .map_err(|e| format!("daemon proxy: {e}"))?;
+    proxy
+        .stop_macro_recording()
+        .await
+        .map_err(|e| format!("daemon call: {e}"))
+}
+
+/// Persist a `MacroConfig`-shaped JSON to the macros directory via
+/// the daemon. The daemon validates + writes atomically so the UI
+/// doesn't need filesystem permissions.
+pub async fn save_macro(json: String) -> Result<(), String> {
+    call_with_proxy(|p| async move { p.save_macro(json).await }).await
 }
 
 async fn call_with_proxy<F, Fut>(f: F) -> Result<(), String>

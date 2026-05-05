@@ -315,18 +315,117 @@ fn slice_editor_row<'a>(
     .align_y(Alignment::Center)
     .spacing(6);
 
-    container(
-        column![
-            header,
-            label_input,
-            row![kind_picker, color_picker, cmd_input.width(Length::Fill)]
-                .align_y(Alignment::Center)
-                .spacing(8),
-        ]
-        .spacing(6),
+    let mut col = column![
+        header,
+        label_input,
+        row![kind_picker, color_picker, cmd_input.width(Length::Fill)]
+            .align_y(Alignment::Center)
+            .spacing(8),
+    ]
+    .spacing(6);
+
+    // Submenu editor — only when this slice's kind is Submenu.
+    // Lists each sub-item with a label / command / colour picker
+    // and reorder + delete buttons. "+ Add item" appends a new
+    // Exec sub-item to the end.
+    if slice.kind == ActionKind::Submenu {
+        col = col.push(submenu_editor(state, idx, &slice.submenu));
+    }
+
+    container(col).padding(10).style(style::card_quiet(pal)).into()
+}
+
+fn submenu_editor<'a>(
+    state: &'a State,
+    parent: usize,
+    items: &'a [Slice],
+) -> Element<'a, Message> {
+    let pal = &state.palette;
+    let header = row![
+        text("Sub-items").size(11).style(style::text_dim(pal)),
+        Space::new().width(Length::Fill),
+        button(text("+ Add item").size(10))
+            .style(style::btn_secondary(pal))
+            .on_press(Message::AddSubItem(parent)),
+    ]
+    .align_y(Alignment::Center)
+    .spacing(6);
+
+    let mut col = column![header, rule::horizontal(1).style(style::rule_style(pal))]
+        .spacing(6);
+    if items.is_empty() {
+        col = col.push(
+            text("No sub-items yet. Click \"+ Add item\" to create one.")
+                .size(11)
+                .style(style::text_faint(pal)),
+        );
+    } else {
+        let last = items.len() - 1;
+        for (i, item) in items.iter().enumerate() {
+            col = col.push(submenu_item_row(state, parent, i, item, last));
+        }
+    }
+    container(col)
+        .padding(8)
+        .style(style::card(pal))
+        .into()
+}
+
+fn submenu_item_row<'a>(
+    state: &'a State,
+    parent: usize,
+    idx: usize,
+    item: &'a Slice,
+    last_idx: usize,
+) -> Element<'a, Message> {
+    let pal = &state.palette;
+    let label_input = text_input("Label", item.label.as_str())
+        .on_input(move |s| Message::SetSubItemLabel(parent, idx, s))
+        .padding(5)
+        .size(11)
+        .width(Length::FillPortion(2));
+    let cmd_input = text_input("Command", item.command.as_str())
+        .on_input(move |s| Message::SetSubItemCommand(parent, idx, s))
+        .padding(5)
+        .size(11)
+        .width(Length::FillPortion(3));
+    let color_picker = pick_list(
+        color_options(),
+        Some(ColorOption(if item.color.is_empty() {
+            "accent".to_string()
+        } else {
+            item.color.clone()
+        })),
+        move |opt| Message::SetSubItemColor(parent, idx, opt.0),
     )
-    .padding(10)
-    .style(style::card_quiet(pal))
+    .style(style::pick_list_style(pal))
+    .text_size(11);
+
+    let mut up_btn = button(text("↑").size(10)).style(style::btn_secondary(pal));
+    if idx > 0 {
+        up_btn = up_btn.on_press(Message::MoveSubItemUp(parent, idx));
+    }
+    let mut down_btn = button(text("↓").size(10)).style(style::btn_secondary(pal));
+    if idx < last_idx {
+        down_btn = down_btn.on_press(Message::MoveSubItemDown(parent, idx));
+    }
+    let del_btn = button(text("✕").size(10))
+        .style(style::btn_danger(pal))
+        .on_press(Message::DeleteSubItem(parent, idx));
+
+    row![
+        text(format!("{}.", idx + 1))
+            .size(10)
+            .style(style::text_faint(pal)),
+        label_input,
+        color_picker,
+        cmd_input,
+        up_btn,
+        down_btn,
+        del_btn,
+    ]
+    .align_y(Alignment::Center)
+    .spacing(6)
     .into()
 }
 
