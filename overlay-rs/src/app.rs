@@ -140,20 +140,14 @@ fn update(state: &mut RadialState, message: Message) -> Task<Message> {
         }
         Message::Overlay(OverlayEvent::Hide) => {
             debug!("Hide event from daemon");
-            // Capture target before hide() consumes / resets it
-            // — slice dispatch fires the `confirm` haptic, while
-            // a tap-to-toggle (no slice highlighted) leaves
-            // haptics silent (the `menu_appear` already played).
-            let dispatched = state.target_slice().is_some();
+            // Decide haptic outcome BEFORE hide() resets target.
+            // - actionable target → confirm
+            // - target that can't actually dispatch → invalid
+            // - no target (tap to toggle) → silent (menu_appear
+            //   already played; nothing was attempted)
+            let outcome = haptic_outcome_for(state);
             state.hide();
-            if dispatched {
-                Task::perform(
-                    crate::haptic_client::trigger_haptic("confirm".to_string()),
-                    |_| Message::Noop,
-                )
-            } else {
-                Task::none()
-            }
+            haptic_outcome_task(outcome)
         }
         Message::Overlay(OverlayEvent::CursorMoved { dx, dy }) => {
             // Compare target_slice before/after so we can fire
@@ -182,19 +176,12 @@ fn update(state: &mut RadialState, message: Message) -> Task<Message> {
         }
         Message::ToggleClickSelect => {
             debug!("Toggle-mode click select");
-            // confirm haptic only when a slice was actually
-            // highlighted at click time. Click on empty space =
-            // no pulse.
-            let dispatched = state.target_slice().is_some();
+            // Same outcome split as Hide — confirm if a real
+            // action will dispatch, invalid if the targeted slice
+            // can't actually do anything, silent if no slice.
+            let outcome = haptic_outcome_for(state);
             state.click_select();
-            if dispatched {
-                Task::perform(
-                    crate::haptic_client::trigger_haptic("confirm".to_string()),
-                    |_| Message::Noop,
-                )
-            } else {
-                Task::none()
-            }
+            haptic_outcome_task(outcome)
         }
         Message::ToggleDismiss => {
             debug!("Toggle-mode dismiss");
@@ -228,6 +215,82 @@ fn update(state: &mut RadialState, message: Message) -> Task<Message> {
             Task::none()
         }
     }
+}
+
+/// Outcome of a dispatch attempt — drives which haptic event
+/// to fire on Hide / ToggleClickSelect.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DispatchOutcome {
+    /// No slice targeted — tap-to-toggle, click on empty space.
+    NoTarget,
+    /// Slice targeted with a non-empty command and a visible
+    /// predicate — `confirm` haptic fires.
+    Actionable,
+    /// Slice targeted but its command is empty OR its visible_if
+    /// predicate evaluates false — `invalid` haptic fires.
+    Unactionable,
+}
+
+/// Inspect the current state to decide what would happen if we
+/// dispatched right now. Mirrors the actionability checks in
+/// `RadialState::dispatch_and_close` (sub-item beats parent;
+/// visible_if false → unactionable; empty command → unactionable).
+fn haptic_outcome_for(state: &RadialState) -> DispatchOutcome {
+    // Sub-item dispatch wins over the parent slice when a submenu
+    // sub-item is highlighted.
+    if let Some(sub) = state.submenu.as_ref() {
+        if let Some(child_idx) = sub.highlighted {
+            if let Some(parent) = state.slices.get(sub.parent) {
+                if let Some(child) = parent.submenu.get(child_idx) {
+                    return classify(child);
+                }
+            }
+        }
+    }
+    let idx = match state.target_slice() {
+        Some(i) => i,
+        None => return DispatchOutcome::NoTarget,
+    };
+    let slice = match state.slices.get(idx) {
+        Some(s) => s,
+        None => return DispatchOutcome::NoTarget,
+    };
+    classify(slice)
+}
+
+fn classify(slice: &juhradial_shared::Slice) -> DispatchOutcome {
+    let visible = slice
+        .visible_if
+        .as_ref()
+        .map(|c| c.eval())
+        .unwrap_or(true);
+    if !visible {
+        return DispatchOutcome::Unactionable;
+    }
+    // Submenu slices are "actionable" in that hovering them is
+    // useful, but pressing them with no sub-item highlighted
+    // doesn't dispatch anything — treat as unactionable so the
+    // user gets `invalid` feedback for that confused state.
+    if matches!(slice.kind, juhradial_shared::ActionKind::Submenu) && !slice.submenu.is_empty() {
+        return DispatchOutcome::Unactionable;
+    }
+    if slice.command.trim().is_empty() {
+        return DispatchOutcome::Unactionable;
+    }
+    DispatchOutcome::Actionable
+}
+
+/// Convert a DispatchOutcome into the corresponding haptic Task.
+fn haptic_outcome_task(outcome: DispatchOutcome) -> Task<Message> {
+    let event = match outcome {
+        DispatchOutcome::Actionable => "confirm",
+        DispatchOutcome::Unactionable => "invalid",
+        DispatchOutcome::NoTarget => return Task::none(),
+    };
+    Task::perform(
+        crate::haptic_client::trigger_haptic(event.to_string()),
+        |_| Message::Noop,
+    )
 }
 
 /// Fire a slice-change haptic when the cursor crosses into a new
