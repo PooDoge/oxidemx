@@ -521,7 +521,7 @@ where
         }
         grid = grid.push(current);
     }
-    scrollable(grid).height(Length::Fixed(280.0)).into()
+    scrollable(grid).height(Length::Fill).into()
 }
 
 /// One cell for the apps source. Click → applies the app's

@@ -33,6 +33,7 @@ mod editor {
 }
 mod ext_positioner;
 mod geometry;
+mod haptic_client;
 mod input;
 mod radial;
 mod render {

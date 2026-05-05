@@ -340,6 +340,13 @@ impl RadialState {
     /// hidden us yet (or we're in toggle mode). Used by hit-test +
     /// dispatch paths so a request that lands during the exit fade
     /// doesn't accidentally trigger an action.
+    /// Currently-targeted slice slot (0..7), if any. Exposed so
+    /// the app loop can detect target-change transitions and fire
+    /// the slice-change haptic only on positive crossings.
+    pub fn target_slice(&self) -> Option<usize> {
+        self.target_slice
+    }
+
     pub fn is_open(&self) -> bool {
         self.menu.target > 0.5
     }

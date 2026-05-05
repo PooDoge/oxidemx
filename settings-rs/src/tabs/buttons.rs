@@ -524,6 +524,14 @@ fn slice_editor_row<'a>(
         .on_input(move |s| Message::SetSliceCommand(idx, s))
         .padding(6)
         .size(12);
+    // Quick-fill from an installed .desktop entry: opens an inline
+    // app picker that, on click, populates command + icon + label
+    // (if empty) + Full-colour mode in one go.
+    let app_pick_btn = button(text("Pick app…").size(11))
+        .style(style::btn_secondary(pal))
+        .on_press(Message::OpenAppCommandPicker(
+            crate::app_picker::AppCommandTarget::Slice(idx),
+        ));
 
     let kind_picker = pick_list(
         KIND_OPTIONS.as_slice(),
@@ -533,13 +541,19 @@ fn slice_editor_row<'a>(
     .style(style::pick_list_style(pal))
     .text_size(12);
 
+    // Selected colour: "Full colour" sentinel takes priority when
+    // icon_untinted is set; otherwise the slice's actual palette
+    // key (defaulting to "accent" for legacy / empty values).
+    let selected_color = if slice.icon_untinted {
+        ColorOption(FULL_COLOR_KEY.to_string())
+    } else if slice.color.is_empty() {
+        ColorOption("accent".to_string())
+    } else {
+        ColorOption(slice.color.clone())
+    };
     let color_picker = pick_list(
         color_options(),
-        Some(ColorOption(if slice.color.is_empty() {
-            "accent".to_string()
-        } else {
-            slice.color.clone()
-        })),
+        Some(selected_color),
         move |opt| Message::SetSliceColor(idx, opt.0),
     )
     .style(style::pick_list_style(pal))
@@ -564,30 +578,9 @@ fn slice_editor_row<'a>(
         .align_y(Alignment::Center)
         .spacing(8);
 
-    // Original-colour toggle. The radial menu defaults to
-    // alpha-tinting the icon to the slice colour (great for
-    // symbolic icons, terrible for full-colour app/brand icons).
-    // Toggle on to keep the icon's pixels as-is.
-    let untinted_now = slice.icon_untinted;
-    let untinted_row = row![
-        column![
-            text("Use original icon colours").size(12),
-            text(
-                "Off: tint to slice colour (best for symbolic icons). On: \
-                 keep brand colours intact (best for app icons / custom \
-                 PNGs)."
-            )
-            .size(10)
-            .style(style::text_dim(pal)),
-        ]
-        .spacing(2),
-        Space::new().width(Length::Fill),
-        toggler(untinted_now)
-            .on_toggle(move |v| Message::SetSliceIconUntinted(idx, v))
-            .style(style::toggler_style(pal)),
-    ]
-    .align_y(Alignment::Center)
-    .spacing(12);
+    // (Original-colour toggle moved into the colour pick_list as
+    // the "Full colour" option — saves vertical space and ties
+    // the rendering mode to the colour choice that drives it.)
 
     let mut up_btn = button(text("↑").size(11)).style(style::btn_secondary(pal));
     if idx > 0 {
@@ -625,24 +618,18 @@ fn slice_editor_row<'a>(
     let mut col = column![
         header,
         label_input,
-        row![kind_picker, color_picker, cmd_input.width(Length::Fill)]
+        row![kind_picker, color_picker, cmd_input.width(Length::Fill), app_pick_btn]
             .align_y(Alignment::Center)
             .spacing(8),
         icon_row,
-        untinted_row,
         visibility_editor(state, idx, slice.visible_if.as_ref()),
     ]
     .spacing(6);
 
-    // Inline icon picker — visible when the picker is open
-    // against this specific slice. Stacking it inside the editor
-    // card keeps the user's editing context (label, command, etc.)
-    // anchored above the picker.
-    if let Some(p) = state.icon_picker.as_ref() {
-        if matches!(p.target, crate::icon_picker::IconPickerTarget::Slice(t) if t == idx) {
-            col = col.push(crate::icon_picker::view(state, p));
-        }
-    }
+    // (Pickers used to render inline here, but now they take
+    // over the entire content area as a full panel — see the
+    // shell view() in main.rs which short-circuits when any
+    // picker state is Some.)
 
     // Submenu editor — only when this slice's kind is Submenu.
     // Lists each sub-item with a label / command / colour picker
@@ -983,13 +970,16 @@ fn submenu_item_row<'a>(
         .padding(5)
         .size(11)
         .width(Length::FillPortion(3));
+    let selected_color = if item.icon_untinted {
+        ColorOption(FULL_COLOR_KEY.to_string())
+    } else if item.color.is_empty() {
+        ColorOption("accent".to_string())
+    } else {
+        ColorOption(item.color.clone())
+    };
     let color_picker = pick_list(
         color_options(),
-        Some(ColorOption(if item.color.is_empty() {
-            "accent".to_string()
-        } else {
-            item.color.clone()
-        })),
+        Some(selected_color),
         move |opt| Message::SetSubItemColor(parent, idx, opt.0),
     )
     .style(style::pick_list_style(pal))
@@ -1026,6 +1016,11 @@ fn submenu_item_row<'a>(
         .padding(5)
         .size(11);
     let sub_browse_target = crate::icon_picker::IconPickerTarget::SubItem { parent, idx };
+    let sub_app_btn = button(text("Pick app…").size(10))
+        .style(style::btn_secondary(pal))
+        .on_press(Message::OpenAppCommandPicker(
+            crate::app_picker::AppCommandTarget::SubItem { parent, idx },
+        ));
     let sub_browse_btn = button(text("Browse…").size(10))
         .style(style::btn_secondary(pal))
         .on_press(Message::OpenIconPicker(sub_browse_target));
@@ -1033,15 +1028,7 @@ fn submenu_item_row<'a>(
         .style(style::btn_secondary(pal))
         .on_press(Message::BrowseIconFile(sub_browse_target));
 
-    // Compact untinted toggle for sub-items — same semantics as
-    // the slice version but inline with the icon row.
-    let untinted_now = item.icon_untinted;
-    let untinted_toggle = toggler(untinted_now)
-        .on_toggle(move |v| Message::SetSubItemIconUntinted { parent, idx, value: v })
-        .label("Original")
-        .text_size(9)
-        .style(style::toggler_style(pal));
-
+    // (Untinted toggle folded into the colour pick_list above.)
     let mut col = column![
         row![
             text(format!("{}.", idx + 1))
@@ -1057,22 +1044,14 @@ fn submenu_item_row<'a>(
         ]
         .align_y(Alignment::Center)
         .spacing(6),
-        row![kind_picker, icon_input.width(Length::Fill), sub_browse_btn, sub_file_btn, untinted_toggle]
+        row![kind_picker, icon_input.width(Length::Fill), sub_app_btn, sub_browse_btn, sub_file_btn]
             .align_y(Alignment::Center)
             .spacing(6),
     ]
     .spacing(4);
 
-    if let Some(p) = state.icon_picker.as_ref() {
-        if matches!(
-            p.target,
-            crate::icon_picker::IconPickerTarget::SubItem { parent: pp, idx: ii }
-                if pp == parent && ii == idx
-        ) {
-            col = col.push(crate::icon_picker::view(state, p));
-        }
-    }
-
+    // (Pickers render full-panel via the shell short-circuit in
+    // main.rs::view, no inline rendering here any more.)
     col.into()
 }
 
@@ -1119,25 +1098,41 @@ const KIND_OPTIONS: [KindOption; 8] = [
     KindOption(ActionKind::None),
 ];
 
+/// Sentinel string used in the colour pick_list to signal "render
+/// the icon at its original colours" (i.e. set
+/// `Slice.icon_untinted = true`). Distinguished from real palette
+/// keys by the leading underscores so it can never collide with a
+/// theme colour name.
+pub const FULL_COLOR_KEY: &str = "__full_color__";
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ColorOption(pub String);
 
 impl std::fmt::Display for ColorOption {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.0)
+        if self.0 == FULL_COLOR_KEY {
+            f.write_str("Full color")
+        } else {
+            f.write_str(&self.0)
+        }
     }
 }
 
 // Catppuccin-style colour key list (matches juhradial_shared's
-// ThemeColors::slice_color_rgba lookup).
+// ThemeColors::slice_color_rgba lookup), with a special "Full
+// colour" sentinel at the top that maps to icon_untinted = true
+// rather than a tint colour. Selecting it leaves the slice's
+// underlying `color` unchanged so the user's previous palette
+// choice is preserved when they toggle back.
 fn color_options() -> Vec<ColorOption> {
-    [
+    let mut v: Vec<ColorOption> = vec![ColorOption(FULL_COLOR_KEY.to_string())];
+    for s in [
         "accent", "green", "yellow", "red", "blue", "mauve", "pink", "peach", "teal", "sapphire",
         "lavender",
-    ]
-    .iter()
-    .map(|s| ColorOption(s.to_string()))
-    .collect()
+    ] {
+        v.push(ColorOption(s.to_string()));
+    }
+    v
 }
 
 // We rebuild the list lazily per render — pick_list takes the Vec

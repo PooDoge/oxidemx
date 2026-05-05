@@ -21,6 +21,7 @@ mod tabs {
     pub mod settings_page;
     pub mod visuals;
 }
+mod app_picker;
 mod battery;
 mod cursor_helper;
 mod daemon;
@@ -169,11 +170,6 @@ pub enum Message {
     /// path to an SVG/PNG, or the legacy internal id) for a slice
     /// on the active page.
     SetSliceIcon(usize, String),
-    /// Toggle whether the slice icon renders at its original
-    /// colours (true) or tinted to the slice colour (false).
-    SetSliceIconUntinted(usize, bool),
-    /// Same toggle for a submenu sub-item.
-    SetSubItemIconUntinted { parent: usize, idx: usize, value: bool },
     /// Replace a slice's visibility predicate. `None` clears the
     /// predicate (slice is always visible). `Some(Always)` is
     /// equivalent at runtime; we write the slimmer `None` shape on
@@ -358,6 +354,23 @@ pub enum Message {
     /// User clicked an icon thumbnail — apply it to the picker's
     /// stored target and close.
     PickIcon(String),
+
+    // --- App-for-command picker (slice + sub-item editor) ---
+    /// Open the app picker against a slice or sub-item; fills
+    /// command + icon + label (if empty) + Full colour mode in
+    /// one click.
+    OpenAppCommandPicker(app_picker::AppCommandTarget),
+    CloseAppCommandPicker,
+    SetAppCommandSearch(String),
+    /// Toggle whether the app pick replaces the slice's icon
+    /// (defaults to true). Off = command + label only, leave the
+    /// existing icon + colour mode alone.
+    SetAppCommandReplaceIcon(bool),
+    /// User clicked an app in the list. Carries the cleaned exec
+    /// line (placeholder %F/%U/etc. stripped), icon string, and
+    /// display name so the handler doesn't need to look back into
+    /// the apps cache.
+    PickAppForCommand { command: String, icon: String, label: String },
     /// Async write of the recents list completed; result is the
     /// updated list (most-recent first). Used to update the
     /// in-memory `recent_icons` so the picker re-renders with
@@ -579,6 +592,11 @@ pub struct State {
     /// Loaded once at startup; static enough to skip live
     /// reloading.
     pub installed_apps: Vec<juhradial_shared::DesktopEntry>,
+    /// In-flight app picker for the slice command field. `Some`
+    /// while the inline list is open; `None` when closed. Picker
+    /// fills the slice's command + icon + label-if-empty + flips
+    /// to "Full colour" mode in one click.
+    pub app_command_picker: Option<app_picker::AppCommandPickerState>,
     /// Shared rasterised icon cache (XDG resolver + tinting). Lives
     /// at State level so it persists across re-renders and across
     /// theme changes (colours change → new cache entries; old
@@ -629,6 +647,7 @@ impl Default for State {
             icon_picker: None,
             recent_icons: recents::load(),
             installed_apps: juhradial_shared::enumerate_applications(),
+            app_command_picker: None,
         }
     }
 }
@@ -750,12 +769,11 @@ fn run_test_action(state: &mut State, slice: Option<&juhradial_shared::Slice>) {
 }
 
 /// Apply an icon name (or absolute file path) to whichever picker
-/// target the caller specifies. Used by both the inline icon-grid
-/// picker and the native file-dialog flow so they share the same
-/// "where does this land?" logic. `prefer_untinted` is set when
-/// the source is naturally full-colour (Apps grid, file picker)
-/// so the slice's `icon_untinted` flag flips on automatically and
-/// the user gets brand colours by default.
+/// target the caller specifies. `prefer_untinted` is set when the
+/// source is naturally full-colour (Apps grid, file picker) — the
+/// slice's `icon_untinted` flag flips on so the colour pick_list
+/// shows "Full colour" and the radial menu skips the alpha-mask
+/// tint at render time.
 fn apply_icon_to_target(
     state: &mut State,
     target: Option<icon_picker::IconPickerTarget>,
@@ -1083,7 +1101,16 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
         }
         Message::SetSliceColor(i, s) => {
             if let Some(slice) = state.active_slices_mut().get_mut(i) {
-                slice.color = s;
+                if s == tabs::buttons::FULL_COLOR_KEY {
+                    // "Full colour" choice → flip to original icon
+                    // colours, leave the underlying tint colour
+                    // unchanged so toggling back to a tint later
+                    // restores the previous selection.
+                    slice.icon_untinted = true;
+                } else {
+                    slice.color = s;
+                    slice.icon_untinted = false;
+                }
                 state.touch();
             }
             Task::none()
@@ -1091,24 +1118,6 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
         Message::SetSliceIcon(i, s) => {
             if let Some(slice) = state.active_slices_mut().get_mut(i) {
                 slice.icon = s;
-                state.touch();
-            }
-            Task::none()
-        }
-        Message::SetSliceIconUntinted(i, v) => {
-            if let Some(slice) = state.active_slices_mut().get_mut(i) {
-                slice.icon_untinted = v;
-                state.touch();
-            }
-            Task::none()
-        }
-        Message::SetSubItemIconUntinted { parent, idx, value } => {
-            if let Some(item) = state
-                .active_slices_mut()
-                .get_mut(parent)
-                .and_then(|p| p.submenu.get_mut(idx))
-            {
-                item.icon_untinted = value;
                 state.touch();
             }
             Task::none()
@@ -1142,10 +1151,9 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
 
         // --- Radial preview interactions ---
         Message::SelectSlice(i) => {
-            // Close the icon picker if it was bound to a different
-            // slot — leaving it open would render the picker
-            // panel under the editor for a slot the user just
-            // navigated away from, which is confusing.
+            // Close any picker bound to a different slot —
+            // leaving it open would render the panel under the
+            // editor of a slot the user just navigated away from.
             if let Some(picker) = state.icon_picker.as_ref() {
                 let still_relevant = matches!(
                     picker.target,
@@ -1155,14 +1163,23 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                     state.icon_picker = None;
                 }
             }
+            if let Some(picker) = state.app_command_picker.as_ref() {
+                let still_relevant = matches!(
+                    picker.target,
+                    app_picker::AppCommandTarget::Slice(t) if t == i
+                );
+                if !still_relevant {
+                    state.app_command_picker = None;
+                }
+            }
             state.selected_slice = Some(i);
             Task::none()
         }
         Message::DismissSliceSelection => {
             state.selected_slice = None;
-            // The picker was bound to whatever slot is being
-            // deselected; leaving it open would orphan the panel.
+            // Close anything bound to the deselected slot.
             state.icon_picker = None;
+            state.app_command_picker = None;
             Task::none()
         }
         Message::SwapSlices { from, to } => {
@@ -1733,7 +1750,12 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                 .get_mut(parent)
                 .and_then(|p| p.submenu.get_mut(idx))
             {
-                item.color = s;
+                if s == tabs::buttons::FULL_COLOR_KEY {
+                    item.icon_untinted = true;
+                } else {
+                    item.color = s;
+                    item.icon_untinted = false;
+                }
                 state.touch();
             }
             Task::none()
@@ -1791,6 +1813,7 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                 // the icon picker (its slot index is page-relative).
                 state.selected_slice = None;
                 state.icon_picker = None;
+                state.app_command_picker = None;
             }
             Task::none()
         }
@@ -1935,6 +1958,116 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                     class,
                 },
             )
+        }
+        Message::OpenAppCommandPicker(target) => {
+            state.app_command_picker = Some(app_picker::AppCommandPickerState {
+                target,
+                search: String::new(),
+                replace_icon: true,
+            });
+            // Prewarm app icons (untinted) so the picker rows
+            // show real thumbnails instead of placeholders.
+            // Cache-aware — repeated opens skip already-rasterised
+            // entries.
+            let pending: Vec<String> = state
+                .installed_apps
+                .iter()
+                .filter_map(|a| {
+                    if a.icon.is_empty() {
+                        return None;
+                    }
+                    if radial_preview::peek_icon_handle_untinted(
+                        &state.iced_handles,
+                        &a.icon,
+                        app_picker::THUMB_PX,
+                    )
+                    .is_some()
+                    {
+                        return None;
+                    }
+                    Some(a.icon.clone())
+                })
+                .collect();
+            if pending.is_empty() {
+                return Task::none();
+            }
+            let size = app_picker::THUMB_PX;
+            Task::perform(
+                async move {
+                    tokio::task::spawn_blocking(move || {
+                        pending
+                            .into_iter()
+                            .map(|name| {
+                                let icon =
+                                    juhradial_icons::rasterize_icon_untinted(&name, size);
+                                (name, icon)
+                            })
+                            .collect::<Vec<_>>()
+                    })
+                    .await
+                    .unwrap_or_default()
+                },
+                Message::AppIconsPrewarmed,
+            )
+        }
+        Message::CloseAppCommandPicker => {
+            state.app_command_picker = None;
+            Task::none()
+        }
+        Message::SetAppCommandSearch(q) => {
+            if let Some(p) = state.app_command_picker.as_mut() {
+                p.search = q;
+            }
+            Task::none()
+        }
+        Message::SetAppCommandReplaceIcon(v) => {
+            if let Some(p) = state.app_command_picker.as_mut() {
+                p.replace_icon = v;
+            }
+            Task::none()
+        }
+        Message::PickAppForCommand { command, icon, label } => {
+            // Read the picker's flags BEFORE we take() it, so the
+            // replace_icon toggle is honoured.
+            let (target, replace_icon) = match state.app_command_picker.take() {
+                Some(p) => (p.target, p.replace_icon),
+                None => return Task::none(),
+            };
+            match target {
+                app_picker::AppCommandTarget::Slice(idx) => {
+                    if let Some(slice) = state.active_slices_mut().get_mut(idx) {
+                        slice.command = command;
+                        slice.kind = juhradial_shared::ActionKind::Exec;
+                        if slice.label.trim().is_empty() {
+                            slice.label = label;
+                        }
+                        if replace_icon {
+                            slice.icon = icon;
+                            slice.icon_untinted = true;
+                        }
+                        state.touch();
+                    }
+                }
+                app_picker::AppCommandTarget::SubItem { parent, idx } => {
+                    if let Some(item) = state
+                        .active_slices_mut()
+                        .get_mut(parent)
+                        .and_then(|p| p.submenu.get_mut(idx))
+                    {
+                        item.command = command;
+                        item.kind = juhradial_shared::ActionKind::Exec;
+                        if item.label.trim().is_empty() {
+                            item.label = label;
+                        }
+                        if replace_icon {
+                            item.icon = icon;
+                            item.icon_untinted = true;
+                        }
+                        state.touch();
+                    }
+                }
+            }
+            Task::none()
         }
         Message::OpenIconPicker(target) => {
             state.icon_picker = Some(icon_picker::IconPickerState {
@@ -2252,22 +2385,65 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
 // View — the shell
 // ============================================================================
 
+/// Wrap a picker's content in a full-panel chrome — top bar with
+/// title + Back button, body fills the remaining space. Used when
+/// a picker takes over the main content area instead of rendering
+/// inline next to the slice editor.
+fn full_panel<'a>(
+    state: &'a State,
+    title: &str,
+    body: Element<'a, Message>,
+    back_msg: Message,
+) -> Element<'a, Message> {
+    let pal = &state.palette;
+    let back_btn = iced::widget::button(text("← Back").size(12))
+        .style(style::btn_secondary(pal))
+        .on_press(back_msg);
+    let header = row![
+        back_btn,
+        Space::new().width(Length::Fixed(12.0)),
+        text(title.to_string()).size(16),
+        Space::new().width(Length::Fill),
+    ]
+    .align_y(iced::Alignment::Center);
+    column![
+        header,
+        rule::horizontal(1).style(style::rule_style(pal)),
+        Space::new().height(Length::Fixed(8.0)),
+        body,
+    ]
+    .spacing(6)
+    .into()
+}
+
 fn view(state: &State) -> Element<'_, Message> {
     let header = header_view(state);
     let sidebar = sidebar_view(state);
-    let body: Element<Message> = match state.tab {
-        Tab::Buttons => tabs::buttons::view(state),
-        Tab::Settings => tabs::settings_page::view(state),
-        Tab::PointScroll => tabs::scroll::view(state),
-        Tab::Haptic => tabs::haptics::view(state),
-        Tab::Devices => tabs::devices::view(state),
-        Tab::EasySwitch => tabs::easyswitch::view(state),
-        Tab::Flow => tabs::placeholder::view(state, 
-            "Flow",
-            "Cross-machine cursor-and-clipboard hand-off. Coming soon.",
-        ),
-        Tab::Macros => tabs::macros::view(state),
-        Tab::Gaming => tabs::gaming::view(state),
+    // Full-panel pickers take over the entire content area when
+    // open — gives the user the full width / height of the
+    // settings window for browsing instead of cramming the grid
+    // into the right column. Back button at the top returns to
+    // whichever tab the user was on. Order matters: app-command
+    // picker wins over icon picker if both are somehow open.
+    let body: Element<Message> = if let Some(p) = state.app_command_picker.as_ref() {
+        full_panel(state, "Pick app for command", app_picker::view(state, p), Message::CloseAppCommandPicker)
+    } else if let Some(p) = state.icon_picker.as_ref() {
+        full_panel(state, "Pick an icon", icon_picker::view(state, p), Message::CloseIconPicker)
+    } else {
+        match state.tab {
+            Tab::Buttons => tabs::buttons::view(state),
+            Tab::Settings => tabs::settings_page::view(state),
+            Tab::PointScroll => tabs::scroll::view(state),
+            Tab::Haptic => tabs::haptics::view(state),
+            Tab::Devices => tabs::devices::view(state),
+            Tab::EasySwitch => tabs::easyswitch::view(state),
+            Tab::Flow => tabs::placeholder::view(state,
+                "Flow",
+                "Cross-machine cursor-and-clipboard hand-off. Coming soon.",
+            ),
+            Tab::Macros => tabs::macros::view(state),
+            Tab::Gaming => tabs::gaming::view(state),
+        }
     };
 
     let main_area = row![

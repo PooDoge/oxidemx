@@ -29,6 +29,9 @@ const APP_ID: &str = "org.kde.juhradialmx.overlay";
 #[derive(Debug, Clone)]
 pub enum Message {
     Tick,
+    /// Sentinel for fire-and-forget Tasks whose completion we
+    /// don't need to react to (e.g. haptic pulses).
+    Noop,
     Overlay(OverlayEvent),
     /// Result of asking the GNOME extension to position the window.
     /// Used only for logging / future retries.
@@ -100,6 +103,7 @@ fn update(state: &mut RadialState, message: Message) -> Task<Message> {
             state.advance_animations();
             Task::none()
         }
+        Message::Noop => Task::none(),
         Message::Overlay(OverlayEvent::Show { x, y }) => {
             debug!(x, y, "Show event from daemon");
             state.show();
@@ -110,12 +114,10 @@ fn update(state: &mut RadialState, message: Message) -> Task<Message> {
             // coords) — the extension figures out which monitor
             // contains the requested point.
             let half = (WINDOW_SIZE / 2.0) as i32;
-            // Run the position call AND the focused-class query in
-            // parallel — both are independent zbus round-trips, so
-            // batching them keeps the perceived open latency
-            // bounded by the slower of the two (~5 ms each on local
-            // session bus). The class result swaps to the matching
-            // app-context page during the menu's open fade-in.
+            // Three parallel D-Bus round-trips: window position,
+            // focus query, and the menu_appear haptic pulse.
+            // Batching keeps perceived open latency bounded by
+            // the slowest of the three.
             Task::batch([
                 Task::perform(
                     crate::ext_positioner::move_overlay(
@@ -130,16 +132,37 @@ fn update(state: &mut RadialState, message: Message) -> Task<Message> {
                     crate::ext_positioner::get_focused_window_class(APP_ID.to_string()),
                     Message::FocusedClassResolved,
                 ),
+                Task::perform(
+                    crate::haptic_client::trigger_haptic("menu_appear".to_string()),
+                    |_| Message::Noop,
+                ),
             ])
         }
         Message::Overlay(OverlayEvent::Hide) => {
             debug!("Hide event from daemon");
+            // Capture target before hide() consumes / resets it
+            // — slice dispatch fires the `confirm` haptic, while
+            // a tap-to-toggle (no slice highlighted) leaves
+            // haptics silent (the `menu_appear` already played).
+            let dispatched = state.target_slice().is_some();
             state.hide();
-            Task::none()
+            if dispatched {
+                Task::perform(
+                    crate::haptic_client::trigger_haptic("confirm".to_string()),
+                    |_| Message::Noop,
+                )
+            } else {
+                Task::none()
+            }
         }
         Message::Overlay(OverlayEvent::CursorMoved { dx, dy }) => {
+            // Compare target_slice before/after so we can fire
+            // a NotifySliceHover only when the user crosses into
+            // a *new* slot — otherwise the daemon would get a
+            // spam of pulses on every mouse-move event.
+            let before = state.target_slice();
             state.on_cursor_moved(dx, dy);
-            Task::none()
+            haptic_on_target_change(before, state.target_slice())
         }
         Message::Positioned(success) => {
             if !success {
@@ -152,13 +175,26 @@ fn update(state: &mut RadialState, message: Message) -> Task<Message> {
             Task::none()
         }
         Message::ToggleCursor { x, y } => {
+            // Same slice-change debounce as drag-mode CursorMoved.
+            let before = state.target_slice();
             state.on_toggle_cursor(x, y);
-            Task::none()
+            haptic_on_target_change(before, state.target_slice())
         }
         Message::ToggleClickSelect => {
             debug!("Toggle-mode click select");
+            // confirm haptic only when a slice was actually
+            // highlighted at click time. Click on empty space =
+            // no pulse.
+            let dispatched = state.target_slice().is_some();
             state.click_select();
-            Task::none()
+            if dispatched {
+                Task::perform(
+                    crate::haptic_client::trigger_haptic("confirm".to_string()),
+                    |_| Message::Noop,
+                )
+            } else {
+                Task::none()
+            }
         }
         Message::ToggleDismiss => {
             debug!("Toggle-mode dismiss");
@@ -181,6 +217,21 @@ fn update(state: &mut RadialState, message: Message) -> Task<Message> {
             Task::none()
         }
     }
+}
+
+/// Fire a slice-change haptic when the cursor crosses into a new
+/// slot. No-op when the user enters empty space (target → None)
+/// — only positive transitions get a pulse, otherwise the daemon
+/// would burn the motor on every drag-to-cancel.
+fn haptic_on_target_change(before: Option<usize>, after: Option<usize>) -> Task<Message> {
+    if before == after {
+        return Task::none();
+    }
+    let Some(idx) = after else { return Task::none(); };
+    Task::perform(
+        crate::haptic_client::notify_slice_hover(idx as u8),
+        |_| Message::Noop,
+    )
 }
 
 fn view(state: &RadialState) -> Element<'_, Message> {

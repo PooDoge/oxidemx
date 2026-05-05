@@ -178,16 +178,51 @@ pub fn enumerate_applications() -> Vec<DesktopEntry> {
     out
 }
 
-/// XDG application directories *plus* the Flatpak export trees,
-/// in the order they should be searched.
+/// XDG application directories *plus* extra packaging-system trees
+/// (Flatpak system + per-user, Snap), in the order they should be
+/// searched. The walk order matters because `enumerate_applications`
+/// dedupes by file-stem id with last-write-wins — earlier entries
+/// can be overridden by later ones, so we put system-wide /
+/// packaged-app sources first and user-installed last.
+///
+/// Sources covered:
+///   * Snap (`/var/lib/snapd/desktop/applications`) — separate from
+///     XDG; no-op on systems without snapd.
+///   * Flatpak system (`/var/lib/flatpak/exports/share/applications`)
+///   * `$XDG_DATA_DIRS/applications` for every entry of the env
+///     var (default `/usr/local/share/:/usr/share/` per spec).
+///     Catches distro-specific data dirs we wouldn't otherwise hit.
+///   * Flatpak per-user
+///     (`~/.local/share/flatpak/exports/share/applications`)
+///   * `$XDG_DATA_HOME/applications` (default
+///     `~/.local/share/applications`)
+///
+/// Result is deduplicated so entries that appear in multiple sources
+/// (commonly: Flatpak paths embedded in `$XDG_DATA_DIRS`) aren't
+/// walked twice.
 pub fn standard_application_dirs() -> Vec<PathBuf> {
     let mut dirs: Vec<PathBuf> = Vec::new();
 
-    // Flatpak system + per-user exports first so their entries can
-    // be overridden by anything in /usr/local or ~/.local.
+    // Snap apps — published outside the XDG tree.
+    dirs.push(PathBuf::from("/var/lib/snapd/desktop/applications"));
+
+    // Flatpak system — usually also in $XDG_DATA_DIRS via
+    // /var/lib/flatpak/exports/share, but include defensively for
+    // older distros that don't export it through the env var.
     dirs.push(PathBuf::from(
         "/var/lib/flatpak/exports/share/applications",
     ));
+
+    // Walk $XDG_DATA_DIRS dynamically so we pick up whatever the
+    // distro configures (often includes Flatpak roots, sometimes
+    // `/var/cache/app-info`, sandbox-specific bridges, etc.).
+    let xdg_data_dirs = std::env::var_os("XDG_DATA_DIRS")
+        .unwrap_or_else(|| std::ffi::OsString::from("/usr/local/share:/usr/share"));
+    for d in std::env::split_paths(&xdg_data_dirs) {
+        dirs.push(d.join("applications"));
+    }
+
+    // Flatpak per-user.
     if let Some(home) = std::env::var_os("HOME") {
         dirs.push(
             PathBuf::from(&home)
@@ -195,14 +230,19 @@ pub fn standard_application_dirs() -> Vec<PathBuf> {
         );
     }
 
-    // System then user XDG application dirs.
-    dirs.push(PathBuf::from("/usr/share/applications"));
-    dirs.push(PathBuf::from("/usr/local/share/applications"));
+    // Per-user XDG dir (highest precedence so user overrides win).
     if let Some(xdg) = std::env::var_os("XDG_DATA_HOME") {
         dirs.push(PathBuf::from(xdg).join("applications"));
     } else if let Some(home) = std::env::var_os("HOME") {
         dirs.push(PathBuf::from(home).join(".local/share/applications"));
     }
+
+    // Dedupe while preserving order — first occurrence kept, so the
+    // priority order above is honoured for the BTreeMap last-write-
+    // wins logic in `enumerate_applications`.
+    let mut seen: std::collections::HashSet<PathBuf> =
+        std::collections::HashSet::new();
+    dirs.retain(|p| seen.insert(p.clone()));
     dirs
 }
 
