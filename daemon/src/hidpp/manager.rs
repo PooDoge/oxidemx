@@ -192,6 +192,17 @@ impl HapticManager {
         }
     }
 
+    /// Un-divert a single button by CID, restoring native OS
+    /// handling. Symmetric counterpart of `divert_single_button`
+    /// — called from the config-reload sync when the user
+    /// reverts a non-gesture button to its default action.
+    pub fn undivert_single_button(&mut self, cid: u16) -> Result<bool, HapticError> {
+        match &mut self.device {
+            Some(device) => device.undivert_single_button(cid),
+            None => Ok(false),
+        }
+    }
+
     /// Handle device disconnection gracefully
     fn handle_disconnect(&mut self) {
         let now = SystemTime::now()

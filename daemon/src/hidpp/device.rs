@@ -880,6 +880,57 @@ impl HidppDevice {
         Ok(diverted)
     }
 
+    /// Un-divert a single button by CID — restores native OS
+    /// behaviour for a button that was previously diverted via
+    /// `divert_single_button`. Sets the REPROG_CONTROLS_V4 divert
+    /// flags to `0x00` (no divert) for the matching control.
+    ///
+    /// Symmetric counterpart to `divert_single_button` — used by
+    /// the on-config-reload sync to undo a divert when the user
+    /// reverts a button to its default action.
+    pub fn undivert_single_button(&mut self, cid: u16) -> Result<bool, HapticError> {
+        let feature_index = match self.reprog_controls_feature_index {
+            Some(idx) => idx,
+            None => return Ok(false),
+        };
+        let count = match self.hidpp_request(feature_index, 0x00, &[]) {
+            Some(resp) if resp.len() >= 5 => resp[4],
+            _ => return Ok(false),
+        };
+        for i in 0..count {
+            let resp = match self.hidpp_request(feature_index, 0x01, &[i, 0, 0]) {
+                Some(r) if r.len() >= 9 => r,
+                _ => continue,
+            };
+            let found_cid = ((resp[4] as u16) << 8) | (resp[5] as u16);
+            let flags = resp[8];
+            let divertable = (flags & 0x20) != 0;
+            if found_cid == cid && divertable {
+                // ChangeTemporaryDivert (0x02) without
+                // TemporaryDiverted (0x01) → tell the device to
+                // accept a new state, then set it to "not
+                // diverted" (no flag bits beyond Change).
+                let divert_flags: u8 = 0x02;
+                let params: &[u8] = &[
+                    (cid >> 8) as u8,
+                    (cid & 0xFF) as u8,
+                    divert_flags,
+                    0x00,
+                    0x00,
+                ];
+                if let Some(resp) = self.hidpp_long_request(feature_index, 0x03, params) {
+                    tracing::info!(
+                        cid = format!("0x{:04X}", cid),
+                        response = format!("{:02X?}", &resp[4..resp.len().min(9)]),
+                        "Button un-diverted"
+                    );
+                    return Ok(true);
+                }
+            }
+        }
+        Ok(false)
+    }
+
     /// Divert a single button by CID for macro interception.
     ///
     /// This prevents the OS from seeing the button event. Instead, it arrives

@@ -80,6 +80,78 @@ fn run_gsettings(schema: &str, key: &str, value: &str) {
     }
 }
 
+/// Reconcile non-gesture button divert state with the new
+/// buttons config. For each of the four non-gesture CIDs we
+/// support (Middle / Back / Forward / SmartShift), compute the
+/// desired state ("diverted" iff configured action != default
+/// for that button) and call divert/undivert when the desired
+/// state changed. Idempotent: if the assigned action is the
+/// same as before, no HID++ traffic. Safe to call from the
+/// reload-on-keystroke path.
+fn sync_non_gesture_diverts(
+    haptic_manager: &std::sync::Arc<std::sync::Mutex<HapticManager>>,
+    prev: &crate::config::ButtonsConfig,
+    next: &crate::config::ButtonsConfig,
+) {
+    use crate::config::ButtonAction;
+    let pairs: &[(u16, ButtonAction, ButtonAction, ButtonAction)] = &[
+        (
+            crate::hidraw::button_cid::MIDDLE_BUTTON,
+            prev.middle, next.middle, ButtonAction::MiddleClick,
+        ),
+        (
+            crate::hidraw::button_cid::BACK_BUTTON,
+            prev.back, next.back, ButtonAction::Back,
+        ),
+        (
+            crate::hidraw::button_cid::FORWARD_BUTTON,
+            prev.forward, next.forward, ButtonAction::Forward,
+        ),
+        (
+            crate::hidraw::button_cid::SMART_SHIFT,
+            prev.shift_wheel, next.shift_wheel, ButtonAction::Smartshift,
+        ),
+    ];
+    let prev_diverted = |a: ButtonAction, default_for: ButtonAction| a != default_for;
+    let next_diverted = |a: ButtonAction, default_for: ButtonAction| a != default_for;
+    let mut work: Vec<(u16, bool)> = Vec::new();
+    for (cid, prev_a, next_a, default_for) in pairs {
+        let was = prev_diverted(*prev_a, *default_for);
+        let now = next_diverted(*next_a, *default_for);
+        if was != now {
+            work.push((*cid, now));
+        }
+    }
+    if work.is_empty() {
+        return;
+    }
+    if let Ok(mut mgr) = haptic_manager.lock() {
+        for (cid, want_diverted) in work {
+            let res = if want_diverted {
+                mgr.divert_single_button(cid)
+            } else {
+                mgr.undivert_single_button(cid)
+            };
+            match res {
+                Ok(true) => tracing::info!(
+                    cid = format!("0x{:04X}", cid),
+                    diverted = want_diverted,
+                    "Non-gesture button divert state synced"
+                ),
+                Ok(false) => tracing::debug!(
+                    cid = format!("0x{:04X}", cid),
+                    "Sync no-op (button not present or not divertable)"
+                ),
+                Err(e) => tracing::warn!(
+                    cid = format!("0x{:04X}", cid),
+                    error = %e,
+                    "Failed to sync button divert state"
+                ),
+            }
+        }
+    }
+}
+
 /// Translate the user's `ScrollConfig` into a HID++ SmartShift call
 /// and apply it to the device. Best-effort — silently logs and
 /// continues if SmartShift isn't supported (older mouse, generic
@@ -269,11 +341,11 @@ impl JuhRadialService {
                 // redundant HID++ commands (which froze the cursor
                 // in a prior incident) and shell out to gsettings
                 // dozens of times per minute.
-                let (prev_scroll, prev_pointer) = self
+                let (prev_scroll, prev_pointer, prev_buttons) = self
                     .config
                     .read()
                     .ok()
-                    .map(|c| (c.scroll.clone(), c.pointer.clone()))
+                    .map(|c| (c.scroll.clone(), c.pointer.clone(), c.buttons.clone()))
                     .unwrap_or_default();
 
                 match self.config.write() {
@@ -335,6 +407,22 @@ impl JuhRadialService {
                 if scroll_gsettings_changed(&prev_scroll, &new_scroll) {
                     apply_scroll_to_gnome(&new_scroll);
                 }
+
+                // Sync non-gesture button divert state with the
+                // new buttons config. For each non-gesture CID,
+                // the desired state is "diverted iff configured
+                // action != default for that button". Compare
+                // against the prev state and call divert /
+                // undivert as needed so toggling a button between
+                // a custom action and the default takes effect
+                // without a daemon restart.
+                let new_buttons = self
+                    .config
+                    .read()
+                    .ok()
+                    .map(|c| c.buttons.clone())
+                    .unwrap_or_default();
+                sync_non_gesture_diverts(&self.haptic_manager, &prev_buttons, &new_buttons);
 
                 Ok(())
             }
