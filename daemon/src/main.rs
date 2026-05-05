@@ -208,6 +208,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mx4_hidraw_path;
     let mx4_device_name: Option<String>;
     {
+        // Snapshot the per-button config before moving the
+        // manager into the blocking task — the divert logic
+        // needs to know which non-gesture buttons the user has
+        // mapped to non-default actions so it can take them over
+        // for action dispatch.
+        let buttons_snapshot = shared_config.read().unwrap().buttons.clone();
         let manager_for_probe = haptic_manager.clone();
         let probe = tokio::task::spawn_blocking(move || {
             let mut manager = manager_for_probe.lock().unwrap();
@@ -219,9 +225,46 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             } else {
                 None
             };
+            // Conditionally divert non-gesture buttons: only when
+            // the user has mapped them to a non-default action.
+            // Default mappings (back→Back, forward→Forward, etc.)
+            // are left native so the OS keeps seeing BTN_SIDE /
+            // BTN_EXTRA / BTN_MIDDLE the way it always has — no
+            // regression risk for users on factory config. When
+            // diverted, the hidraw handler dispatches via
+            // ButtonActionEvent through execute_button_action.
+            let non_gesture_diverted: Vec<u16> = if matches!(connect_result, Ok(true)) {
+                let mut diverted = Vec::new();
+                let candidates: &[(u16, juhradiald::config::ButtonAction, juhradiald::config::ButtonAction)] = &[
+                    (juhradiald::hidraw::button_cid::MIDDLE_BUTTON,
+                     buttons_snapshot.middle,
+                     juhradiald::config::ButtonAction::MiddleClick),
+                    (juhradiald::hidraw::button_cid::BACK_BUTTON,
+                     buttons_snapshot.back,
+                     juhradiald::config::ButtonAction::Back),
+                    (juhradiald::hidraw::button_cid::FORWARD_BUTTON,
+                     buttons_snapshot.forward,
+                     juhradiald::config::ButtonAction::Forward),
+                    (juhradiald::hidraw::button_cid::SMART_SHIFT,
+                     buttons_snapshot.shift_wheel,
+                     juhradiald::config::ButtonAction::Smartshift),
+                ];
+                for (cid, configured, default_for_button) in candidates {
+                    if configured != default_for_button {
+                        match manager.divert_single_button(*cid) {
+                            Ok(true) => diverted.push(*cid),
+                            Ok(false) => {}
+                            Err(_) => {}
+                        }
+                    }
+                }
+                diverted
+            } else {
+                Vec::new()
+            };
             let path = manager.device_path();
             let name = manager.get_device_name_string();
-            (connect_result, divert_result, path, name)
+            (connect_result, divert_result, path, name, non_gesture_diverted)
         })
         .await
         .expect("HID++ probe task panicked");
@@ -236,6 +279,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                     Some(Err(e)) => warn!("Button divert failed (non-fatal): {}", e),
                     None => {}
+                }
+                if !probe.4.is_empty() {
+                    info!(
+                        cids = ?probe.4.iter().map(|c| format!("0x{:04X}", c)).collect::<Vec<_>>(),
+                        "Non-gesture buttons diverted (custom actions configured)"
+                    );
                 }
             }
             Ok(false) => info!("No MX Master 4 found for haptics (optional)"),

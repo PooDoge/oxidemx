@@ -369,7 +369,18 @@ impl HidrawHandler {
             );
         }
 
-        if cid == button_cid::GESTURE_BUTTON || cid == button_cid::HAPTIC {
+        // All CIDs that we're prepared to dispatch user-configured
+        // actions for. Beyond the gesture + haptic buttons (which
+        // are diverted unconditionally to power the radial menu),
+        // we also handle the other reprogrammable buttons when
+        // they've been diverted on the divert pass at startup.
+        let is_dispatchable = cid == button_cid::GESTURE_BUTTON
+            || cid == button_cid::HAPTIC
+            || cid == button_cid::BACK_BUTTON
+            || cid == button_cid::FORWARD_BUTTON
+            || cid == button_cid::MIDDLE_BUTTON
+            || cid == button_cid::SMART_SHIFT;
+        if is_dispatchable {
             // Look up configured action for this button
             let action = self.get_action_for_cid(cid);
             tracing::info!(cid, %action, "Button pressed - config action lookup");
