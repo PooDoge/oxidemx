@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">
+  <g fill="#bebebe">
+    <!-- mouse body: rounded shape, wide at top, tapers toward bottom -->
+    <path d="M 8 1.5
+             C 5.6 1.5 4 3.5 4 6
+             L 4 11
+             C 4 13 5.6 14.5 8 14.5
+             C 10.4 14.5 12 13 12 11
+             L 12 6
+             C 12 3.5 10.4 1.5 8 1.5
+             Z" />
+    <!-- scroll wheel: tiny vertical bar at top -->
+    <rect x="7.5" y="3.5" width="1" height="2.5" rx="0.5" fill="#bebebe" />
+  </g>
+</svg>

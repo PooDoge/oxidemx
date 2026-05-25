@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Dev-mode GNOME extension installer for juhradial-cursor.
+# Dev-mode GNOME extension installer for juhradial-cursor + juhradial-indicator.
 #
 # Why a separate script: the canonical install.sh does a full system
 # install (deps + binaries + udev + desktop entries). For local dev
@@ -11,6 +11,8 @@
 # What it does:
 #   1. Copies extension.js + metadata.json from gnome-extension/<uuid>/
 #      into ~/.local/share/gnome-shell/extensions/<uuid>/
+#      For the indicator extension also copies: prefs.js, stylesheet.css,
+#      icons/, and schemas/ (then compiles the GSettings schema in-place).
 #   2. Tries a hot-reload via `gnome-extensions disable; enable` so
 #      the new D-Bus methods become callable without a Shell restart.
 #   3. Probes the new method via `busctl --user introspect` to confirm
@@ -31,9 +33,16 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# ── Extension: cursor helper ───────────────────────────────────────
 EXT_UUID="juhradial-cursor@dev.juhlabs.com"
 EXT_SRC="$ROOT/gnome-extension/$EXT_UUID"
 EXT_DEST="$HOME/.local/share/gnome-shell/extensions/$EXT_UUID"
+
+# ── Extension: indicator ───────────────────────────────────────────
+IND_UUID="juhradial-indicator@dev.juhlabs.com"
+IND_SRC="$ROOT/gnome-extension/$IND_UUID"
+IND_DEST="$HOME/.local/share/gnome-shell/extensions/$IND_UUID"
 
 # ── Output helpers ─────────────────────────────────────────────────
 BOLD='\033[1m'; DIM='\033[2m'; RESET='\033[0m'
@@ -68,6 +77,21 @@ require_source() {
     err "The extension source is TypeScript. Run: cd gnome-extension && npm install && npm run build"
     exit 1
   fi
+
+  if [[ ! -d "$IND_SRC" ]]; then
+    err "Indicator source not found: $IND_SRC"
+    err "Run this from a juhradial-mx workspace checkout."
+    exit 1
+  fi
+  if [[ ! -f "$IND_SRC/metadata.json" ]]; then
+    err "Missing metadata.json in $IND_SRC"
+    exit 1
+  fi
+  if [[ ! -f "$IND_SRC/extension.ts" && ! -f "$IND_SRC/extension.js" ]]; then
+    err "Missing extension.ts (and no compiled extension.js) in $IND_SRC"
+    err "The extension source is TypeScript. Run: cd gnome-extension && npm install && npm run build"
+    exit 1
+  fi
 }
 
 # ── Operations ─────────────────────────────────────────────────────
@@ -76,8 +100,44 @@ copy_files() {
   # Copy each file individually so any read failure surfaces clearly.
   cp "$EXT_SRC/metadata.json" "$EXT_DEST/metadata.json"
   cp "$EXT_SRC/extension.js"  "$EXT_DEST/extension.js"
-  ok "Copied extension files → $EXT_DEST"
+  ok "Copied cursor extension files → $EXT_DEST"
   say "extension.js: $(wc -c < "$EXT_DEST/extension.js") bytes"
+}
+
+copy_indicator_files() {
+  mkdir -p "$IND_DEST"
+
+  # Core JS + metadata
+  cp "$IND_SRC/metadata.json"  "$IND_DEST/metadata.json"
+  cp "$IND_SRC/extension.js"   "$IND_DEST/extension.js"
+  [[ -f "$IND_SRC/prefs.js" ]] && cp "$IND_SRC/prefs.js" "$IND_DEST/prefs.js"
+
+  # Stylesheet (panel button CSS classes)
+  [[ -f "$IND_SRC/stylesheet.css" ]] && cp "$IND_SRC/stylesheet.css" "$IND_DEST/stylesheet.css"
+
+  # Symbolic icons (new in Phase 1D)
+  if [[ -d "$IND_SRC/icons" ]]; then
+    mkdir -p "$IND_DEST/icons"
+    cp -r "$IND_SRC/icons/." "$IND_DEST/icons/"
+    ok "Copied icons/ → $IND_DEST/icons/"
+  fi
+
+  # GSettings schema — copy then compile in the INSTALLED dir.
+  # Shell loads gschemas.compiled from the installed extension dir, not source.
+  if [[ -d "$IND_SRC/schemas" ]]; then
+    mkdir -p "$IND_DEST/schemas"
+    cp "$IND_SRC/schemas/"*.xml "$IND_DEST/schemas/"
+    if command -v glib-compile-schemas >/dev/null 2>&1; then
+      glib-compile-schemas "$IND_DEST/schemas/"
+      ok "Compiled GSettings schema in $IND_DEST/schemas/"
+    else
+      warn "glib-compile-schemas not found — schema won't be readable by Shell."
+      warn "Install glib2-devel (or equivalent) and re-run to compile schemas."
+    fi
+  fi
+
+  ok "Copied indicator extension files → $IND_DEST"
+  say "extension.js: $(wc -c < "$IND_DEST/extension.js") bytes"
 }
 
 # Disable + enable cycle. Quiet about failures because the user might
@@ -172,6 +232,7 @@ do_install() {
   require_gnome
   require_source
   copy_files
+  copy_indicator_files
   if [[ "${1:-}" != "--no-reload" ]]; then
     hot_reload
     verify_dbus
@@ -182,8 +243,10 @@ do_install() {
 
 do_uninstall() {
   if command -v gnome-extensions >/dev/null 2>&1; then
-    say "Disabling extension…"
+    say "Disabling cursor extension…"
     gnome-extensions disable "$EXT_UUID" 2>/dev/null || true
+    say "Disabling indicator extension…"
+    gnome-extensions disable "$IND_UUID" 2>/dev/null || true
   fi
   if [[ -d "$EXT_DEST" ]]; then
     rm -rf "$EXT_DEST"
@@ -191,18 +254,26 @@ do_uninstall() {
   else
     say "Nothing to remove ($EXT_DEST does not exist)."
   fi
+  if [[ -d "$IND_DEST" ]]; then
+    rm -rf "$IND_DEST"
+    ok "Removed $IND_DEST"
+  else
+    say "Nothing to remove ($IND_DEST does not exist)."
+  fi
 }
 
 usage() {
   cat <<USAGE
-Dev-mode GNOME extension installer for $EXT_UUID
+Dev-mode GNOME extension installer for $EXT_UUID + $IND_UUID
 
-  $0                  install + hot-reload + verify
+  $0                  install both extensions + hot-reload + verify
   $0 --no-reload      copy files only, don't touch extension state
-  $0 --uninstall      disable + remove the user-local copy
+  $0 --uninstall      disable + remove user-local copies of both
 
-Source:    $EXT_SRC
-Dest:      $EXT_DEST
+Cursor source:     $EXT_SRC
+Cursor dest:       $EXT_DEST
+Indicator source:  $IND_SRC
+Indicator dest:    $IND_DEST
 USAGE
 }
 
