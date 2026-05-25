@@ -59,7 +59,13 @@ impl OverlaySpawner {
         match Command::new("juhradial-overlay-rs").spawn() {
             Ok(child) => {
                 info!("Spawned juhradial-overlay-rs via EnsureOverlayRunning");
-                *self.child.lock().unwrap() = Some(child);
+                match self.child.lock() {
+                    Ok(mut guard) => *guard = Some(child),
+                    Err(poisoned) => {
+                        warn!("OverlaySpawner child mutex poisoned; recovering");
+                        *poisoned.into_inner() = Some(child);
+                    }
+                }
             }
             Err(e) => {
                 warn!(error = %e, "Failed to spawn juhradial-overlay-rs");

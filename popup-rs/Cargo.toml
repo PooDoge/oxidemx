@@ -23,7 +23,7 @@ async-channel = "2"
 futures-util = "0.3"
 
 # Async runtime + subprocess for wpctl.
-tokio = { version = "1", features = ["rt", "macros", "time", "process"] }
+tokio = { version = "1", features = ["rt", "macros", "time", "process", "sync"] }
 
 # Config IO and inotify watcher.
 serde = { version = "1", features = ["derive"] }

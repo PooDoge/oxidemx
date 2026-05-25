@@ -5,8 +5,24 @@
 //! All calls are fire-and-forget: errors are logged but not propagated so
 //! a transient D-Bus hiccup doesn't crash the popup.
 
+use tokio::sync::OnceCell;
 use tracing::{info, warn};
 use zbus::{proxy, Connection};
+
+// ---------------------------------------------------------------------------
+// Cached session connection — constructed on first use, reused thereafter.
+// ---------------------------------------------------------------------------
+
+static CONN: OnceCell<Connection> = OnceCell::const_new();
+
+async fn session_conn() -> Result<&'static Connection, String> {
+    CONN.get_or_try_init(|| async {
+        Connection::session()
+            .await
+            .map_err(|e| format!("D-Bus session connect: {e}"))
+    })
+    .await
+}
 
 // ---------------------------------------------------------------------------
 // D-Bus proxy — mirrors only the methods the daemon actually exposes.
@@ -90,10 +106,8 @@ pub async fn apply(action: Action) -> Result<(), String> {
         _ => {}
     }
 
-    let conn = Connection::session()
-        .await
-        .map_err(|e| format!("D-Bus session connect: {e}"))?;
-    let proxy = DaemonProxy::new(&conn)
+    let conn = session_conn().await?;
+    let proxy = DaemonProxy::new(conn)
         .await
         .map_err(|e| format!("DaemonProxy::new: {e}"))?;
 
@@ -133,8 +147,8 @@ pub async fn apply(action: Action) -> Result<(), String> {
 /// Fetch the current device state from the daemon.
 /// Returns `None` if the daemon is not reachable.
 pub async fn fetch_device_state() -> Option<DeviceState> {
-    let conn = Connection::session().await.ok()?;
-    let proxy = DaemonProxy::new(&conn).await.ok()?;
+    let conn = session_conn().await.ok()?;
+    let proxy = DaemonProxy::new(conn).await.ok()?;
     // Daemon returns (battery_pct, charging, connection, device_name, device_id) — 5 fields.
     match proxy.get_active_device_state().await {
         Ok((battery_pct, charging, connection_type, device_name, _device_id)) => {
