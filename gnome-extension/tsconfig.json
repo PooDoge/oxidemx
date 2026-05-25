@@ -29,6 +29,24 @@
       ],
       "resource:///org/gnome/shell/extensions/prefs.js": [
         "./node_modules/@girs/gnome-shell/dist/extensions/prefs-ambient.d.ts"
+      ],
+      "resource:///org/gnome/shell/ui/main.js": [
+        "./node_modules/@girs/gnome-shell/dist/ui/main-ambient.d.ts"
+      ],
+      "resource:///org/gnome/shell/ui/panelMenu.js": [
+        "./node_modules/@girs/gnome-shell/dist/ui/panelMenu-ambient.d.ts"
+      ],
+      "resource:///org/gnome/shell/ui/popupMenu.js": [
+        "./node_modules/@girs/gnome-shell/dist/ui/popupMenu-ambient.d.ts"
+      ],
+      "gi://GObject": [
+        "./node_modules/@girs/gobject-2.0/gobject-2.0-ambient.d.ts"
+      ],
+      "gi://St": [
+        "./node_modules/@girs/st-16/st-16-ambient.d.ts"
+      ],
+      "gi://Clutter": [
+        "./node_modules/@girs/clutter-16/clutter-16-ambient.d.ts"
       ]
     },
     "types": [

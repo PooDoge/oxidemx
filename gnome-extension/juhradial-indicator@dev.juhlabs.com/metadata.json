@@ -1,0 +1,9 @@
+{
+    "uuid": "juhradial-indicator@dev.juhlabs.com",
+    "name": "JuhRadial Indicator",
+    "description": "Top-bar battery + quick-controls popup for Logitech MX devices. Sources battery state from the JuhRadial daemon (org.juhradial.Daemon); click opens the daemon-rendered popup.",
+    "shell-version": ["45", "46", "47", "48", "49", "50", "51"],
+    "url": "https://github.com/JuhLabs/juhradial-mx",
+    "version": 1,
+    "settings-schema": "org.gnome.shell.extensions.juhradial-indicator"
+}
