@@ -34,7 +34,7 @@ pub enum HostLabelStyle {
 pub struct PopupConfig {
     #[serde(default)]
     pub mode: PopupMode,
-    #[serde(default = "default_show_host_buttons")]
+    #[serde(default = "default_true")]
     pub show_host_buttons: bool,
     #[serde(default)]
     pub host_label_style: HostLabelStyle,
@@ -53,7 +53,6 @@ pub struct PopupConfig {
 }
 
 fn default_true() -> bool { true }
-fn default_show_host_buttons() -> bool { true }
 fn default_simple_toggles() -> Vec<String> {
     vec!["gaming".into(), "haptics".into(), "radial".into()]
 }
@@ -68,14 +67,14 @@ impl Default for PopupConfig {
     fn default() -> Self {
         Self {
             mode: PopupMode::default(),
-            show_host_buttons: default_show_host_buttons(),
+            show_host_buttons: default_true(),
             host_label_style: HostLabelStyle::default(),
             simple_toggles: default_simple_toggles(),
             power_toggles: default_power_toggles(),
             power_sliders: default_power_sliders(),
-            volume_on_scroll: true,
+            volume_on_scroll: default_true(),
             close_on_action: false,
-            animations: true,
+            animations: default_true(),
         }
     }
 }
