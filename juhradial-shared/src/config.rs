@@ -324,6 +324,11 @@ pub struct AppConfig {
     /// config. Empty by default — no profile switching.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub app_profiles: std::collections::BTreeMap<String, String>,
+
+    /// Indicator-popup preferences (mode, quick toggles, sliders, etc.).
+    /// Stored in the `popup` table of `config.json`; absent = defaults.
+    #[serde(default)]
+    pub popup: crate::popup::PopupConfig,
 }
 
 /// Default location of the user's main config: `~/.config/juhradial/config.json`.

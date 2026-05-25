@@ -19,6 +19,7 @@ pub mod conditions;
 pub mod config;
 pub mod haptics;
 pub mod pointer;
+pub mod popup;
 pub mod profiles;
 pub mod theme;
 
@@ -35,5 +36,9 @@ pub use config::{AppConfig, RadialMenuConfig, RadialPage, Slice, VisualSettings}
 pub use buttons::{ButtonAction, ButtonsConfig, MouseButton};
 pub use haptics::{HapticsConfig, PerEventPatterns, HAPTIC_PATTERNS};
 pub use pointer::{PointerConfig, ScrollConfig};
+pub use popup::{
+    HostLabelStyle, PopupConfig, PopupMode, QuickEntry,
+    QUICK_SLIDER_CATALOG, QUICK_TOGGLE_CATALOG,
+};
 pub use profiles::ProfileResolver;
 pub use theme::{Theme, ThemeName};
