@@ -26,7 +26,7 @@
  *                                                  # monitor=-1 → primary
  *                                                  # returns: b success
  *     RaiseOverlay(s app_id) -> b success
- *     ListMonitors() -> a(iiii)                    # [(idx, x, y, w, h), ...]
+ *     ListMonitors() -> a(iiiii)                   # [(idx, x, y, w, h), ...]
  *     GetFocusedWindowClass(s ignore_app_id) -> s  # WM_CLASS / app_id of
  *                                                  # currently focused window;
  *                                                  # empty string when none.
@@ -148,7 +148,7 @@ const DBUS_IFACE: string = `
       <arg type="b" direction="out" name="success"/>
     </method>
     <method name="ListMonitors">
-      <arg type="a(iiii)" direction="out" name="monitors"/>
+      <arg type="a(iiiii)" direction="out" name="monitors"/>
     </method>
     <method name="GetFocusedWindowClass">
       <arg type="s" direction="in" name="ignore_app_id"/>
@@ -296,8 +296,7 @@ export default class JuhRadialCursorExtension extends Extension {
                         out.push([i, g.x, g.y, g.width, g.height]);
                     }
                 }
-                // @ts-expect-error -- pre-existing discrepancy: D-Bus XML declares a(iiii) but JS pushes 5-tuples. Tracked as a follow-up; preserving original behaviour here.
-                invocation.return_value(new GLib.Variant('(a(iiii))', [out]));
+                invocation.return_value(new GLib.Variant('(a(iiiii))', [out]));
                 return;
             }
             case 'GetFocusedWindowClass': {

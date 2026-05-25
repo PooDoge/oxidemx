@@ -4877,7 +4877,7 @@ fn main() -> iced::Result {
 
     let mut window = iced::window::Settings::default();
     window.size = iced::Size::new(1280.0, 820.0);
-    window.platform_specific.application_id = "org.juhlabs.juhradial.settings".into();
+    window.platform_specific.application_id = "org.juhradial.settings".into();
 
     iced::application(boot, update, view)
         .title("JuhRadial Settings")

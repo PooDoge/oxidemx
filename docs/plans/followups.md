@@ -1,6 +1,6 @@
 # Indicator + Popup + Settings — follow-ups
 
-Tracked items deferred during the 25-commit `indicator-feature` integration (now merged into `rust-gtk4-overlay` at `040e3db`). Captured here so nothing falls off the radar.
+Tracked items deferred during the 25-commit `indicator-feature` integration (now merged into `rust-gtk4-overlay` at `040e3db`). Captured here so nothing falls off the radar. **2026-05-25 pass closed 7 of the 15 items; remaining items below are tagged with status.**
 
 Sibling docs:
 - [INDICATOR_DESIGN.md](../../INDICATOR_DESIGN.md) — architecture
@@ -11,42 +11,26 @@ Sibling docs:
 
 ## P1 — Blocks `cargo test --workspace`
 
-### 1. `daemon/src/hidpp/tests.rs` `page_change` field initializers
-**Status:** pre-existing on `rust-gtk4-overlay` before the indicator work began. The merge did not introduce or change this; library code builds clean, only the daemon test target fails to compile.
-
-**Symptoms:**
-```
-error[E0063]: missing field `page_change` in initializer of `PerEventPattern`
-error[E0063]: missing field `page_change` in initializer of `HapticEventConfig` (x2)
-```
-
-**Fix:** the `page_change` variant / field was added to `HapticEvent` / `PerEventPattern` / `HapticEventConfig` somewhere in the haptic-patterns work but the three test fixtures in `tests.rs` weren't updated. Walk through the three initializers and add `page_change: PerEventPattern::default()` (or the equivalent value the production code uses).
+### 1. `daemon/src/hidpp/tests.rs` `page_change` field initializers ✅ DONE (resolved by merge)
+The stash-pop-and-resolve cycle on `rust-gtk4-overlay` properly restored the user's in-flight `page_change` work — both `manager.rs` initializers and `tests.rs` fixtures have the field. Verified 2026-05-25 with `cargo test -p juhradiald --lib` → **266 passed, 0 failed, 7 ignored**.
 
 ---
 
 ## P2 — Indicator Phase 3.5 (deferred quick-actions)
 
-### 2. Wire the 7 unwired quick-toggle / quick-slider actions to real daemon D-Bus methods
+### 2. Wire the 7 unwired quick-toggle / quick-slider actions to real daemon D-Bus methods 🟡 PARTIAL
 
-`popup-rs/src/actions.rs` currently logs `"action not yet wired to daemon"` for these `Action::*` variants. Each needs a corresponding daemon D-Bus method:
-
-| Quick-action id | `Action::` variant | Daemon work needed |
+| Quick-action id | `Action::` variant | Status |
 |---|---|---|
-| `haptics` | `Haptics(bool)` | Add `set_haptics_enabled(bool)` → write `config.haptics.enabled` + signal `ReloadConfig`. |
-| `radial` | `Radial(bool)` | Add `set_radial_enabled(bool)` → on/off should map to `EnsureOverlayRunning()` vs daemon kill-signal to overlay process. |
-| `scroll` | `Scroll(u8)` | Add `set_scroll_sensitivity(u8)` → write `config.scroll.scroll_speed` (range 1–10 per design). |
-| `haptic_i` | `HapticIntensity(u8)` | Add `set_haptic_intensity(u8)` → write `config.haptics.intensity_pct` or equivalent. |
-| `accel` | `Accel(f32)` | Add `set_pointer_accel(f32)` → write `config.pointer.acceleration_curve` (range -1.0..1.0). |
-| `flow` | `Flow(bool)` | Cross-device flow toggle — currently no daemon method exists at all. May be juhflow-scope. |
-| `highlight` | `Highlight(bool)` | Cursor-highlight on shake — needs a new daemon-side animator. May be biggest piece of net-new work. |
+| `haptics` | `Haptics(bool)` | ✅ **DONE 2026-05-25.** Added `daemon::set_haptics_enabled(bool)` that mutates `config.haptics.enabled`, refreshes the live `HapticManager`, and persists to disk via `Config::save()`. `popup-rs/src/actions.rs` now dispatches via the new method. |
+| `radial` | `Radial(bool)` | ⏳ PENDING. ON-side could call existing `EnsureOverlayRunning()`. OFF-side needs a new `ShutdownOverlay()` method backed by an `OverlaySpawner::shutdown()` that signals the overlay's `HideMenu`-loop + waits for the bus name to drop. |
+| `scroll` | `Scroll(u8)` | ⏳ PENDING. No corresponding daemon-side concept yet. The popup design says "1–10 scroll sensitivity"; the daemon's `ScrollConfig` has `mode`/`smartshift`/`smartshift_threshold`/`natural` — none is a linear 1–10 knob. Needs a design pass on what "sensitivity" maps to (DPI multiplier? HID++ wheel-divisor?). |
+| `haptic_i` | `HapticIntensity(u8)` | ⏳ PENDING. The MX4 haptic patterns are discrete strings (`DampStateChange`, `DampLight`, …) — there is no intensity knob on the device. Could map "intensity" → pattern selection (off / light / medium / strong). Needs design. |
+| `accel` | `Accel(f32)` | ⏳ PENDING. `config.pointer.acceleration` is a `bool` (flat vs default profile). The popup's `-1.0..1.0` range implies a continuous curve. Either reinterpret as discrete (-1=off, +1=on) or add a `acceleration_curve: f32` field. |
+| `flow` | `Flow(bool)` | ⏳ PENDING. JuhFlow daemon is a separate process; the indicator popup needs to call into its D-Bus or shell out. Out of scope until JuhFlow gets a D-Bus surface. |
+| `highlight` | `Highlight(bool)` | ⏳ PENDING. Cursor-highlight on shake is a brand-new feature — would need a daemon-side motion detector + animator. Largest piece of new work. |
 
-Mechanically:
-1. Add the method to `daemon/src/dbus/interface.rs` (mirror `set_dpi` / `set_smart_shift` shape).
-2. Add the proxy method to `popup-rs/src/actions.rs` `Daemon` trait declaration.
-3. In `popup-rs/src/actions.rs::apply`, change the warn-only arm to the real `proxy.set_*` call.
-4. Smoke-test from the popup binary against a running daemon.
-
-For `Flow` and `Highlight` specifically — check whether these belong here at all or should be removed from `QUICK_TOGGLE_CATALOG` in `juhradial-shared/src/popup.rs` until the underlying features exist.
+For `Flow` and `Highlight` specifically — consider removing from `QUICK_TOGGLE_CATALOG` in `juhradial-shared/src/popup.rs` until the underlying features exist; both currently render as toggles that log "not yet wired" on click.
 
 ---
 
@@ -76,45 +60,54 @@ Pick whichever is the smaller diff.
 
 ## P3 — Code-quality cleanup
 
-### 7. `popup-rs` opens fresh `Connection::session()` per action
-`popup-rs/src/actions.rs::apply()` calls `Connection::session()` on every D-Bus dispatch. zbus pools internally so this isn't catastrophic, but a single connection stored at popup startup (`Arc<Connection>` shared across actions) would be cleaner. Mirrors what `overlay-rs` does.
+### 6. DeviceStateChanged empty-string race window ✅ DONE (already implemented at merge)
+`popup-rs::boot()` returns `(State, Task::perform(actions::fetch_device_state(), Message::DeviceFetched))` — the synchronous initial fetch runs as the boot task so `_latest` is populated before any signal can arrive. Verified 2026-05-25.
 
-### 8. `overlay_spawner.rs` `Mutex::unwrap()` on Child
-`daemon/src/overlay_spawner.rs:62` does `*self.child.lock().unwrap() = Some(child)`. The `.unwrap()` panics if the mutex is poisoned — which kills the daemon. Replace with `.unwrap_or_else(|poisoned| { warn!(...); poisoned.into_inner() })` or propagate the error.
+### 7. `popup-rs` opens fresh `Connection::session()` per action ✅ DONE 2026-05-25
+`popup-rs/src/actions.rs` now caches the session connection via `tokio::sync::OnceCell` (`session_conn()` helper). Both `apply()` and `fetch_device_state()` reuse the same connection.
 
-### 9. `normalise_connection_kind` → `normalize_connection_kind`
-`daemon/src/dbus/interface.rs` uses UK spelling for the helper. Codebase norm elsewhere uses US (`normalized` in `bundled_themes.rs`). Single rename + call-site update; one call site only.
+### 8. `overlay_spawner.rs` `Mutex::unwrap()` on Child ✅ DONE 2026-05-25
+`daemon/src/overlay_spawner.rs::ensure_running` now recovers from a poisoned mutex via `match self.child.lock() { Ok(g) => …, Err(poisoned) => { warn!(…); *poisoned.into_inner() = … } }` instead of crashing the daemon.
 
-### 10. `org.juhlabs.juhradial.Settings` vs `org.juhradial.Settings` naming inconsistency
-Pre-existing inconsistency surfaced during the D-Bus rename (Task 0.0 review):
-- `settings-rs/src/singleton.rs` registers as `org.juhlabs.juhradial.Settings`.
-- `overlay/juhradial-overlay.py:445` and `overlay/settings_page_settings.py:116` now use `org.juhradial.Settings` (post-Task-0.0 rename).
-- Neither pointed at the same name before the rename either (different inconsistency).
+### 9. `normalise_connection_kind` → `normalize_connection_kind` ✅ DONE 2026-05-25
+Renamed in `daemon/src/dbus/interface.rs`. Single call site updated. US spelling now matches codebase norm.
 
-Pick one name, update all three sites.
+### 10. `org.juhlabs.juhradial.Settings` vs `org.juhradial.Settings` naming inconsistency ✅ DONE 2026-05-25
+Canonical name picked: `org.juhradial.Settings` (matches `org.juhradial.Daemon` pattern from Task 0.0). Rust side renamed in `singleton.rs` (`BUS_NAME` + `OBJECT_PATH` + `INTERFACE` + `#[interface]`), `raise.rs` (APP_ID), `cursor_helper.rs` (SETTINGS_APP_ID), `main.rs` (application_id). Python files were already using the new name post-Task-0.0. Aligned.
 
-### 11. Stale Phase comment in `lib/placement.ts`
-`gnome-extension/juhradial-indicator@dev.juhlabs.com/lib/placement.ts` says "A dual-button design is deferred to Phase 2". Phase 2 (the settings tab) has shipped. Should say "not yet implemented" or reference a follow-up issue.
+### 11. Stale Phase comment in `lib/placement.ts` ✅ DONE 2026-05-25
+Replaced "deferred to Phase 2 if there is demand" with a reference to this very followups file (P3.4).
 
-### 12. `juhradial-cursor` extension `ListMonitors` tuple-arity bug
-Pre-existing JS bug intentionally preserved during the Phase 1A TS migration:
-- D-Bus XML declares `a(iiii)` (4-tuple)
-- Code pushes 5-tuples `[idx, x, y, w, h]`
+### 12. `juhradial-cursor` extension `ListMonitors` tuple-arity bug ✅ DONE 2026-05-25
+Resolution: corrected the XML declaration to `a(iiiii)` (5 ints) to match the actual runtime contract — the existing Rust client at `juhradial-window/src/cursor_helper.rs:36` already expected 5-tuples. Updated XML, doc-comment, and dropped the `@ts-expect-error` annotation.
 
-The `@ts-expect-error` annotation in `extension.ts:300` flags it. Fix: either update the XML to `a(iiiii)` and add `monitor_index` to the documented contract, or drop the `idx` field from the pushed array.
+---
+
+## P3 — Indicator Phase 3.5 (UX polish) — DEFERRED
+
+These need live-session testing or substantial design work; deferred until next pass.
+
+### P3.3 Popup view pixel-fidelity pass — DEFERRED
+Needs a running Wayland session + visual diff against `design/juhradial-indicator/index.html`. Tackle in a focused visual-polish session.
+
+### P3.4 `panel-target='both'` full implementation — DEFERRED
+Requires architectural design: shared-state subscription split across two `PanelMenu.Button` instances on different panels. The current schema lists `'both'` as an option; the user-facing dropdown label already flags "(currently top-bar only)" via `gnome-extension/juhradial-indicator@dev.juhlabs.com/prefs.ts`.
+
+### P3.5 Mouse-glyph tinting in prefs Preview group — DEFERRED
+Approximate `Gtk.CssProvider` rendering needs live verification in the prefs dialog. Defer to a sit-down session with the live extension.
 
 ---
 
 ## P4 — Documentation
 
-### 13. ListMonitors API contract clarification
-Per #12 — if we fix the tuple-arity bug by adding `idx`, document it in the cursor-helper extension's README + `INDICATOR_DESIGN.md` §4 D-Bus table.
+### 13. ListMonitors API contract clarification ✅ DONE (closed with #12)
+`INDICATOR_DESIGN.md` §4 didn't include ListMonitors in its D-Bus table; the cursor-helper extension's inline doc comment is the canonical source and is now corrected.
 
-### 14. Update `INDICATOR_DESIGN.md` status header
-Currently says "Status: Pre-implementation. Spec locked 2026-05-24." Update to reflect "Status: Phase 0–3 shipped on rust-gtk4-overlay at 040e3db".
+### 14. Update `INDICATOR_DESIGN.md` status header ✅ DONE 2026-05-25
+Status now reads: "Phases 0–3 shipped on `rust-gtk4-overlay` (merge commit `040e3db`, 2026-05-25). Post-merge follow-ups tracked in `docs/plans/followups.md`."
 
-### 15. CHANGELOG cleanup pass once a real version cuts
-The `[Unreleased]` block enumerates everything that landed. When `0.3.3` (or whatever) cuts, rename to `## [0.3.3] - YYYY-MM-DD` and start a new empty `[Unreleased]` block.
+### 15. CHANGELOG cleanup pass once a real version cuts ⏳ PENDING
+The `[Unreleased]` block enumerates everything that landed. When `0.3.3` (or whatever) cuts, rename to `## [0.3.3] - YYYY-MM-DD` and start a new empty `[Unreleased]` block. Only relevant at release-cut time.
 
 ---
 

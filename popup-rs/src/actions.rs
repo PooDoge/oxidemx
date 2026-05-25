@@ -40,6 +40,10 @@ trait Daemon {
     /// Set gaming-mode on/off. Bumps DPI and hides the radial when on.
     fn set_gaming_mode(&self, enabled: bool) -> zbus::Result<()>;
 
+    /// Toggle haptic feedback globally. Mutates config.haptics.enabled in
+    /// the daemon and persists to disk so the change survives restarts.
+    fn set_haptics_enabled(&self, enabled: bool) -> zbus::Result<()>;
+
     /// Enable / disable SmartShift (free-spin scroll).
     /// `threshold` is the torque percentage at which ratchet engages (1–100).
     /// When the popup toggle only signals on/off, pass 30 as the default
@@ -66,7 +70,8 @@ trait Daemon {
 #[derive(Debug, Clone)]
 pub enum Action {
     Gaming(bool),
-    /// Haptic feedback toggle — not yet wired on the daemon side (Phase 3.5).
+    /// Haptic feedback toggle. Calls set_haptics_enabled which mutates
+    /// config.haptics.enabled in the daemon and persists to disk.
     Haptics(bool),
     /// Radial overlay toggle — not yet wired on the daemon side (Phase 3.5).
     Radial(bool),
@@ -91,10 +96,9 @@ pub enum Action {
 pub async fn apply(action: Action) -> Result<(), String> {
     // Actions not yet backed by a daemon method: log and return early so we
     // don't attempt a D-Bus connection for a no-op. Tracked as Phase 3.5
-    // follow-up work.
+    // follow-up work in docs/plans/followups.md (P2.2).
     match &action {
-        Action::Haptics(_)
-        | Action::Radial(_)
+        Action::Radial(_)
         | Action::Scroll(_)
         | Action::HapticIntensity(_)
         | Action::Accel(_)
@@ -116,6 +120,10 @@ pub async fn apply(action: Action) -> Result<(), String> {
             info!(enabled = v, "dispatch: set_gaming_mode");
             proxy.set_gaming_mode(v).await
         }
+        Action::Haptics(v) => {
+            info!(enabled = v, "dispatch: set_haptics_enabled");
+            proxy.set_haptics_enabled(v).await
+        }
         Action::Smart(v) => {
             // set_smart_shift takes (enabled, threshold). The popup toggle
             // only signals on/off; pass 30 as the default threshold — this
@@ -132,8 +140,7 @@ pub async fn apply(action: Action) -> Result<(), String> {
             proxy.set_host(host).await.map(|_accepted| ())
         }
         // Already handled in the early-return arm above.
-        Action::Haptics(_)
-        | Action::Radial(_)
+        Action::Radial(_)
         | Action::Scroll(_)
         | Action::HapticIntensity(_)
         | Action::Accel(_)

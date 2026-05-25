@@ -45,7 +45,7 @@ fn pointer_changed(a: &PointerConfig, b: &PointerConfig) -> bool {
 ///
 /// When `battery_available` is false the connection is always "off"
 /// regardless of `device_mode`.
-pub(crate) fn normalise_connection_kind(device_mode: &str, battery_available: bool) -> String {
+pub(crate) fn normalize_connection_kind(device_mode: &str, battery_available: bool) -> String {
     if !battery_available {
         return "off".to_string();
     }
@@ -425,6 +425,52 @@ impl JuhRadialService {
         Ok(())
     }
 
+    /// Toggle haptic feedback globally. Mutates config.haptics.enabled,
+    /// updates the live HapticManager so subsequent events are gated
+    /// correctly, and persists the config to disk so the change
+    /// survives daemon restarts.
+    ///
+    /// Called by the indicator popup's "Haptic Feedback" quick toggle.
+    /// Returns Ok even if persist fails — the in-memory state is the
+    /// authoritative one for the current session and the next
+    /// settings-rs save would reconcile.
+    async fn set_haptics_enabled(&self, enabled: bool) -> fdo::Result<()> {
+        tracing::info!(enabled, "SetHapticsEnabled called");
+
+        // Mutate in-memory config first so the haptic manager picks
+        // up the new enabled flag on its next reload.
+        let new_haptic_config = {
+            match self.config.write() {
+                Ok(mut config) => {
+                    config.haptics.enabled = enabled;
+                    config.haptics.clone()
+                }
+                Err(e) => {
+                    tracing::error!(error = %e, "Failed to lock config for SetHapticsEnabled");
+                    return Err(fdo::Error::Failed(format!("Lock error: {}", e)));
+                }
+            }
+        };
+
+        // Push the live haptic manager so emit() calls respect the
+        // new gate immediately (without waiting for the next
+        // reload-from-disk cycle).
+        if let Ok(mut manager) = self.haptic_manager.lock() {
+            manager.update_from_config(&new_haptic_config);
+        }
+
+        // Best-effort disk persist. A failure here means settings-rs
+        // (if running) would override our in-memory state on its
+        // next save; logged but not surfaced as an Err.
+        if let Ok(snapshot) = self.config.read() {
+            if let Err(e) = snapshot.save() {
+                tracing::warn!(error = %e, "SetHapticsEnabled disk persist failed; in-memory state still updated");
+            }
+        }
+
+        Ok(())
+    }
+
     /// Synthesize a keyboard shortcut into the focused window —
     /// xdotool first, ydotool fallback. Format mirrors xdotool's
     /// `key` argument: `"ctrl+c"`, `"ctrl+shift+z"`, `"super+e"`.
@@ -614,7 +660,7 @@ impl JuhRadialService {
     ///
     /// battery + charging are sourced from the real SharedBatteryState.
     /// connection_kind is derived from self.device_mode via
-    /// normalise_connection_kind(); "off" when battery is unavailable.
+    /// normalize_connection_kind(); "off" when battery is unavailable.
     /// device_name comes from self.device_name (set at startup by the
     /// HID++ probe or evdev fallback).
     /// device_id is empty — no hidraw-path source exists on
@@ -630,7 +676,7 @@ impl JuhRadialService {
         } else {
             (0u8, false)
         };
-        let connection = normalise_connection_kind(&self.device_mode, state.available);
+        let connection = normalize_connection_kind(&self.device_mode, state.available);
         let name = self.device_name.clone();
         // device_id: no hidraw-path source on JuhRadialService yet.
         // TODO: thread hidraw path through JuhRadialService when

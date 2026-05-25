@@ -21,7 +21,7 @@
 use tracing::{debug, warn};
 use zbus::{proxy, Connection};
 
-const APP_ID: &str = "org.juhlabs.juhradial.settings";
+const APP_ID: &str = "org.juhradial.settings";
 
 #[proxy(
     interface = "org.juhradial.CursorHelper",

@@ -1,7 +1,7 @@
 # JuhRadial Indicator + Popup + Settings — Design Document
 
-**Status:** Pre-implementation. Spec locked 2026-05-24. Implementation plan: [`docs/plans/indicator-implementation.md`](docs/plans/indicator-implementation.md). Original UI spec: [`design/juhradial-indicator/CLAUDE_CODE_PROMPT.md`](design/juhradial-indicator/CLAUDE_CODE_PROMPT.md). Deltas from that spec: [`design/juhradial-indicator/SPEC_ADDENDUM.md`](design/juhradial-indicator/SPEC_ADDENDUM.md).
-**Date:** 2026-05-24
+**Status:** Phases 0–3 shipped on `rust-gtk4-overlay` (merge commit `040e3db`, 2026-05-25). Post-merge follow-ups tracked in [`docs/plans/followups.md`](docs/plans/followups.md). Implementation plan: [`docs/plans/indicator-implementation.md`](docs/plans/indicator-implementation.md). Original UI spec: [`design/juhradial-indicator/CLAUDE_CODE_PROMPT.md`](design/juhradial-indicator/CLAUDE_CODE_PROMPT.md). Deltas from that spec: [`design/juhradial-indicator/SPEC_ADDENDUM.md`](design/juhradial-indicator/SPEC_ADDENDUM.md).
+**Date:** 2026-05-24 (spec) · 2026-05-25 (shipped)
 **Owners:**
 - `gnome-extension/juhradial-indicator@dev.juhlabs.com/` (new)
 - `gnome-extension/juhradial-cursor@dev.juhlabs.com/` (TS migration in scope)

@@ -107,8 +107,9 @@ export function addToPanel(
             addToTopBar();
             // For 'both' we still only have one button instance — adding it to
             // two status areas simultaneously causes a GObject double-parent
-            // error. Log a note and skip the second add. A dual-button design
-            // is deferred to Phase 2 if there is demand.
+            // error. Log a note and skip the second add. A dual-instance
+            // design (separate PanelMenu.Button per panel sharing one state
+            // subscription) is tracked as docs/plans/followups.md P3.4.
             log('[juhradial-indicator] panel-target=both: dual-instance not yet supported; showing on top bar only.');
             break;
     }

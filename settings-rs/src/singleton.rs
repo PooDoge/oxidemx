@@ -3,7 +3,7 @@
 //! Flow:
 //!   1. Spawn a dedicated thread with its own tokio runtime.
 //!   2. The thread connects to the session bus and tries to claim
-//!      `org.juhlabs.juhradial.Settings` with `DoNotQueue`.
+//!      `org.juhradial.Settings` with `DoNotQueue`.
 //!   3a. If we get the name → register a `Focus` method handler at
 //!       `/org/juhlabs/juhradial/Settings`. Each call writes `()`
 //!       into an async-channel that iced consumes via a
@@ -29,9 +29,9 @@ use zbus::{
     interface, Connection,
 };
 
-const BUS_NAME: &str = "org.juhlabs.juhradial.Settings";
-const OBJECT_PATH: &str = "/org/juhlabs/juhradial/Settings";
-const INTERFACE: &str = "org.juhlabs.juhradial.Settings";
+const BUS_NAME: &str = "org.juhradial.Settings";
+const OBJECT_PATH: &str = "/org/juhradial/Settings";
+const INTERFACE: &str = "org.juhradial.Settings";
 
 /// Outcome of the singleton handshake.
 pub enum Acquisition {
@@ -55,7 +55,7 @@ struct SettingsService {
     focus_tx: Sender<()>,
 }
 
-#[interface(name = "org.juhlabs.juhradial.Settings")]
+#[interface(name = "org.juhradial.Settings")]
 impl SettingsService {
     /// Bring the settings window to the front + focus it. Idempotent
     /// — second instance calls this and exits, but additional
