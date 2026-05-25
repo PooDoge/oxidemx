@@ -111,6 +111,101 @@ The `[Unreleased]` block enumerates everything that landed. When `0.3.3` (or wha
 
 ---
 
+## P5 — Distribution (CI + pre-built binaries)
+
+### 16. GitHub Releases pipeline for pre-built binaries ⏳ PENDING
+
+`install.sh` today supports three build paths (host cargo, distrobox cargo, or `JUHRADIAL_SKIP_BUILD=1` with pre-built `target/release/*`). The third path is the right one for "I'm a user, not a developer" install on atomic Fedora — but today the user has to produce those binaries themselves.
+
+Wire up a CI pipeline that produces a signed, downloadable artifact per tag:
+
+**Workflow:**
+
+```yaml
+# .github/workflows/release.yml
+on:
+  push:
+    tags: ['v*']
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container: fedora:latest   # or rockylinux:9 for older glibc compat
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          dnf install -y rust cargo dbus-devel systemd-devel \
+                         libevdev-devel hidapi-devel git make
+      - run: |
+          cargo build --release \
+            -p juhradiald -p juhradial-overlay-rs \
+            -p juhradial-popup-rs -p juhradial-settings-rs
+      - run: |
+          tar -czf juhradial-mx-${{ github.ref_name }}-x86_64-linux.tar.gz \
+              -C target/release \
+              juhradiald juhradial-popup juhradial-overlay-rs juhradial-settings
+          sha256sum juhradial-mx-*.tar.gz > juhradial-mx-${{ github.ref_name }}-x86_64-linux.tar.gz.sha256
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            juhradial-mx-${{ github.ref_name }}-x86_64-linux.tar.gz
+            juhradial-mx-${{ github.ref_name }}-x86_64-linux.tar.gz.sha256
+```
+
+**`install.sh --from-release [vX.Y.Z]` flag:**
+
+```bash
+# In install.sh:
+download_release_binaries() {
+    local tag="${1:-latest}"
+    local arch
+    arch="$(uname -m)"  # x86_64 or aarch64
+    local url
+    if [ "$tag" = "latest" ]; then
+        url="https://api.github.com/repos/JuhLabs/juhradial-mx/releases/latest"
+        tag=$(curl -s "$url" | grep -oP '"tag_name":\s*"\K[^"]+')
+    fi
+    local archive="juhradial-mx-${tag}-${arch}-linux.tar.gz"
+    local base="https://github.com/JuhLabs/juhradial-mx/releases/download/${tag}"
+
+    log_info "Downloading $archive..."
+    curl -fL --progress-bar -o "/tmp/$archive"        "$base/$archive"
+    curl -fL --progress-bar -o "/tmp/$archive.sha256" "$base/$archive.sha256"
+    ( cd /tmp && sha256sum -c "$archive.sha256" ) || {
+        log_error "Checksum mismatch — refusing to install."; exit 1;
+    }
+    mkdir -p "$INSTALL_DIR/target/release"
+    tar -xzf "/tmp/$archive" -C "$INSTALL_DIR/target/release"
+    rm "/tmp/$archive" "/tmp/$archive.sha256"
+    log_success "Release $tag binaries downloaded + verified"
+}
+```
+
+Then user flow becomes:
+
+```bash
+# On any Bazzite / Silverblue / Kinoite box, zero rpm-ostree / distrobox required:
+curl -fsSL https://raw.githubusercontent.com/JuhLabs/juhradial-mx/master/install.sh -o /tmp/install.sh
+chmod +x /tmp/install.sh
+/tmp/install.sh --from-release             # latest tag
+/tmp/install.sh --from-release v0.3.3      # pinned tag
+```
+
+**Scope:**
+- One `release.yml` workflow file.
+- ~30 lines added to `install.sh` (the `download_release_binaries` helper + a `--from-release` arg parser + a check that's wired into `build_project()` before the cargo path).
+- Update `docs/live-test.md` to mention Path C: "from-release zero-touch install".
+
+**Considerations:**
+- glibc compat: building on `fedora:latest` may require glibc ≥ 2.38 at the user's runtime. Use `rockylinux:9` if you need to support older base images.
+- Code signing: optional but worth doing. `cosign` is the modern tool; GitHub provides keyless signing via OIDC.
+- ARM64: Bazzite has an aarch64 spin (Fedora-Asahi). Build matrix should include `aarch64-unknown-linux-gnu`.
+- Provenance: SBOM via `cargo-cyclonedx` or `syft` if you want OCI-style attestation.
+- The download URL needs to handle `JuhLabs/juhradial-mx` vs forks — accept `JUHRADIAL_RELEASE_REPO` env override.
+
+**Estimated effort:** half a day for the basic pipeline, full day with signing + ARM64 + glibc-compat docs.
+
+---
+
 ## Reference: what landed on this branch
 
 25 commits from indicator-feature + 1 merge commit:
