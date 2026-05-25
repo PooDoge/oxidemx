@@ -6,8 +6,9 @@
 
 use crate::mouse_callouts::mouse_widget;
 use crate::radial_preview::radial_preview_widget;
-use crate::widgets::section_header;
-use crate::{style, Message, State};
+use juhradial_widgets::widgets::section_header;
+use crate::{Message, State};
+use juhradial_widgets::style;
 use iced::widget::{button, column, container, pick_list, row, rule, text, text_input, toggler, Space};
 use iced::{Alignment, Element, Length};
 use juhradial_shared::{ActionKind, Condition, RadialPage, Slice};

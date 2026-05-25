@@ -15,7 +15,8 @@
 //! the icon name.
 
 use crate::radial_preview::{peek_icon_handle, peek_icon_handle_untinted};
-use crate::{style, Message};
+use crate::{Message};
+use juhradial_widgets::style;
 use iced::widget::{button, column, container, image, pick_list, row, scrollable, text, text_input, Space};
 use iced::{Alignment, Element, Length};
 

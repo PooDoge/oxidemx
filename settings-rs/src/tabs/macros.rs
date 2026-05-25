@@ -6,8 +6,9 @@
 //! want any more. A future iteration adds in-place name editing
 //! and a "Record" launcher that talks to the daemon over D-Bus.
 
-use crate::widgets::section_header;
-use crate::{style, MacroEditField, Message, RecordingState, State};
+use juhradial_widgets::widgets::section_header;
+use crate::{MacroEditField, Message, RecordingState, State};
+use juhradial_widgets::style;
 use iced::widget::{button, column, container, row, rule, text, text_input, Space};
 use iced::{Alignment, Element, Length};
 use serde::Deserialize;

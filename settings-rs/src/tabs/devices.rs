@@ -10,8 +10,9 @@
 //! lands once the daemon's device-list method is wired into
 //! juhradial-shared.
 
-use crate::widgets::section_header;
-use crate::{style, Message, State};
+use juhradial_widgets::widgets::section_header;
+use crate::{Message, State};
+use juhradial_widgets::style;
 use iced::widget::{column, container, row, rule, text, Space};
 use iced::{Alignment, Element, Length};
 

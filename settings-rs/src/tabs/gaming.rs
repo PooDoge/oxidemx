@@ -10,8 +10,9 @@
 //!   * Cycle DPI — calls `CycleGamingDpi()`. Daemon walks its
 //!     preset list and reports back the new label.
 
-use crate::widgets::section_header;
-use crate::{style, Message, State};
+use juhradial_widgets::widgets::section_header;
+use crate::{Message, State};
+use juhradial_widgets::style;
 use iced::widget::{button, column, container, row, rule, text, toggler, Space};
 use iced::{Alignment, Element, Length};
 

@@ -2,9 +2,10 @@
 //! the legacy device-config sections. Hosts the Theme picker,
 //! Visuals, and Animation sub-panels stacked.
 
-use crate::palette::theme_catalogue;
-use crate::widgets::section_header;
-use crate::{style, tabs, Message, State};
+use juhradial_widgets::palette::theme_catalogue;
+use juhradial_widgets::widgets::section_header;
+use crate::{tabs, Message, State};
+use juhradial_widgets::style;
 use iced::widget::{button, column, container, pick_list, row, rule, text, text_input, Space};
 use iced::{Alignment, Element, Length};
 
@@ -360,7 +361,7 @@ fn color_row<'a>(field: &'a str, value: &'a str) -> Element<'a, Message> {
     .into()
 }
 
-fn swatch_row(pal: &crate::palette::Palette) -> Element<'static, Message> {
+fn swatch_row(pal: &juhradial_widgets::palette::Palette) -> Element<'static, Message> {
     let swatches = [
         pal.accent,
         pal.green,

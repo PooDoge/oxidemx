@@ -21,6 +21,7 @@ members = [
     "daemon",
     "juhradial-icons",
     "juhradial-shared",
+    "juhradial-widgets",
     "overlay-rs",
     "settings-rs",
     "spike-iced",

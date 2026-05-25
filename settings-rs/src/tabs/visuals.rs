@@ -1,8 +1,9 @@
 //! "Visuals" tab — static visual knobs (background opacity,
 //! highlight intensity).
 
-use crate::widgets::labeled_slider;
-use crate::{style, Message, State, VisualField};
+use juhradial_widgets::widgets::labeled_slider;
+use crate::{Message, State, VisualField};
+use juhradial_widgets::style;
 use iced::widget::{column, container, row, text, text_input, Space};
 use iced::{Alignment, Element, Length};
 

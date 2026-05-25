@@ -11,7 +11,7 @@
 //! control over chip placement, connector geometry, and palette-
 //! aware colouring without fighting iced's layout system.
 
-use crate::palette::Palette;
+use juhradial_widgets::palette::Palette;
 use iced::widget::canvas::{self, path::Builder, Frame, Geometry, Path, Stroke, Text};
 use iced::widget::image as iced_image;
 use iced::{mouse, Color, Length, Point, Rectangle, Renderer, Size, Theme, Vector};

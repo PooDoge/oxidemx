@@ -1,7 +1,8 @@
 //! Placeholder for tabs not yet implemented.
 
-use crate::widgets::section_header;
-use crate::{style, Message, State};
+use juhradial_widgets::widgets::section_header;
+use crate::{Message, State};
+use juhradial_widgets::style;
 use iced::widget::{column, container, rule, text, Space};
 use iced::{Element, Length};
 

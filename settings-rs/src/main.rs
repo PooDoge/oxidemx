@@ -28,20 +28,18 @@ mod daemon;
 mod fonts;
 mod icon_picker;
 mod mouse_callouts;
-mod palette;
 mod persist;
 mod radial_preview;
 mod raise;
 mod recents;
 mod singleton;
-mod style;
-mod widgets;
 
 use iced::widget::{button, column, container, row, rule, scrollable, text, Space};
 use iced::{Element, Length, Subscription, Task};
 use juhradial_shared::{
     AnimationConfig, AppConfig, ElementAnimation, TransitionConfig, VisualSettings,
 };
+use juhradial_widgets::{palette, style};
 use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 use tracing::{info, warn};

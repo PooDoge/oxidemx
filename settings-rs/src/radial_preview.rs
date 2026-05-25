@@ -15,7 +15,7 @@
 //! disc at the cursor, and release fires `SwapSlices` for the
 //! slot under the release point.
 
-use crate::palette::Palette;
+use juhradial_widgets::palette::Palette;
 use iced::widget::canvas::{self, path::Builder, Frame, Geometry, Image, Path, Stroke, Text};
 use iced::widget::image::Handle;
 use iced::{mouse, Color, Length, Point, Rectangle, Renderer, Theme};

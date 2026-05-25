@@ -3,8 +3,9 @@
 //! `ScrollConfig`; values land in `~/.config/juhradial/config.json`
 //! under `pointer` and `scroll` keys, matching the legacy daemon.
 
-use crate::widgets::{labeled_int_slider, section_header};
-use crate::{style, Message, State};
+use juhradial_widgets::widgets::{labeled_int_slider, section_header};
+use crate::{Message, State};
+use juhradial_widgets::style;
 use iced::widget::{column, container, pick_list, row, rule, text, toggler, Space};
 use iced::{Alignment, Element, Length};
 
@@ -129,7 +130,7 @@ fn dpi_card(state: &State) -> Element<'_, Message> {
             )
             .size(11)
             .style(style::text_dim(pal)),
-            crate::widgets::labeled_int_slider(
+            juhradial_widgets::widgets::labeled_int_slider(
                 "DPI",
                 dpi as u32,
                 400..=8000,

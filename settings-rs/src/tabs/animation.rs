@@ -9,7 +9,7 @@
 //! For the Submenu element a `chain` row exposes the per-item
 //! stagger slider (0–250 ms).
 
-use crate::widgets::{labeled_int_slider, labeled_slider, section_header};
+use juhradial_widgets::widgets::{labeled_int_slider, labeled_slider, section_header};
 use crate::{AnimDirection, AnimElement, Message, State};
 use iced::widget::{button, column, container, pick_list, row, rule, text, Space};
 use iced::{Alignment, Element, Length};

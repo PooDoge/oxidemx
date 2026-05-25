@@ -5,8 +5,9 @@
 //! All edits go to `state.config.haptics`; the overlay's daemon
 //! reads the same JSON and re-applies on the next reload.
 
-use crate::widgets::{labeled_int_slider, section_header};
-use crate::{style, Message, State};
+use juhradial_widgets::widgets::{labeled_int_slider, section_header};
+use crate::{Message, State};
+use juhradial_widgets::style;
 use iced::widget::{column, container, pick_list, row, rule, text, toggler, Space};
 use iced::{Alignment, Element, Length};
 use juhradial_shared::HAPTIC_PATTERNS;
