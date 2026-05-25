@@ -334,8 +334,8 @@ fn quick_toggles_card(state: &State) -> Element<'_, Message> {
         column![
             text("Quick toggles").size(14),
             text(
-                "On/off switches shown in the popup. Drag the arrows to \
-                 reorder; the trash icon removes a toggle from the popup \
+                "On/off switches shown in the popup. Use the arrow buttons \
+                 to reorder; trash to remove from the popup \
                  (it doesn't change the underlying setting).",
             )
             .size(11)
