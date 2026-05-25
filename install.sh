@@ -171,21 +171,68 @@ check_wayland() {
 }
 
 check_atomic() {
-    # Detect rpm-ostree-based (immutable) distros: Bazzite, Silverblue,
-    # Kinoite, Bluefin, Aurora, and other uBlue variants. These have a
-    # read-only /usr and install system packages via rpm-ostree.
+    # Detect immutable / atomic Linux distros. The script supports
+    # rpm-ostree (Fedora atomic family) natively; openSUSE MicroOS and
+    # NixOS are flagged so the user gets a clear error instead of a
+    # mysterious dnf/zypper failure further down.
+    ATOMIC_FLAVOR=""
+
+    # rpm-ostree: Bazzite, Silverblue, Kinoite, Bluefin, Aurora, etc.
     if [ -f /run/ostree-booted ]; then
         IS_ATOMIC=true
+        ATOMIC_FLAVOR="rpm-ostree"
     elif command -v rpm-ostree &> /dev/null && rpm-ostree status &> /dev/null; then
         IS_ATOMIC=true
+        ATOMIC_FLAVOR="rpm-ostree"
+    # openSUSE MicroOS / Aeon / Kalpa — transactional-update wraps zypper.
+    elif command -v transactional-update &> /dev/null; then
+        IS_ATOMIC=true
+        ATOMIC_FLAVOR="transactional-update"
+    # NixOS — fully declarative, configuration.nix flow.
+    elif [ -f /etc/NIXOS ] || [ -d /run/current-system/sw/bin ]; then
+        IS_ATOMIC=true
+        ATOMIC_FLAVOR="nixos"
     fi
 
     if [ "$IS_ATOMIC" = true ]; then
-        # /usr is read-only on atomic images; /usr/local is a writable
-        # symlink (to /var/usrlocal) that XDG picks up by default.
+        # /usr is read-only on atomic images; /usr/local is the canonical
+        # writable overlay path on every flavor we support (rpm-ostree
+        # symlinks it to /var/usrlocal; MicroOS keeps it native-writable;
+        # NixOS puts everything under /run/current-system).
         SHARE_DIR="/usr/local/share/juhradial"
         APP_DIR="/usr/local/share/applications"
         ICON_DIR="/usr/local/share/icons/hicolor/scalable/apps"
+    fi
+}
+
+# Distrobox / Toolbox / Docker containers can't run rpm-ostree (the
+# command may exist but talks to the host's read-only image store).
+# Detect a container env and refuse — the user needs to exit to the host.
+check_container_safety() {
+    local in_container=""
+    if [ -f /run/.containerenv ]; then
+        in_container="podman/toolbox"
+    elif [ -f /.dockerenv ]; then
+        in_container="docker"
+    elif [ -n "${container:-}" ]; then
+        in_container="$container"
+    elif [ -n "${TOOLBOX_NAME:-}" ] || [ -n "${DISTROBOX_HOST_HOME:-}" ]; then
+        in_container="distrobox/toolbox"
+    fi
+
+    if [ -n "$in_container" ] && [ "$IS_ATOMIC" = true ]; then
+        echo ""
+        log_error "Detected: running inside a container ($in_container) on an atomic host."
+        log_dim ""
+        log_dim "  install.sh layers packages into the host with rpm-ostree (or"
+        log_dim "  transactional-update), which can't reach the host from inside"
+        log_dim "  a container. Exit to the host shell and re-run there:"
+        log_dim ""
+        log_dim "      # outside any toolbox / distrobox:"
+        log_dim "      cd $(pwd)"
+        log_dim "      ./install.sh"
+        log_dim ""
+        exit 1
     fi
 }
 
@@ -253,11 +300,15 @@ check_logitech_device() {
         fi
     fi
 
-    # Fallback: check HID subsystem
-    if [ "$LOGI_DEVICE_FOUND" = false ]; then
-        if ls /sys/bus/hid/devices/ 2>/dev/null | grep -qi "046D"; then
-            LOGI_DEVICE_FOUND=true
-        fi
+    # Fallback: check HID subsystem (glob avoids the SC2010 ls|grep
+    # antipattern and works with non-alphanumeric filenames if any
+    # ever show up).
+    if [ "$LOGI_DEVICE_FOUND" = false ] && [ -d /sys/bus/hid/devices/ ]; then
+        for d in /sys/bus/hid/devices/*; do
+            case "$(basename "$d")" in
+                *046D:*|*046d:*) LOGI_DEVICE_FOUND=true; break ;;
+            esac
+        done
     fi
 }
 
@@ -519,9 +570,38 @@ install_dependencies() {
     step "Installing dependencies"
 
     if [ "$IS_ATOMIC" = true ]; then
-        log_info "Package manager: ${BOLD}rpm-ostree${RESET} ${GRAY}(atomic ${DISTRO_FAMILY})${RESET}"
+        log_info "Package manager: ${BOLD}${ATOMIC_FLAVOR}${RESET} ${GRAY}(atomic ${DISTRO_FAMILY})${RESET}"
     else
         log_info "Package manager: ${BOLD}${DISTRO_FAMILY}${RESET}"
+    fi
+
+    # Atomic flavors that AREN'T rpm-ostree have very different package
+    # flows. Bail with a clear message instead of falling through to
+    # zypper/dnf and erroring opaquely.
+    case "$ATOMIC_FLAVOR" in
+        transactional-update)
+            log_error "openSUSE MicroOS / Aeon / Kalpa detected (transactional-update)."
+            log_dim "Automated layering for MicroOS isn't wired yet. Install manually:"
+            log_dim "  sudo transactional-update pkg install rust cargo python3 python3-qt6 \\"
+            log_dim "       python3-gobject gtk4 libadwaita-devel python3-cryptography \\"
+            log_dim "       libevdev-devel libhidapi-devel ydotool git make"
+            log_dim "Then reboot and re-run this installer with JUHRADIAL_SKIP_DEPS=1."
+            exit 1
+            ;;
+        nixos)
+            log_error "NixOS detected. Imperative package install doesn't fit NixOS's model."
+            log_dim "Add a juhradial-mx derivation to your configuration.nix / flake instead."
+            log_dim "Hand-roll a derivation from packaging/arch/PKGBUILD as a template."
+            log_dim "Then re-run with JUHRADIAL_SKIP_DEPS=1 to run only build + install steps."
+            exit 1
+            ;;
+    esac
+
+    # JUHRADIAL_SKIP_DEPS=1 short-circuits the package install — useful
+    # when the user manages deps via Nix / Guix / hand-built tooling.
+    if [ "${JUHRADIAL_SKIP_DEPS:-}" = "1" ]; then
+        log_warning "JUHRADIAL_SKIP_DEPS=1 set — assuming dependencies are already present"
+        return 0
     fi
 
     case $DISTRO_FAMILY in
@@ -544,6 +624,7 @@ install_dependencies() {
         *)
             log_error "Unsupported distribution: $DISTRO"
             log_dim "Please install dependencies manually. See CONTRIBUTING.md"
+            log_dim "Or run with JUHRADIAL_SKIP_DEPS=1 to skip this step."
             exit 1
             ;;
     esac
@@ -551,23 +632,54 @@ install_dependencies() {
 }
 
 # ── Repository ───────────────────────────────────────────────────────
+
+# Detect "the script is being executed from inside an existing checkout"
+# vs "user downloaded install.sh into /tmp and wants us to clone for them".
+# Marker: a sibling Cargo.toml + .git/ at the script's directory.
+script_dir_is_a_juhradial_clone() {
+    local d
+    d="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    [ -f "$d/Cargo.toml" ] && [ -d "$d/.git" ] && \
+        grep -q "juhradial" "$d/Cargo.toml" 2>/dev/null
+}
+
 clone_repo() {
     step "Fetching source"
 
-    if [ -d "$INSTALL_DIR" ]; then
-        log_info "Updating existing installation..."
-        sudo chown -R "$USER:$USER" "$INSTALL_DIR"
-        git -C "$INSTALL_DIR" fetch origin
-        git -C "$INSTALL_DIR" reset --hard origin/master
-        git -C "$INSTALL_DIR" clean -fd
+    # If the user ran ./install.sh from inside their own clone, prefer
+    # that — don't clobber their working tree with a fresh remote
+    # clone to /opt/. Honors $JUHRADIAL_INSTALL_DIR for explicit overrides.
+    if [ -n "${JUHRADIAL_INSTALL_DIR:-}" ]; then
+        INSTALL_DIR="$JUHRADIAL_INSTALL_DIR"
+        log_info "Using \$JUHRADIAL_INSTALL_DIR override: $INSTALL_DIR"
+    elif script_dir_is_a_juhradial_clone; then
+        INSTALL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+        log_info "Running from inside a clone — using $INSTALL_DIR (no remote clone)"
+    fi
+
+    if [ -d "$INSTALL_DIR/.git" ]; then
+        log_info "Updating existing checkout at $INSTALL_DIR..."
+        # Only chown if we own it (otherwise it's the user's working tree
+        # and reset --hard would destroy their uncommitted work).
+        if [ -O "$INSTALL_DIR" ]; then
+            git -C "$INSTALL_DIR" fetch origin || log_warning "git fetch failed (offline?) — using cached state"
+            log_dim "Skipping reset --hard to preserve your working tree."
+        else
+            sudo chown -R "$USER:$USER" "$INSTALL_DIR"
+            git -C "$INSTALL_DIR" fetch origin
+            git -C "$INSTALL_DIR" reset --hard origin/master
+            git -C "$INSTALL_DIR" clean -fd
+        fi
+    elif [ -d "$INSTALL_DIR" ]; then
+        log_warning "$INSTALL_DIR exists but isn't a git checkout — skipping clone"
     else
-        log_info "Cloning repository..."
+        log_info "Cloning repository into $INSTALL_DIR..."
         sudo git clone "$REPO_URL" "$INSTALL_DIR"
         sudo chown -R "$USER:$USER" "$INSTALL_DIR"
     fi
 
     cd "$INSTALL_DIR"
-    log_success "Source ready"
+    log_success "Source ready ($INSTALL_DIR)"
 }
 
 # ── Build ────────────────────────────────────────────────────────────
@@ -602,19 +714,22 @@ install_files() {
 
     # Cargo workspace puts binaries at target/release/<bin>; per-crate builds
     # put them at <crate>/target/release/<bin>. Helper picks the first
-    # existing path so the install works in both modes.
+    # existing path so the install works in both modes. First arg is the
+    # human-readable binary name (used in error messages); remaining args
+    # are candidate paths to probe in order.
     pick_binary() {
-        local bin="$1"; shift
+        local name="$1"; shift
         for candidate in "$@"; do
             if [ -x "$candidate" ]; then
                 echo "$candidate"
                 return 0
             fi
         done
+        log_warning "$name binary not found in any of: $*"
         return 1
     }
 
-    # Install daemon binary
+    # Install daemon binary (required)
     daemon_bin="$(pick_binary juhradiald target/release/juhradiald daemon/target/release/juhradiald)" || {
         log_error "juhradiald not built — run ./dev.sh build daemon or cargo build --release -p juhradiald"
         exit 1
@@ -622,19 +737,19 @@ install_files() {
     sudo install -Dm755 "$daemon_bin" "$BIN_DIR/juhradiald"
     log_success "Daemon binary ($daemon_bin)"
 
-    # Install indicator popup binary (popup-rs)
+    # Install indicator popup binary (popup-rs) — optional, skip on partial builds
     if popup_bin="$(pick_binary juhradial-popup target/release/juhradial-popup popup-rs/target/release/juhradial-popup)"; then
         sudo install -Dm755 "$popup_bin" "$BIN_DIR/juhradial-popup"
         log_success "Indicator popup binary"
     fi
 
-    # Install overlay binary (overlay-rs)
+    # Install overlay binary (overlay-rs) — optional
     if overlay_bin="$(pick_binary juhradial-overlay-rs target/release/juhradial-overlay-rs overlay-rs/target/release/juhradial-overlay-rs)"; then
         sudo install -Dm755 "$overlay_bin" "$BIN_DIR/juhradial-overlay-rs"
         log_success "Overlay binary"
     fi
 
-    # Install settings binary (settings-rs)
+    # Install settings binary (settings-rs) — optional
     if settings_bin="$(pick_binary juhradial-settings target/release/juhradial-settings settings-rs/target/release/juhradial-settings)"; then
         sudo install -Dm755 "$settings_bin" "$BIN_DIR/juhradial-settings"
         log_success "Settings binary"
@@ -783,42 +898,123 @@ enable_service() {
     fi
 }
 
-# ── GNOME extension ──────────────────────────────────────────────────
+# ── GNOME extensions ─────────────────────────────────────────────────
+
+# Compile TypeScript sources for both extensions into .js (the runtime
+# format Shell loads). Idempotent — exits early if no .ts source exists,
+# bootstraps node_modules via npm install on first run.
+compile_gnome_extensions_ts() {
+    local ext_root="$INSTALL_DIR/gnome-extension"
+
+    # No TS source = nothing to compile. The extensions can still be
+    # installed if they have pre-built .js (older snapshots / vendored).
+    if ! find "$ext_root" -maxdepth 3 -name '*.ts' -print -quit 2>/dev/null | grep -q .; then
+        return 0
+    fi
+
+    if ! command -v npx &> /dev/null; then
+        log_warning "npx not on PATH — skipping TypeScript compile."
+        log_dim "Install Node.js (inside a distrobox on atomic systems) and re-run for full TS support."
+        log_dim "  distrobox enter <name> -- bash -c 'cd $ext_root && npm install && npm run build'"
+        return 0
+    fi
+
+    if [ ! -d "$ext_root/node_modules" ]; then
+        log_info "Bootstrapping TypeScript toolchain (npm install)..."
+        ( cd "$ext_root" && npm install --no-audit --no-fund ) || {
+            log_warning "npm install failed — TS sources won't be compiled."
+            return 0
+        }
+    fi
+    log_info "Compiling TypeScript extensions..."
+    ( cd "$ext_root" && npx tsc -p tsconfig.json ) || {
+        log_warning "tsc failed — falling back to whatever .js is already present."
+        return 0
+    }
+    log_success "TypeScript extensions compiled"
+}
+
+# Install one GNOME shell extension by UUID. Handles: copy source files,
+# compile gschema (if a schemas/ dir exists), enable, report state. The
+# caller controls whether the extension is "primary" (cursor helper) or
+# "indicator" — both are installed identically; the only per-extension
+# logic is whether glib-compile-schemas runs against schemas/.
+install_gnome_extension() {
+    local EXT_UUID="$1"
+    local EXT_SRC="$INSTALL_DIR/gnome-extension/$EXT_UUID"
+    local EXT_DEST="$HOME/.local/share/gnome-shell/extensions/$EXT_UUID"
+
+    if [ ! -d "$EXT_SRC" ]; then
+        log_warning "$EXT_UUID source not found at $EXT_SRC — skipping"
+        return 0
+    fi
+
+    mkdir -p "$EXT_DEST"
+    # Copy every payload artifact: metadata, compiled .js, lib/, schemas/,
+    # icons/, stylesheet. Use rsync-style cp -a so timestamps + perms
+    # carry over (-r alone trips on some src layouts).
+    cp -af "$EXT_SRC/metadata.json" "$EXT_DEST/"
+    # Compiled .js (extension entry + prefs + lib/*); lib/ may not exist
+    # on the cursor extension, which is fine.
+    cp -af "$EXT_SRC"/*.js "$EXT_DEST/" 2>/dev/null || true
+    [ -d "$EXT_SRC/lib" ]      && cp -af "$EXT_SRC/lib"      "$EXT_DEST/"
+    [ -d "$EXT_SRC/icons" ]    && cp -af "$EXT_SRC/icons"    "$EXT_DEST/"
+    [ -f "$EXT_SRC/stylesheet.css" ] && cp -af "$EXT_SRC/stylesheet.css" "$EXT_DEST/"
+
+    # GSettings schema. Compile in-place so Shell + popup-rs find the
+    # compiled gschemas.compiled at the extension's own schemas/ dir.
+    if [ -d "$EXT_SRC/schemas" ]; then
+        mkdir -p "$EXT_DEST/schemas"
+        cp -af "$EXT_SRC/schemas"/*.xml "$EXT_DEST/schemas/" 2>/dev/null || true
+        if command -v glib-compile-schemas &> /dev/null; then
+            glib-compile-schemas "$EXT_DEST/schemas/" 2>/dev/null \
+                && log_dim "  ↳ gschema compiled" \
+                || log_warning "  ↳ glib-compile-schemas failed for $EXT_UUID"
+        else
+            log_warning "  ↳ glib-compile-schemas missing — install glib2-devel"
+        fi
+    fi
+
+    log_success "$EXT_UUID installed"
+
+    # Enable + report state. Hot-reload works for the cursor extension's
+    # D-Bus surface; the indicator's PanelMenu.Button needs a real
+    # Shell restart (full re-login on Wayland — there's no Alt-F2 r).
+    if command -v gnome-extensions &> /dev/null; then
+        if gnome-extensions enable "$EXT_UUID" 2>/dev/null; then
+            log_dim "  ↳ enabled"
+        else
+            log_dim "  ↳ enable deferred (Shell not running, or needs re-login)"
+        fi
+    fi
+}
+
 configure_gnome() {
     if [ "$DESKTOP_TYPE" != "gnome" ]; then
         return 0
     fi
 
-    log_info "Installing GNOME Shell cursor helper extension..."
+    log_info "Installing GNOME Shell extensions..."
 
-    local EXT_UUID="juhradial-cursor@dev.juhlabs.com"
-    local EXT_SRC="$INSTALL_DIR/gnome-extension/$EXT_UUID"
-    local EXT_DEST="$HOME/.local/share/gnome-shell/extensions/$EXT_UUID"
+    compile_gnome_extensions_ts
+    install_gnome_extension "juhradial-cursor@dev.juhlabs.com"
+    install_gnome_extension "juhradial-indicator@dev.juhlabs.com"
 
-    if [ ! -d "$EXT_SRC" ]; then
-        log_warning "GNOME extension source not found — skipping"
-        return 0
-    fi
+    # Per-extension state check — report the WORSE of the two states so
+    # the user knows whether they need to log out.
+    local needs_restart=false
+    for uuid in "juhradial-cursor@dev.juhlabs.com" "juhradial-indicator@dev.juhlabs.com"; do
+        local ext_state
+        ext_state=$(gnome-extensions info "$uuid" 2>/dev/null | grep -oP '(?<=State: )\S+' || true)
+        if [ "$ext_state" != "ACTIVE" ] && [ "$ext_state" != "ENABLED" ]; then
+            needs_restart=true
+        fi
+    done
 
-    mkdir -p "$EXT_DEST"
-    cp "$EXT_SRC/metadata.json" "$EXT_DEST/"
-    cp "$EXT_SRC/extension.js" "$EXT_DEST/"
-    log_success "Extension files installed"
-
-    # Enable the extension (may fail if GNOME Shell isn't running yet)
-    if command -v gnome-extensions &> /dev/null; then
-        gnome-extensions enable "$EXT_UUID" 2>/dev/null && \
-            log_success "Extension enabled" || \
-            log_dim "Extension installed but could not enable automatically"
-    fi
-
-    # Check if extension is already active (update scenario) - no restart needed
-    local ext_state
-    ext_state=$(gnome-extensions info "$EXT_UUID" 2>/dev/null | grep -oP '(?<=State: )\S+' || true)
-    if [ "$ext_state" = "ACTIVE" ]; then
-        log_success "Extension is active - no restart needed"
+    if [ "$needs_restart" = true ]; then
+        log_warning "Log out and back in for the extensions to load (Wayland requires session restart)."
     else
-        log_warning "Log out and back in for the extension to load (Wayland requires session restart)"
+        log_success "Both extensions active — no restart needed."
     fi
 }
 
@@ -904,6 +1100,7 @@ main() {
     check_root
     detect_distro
     check_atomic
+    check_container_safety
     check_wayland
     check_desktop
     check_existing_install
