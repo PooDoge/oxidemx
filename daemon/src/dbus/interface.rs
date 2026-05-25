@@ -29,6 +29,36 @@ fn pointer_changed(a: &PointerConfig, b: &PointerConfig) -> bool {
     a.speed != b.speed || a.acceleration != b.acceleration
 }
 
+/// Map the daemon's internal `device_mode` string to the indicator's
+/// documented connection-kind vocabulary:
+///
+/// | device_mode  | connection_kind |
+/// |--------------|-----------------|
+/// | "logitech"   | "unifying"      |  (conservative default; real sub-type
+/// |              |                 |   not yet stored on JuhRadialService)
+/// | "bolt"       | "bolt"          |
+/// | "bluetooth"  | "bluetooth"     |
+/// | "usb"        | "usb"           |
+/// | "generic"    | "usb"           |  (generic mouse — treat as wired USB)
+/// | anything else| "off"           |
+///
+/// When `battery_available` is false the connection is always "off"
+/// regardless of `device_mode`.
+pub(crate) fn normalise_connection_kind(device_mode: &str, battery_available: bool) -> String {
+    if !battery_available {
+        return "off".to_string();
+    }
+    match device_mode {
+        "logitech" => "unifying",
+        "bolt" => "bolt",
+        "bluetooth" => "bluetooth",
+        "usb" => "usb",
+        "generic" => "usb",
+        _ => "off",
+    }
+    .to_string()
+}
+
 /// Apply pointer + scroll preferences to GNOME via `gsettings`.
 /// No-op (logs a debug line) when gsettings isn't available — KDE
 /// + COSMIC have their own paths and aren't wired yet.
@@ -467,10 +497,15 @@ impl JuhRadialService {
     /// Tuple: (battery_percent, charging, connection_kind, device_name, device_id)
     /// connection_kind ∈ {"bluetooth", "unifying", "bolt", "usb", "off"}.
     ///
-    /// Phase 0.2a returns placeholder values for connection_kind / name /
-    /// id (battery + charging come from the real state). The indicator
-    /// extension can ship today using this method; Task 0.2b wires the
-    /// remaining fields to the hidpp manager's device-info cache.
+    /// battery + charging are sourced from the real SharedBatteryState.
+    /// connection_kind is derived from self.device_mode via
+    /// normalise_connection_kind(); "off" when battery is unavailable.
+    /// device_name comes from self.device_name (set at startup by the
+    /// HID++ probe or evdev fallback).
+    /// device_id is empty — no hidraw-path source exists on
+    /// JuhRadialService yet.
+    /// TODO: thread hidraw path through JuhRadialService when
+    ///       device-cache module lands.
     async fn get_active_device_state(
         &self,
     ) -> fdo::Result<(u8, bool, String, String, String)> {
@@ -480,9 +515,11 @@ impl JuhRadialService {
         } else {
             (0u8, false)
         };
-        // TODO(Task 0.2b): wire real values from hidpp manager.
-        let connection = String::from("off");
-        let name = String::new();
+        let connection = normalise_connection_kind(&self.device_mode, state.available);
+        let name = self.device_name.clone();
+        // device_id: no hidraw-path source on JuhRadialService yet.
+        // TODO: thread hidraw path through JuhRadialService when
+        //       device-cache module lands.
         let id = String::new();
         Ok((battery, charging, connection, name, id))
     }
@@ -540,13 +577,13 @@ impl JuhRadialService {
             .map_err(fdo::Error::Failed)
     }
 
-    /// Emitted when any of (battery, charging, connection, name) changes.
-    /// Subscribed-to by the GNOME indicator extension for push updates so
-    /// it doesn't have to poll the daemon on the critical path.
+    /// Emitted after each battery poll when any of (battery %, charging,
+    /// available) changes. Subscribed-to by the GNOME indicator extension
+    /// for push updates.
     ///
-    /// Phase 0.2a declares the signal so consumers can subscribe; Task
-    /// 0.2b adds the actual emit from `daemon/src/battery.rs` after
-    /// each successful poll.
+    /// The device_name / connection / device_id fields carry empty strings
+    /// in the battery-poll emit path (see battery.rs). Consumers that need
+    /// those fields should follow up with a GetActiveDeviceState call.
     #[zbus(signal)]
     async fn device_state_changed(
         emitter: &SignalEmitter<'_>,

@@ -496,6 +496,64 @@ pub async fn start_battery_updater(state: SharedBatteryState) {
     }
 }
 
+/// Emit the DeviceStateChanged D-Bus signal if a connection is available.
+///
+/// Uses the raw `SignalEmitter::emit` API (public in zbus 5) so we can
+/// call this from outside the `#[interface]` impl block.
+///
+/// Emits battery + charging only; device_name / connection / device_id are
+/// left as empty strings because BatteryHandler doesn't have access to the
+/// JuhRadialService fields that carry that information.  Consumers that
+/// need those fields should follow up with GetActiveDeviceState().
+///
+/// TODO: thread JuhRadialService device_name / device_mode into the emit
+///       call once the device-cache module lands.
+async fn maybe_emit_device_state_changed(
+    dbus_conn: &Option<zbus::Connection>,
+    percentage: u8,
+    charging: bool,
+) {
+    let conn = match dbus_conn {
+        Some(c) => c,
+        None => return,
+    };
+    let path = match zbus::zvariant::ObjectPath::try_from(crate::dbus::DBUS_PATH) {
+        Ok(p) => p,
+        Err(e) => {
+            tracing::warn!(error = %e, "DeviceStateChanged: invalid object path");
+            return;
+        }
+    };
+    let emitter = match zbus::object_server::SignalEmitter::new(conn, path) {
+        Ok(e) => e,
+        Err(e) => {
+            tracing::warn!(error = %e, "DeviceStateChanged: failed to create emitter");
+            return;
+        }
+    };
+    // Signal body: (battery: u8, charging: bool, connection: String,
+    //               device_name: String, device_id: String)
+    // Matches the #[zbus(signal)] declaration in interface.rs.
+    // connection / device_name / device_id are empty — see TODO above.
+    let body: (u8, bool, String, String, String) = (
+        percentage,
+        charging,
+        String::new(), // connection — see TODO above
+        String::new(), // device_name — see TODO above
+        String::new(), // device_id — see TODO above
+    );
+    if let Err(e) = emitter
+        .emit(
+            crate::dbus::DBUS_INTERFACE,
+            "DeviceStateChanged",
+            &body,
+        )
+        .await
+    {
+        tracing::warn!(error = %e, "DeviceStateChanged emit failed");
+    }
+}
+
 /// Start a periodic battery update task using shared HapticManager
 ///
 /// This version shares the HidppDevice with haptic feedback to avoid
@@ -503,6 +561,20 @@ pub async fn start_battery_updater(state: SharedBatteryState) {
 pub async fn start_battery_updater_shared(
     state: SharedBatteryState,
     haptic_manager: crate::hidpp::SharedHapticManager,
+) {
+    start_battery_updater_shared_with_dbus(state, haptic_manager, None).await
+}
+
+/// Start a periodic battery update task using shared HapticManager, with a
+/// D-Bus connection for emitting DeviceStateChanged signals on state changes.
+///
+/// Pass a clone of the session bus connection obtained from
+/// `init_dbus_service_with_device` so that consumers (e.g. the GNOME
+/// indicator extension) receive push updates instead of polling.
+pub async fn start_battery_updater_shared_with_dbus(
+    state: SharedBatteryState,
+    haptic_manager: crate::hidpp::SharedHapticManager,
+    dbus_conn: Option<zbus::Connection>,
 ) {
     let mut consecutive_errors = 0u32;
 
@@ -520,6 +592,9 @@ pub async fn start_battery_updater_shared(
             s.available = true;
             s.error = None;
             tracing::info!(percentage, charging, "Initial battery state");
+            // Emit initial state so the indicator can populate immediately.
+            drop(s);
+            maybe_emit_device_state_changed(&dbus_conn, percentage, charging).await;
         }
         Err(e) => {
             let mut s = state.write().await;
@@ -544,18 +619,44 @@ pub async fn start_battery_updater_shared(
         match result {
             Ok((percentage, charging)) => {
                 consecutive_errors = 0;
-                let mut s = state.write().await;
-                s.percentage = percentage;
-                s.charging = charging;
-                s.available = true;
-                s.error = None;
+
+                // Only emit the signal when something actually changed.
+                let changed = {
+                    let s = state.read().await;
+                    s.percentage != percentage || s.charging != charging || !s.available
+                };
+
+                {
+                    let mut s = state.write().await;
+                    s.percentage = percentage;
+                    s.charging = charging;
+                    s.available = true;
+                    s.error = None;
+                }
                 tracing::debug!(percentage, charging, "Battery state updated (shared)");
+
+                if changed {
+                    maybe_emit_device_state_changed(&dbus_conn, percentage, charging).await;
+                }
             }
             Err(e) => {
                 consecutive_errors += 1;
-                let mut s = state.write().await;
-                s.available = false;
-                s.error = Some(format!("{}", e));
+
+                // Emit "off" signal when battery transitions from available to unavailable.
+                let was_available = {
+                    let s = state.read().await;
+                    s.available
+                };
+
+                {
+                    let mut s = state.write().await;
+                    s.available = false;
+                    s.error = Some(format!("{}", e));
+                }
+
+                if was_available {
+                    maybe_emit_device_state_changed(&dbus_conn, 0, false).await;
+                }
 
                 // Only log warning for first few errors, then go quiet
                 if consecutive_errors <= 3 {
