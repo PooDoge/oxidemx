@@ -28,14 +28,23 @@ Requires=dbus.socket
 [Service]
 Type=simple
 ExecStart=/usr/local/bin/juhradiald
-# Restart on crashes (SIGSEGV, SIGABRT, etc.) and watchdog kills.
-# on-abnormal = non-clean signals, watchdog, timeout — NOT SIGTERM/clean exit.
-Restart=on-abnormal
+# Restart on ANY exit reason (crashes, SIGTERM from rogue pkill, OOM kills,
+# watchdog timeouts, clean exits). Previously this was `on-abnormal`, which
+# excluded clean signals like SIGTERM — so a stray `pkill juhradiald` (used
+# by the launcher script) would permanently take the daemon down on systems
+# where the launcher's daemon then exits, leading to no daemon owning the
+# `org.juhradial.Daemon` D-Bus name and the overlay going deaf to button
+# events. `Restart=always` plus an idle backoff guarantees a single daemon
+# is always alive on the bus.
+Restart=always
 RestartSec=5s
 
-# Limit restart attempts to prevent infinite restart loops
+# Limit restart attempts to prevent infinite restart loops, but raise the
+# burst from 5 → 20 so a brief storm of HID++ reconnects (caused by Bolt
+# receiver hand-off during USB suspend/resume) doesn't permanently disable
+# the service.
 StartLimitIntervalSec=60
-StartLimitBurst=5
+StartLimitBurst=20
 
 # Disable watchdog to prevent systemd drop-ins (e.g. 10-timeout-abort.conf
 # on Fedora) from killing the daemon when it doesn't send sd_notify heartbeats.

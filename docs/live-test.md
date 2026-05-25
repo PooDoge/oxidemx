@@ -1,8 +1,17 @@
 # Live-test the indicator stack on Bazzite
 
-Step-by-step recipe to bring up the indicator + popup + settings on a Wayland GNOME session, starting from a clean (no-install) state. Tailored to Bazzite (atomic Fedora, rpm-ostree). No `rpm-ostree install` calls — all build tooling lives in `claude_development` distrobox per `feedback_no_rpm_ostree`.
+Step-by-step recipe to bring up the indicator + popup + settings on a Wayland GNOME session, starting from a clean (no-install) state. Tailored to Bazzite (atomic Fedora, rpm-ostree).
 
 Followups doc: [docs/plans/followups.md](plans/followups.md) — addresses what's wired vs deferred.
+
+## Two paths
+
+| Path | When to use | What runs |
+|---|---|---|
+| **A. `./install.sh` (one-shot)** | First-time install, or you don't already have build tooling in distrobox | Atomic-Fedora-aware. Detects `/run/ostree-booted`; offers `rpm-ostree install --idempotent` for system deps (asks before, prompts for reboot after); installs binaries to `/usr/local/bin/`, shared data to `/usr/local/share/juhradial/`, GNOME extensions to `~/.local/share/gnome-shell/extensions/`. |
+| **B. Manual steps below (this doc)** | Iterating during dev — you already have rust+cargo in distrobox and want explicit control over each step | Same end state as path A but you drive each install yourself. Lets you skip dependency layering and use the dev distrobox for cargo. |
+
+Steps 1–7 below are path B. If you take path A, skip to step 5 (smoke-test) after `./install.sh` returns.
 
 ---
 

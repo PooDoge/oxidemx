@@ -33,6 +33,12 @@ BIN_DIR="/usr/local/bin"
 SYSTEMD_USER_DIR="$HOME/.config/systemd/user"
 CONFIG_DIR="$HOME/.config/juhradial"
 DISTRO_FAMILY=""
+IS_ATOMIC=false
+# Paths for shared data — overridden to /usr/local/share on atomic/immutable
+# systems where /usr is read-only (Bazzite, Silverblue, Kinoite, Bluefin…).
+SHARE_DIR="/usr/share/juhradial"
+APP_DIR="/usr/share/applications"
+ICON_DIR="/usr/share/icons/hicolor/scalable/apps"
 TOTAL_STEPS=6
 CURRENT_STEP=0
 INSTALL_MODE="install"  # "install" or "upgrade"
@@ -118,7 +124,7 @@ resolve_distro_family() {
         arch|manjaro|endeavouros|garuda|artix|cachyos|arcolinux|archcraft)
             DISTRO_FAMILY="arch"
             ;;
-        fedora|rhel|centos|rocky|almalinux|nobara|ultramarine)
+        fedora|rhel|centos|rocky|almalinux|nobara|ultramarine|bazzite|silverblue|kinoite|bluefin|aurora|fedora-asahi-remix)
             DISTRO_FAMILY="fedora"
             ;;
         debian|ubuntu|linuxmint|pop|elementary|kali|zorin|tuxedo|neon|mx)
@@ -161,6 +167,25 @@ check_wayland() {
         WAYLAND_OK=true
     else
         WAYLAND_OK=false
+    fi
+}
+
+check_atomic() {
+    # Detect rpm-ostree-based (immutable) distros: Bazzite, Silverblue,
+    # Kinoite, Bluefin, Aurora, and other uBlue variants. These have a
+    # read-only /usr and install system packages via rpm-ostree.
+    if [ -f /run/ostree-booted ]; then
+        IS_ATOMIC=true
+    elif command -v rpm-ostree &> /dev/null && rpm-ostree status &> /dev/null; then
+        IS_ATOMIC=true
+    fi
+
+    if [ "$IS_ATOMIC" = true ]; then
+        # /usr is read-only on atomic images; /usr/local is a writable
+        # symlink (to /var/usrlocal) that XDG picks up by default.
+        SHARE_DIR="/usr/local/share/juhradial"
+        APP_DIR="/usr/local/share/applications"
+        ICON_DIR="/usr/local/share/icons/hicolor/scalable/apps"
     fi
 }
 
@@ -274,6 +299,11 @@ print_system_info() {
         echo -e "  ${DIM}Mouse${RESET}        ${YELLOW}No Logitech receiver found${RESET} ${GRAY}— plug in to continue${RESET}"
     fi
 
+    # Image type (atomic/immutable vs traditional)
+    if [ "$IS_ATOMIC" = true ]; then
+        echo -e "  ${DIM}Image${RESET}        ${CYAN}Atomic${RESET} ${GRAY}(rpm-ostree — layering required)${RESET}"
+    fi
+
     # Install mode
     if [ "$INSTALL_MODE" = "upgrade" ]; then
         local ver_info=""
@@ -337,6 +367,91 @@ windowrulev2 = noanim, title:^(JuhRadial MX)$'
 }
 
 # ── Dependency installation ──────────────────────────────────────────
+
+# rpm-ostree layering for Bazzite / Silverblue / Kinoite / Bluefin / Aurora.
+# Bazzite docs recommend Flatpak/Homebrew/Distrobox first and treat rpm-ostree
+# as a last resort (see https://docs.bazzite.gg/Installing_and_Managing_Software/rpm-ostree/).
+# JuhRadial MX needs a system daemon (hidraw + udev + systemd) AND a host-side
+# Python/GTK overlay UI, so layering is the appropriate choice here.
+install_deps_fedora_atomic() {
+    local packages=(
+        rust cargo
+        python3 python3-pip
+        python3-pyqt6 qt6-qtsvg
+        python3-gobject gtk4 libadwaita
+        gtk4-layer-shell
+        python3-cryptography
+        dbus-devel systemd-devel
+        libevdev-devel hidapi-devel
+        ydotool
+        git make
+    )
+
+    log_info "Atomic image detected — using ${BOLD}rpm-ostree${RESET} for package layering"
+    log_dim "Docs: https://docs.bazzite.gg/Installing_and_Managing_Software/rpm-ostree/"
+
+    # Figure out what's actually missing so we don't re-layer on subsequent runs
+    local to_install=()
+    for pkg in "${packages[@]}"; do
+        if ! rpm -q "$pkg" &> /dev/null; then
+            to_install+=("$pkg")
+        fi
+    done
+
+    if [ ${#to_install[@]} -eq 0 ]; then
+        log_success "All required packages are already layered"
+        return 0
+    fi
+
+    echo ""
+    log_info "Packages to layer (${#to_install[@]}):"
+    local pkg_list=""
+    for pkg in "${to_install[@]}"; do
+        pkg_list+="$pkg "
+    done
+    log_dim "$pkg_list"
+    echo ""
+    log_warning "rpm-ostree layering requires a REBOOT to activate packages."
+    log_warning "Per Bazzite docs, layered packages can delay future image updates."
+    log_dim "After rebooting, re-run this installer to finish the setup."
+    echo ""
+
+    echo -e "  ${BOLD}Proceed with rpm-ostree install?${RESET} ${DIM}[Y/n]${RESET} \c"
+    read -n 1 -r < /dev/tty
+    echo ""
+    if [[ ! $REPLY =~ ^[Yy]$ ]] && [[ -n $REPLY ]]; then
+        echo ""
+        log_info "Cancelled. To layer manually:"
+        log_dim "  sudo rpm-ostree install ${to_install[*]}"
+        log_dim "Then reboot and re-run this installer."
+        exit 0
+    fi
+
+    echo ""
+    if ! sudo rpm-ostree install --idempotent "${to_install[@]}"; then
+        log_error "rpm-ostree install failed"
+        log_dim "Try installing packages one at a time, or file an issue with the error output."
+        exit 1
+    fi
+
+    echo ""
+    log_success "Packages layered into the next deployment"
+    echo ""
+    echo -e "  ${YELLOW}${BOLD}════════════════════════════════════════════════${RESET}"
+    echo -e "  ${YELLOW}${BOLD}  REBOOT REQUIRED — then re-run this installer${RESET}"
+    echo -e "  ${YELLOW}${BOLD}════════════════════════════════════════════════${RESET}"
+    echo ""
+    echo -e "  ${BOLD}Reboot now?${RESET} ${DIM}[y/N]${RESET} \c"
+    read -n 1 -r < /dev/tty
+    echo ""
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        log_info "Rebooting in 3 seconds… (Ctrl+C to cancel)"
+        sleep 3
+        sudo systemctl reboot
+    fi
+    exit 0
+}
+
 install_deps_fedora() {
     sudo dnf install -y \
         rust cargo \
@@ -402,11 +517,20 @@ install_deps_opensuse() {
 
 install_dependencies() {
     step "Installing dependencies"
-    log_info "Package manager: ${BOLD}${DISTRO_FAMILY}${RESET}"
+
+    if [ "$IS_ATOMIC" = true ]; then
+        log_info "Package manager: ${BOLD}rpm-ostree${RESET} ${GRAY}(atomic ${DISTRO_FAMILY})${RESET}"
+    else
+        log_info "Package manager: ${BOLD}${DISTRO_FAMILY}${RESET}"
+    fi
 
     case $DISTRO_FAMILY in
         fedora)
-            install_deps_fedora
+            if [ "$IS_ATOMIC" = true ]; then
+                install_deps_fedora_atomic
+            else
+                install_deps_fedora
+            fi
             ;;
         arch)
             install_deps_arch
@@ -448,19 +572,26 @@ clone_repo() {
 
 # ── Build ────────────────────────────────────────────────────────────
 build_project() {
-    step "Building daemon"
-    log_info "Compiling Rust daemon..."
+    step "Building Rust workspace"
+    log_info "Compiling daemon + overlay + popup + settings (cargo workspace)..."
     cd "$INSTALL_DIR"
 
-    cd daemon
-    cargo build --release
-    cd ..
-
-    step "Building indicator popup"
-    log_info "Compiling popup-rs..."
-    cd popup-rs
-    cargo build --release
-    cd ..
+    # Workspace build picks up all binary crates in one cargo invocation:
+    # juhradiald, juhradial-overlay-rs, juhradial-popup, juhradial-settings.
+    # Falls back to per-crate builds for partial-checkout / pre-workspace trees.
+    if [ -f Cargo.toml ] && grep -q '^\[workspace\]' Cargo.toml; then
+        cargo build --release \
+            -p juhradiald \
+            -p juhradial-overlay-rs \
+            -p juhradial-popup-rs \
+            -p juhradial-settings-rs
+    else
+        log_warning "Workspace Cargo.toml not detected; building per-crate"
+        ( cd daemon && cargo build --release )
+        [ -d popup-rs ]    && ( cd popup-rs    && cargo build --release )
+        [ -d overlay-rs ]  && ( cd overlay-rs  && cargo build --release )
+        [ -d settings-rs ] && ( cd settings-rs && cargo build --release )
+    fi
 
     log_success "Build complete"
 }
@@ -469,78 +600,143 @@ build_project() {
 install_files() {
     step "Installing files"
 
+    # Cargo workspace puts binaries at target/release/<bin>; per-crate builds
+    # put them at <crate>/target/release/<bin>. Helper picks the first
+    # existing path so the install works in both modes.
+    pick_binary() {
+        local bin="$1"; shift
+        for candidate in "$@"; do
+            if [ -x "$candidate" ]; then
+                echo "$candidate"
+                return 0
+            fi
+        done
+        return 1
+    }
+
     # Install daemon binary
-    sudo install -Dm755 daemon/target/release/juhradiald "$BIN_DIR/juhradiald"
-    log_success "Daemon binary"
+    daemon_bin="$(pick_binary juhradiald target/release/juhradiald daemon/target/release/juhradiald)" || {
+        log_error "juhradiald not built — run ./dev.sh build daemon or cargo build --release -p juhradiald"
+        exit 1
+    }
+    sudo install -Dm755 "$daemon_bin" "$BIN_DIR/juhradiald"
+    log_success "Daemon binary ($daemon_bin)"
 
     # Install indicator popup binary (popup-rs)
-    sudo install -Dm755 popup-rs/target/release/juhradial-popup "$BIN_DIR/juhradial-popup"
-    log_success "Indicator popup binary"
+    if popup_bin="$(pick_binary juhradial-popup target/release/juhradial-popup popup-rs/target/release/juhradial-popup)"; then
+        sudo install -Dm755 "$popup_bin" "$BIN_DIR/juhradial-popup"
+        log_success "Indicator popup binary"
+    fi
+
+    # Install overlay binary (overlay-rs)
+    if overlay_bin="$(pick_binary juhradial-overlay-rs target/release/juhradial-overlay-rs overlay-rs/target/release/juhradial-overlay-rs)"; then
+        sudo install -Dm755 "$overlay_bin" "$BIN_DIR/juhradial-overlay-rs"
+        log_success "Overlay binary"
+    fi
+
+    # Install settings binary (settings-rs)
+    if settings_bin="$(pick_binary juhradial-settings target/release/juhradial-settings settings-rs/target/release/juhradial-settings)"; then
+        sudo install -Dm755 "$settings_bin" "$BIN_DIR/juhradial-settings"
+        log_success "Settings binary"
+    fi
+
+    # On atomic images /usr is read-only, so shared data goes to /usr/local/share
+    # (SHARE_DIR / APP_DIR / ICON_DIR are set by check_atomic()).
+    if [ "$IS_ATOMIC" = true ]; then
+        log_dim "Installing shared files to ${SHARE_DIR} (atomic image)"
+    fi
 
     # Install overlay scripts
-    sudo mkdir -p /usr/share/juhradial
-    sudo cp -r overlay/*.py /usr/share/juhradial/
+    sudo mkdir -p "$SHARE_DIR"
+    sudo cp -r overlay/*.py "$SHARE_DIR/"
     log_success "Overlay scripts"
 
     # Install flow module (subdirectory)
-    sudo cp -r overlay/flow /usr/share/juhradial/flow
+    sudo rm -rf "$SHARE_DIR/flow"
+    sudo cp -r overlay/flow "$SHARE_DIR/flow"
     log_success "Flow module"
 
     # Install locale files
     if [ -d overlay/locales ]; then
-        sudo mkdir -p /usr/share/juhradial/locales
-        sudo cp -r overlay/locales/* /usr/share/juhradial/locales/
+        sudo mkdir -p "$SHARE_DIR/locales"
+        sudo cp -r overlay/locales/* "$SHARE_DIR/locales/"
     fi
 
     # Install 3D radial wheel images
-    sudo mkdir -p /usr/share/juhradial/assets/radial-wheels
-    sudo cp -r assets/radial-wheels/*.png /usr/share/juhradial/assets/radial-wheels/
+    sudo mkdir -p "$SHARE_DIR/assets/radial-wheels"
+    sudo cp -r assets/radial-wheels/*.png "$SHARE_DIR/assets/radial-wheels/"
     log_success "Theme assets"
 
     # Install device images (mouse illustrations for settings)
     if [ -d assets/devices ]; then
-        sudo mkdir -p /usr/share/juhradial/assets/devices
-        sudo cp assets/devices/*.png assets/devices/*.svg /usr/share/juhradial/assets/devices/ 2>/dev/null || true
+        sudo mkdir -p "$SHARE_DIR/assets/devices"
+        sudo cp assets/devices/*.png assets/devices/*.svg "$SHARE_DIR/assets/devices/" 2>/dev/null || true
     fi
 
     # Install AI assistant icons
-    sudo cp assets/ai-*.svg /usr/share/juhradial/assets/ 2>/dev/null || true
+    sudo cp assets/ai-*.svg "$SHARE_DIR/assets/" 2>/dev/null || true
 
     # Install OS icons (used by Flow easy-switch and device display)
-    sudo cp assets/os-*.svg /usr/share/juhradial/assets/ 2>/dev/null || true
+    sudo cp assets/os-*.svg "$SHARE_DIR/assets/" 2>/dev/null || true
 
     # Install Flow indicator image
-    sudo cp assets/flow-indicator.png /usr/share/juhradial/assets/ 2>/dev/null || true
+    sudo cp assets/flow-indicator.png "$SHARE_DIR/assets/" 2>/dev/null || true
 
     # Install generic mouse icon
-    sudo cp assets/genericmouse.png /usr/share/juhradial/assets/ 2>/dev/null || true
+    sudo cp assets/genericmouse.png "$SHARE_DIR/assets/" 2>/dev/null || true
 
     # Install sidebar navigation icons
-    sudo cp assets/nav-*.png /usr/share/juhradial/assets/ 2>/dev/null || true
+    sudo cp assets/nav-*.png "$SHARE_DIR/assets/" 2>/dev/null || true
 
     # Install generated settings artwork
     if [ -d assets/settings-generated ]; then
-        sudo mkdir -p /usr/share/juhradial/assets/settings-generated
-        sudo cp assets/settings-generated/control-ring.png /usr/share/juhradial/assets/settings-generated/ 2>/dev/null || true
-        sudo cp assets/settings-generated/easyswitch.png /usr/share/juhradial/assets/settings-generated/ 2>/dev/null || true
-        sudo cp assets/settings-generated/haptics.png /usr/share/juhradial/assets/settings-generated/ 2>/dev/null || true
+        sudo mkdir -p "$SHARE_DIR/assets/settings-generated"
+        sudo cp assets/settings-generated/control-ring.png "$SHARE_DIR/assets/settings-generated/" 2>/dev/null || true
+        sudo cp assets/settings-generated/easyswitch.png "$SHARE_DIR/assets/settings-generated/" 2>/dev/null || true
+        sudo cp assets/settings-generated/haptics.png "$SHARE_DIR/assets/settings-generated/" 2>/dev/null || true
     fi
 
-    # Install launcher scripts
+    # Install launcher scripts. NOTE: the Rust juhradial-settings binary
+    # installed above (when present) wins on $PATH; the shell launcher
+    # remains as a fallback for installs that built only the Python
+    # overlay tree.
     sudo install -Dm755 scripts/juhradial-mx.sh "$BIN_DIR/juhradial-mx"
-    sudo install -Dm755 scripts/juhradial-settings.sh "$BIN_DIR/juhradial-settings"
+    if [ -z "${settings_bin:-}" ]; then
+        sudo install -Dm755 scripts/juhradial-settings.sh "$BIN_DIR/juhradial-settings"
+    fi
 
     # Install desktop files
-    sudo install -Dm644 packaging/juhradial-mx.desktop /usr/share/applications/juhradial-mx.desktop
-    sudo install -Dm644 packaging/org.juhradial.settings.desktop /usr/share/applications/org.juhradial.settings.desktop
+    sudo install -Dm644 packaging/juhradial-mx.desktop "$APP_DIR/juhradial-mx.desktop"
+    sudo install -Dm644 packaging/org.juhradial.settings.desktop "$APP_DIR/org.juhradial.settings.desktop"
 
     # Install icons
-    sudo install -Dm644 assets/juhradial-mx.svg /usr/share/icons/hicolor/scalable/apps/juhradial-mx.svg
+    sudo install -Dm644 assets/juhradial-mx.svg "$ICON_DIR/juhradial-mx.svg"
     log_success "Desktop integration"
 
     # Install systemd service
     mkdir -p "$SYSTEMD_USER_DIR"
     cp packaging/systemd/juhradialmx-daemon.service "$SYSTEMD_USER_DIR/"
+
+    # Autostart the overlay at login. The systemd service runs the daemon,
+    # but the overlay is a per-session GUI process that needs the user's
+    # graphical/D-Bus session — so we install it as an XDG autostart entry
+    # rather than a second systemd unit. Without this, the daemon captures
+    # button presses but there's no overlay listening to draw the menu, so
+    # users have to manually launch the app every login.
+    AUTOSTART_DIR="$HOME/.config/autostart"
+    mkdir -p "$AUTOSTART_DIR"
+    cat > "$AUTOSTART_DIR/juhradial-overlay.desktop" <<EOF
+[Desktop Entry]
+Type=Application
+Name=JuhRadial MX Overlay
+Comment=Radial menu overlay for Logitech MX Master mice
+Exec=python3 $SHARE_DIR/juhradial-overlay.py
+Icon=juhradial-mx
+Terminal=false
+NoDisplay=true
+X-GNOME-Autostart-enabled=true
+EOF
+    log_success "Overlay autostart configured"
 
     # Install/update udev rules (always update to fix security issues in older versions)
     if [ -f packaging/udev/99-juhradialmx.rules ]; then
@@ -707,6 +903,7 @@ main() {
     print_banner
     check_root
     detect_distro
+    check_atomic
     check_wayland
     check_desktop
     check_existing_install
