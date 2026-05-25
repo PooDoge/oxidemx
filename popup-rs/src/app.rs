@@ -11,7 +11,6 @@
 //! extension to move it below the indicator (same pattern as overlay-rs).
 //! Volume-on-scroll and click-outside-to-dismiss are handled here.
 
-use iced::widget::mouse_area;
 use iced::{Element, Subscription, Task};
 use juhradial_shared::AppConfig;
 use juhradial_widgets::palette::Palette;
@@ -24,7 +23,7 @@ use crate::gsettings_bridge::BatteryColors;
 use crate::view;
 use crate::POPUP_W;
 
-const APP_ID: &str = "org.juhradial.popup";
+use crate::APP_ID;
 
 // ---------------------------------------------------------------------------
 // State
@@ -289,13 +288,18 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         Message::OpenSettings => {
             // Spawn the settings binary as a sibling or from PATH.
             let settings_bin = sibling_or_path("juhradial-settings");
-            tokio::task::spawn(async move {
-                match tokio::process::Command::new(&settings_bin).spawn() {
-                    Ok(_) => info!("launched {settings_bin}"),
-                    Err(e) => warn!("could not launch {settings_bin}: {e}"),
-                }
-            });
-            iced::exit()
+            Task::batch([
+                Task::perform(
+                    async move {
+                        match tokio::process::Command::new(&settings_bin).spawn() {
+                            Ok(_) => info!("launched {settings_bin}"),
+                            Err(e) => warn!("could not launch {settings_bin}: {e}"),
+                        }
+                    },
+                    |_| Message::Noop,
+                ),
+                iced::exit(),
+            ])
         }
 
         Message::WheelScroll(dir) => {
@@ -336,16 +340,59 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
 // ---------------------------------------------------------------------------
 
 pub fn view(state: &State) -> Element<'_, Message> {
-    // Wrap the popup content in a fullscreen mouse_area that catches
-    // clicks outside the card and dismisses the popup.
-    mouse_area(view::popup_view(state))
-        .on_press(Message::Noop) // clicks inside the content pass through
-        .into()
+    // The popup dismisses on focus loss (WindowUnfocused → iced::exit())
+    // and on Esc (keyboard subscription below). There is no mouse_area
+    // wrapper — the previous .on_press(Noop) was the same footprint as the
+    // card and could not intercept clicks outside the window anyway.
+    view::popup_view(state)
 }
 
 // ---------------------------------------------------------------------------
 // subscription
 // ---------------------------------------------------------------------------
+
+/// `iced::event::listen_with` handler for mouse-wheel events.
+/// Converts a scroll delta into a signed integer direction (+1 up, -1 down)
+/// and emits `WheelScroll`. The update arm guards on `state.focused` and
+/// `config.popup.volume_on_scroll` before spawning wpctl.
+fn handle_wheel(
+    event: iced::Event,
+    _status: iced::event::Status,
+    _id: iced::window::Id,
+) -> Option<Message> {
+    if let iced::Event::Mouse(iced::mouse::Event::WheelScrolled { delta }) = event {
+        let dir = match delta {
+            iced::mouse::ScrollDelta::Lines { y, .. } => y as i32,
+            iced::mouse::ScrollDelta::Pixels { y, .. } => {
+                if y > 0.0 {
+                    1
+                } else if y < 0.0 {
+                    -1
+                } else {
+                    0
+                }
+            }
+        };
+        if dir != 0 {
+            return Some(Message::WheelScroll(dir));
+        }
+    }
+    None
+}
+
+/// `iced::event::listen_with` handler for Esc key — dismisses the popup.
+fn handle_key(
+    event: iced::Event,
+    _status: iced::event::Status,
+    _id: iced::window::Id,
+) -> Option<Message> {
+    if let iced::Event::Keyboard(iced::keyboard::Event::KeyPressed { key, .. }) = event {
+        if key == iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape) {
+            return Some(Message::Dismiss);
+        }
+    }
+    None
+}
 
 pub fn subscription(_state: &State) -> Subscription<Message> {
     use iced::time;
@@ -363,6 +410,10 @@ pub fn subscription(_state: &State) -> Subscription<Message> {
             iced::window::Event::Unfocused => Message::WindowUnfocused,
             _ => Message::Noop,
         }),
+        // Mouse-wheel → WheelScroll (volume-on-scroll while popup is focused).
+        iced::event::listen_with(handle_wheel),
+        // Esc key → Dismiss.
+        iced::event::listen_with(handle_key),
     ])
 }
 

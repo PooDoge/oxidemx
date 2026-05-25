@@ -456,6 +456,10 @@ build_project() {
     cargo build --release
     cd ..
 
+    step "Building indicator popup"
+    log_info "Compiling popup-rs..."
+    cargo build --release -p juhradial-popup-rs
+
     log_success "Build complete"
 }
 
@@ -468,10 +472,8 @@ install_files() {
     log_success "Daemon binary"
 
     # Install indicator popup binary (popup-rs)
-    if [ -f popup-rs/target/release/juhradial-popup ]; then
-        sudo install -Dm755 popup-rs/target/release/juhradial-popup "$BIN_DIR/juhradial-popup"
-        log_success "Indicator popup binary"
-    fi
+    sudo install -Dm755 popup-rs/target/release/juhradial-popup "$BIN_DIR/juhradial-popup"
+    log_success "Indicator popup binary"
 
     # Install overlay scripts
     sudo mkdir -p /usr/share/juhradial

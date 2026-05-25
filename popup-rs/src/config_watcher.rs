@@ -44,6 +44,11 @@ pub fn watch_stream() -> impl futures_util::stream::Stream<Item = juhradial_shar
 
     let (raw_tx, raw_rx) = std::sync::mpsc::channel::<()>();
     let watcher_path = path.clone();
+    // The watcher Drop guard is forwarded into the debounce loop below via
+    // `watcher_tx` so that it lives until the loop exits (i.e. until the
+    // `tx` async_channel receiver side is dropped on app shutdown).  This
+    // avoids `std::thread::park()` blocking a threadpool slot forever.
+    let (watcher_tx, watcher_rx) = std::sync::mpsc::sync_channel::<RecommendedWatcher>(1);
     tokio::task::spawn_blocking(move || {
         let mut watcher: RecommendedWatcher = match notify::recommended_watcher(
             move |res: notify::Result<notify::Event>| {
@@ -81,13 +86,22 @@ pub fn watch_stream() -> impl futures_util::stream::Stream<Item = juhradial_shar
             return;
         }
 
-        std::thread::park();
-        drop(watcher);
+        // Hand the watcher to the debounce loop so it stays alive until
+        // the loop exits.  Ignore send errors (debounce task already exited).
+        let _ = watcher_tx.send(watcher);
     });
 
     let debounce = Duration::from_millis(150);
     let path_for_loader = path.clone();
     tokio::task::spawn_blocking(move || {
+        // Hold the watcher Drop guard for the lifetime of this loop so that
+        // inotify keeps running.  If the setup task errored, watcher_rx will
+        // be empty and we exit cleanly when the channel disconnects.
+        let _watcher = match watcher_rx.recv() {
+            Ok(w) => w,
+            Err(_) => return, // watcher setup failed; nothing to do
+        };
+
         let mut last_emit = Instant::now() - Duration::from_secs(60);
         let mut pending = false;
         loop {
