@@ -231,6 +231,7 @@ export default class JuhRadialCursorExtension extends Extension {
                         } catch (e) {
                             log(`[juhradial-cursor] ${method} failed: ${e}`);
                             invocation.return_error_literal(
+                                // @ts-expect-error -- Gio.DBusError is the registered error domain quark at GJS runtime; @girs models it as a class type, but GLib accepts the domain object here. Preserves original .js behaviour.
                                 Gio.DBusError, Gio.DBusError.FAILED, String(e),
                             );
                         }
@@ -295,6 +296,7 @@ export default class JuhRadialCursorExtension extends Extension {
                         out.push([i, g.x, g.y, g.width, g.height]);
                     }
                 }
+                // @ts-expect-error -- pre-existing discrepancy: D-Bus XML declares a(iiii) but JS pushes 5-tuples. Tracked as a follow-up; preserving original behaviour here.
                 invocation.return_value(new GLib.Variant('(a(iiii))', [out]));
                 return;
             }
