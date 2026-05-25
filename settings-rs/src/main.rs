@@ -15,6 +15,7 @@ mod tabs {
     pub mod easyswitch;
     pub mod gaming;
     pub mod haptics;
+    pub mod indicator_popup;
     pub mod macros;
     pub mod placeholder;
     pub mod scroll;
@@ -58,6 +59,7 @@ static FOCUS_RX: OnceLock<async_channel::Receiver<()>> = OnceLock::new();
 pub enum Tab {
     Buttons,
     PointScroll,
+    IndicatorPopup,
     Haptic,
     Devices,
     EasySwitch,
@@ -72,6 +74,7 @@ impl Tab {
         match self {
             Tab::Buttons => "Buttons",
             Tab::PointScroll => "Point & Scroll",
+            Tab::IndicatorPopup => "Indicator Popup",
             Tab::Haptic => "Haptic Feedback",
             Tab::Devices => "Devices",
             Tab::EasySwitch => "Easy-Switch",
@@ -97,6 +100,7 @@ impl Tab {
         match self {
             Tab::Buttons => "M",
             Tab::PointScroll => "S",
+            Tab::IndicatorPopup => "I",
             Tab::Haptic => "H",
             Tab::Devices => "D",
             Tab::EasySwitch => "E",
@@ -107,9 +111,10 @@ impl Tab {
         }
     }
 
-    pub const ALL: [Tab; 9] = [
+    pub const ALL: [Tab; 10] = [
         Tab::Buttons,
         Tab::PointScroll,
+        Tab::IndicatorPopup,
         Tab::Haptic,
         Tab::Devices,
         Tab::EasySwitch,
@@ -419,6 +424,24 @@ pub enum Message {
     SetSubItemKind(usize, usize, juhradial_shared::ActionKind),
     MoveSubItemUp(usize, usize),
     MoveSubItemDown(usize, usize),
+
+    // ============================================================================
+    // Indicator Popup
+    // ============================================================================
+    SetPopupMode(juhradial_shared::PopupMode),
+    SetPopupShowHostButtons(bool),
+    SetPopupHostLabelStyle(juhradial_shared::HostLabelStyle),
+    PopupToggleMoveUp(String),
+    PopupToggleMoveDown(String),
+    PopupToggleRemove(String),
+    PopupToggleAdd(String),
+    PopupSliderMoveUp(String),
+    PopupSliderMoveDown(String),
+    PopupSliderRemove(String),
+    PopupSliderAdd(String),
+    SetPopupVolumeOnScroll(bool),
+    SetPopupCloseOnAction(bool),
+    SetPopupAnimations(bool),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -2403,6 +2426,118 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             }
             Task::none()
         }
+
+        // ====================================================================
+        // Indicator Popup handlers
+        // ====================================================================
+        Message::SetPopupMode(mode) => {
+            state.config.popup.mode = mode;
+            state.touch();
+            Task::none()
+        }
+        Message::SetPopupShowHostButtons(on) => {
+            state.config.popup.show_host_buttons = on;
+            state.touch();
+            Task::none()
+        }
+        Message::SetPopupHostLabelStyle(style) => {
+            state.config.popup.host_label_style = style;
+            state.touch();
+            Task::none()
+        }
+        Message::PopupToggleMoveUp(id) => {
+            let list = if state.config.popup.mode == juhradial_shared::PopupMode::Simple {
+                &mut state.config.popup.simple_toggles
+            } else {
+                &mut state.config.popup.power_toggles
+            };
+            juhradial_shared::PopupConfig::move_up(list, &id);
+            state.touch();
+            Task::none()
+        }
+        Message::PopupToggleMoveDown(id) => {
+            let list = if state.config.popup.mode == juhradial_shared::PopupMode::Simple {
+                &mut state.config.popup.simple_toggles
+            } else {
+                &mut state.config.popup.power_toggles
+            };
+            juhradial_shared::PopupConfig::move_down(list, &id);
+            state.touch();
+            Task::none()
+        }
+        Message::PopupToggleRemove(id) => {
+            let list = if state.config.popup.mode == juhradial_shared::PopupMode::Simple {
+                &mut state.config.popup.simple_toggles
+            } else {
+                &mut state.config.popup.power_toggles
+            };
+            list.retain(|x| x != &id);
+            state.touch();
+            Task::none()
+        }
+        Message::PopupToggleAdd(id) => {
+            if !juhradial_shared::QUICK_TOGGLE_CATALOG.iter().any(|q| q.id == id) {
+                warn!("PopupToggleAdd: unknown id {id:?} — not in QUICK_TOGGLE_CATALOG");
+                return Task::none();
+            }
+            let list = if state.config.popup.mode == juhradial_shared::PopupMode::Simple {
+                &mut state.config.popup.simple_toggles
+            } else {
+                &mut state.config.popup.power_toggles
+            };
+            if !list.iter().any(|x| x == &id) {
+                list.push(id);
+                state.touch();
+            }
+            Task::none()
+        }
+        Message::PopupSliderMoveUp(id) => {
+            juhradial_shared::PopupConfig::move_up(
+                &mut state.config.popup.power_sliders,
+                &id,
+            );
+            state.touch();
+            Task::none()
+        }
+        Message::PopupSliderMoveDown(id) => {
+            juhradial_shared::PopupConfig::move_down(
+                &mut state.config.popup.power_sliders,
+                &id,
+            );
+            state.touch();
+            Task::none()
+        }
+        Message::PopupSliderRemove(id) => {
+            state.config.popup.power_sliders.retain(|x| x != &id);
+            state.touch();
+            Task::none()
+        }
+        Message::PopupSliderAdd(id) => {
+            if !juhradial_shared::QUICK_SLIDER_CATALOG.iter().any(|q| q.id == id) {
+                warn!("PopupSliderAdd: unknown id {id:?} — not in QUICK_SLIDER_CATALOG");
+                return Task::none();
+            }
+            if !state.config.popup.power_sliders.iter().any(|x| x == &id) {
+                state.config.popup.power_sliders.push(id);
+                state.touch();
+            }
+            Task::none()
+        }
+        Message::SetPopupVolumeOnScroll(on) => {
+            state.config.popup.volume_on_scroll = on;
+            state.touch();
+            Task::none()
+        }
+        Message::SetPopupCloseOnAction(on) => {
+            state.config.popup.close_on_action = on;
+            state.touch();
+            Task::none()
+        }
+        Message::SetPopupAnimations(on) => {
+            state.config.popup.animations = on;
+            state.touch();
+            Task::none()
+        }
     }
 }
 
@@ -2459,6 +2594,7 @@ fn view(state: &State) -> Element<'_, Message> {
             Tab::Buttons => tabs::buttons::view(state),
             Tab::Settings => tabs::settings_page::view(state),
             Tab::PointScroll => tabs::scroll::view(state),
+            Tab::IndicatorPopup => tabs::indicator_popup::view(state),
             Tab::Haptic => tabs::haptics::view(state),
             Tab::Devices => tabs::devices::view(state),
             Tab::EasySwitch => tabs::easyswitch::view(state),
