@@ -22,6 +22,7 @@ members = [
     "juhradial-icons",
     "juhradial-shared",
     "juhradial-widgets",
+    "juhradial-window",
     "overlay-rs",
     "settings-rs",
     "spike-iced",

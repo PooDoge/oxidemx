@@ -31,7 +31,6 @@ mod editor {
     pub mod slice_panel;
     pub mod window;
 }
-mod ext_positioner;
 mod geometry;
 mod haptic_client;
 mod input;

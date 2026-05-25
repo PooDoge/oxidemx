@@ -14,7 +14,6 @@
 //! coordinates the way the gtk4-layer-shell prototype tried to.
 
 use iced::widget::canvas::Canvas;
-use iced::window;
 use iced::{Color, Element, Length, Size, Subscription, Task};
 use tracing::{debug, error, info, warn};
 
@@ -61,19 +60,10 @@ pub enum Message {
 }
 
 pub fn run() -> iced::Result {
-    // Build window settings as a struct so we can set
-    // `platform_specific.application_id` — this becomes the
-    // xdg-toplevel app_id on Wayland, which is how the
-    // juhradial-cursor GNOME extension's MoveOverlay method finds
-    // our window. Without this, the extension's WM_CLASS lookup
-    // fails and the menu opens wherever Mutter chose.
-    let mut window = iced::window::Settings::default();
-    window.size = Size::new(WINDOW_SIZE as f32, WINDOW_SIZE as f32);
-    window.decorations = false;
-    window.transparent = true;
-    window.resizable = false;
-    window.level = window::Level::AlwaysOnTop;
-    window.platform_specific.application_id = APP_ID.to_string();
+    let window = juhradial_window::frameless_topmost(
+        APP_ID,
+        Size::new(WINDOW_SIZE as f32, WINDOW_SIZE as f32),
+    );
 
     iced::application(boot, update, view)
         .title("JuhRadial MX")
@@ -120,7 +110,7 @@ fn update(state: &mut RadialState, message: Message) -> Task<Message> {
             // the slowest of the three.
             Task::batch([
                 Task::perform(
-                    crate::ext_positioner::move_overlay(
+                    juhradial_window::cursor_helper::move_overlay(
                         APP_ID.to_string(),
                         x - half,
                         y - half,
@@ -129,7 +119,7 @@ fn update(state: &mut RadialState, message: Message) -> Task<Message> {
                     Message::Positioned,
                 ),
                 Task::perform(
-                    crate::ext_positioner::get_focused_window_class(APP_ID.to_string()),
+                    juhradial_window::cursor_helper::get_focused_window_class(APP_ID.to_string()),
                     Message::FocusedClassResolved,
                 ),
                 Task::perform(

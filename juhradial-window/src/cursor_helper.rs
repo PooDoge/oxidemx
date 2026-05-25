@@ -1,13 +1,15 @@
-//! Async client for the GNOME extension's window-positioning D-Bus
-//! methods. The extension lives in `gnome-extension/juhradial-cursor`
-//! and exposes `MoveOverlay(app_id, x, y, monitor) -> success` on
-//! `org.juhradial.CursorHelper`.
+//! Async client for the `juhradial-cursor` GNOME shell extension's
+//! window-positioning D-Bus methods. The extension exposes the
+//! `org.juhradial.CursorHelper` service at `/org/juhradial/CursorHelper`.
 //!
-//! We use this because Mutter (stable GNOME) doesn't advertise
-//! `wlr-layer-shell`, so a regular xdg-shell client can't position
-//! its own toplevel. The extension runs *inside* Mutter and can
-//! call `Meta.Window.move_frame()` directly, bypassing the
-//! protocol restriction.
+//! Used because Mutter (stable GNOME) doesn't advertise
+//! `wlr-layer-shell`, so regular xdg-shell clients can't position
+//! their own toplevels. The extension runs *inside* Mutter and can
+//! call `Meta.Window.move_frame()` directly.
+//!
+//! This module was extracted from `overlay-rs/src/ext_positioner.rs`
+//! in 2026-05 so `popup-rs` could use the same positioning client.
+//! Re-exported via `juhradial_window::cursor_helper`.
 //!
 //! Fire-and-forget by design — if the extension is missing or the
 //! call fails, the menu opens wherever Mutter chose to place the
