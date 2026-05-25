@@ -327,9 +327,9 @@ class SettingsWindow(SidebarMixin, Adw.ApplicationWindow):
                 bus,
                 Gio.DBusProxyFlags.NONE,
                 None,
-                "org.kde.juhradialmx",
-                "/org/kde/juhradialmx/Daemon",
-                "org.kde.juhradialmx.Daemon",
+                "org.juhradial.Daemon",
+                "/org/juhradial/Daemon",
+                "org.juhradial.Daemon",
                 None,
             )
         except Exception as e:
@@ -808,7 +808,7 @@ class SettingsApp(Adw.Application):
 
     def __init__(self):
         super().__init__(
-            application_id="org.kde.juhradialmx.settings",
+            application_id="org.juhradial.settings",
             flags=Gio.ApplicationFlags.DEFAULT_FLAGS,  # Enables single-instance via D-Bus
         )
 
@@ -848,7 +848,7 @@ def main():
     signal.signal(signal.SIGINT, signal.SIG_DFL)
 
     # GTK4/Adwaita handles single-instance automatically via D-Bus
-    # Using application_id='org.kde.juhradialmx.settings' with DEFAULT_FLAGS
+    # Using application_id='org.juhradial.settings' with DEFAULT_FLAGS
     # If another instance is launched, it activates the existing window
     logger.info("JuhRadial MX Settings Dashboard")
     logger.info("  Theme: Catppuccin Mocha")

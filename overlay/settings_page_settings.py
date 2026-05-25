@@ -112,8 +112,8 @@ class SettingsPage(Gtk.ScrolledWindow):
                     bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
                     bus.emit_signal(
                         None,  # broadcast
-                        "/org/kde/juhradialmx/Settings",
-                        "org.kde.juhradialmx.Settings",
+                        "/org/juhradial/Settings",
+                        "org.juhradial.Settings",
                         "LanguageChanged",
                         GLib.Variant("(s)", (lang_keys[idx],)),
                     )

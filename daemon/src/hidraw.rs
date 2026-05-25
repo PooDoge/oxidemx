@@ -549,8 +549,8 @@ if (screens) {
         }
     }
 }
-callDBus("org.kde.juhradialmx", "/org/kde/juhradialmx/Daemon",
-         "org.kde.juhradialmx.Daemon", "ShowMenuAtCursor",
+callDBus("org.juhradial.Daemon", "/org/juhradial/Daemon",
+         "org.juhradial.Daemon", "ShowMenuAtCursor",
          sx + Math.round((pos.x - sx) * dpr),
          sy + Math.round((pos.y - sy) * dpr));
 "#;

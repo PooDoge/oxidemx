@@ -239,9 +239,9 @@ class ConfigManager:
                 bus,
                 Gio.DBusProxyFlags.NONE,
                 None,
-                "org.kde.juhradialmx",
-                "/org/kde/juhradialmx/Daemon",
-                "org.kde.juhradialmx.Daemon",
+                "org.juhradial.Daemon",
+                "/org/juhradial/Daemon",
+                "org.juhradial.Daemon",
                 None,
             )
             proxy.call_sync("ReloadConfig", None, Gio.DBusCallFlags.NONE, 500, None)
@@ -437,9 +437,9 @@ def _get_daemon_proxy():
             bus,
             Gio.DBusProxyFlags.NONE,
             None,
-            "org.kde.juhradialmx",
-            "/org/kde/juhradialmx/Daemon",
-            "org.kde.juhradialmx.Daemon",
+            "org.juhradial.Daemon",
+            "/org/juhradial/Daemon",
+            "org.juhradial.Daemon",
             None,
         )
     except GLib.Error:

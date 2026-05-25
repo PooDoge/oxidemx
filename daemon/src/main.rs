@@ -1133,7 +1133,7 @@ async fn emit_menu_requested(
         connection,
         DBUS_NAME,
         DBUS_PATH,
-        "org.kde.juhradialmx.Daemon",
+        "org.juhradial.Daemon",
     )
     .await?;
 
@@ -1154,7 +1154,7 @@ async fn emit_hide_menu(
         .emit_signal(
             None::<&str>, // destination (None = broadcast)
             DBUS_PATH,
-            "org.kde.juhradialmx.Daemon",
+            "org.juhradial.Daemon",
             "HideMenu",
             &(),
         )
@@ -1178,7 +1178,7 @@ async fn emit_cursor_moved(
         .emit_signal(
             None::<&str>, // destination (None = broadcast)
             DBUS_PATH,
-            "org.kde.juhradialmx.Daemon",
+            "org.juhradial.Daemon",
             "CursorMoved",
             &(x, y),
         )

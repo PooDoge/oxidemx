@@ -727,9 +727,9 @@ None,      Down, Button5, {lines}
             bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
             return Gio.DBusProxy.new_sync(
                 bus, Gio.DBusProxyFlags.NONE, None,
-                "org.kde.juhradialmx",
-                "/org/kde/juhradialmx/Daemon",
-                "org.kde.juhradialmx.Daemon",
+                "org.juhradial.Daemon",
+                "/org/juhradial/Daemon",
+                "org.juhradial.Daemon",
                 None,
             )
         except Exception:

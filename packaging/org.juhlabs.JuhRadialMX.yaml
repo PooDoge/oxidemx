@@ -20,7 +20,7 @@ finish-args:
   - --device=all
 
   # D-Bus access for daemon communication
-  - --talk-name=org.kde.juhradialmx.*
+  - --talk-name=org.juhradial.*
   - --talk-name=org.freedesktop.Notifications
 
   # Session bus for KDE integration

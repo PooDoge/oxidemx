@@ -124,9 +124,9 @@ def _reload_daemon_triggers():
         subprocess.Popen(
             [
                 "dbus-send", "--session", "--type=method_call",
-                "--dest=org.kde.juhradialmx",
-                "/org/kde/juhradialmx/Daemon",
-                "org.kde.juhradialmx.Daemon.ReloadMacroTriggers",
+                "--dest=org.juhradial.Daemon",
+                "/org/juhradial/Daemon",
+                "org.juhradial.Daemon.ReloadMacroTriggers",
             ],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,

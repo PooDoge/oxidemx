@@ -414,9 +414,9 @@ class FlowHandoffManager:
             subprocess.Popen(
                 [
                     "gdbus", "call", "--session",
-                    "--dest", "org.kde.juhradialmx",
-                    "--object-path", "/org/kde/juhradialmx/Daemon",
-                    "--method", "org.kde.juhradialmx.Daemon.SetHost",
+                    "--dest", "org.juhradial.Daemon",
+                    "--object-path", "/org/juhradial/Daemon",
+                    "--method", "org.juhradial.Daemon.SetHost",
                     str(host_index),
                 ],
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,

@@ -413,26 +413,26 @@ class RadialMenu(RadialMenuPaintingMixin, QWidget):
         # D-Bus setup
         bus = QDBusConnection.sessionBus()
         bus.connect(
-            "org.kde.juhradialmx",
-            "/org/kde/juhradialmx/Daemon",
-            "org.kde.juhradialmx.Daemon",
+            "org.juhradial.Daemon",
+            "/org/juhradial/Daemon",
+            "org.juhradial.Daemon",
             "MenuRequested",
             "ii",
             self.on_show,
         )
         # Listen for HideMenu without parameters - we track duration ourselves
         bus.connect(
-            "org.kde.juhradialmx",
-            "/org/kde/juhradialmx/Daemon",
-            "org.kde.juhradialmx.Daemon",
+            "org.juhradial.Daemon",
+            "/org/juhradial/Daemon",
+            "org.juhradial.Daemon",
             "HideMenu",
             "",
             self.on_hide,
         )
         bus.connect(
-            "org.kde.juhradialmx",
-            "/org/kde/juhradialmx/Daemon",
-            "org.kde.juhradialmx.Daemon",
+            "org.juhradial.Daemon",
+            "/org/juhradial/Daemon",
+            "org.juhradial.Daemon",
             "CursorMoved",
             "ii",
             self.on_cursor_moved,
@@ -441,8 +441,8 @@ class RadialMenu(RadialMenuPaintingMixin, QWidget):
         # Listen for language changes from settings process
         bus.connect(
             "",  # any sender
-            "/org/kde/juhradialmx/Settings",
-            "org.kde.juhradialmx.Settings",
+            "/org/juhradial/Settings",
+            "org.juhradial.Settings",
             "LanguageChanged",
             "s",
             self._on_language_changed,
@@ -450,9 +450,9 @@ class RadialMenu(RadialMenuPaintingMixin, QWidget):
 
         # D-Bus interface for calling daemon methods (haptic feedback)
         self.daemon_iface = QDBusInterface(
-            "org.kde.juhradialmx",
-            "/org/kde/juhradialmx/Daemon",
-            "org.kde.juhradialmx.Daemon",
+            "org.juhradial.Daemon",
+            "/org/juhradial/Daemon",
+            "org.juhradial.Daemon",
             bus,
         )
         print(
@@ -661,9 +661,9 @@ class RadialMenu(RadialMenuPaintingMixin, QWidget):
             print("[DBUS] D-Bus interface invalid, recreating...")
             bus = QDBusConnection.sessionBus()
             self.daemon_iface = QDBusInterface(
-                "org.kde.juhradialmx",
-                "/org/kde/juhradialmx/Daemon",
-                "org.kde.juhradialmx.Daemon",
+                "org.juhradial.Daemon",
+                "/org/juhradial/Daemon",
+                "org.juhradial.Daemon",
                 bus,
             )
             print(
@@ -996,11 +996,11 @@ class RadialMenu(RadialMenuPaintingMixin, QWidget):
                             "call",
                             "--session",
                             "--dest",
-                            "org.kde.juhradialmx",
+                            "org.juhradial.Daemon",
                             "--object-path",
-                            "/org/kde/juhradialmx/Daemon",
+                            "/org/juhradial/Daemon",
                             "--method",
-                            "org.kde.juhradialmx.Daemon.SetHost",
+                            "org.juhradial.Daemon.SetHost",
                             str(host_index),
                         ],
                         capture_output=True,

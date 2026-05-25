@@ -836,8 +836,8 @@ impl EvdevHandler {
         // Create KWin script that calls ShowMenuAtCursor with true cursor position
         let script = r#"
 var pos = workspace.cursorPos;
-callDBus("org.kde.juhradialmx", "/org/kde/juhradialmx/Daemon",
-         "org.kde.juhradialmx.Daemon", "ShowMenuAtCursor",
+callDBus("org.juhradial.Daemon", "/org/juhradial/Daemon",
+         "org.juhradial.Daemon", "ShowMenuAtCursor",
          pos.x, pos.y);
 "#;
 

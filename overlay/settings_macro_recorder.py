@@ -310,9 +310,9 @@ class MacroRecorderDialog(Adw.Window):
                 bus,
                 Gio.DBusProxyFlags.NONE,
                 None,
-                "org.kde.juhradialmx",
-                "/org/kde/juhradialmx/Daemon",
-                "org.kde.juhradialmx.Daemon",
+                "org.juhradial.Daemon",
+                "/org/juhradial/Daemon",
+                "org.juhradial.Daemon",
                 None,
             )
             self._dbus_proxy.call_sync(
@@ -321,10 +321,10 @@ class MacroRecorderDialog(Adw.Window):
 
             # Subscribe to MacroEventCaptured signal
             self._signal_sub_id = bus.signal_subscribe(
-                "org.kde.juhradialmx",
-                "org.kde.juhradialmx.Daemon",
+                "org.juhradial.Daemon",
+                "org.juhradial.Daemon",
                 "MacroEventCaptured",
-                "/org/kde/juhradialmx/Daemon",
+                "/org/juhradial/Daemon",
                 None,
                 Gio.DBusSignalFlags.NONE,
                 self._on_dbus_event,

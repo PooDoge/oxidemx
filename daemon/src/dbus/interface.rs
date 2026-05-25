@@ -1,6 +1,6 @@
 //! D-Bus interface implementation
 //!
-//! All methods, signals, and properties for org.kde.juhradialmx.Daemon.
+//! All methods, signals, and properties for org.juhradial.Daemon.
 //! This must be a single `#[interface]` impl block per zbus requirements.
 
 use zbus::{interface, object_server::SignalEmitter, fdo};
@@ -205,7 +205,7 @@ fn apply_scroll_to_device(manager: &mut HapticManager, scroll: &ScrollConfig) {
     }
 }
 
-#[interface(name = "org.kde.juhradialmx.Daemon")]
+#[interface(name = "org.juhradial.Daemon")]
 impl JuhRadialService {
     // =========================================================================
     // MENU METHODS

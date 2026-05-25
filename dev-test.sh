@@ -129,13 +129,13 @@ do_start_daemon() {
   fi
   "$DEV" start daemon
   # Give it a moment to claim the D-Bus name + scan hidraw, then sanity-
-  # check that org.kde.juhradialmx.Daemon actually appeared. A failed
+  # check that org.juhradial.Daemon actually appeared. A failed
   # daemon would leave us starting overlay+settings against a dead
   # bus name and confuse the user later.
   sleep 0.6
   if command -v busctl >/dev/null 2>&1; then
-    if busctl --user list 2>/dev/null | grep -q "org.kde.juhradialmx"; then
-      ok "Daemon claimed org.kde.juhradialmx on the session bus."
+    if busctl --user list 2>/dev/null | grep -q "org.juhradial.Daemon"; then
+      ok "Daemon claimed org.juhradial.Daemon on the session bus."
     else
       warn "Daemon started but D-Bus name not yet visible. Tail logs:"
       warn "  ./dev.sh logs daemon -f"

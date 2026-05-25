@@ -21,7 +21,7 @@ juhradial-icons = { path = "../juhradial-icons" }
 # pure-Rust avoids the *-devel rpm-ostree pain on atomic Fedora.
 iced = { version = "0.14", features = ["canvas", "wayland", "x11", "tokio", "image"] }
 
-# IPC with the daemon (signals on org.kde.juhradialmx) and with the
+# IPC with the daemon (signals on org.juhradial.Daemon) and with the
 # GNOME shell extension (window positioning).
 zbus = "5"
 async-channel = "2"

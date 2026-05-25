@@ -24,7 +24,7 @@ use crate::dbus::OverlayEvent;
 use crate::geometry::WINDOW_SIZE;
 use crate::radial::{RadialState, Painter};
 
-const APP_ID: &str = "org.kde.juhradialmx.overlay";
+const APP_ID: &str = "org.juhradial.overlay";
 
 #[derive(Debug, Clone)]
 pub enum Message {

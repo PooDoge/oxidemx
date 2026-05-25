@@ -1,6 +1,6 @@
 //! D-Bus IPC server for JuhRadial MX
 //!
-//! Implements the org.kde.juhradialmx.Daemon interface for communication
+//! Implements the org.juhradial.Daemon interface for communication
 //! with the overlay, settings UI, and Plasma widget.
 //!
 //! ## Module Layout
@@ -14,13 +14,13 @@ mod interface;
 mod service;
 
 /// D-Bus interface name
-pub const DBUS_INTERFACE: &str = "org.kde.juhradialmx.Daemon";
+pub const DBUS_INTERFACE: &str = "org.juhradial.Daemon";
 
 /// D-Bus object path
-pub const DBUS_PATH: &str = "/org/kde/juhradialmx/Daemon";
+pub const DBUS_PATH: &str = "/org/juhradial/Daemon";
 
 /// D-Bus bus name
-pub const DBUS_NAME: &str = "org.kde.juhradialmx";
+pub const DBUS_NAME: &str = "org.juhradial.Daemon";
 
 // Re-export public API
 pub use init::{init_dbus_service, init_dbus_service_with_device};
@@ -32,8 +32,8 @@ mod tests {
 
     #[test]
     fn test_dbus_constants() {
-        assert_eq!(DBUS_INTERFACE, "org.kde.juhradialmx.Daemon");
-        assert_eq!(DBUS_PATH, "/org/kde/juhradialmx/Daemon");
-        assert_eq!(DBUS_NAME, "org.kde.juhradialmx");
+        assert_eq!(DBUS_INTERFACE, "org.juhradial.Daemon");
+        assert_eq!(DBUS_PATH, "/org/juhradial/Daemon");
+        assert_eq!(DBUS_NAME, "org.juhradial.Daemon");
     }
 }

@@ -20,4 +20,4 @@ Type=Application
 Categories=Settings;Utility;
 Keywords=mouse;logitech;radial;menu;settings;
 StartupNotify=true
-StartupWMClass=org.kde.juhradialmx.settings
+StartupWMClass=org.juhradial.settings

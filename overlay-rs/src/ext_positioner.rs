@@ -110,7 +110,7 @@ mod tests {
     //   busctl --user call org.juhradial.CursorHelper \
     //          /org/juhradial/CursorHelper org.juhradial.CursorHelper \
     //          MoveOverlay siiii \
-    //          "org.kde.juhradialmx.overlay" 200 100 -1
+    //          "org.juhradial.overlay" 200 100 -1
     //
     // returns: b true   (when overlay window is present)
     //          b false  (when no matching window)

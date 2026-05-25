@@ -200,8 +200,8 @@ fn get_cursor_via_kwin_script() -> Option<CursorPosition> {
     // Create KWin script that calls our D-Bus method with cursor position
     let script = r#"
 var pos = workspace.cursorPos;
-callDBus("org.kde.juhradialmx", "/org/kde/juhradialmx/Daemon",
-         "org.kde.juhradialmx.Daemon", "ReportCursorPosition",
+callDBus("org.juhradial.Daemon", "/org/juhradial/Daemon",
+         "org.juhradial.Daemon", "ReportCursorPosition",
          pos.x, pos.y);
 "#;
 

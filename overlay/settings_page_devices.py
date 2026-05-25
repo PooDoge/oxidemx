@@ -266,9 +266,9 @@ class DevicesPage(Gtk.ScrolledWindow):
                     bus,
                     Gio.DBusProxyFlags.NONE,
                     None,
-                    "org.kde.juhradialmx",
-                    "/org/kde/juhradialmx/Daemon",
-                    "org.kde.juhradialmx.Daemon",
+                    "org.juhradial.Daemon",
+                    "/org/juhradial/Daemon",
+                    "org.juhradial.Daemon",
                     None,
                 )
                 # Connection

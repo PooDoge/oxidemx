@@ -334,7 +334,7 @@ def open_settings():
     # Check if settings app is already running on D-Bus
     try:
         result = subprocess.run(
-            ["busctl", "--user", "status", "org.kde.juhradialmx.settings"],
+            ["busctl", "--user", "status", "org.juhradial.settings"],
             capture_output=True, timeout=0.5,
         )
         if result.returncode == 0:

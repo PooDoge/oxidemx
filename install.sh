@@ -522,7 +522,7 @@ install_files() {
 
     # Install desktop files
     sudo install -Dm644 packaging/juhradial-mx.desktop /usr/share/applications/juhradial-mx.desktop
-    sudo install -Dm644 packaging/org.kde.juhradialmx.settings.desktop /usr/share/applications/org.kde.juhradialmx.settings.desktop
+    sudo install -Dm644 packaging/org.juhradial.settings.desktop /usr/share/applications/org.juhradial.settings.desktop
 
     # Install icons
     sudo install -Dm644 assets/juhradial-mx.svg /usr/share/icons/hicolor/scalable/apps/juhradial-mx.svg
