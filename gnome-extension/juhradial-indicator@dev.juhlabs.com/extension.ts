@@ -192,8 +192,6 @@ export default class JuhRadialIndicatorExtension extends Extension {
     private _supervisor: Supervisor | null = null;
     private _cancellable: Gio.Cancellable | null = null;
     private _unsubs: Array<() => void> = [];
-    /** Last-known health snapshot; used by click dispatch for the Start Daemon menu item. */
-    private _lastHealth: StackHealth | null = null;
 
     override enable(): void {
         this._cancellable = new Gio.Cancellable();
@@ -233,10 +231,9 @@ export default class JuhRadialIndicatorExtension extends Extension {
             }),
         );
 
-        // Subscribe: health → button health display + local cache.
+        // Subscribe: health → button health display.
         this._unsubs.push(
             this._supervisor.onHealthChange((h: StackHealth) => {
-                this._lastHealth = h;
                 this._button.setHealth(h);
                 this._rebuildHealthMenu(h);
             }),
@@ -292,7 +289,6 @@ export default class JuhRadialIndicatorExtension extends Extension {
         this._notifier = null;
         this._supervisor = null;
         this._cancellable = null;
-        this._lastHealth = null;
     }
 
     // ---- click dispatch ----

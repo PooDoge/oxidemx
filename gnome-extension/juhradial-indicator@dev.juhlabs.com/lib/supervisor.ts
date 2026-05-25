@@ -200,10 +200,13 @@ export class Supervisor {
                     ['systemctl', '--user', 'start', 'juhradialmx-daemon.service'],
                     Gio.SubprocessFlags.STDOUT_SILENCE | Gio.SubprocessFlags.STDERR_SILENCE,
                 );
-                // AsyncReadyCallback: first param is source_object (Subprocess | null)
-                proc.wait_async(this._cancellable, (_proc: Gio.Subprocess | null, result: Gio.AsyncResult) => {
+                // AsyncReadyCallback: first param is source_object (Subprocess | null).
+                // wait_check_async / wait_check_finish throws on non-zero exit so a
+                // failed systemctl (unit unknown, masked, etc.) surfaces as a rejected
+                // promise — matching the pattern used in isSystemdUnitActive above.
+                proc.wait_check_async(this._cancellable, (_proc: Gio.Subprocess | null, result: Gio.AsyncResult) => {
                     try {
-                        proc.wait_finish(result);
+                        proc.wait_check_finish(result);
                         resolve();
                     } catch (e) {
                         reject(e);

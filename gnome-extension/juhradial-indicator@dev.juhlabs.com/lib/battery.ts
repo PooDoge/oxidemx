@@ -160,6 +160,15 @@ export class BatteryClient {
     // ---- internal ----
 
     private _notify(state: DeviceState): void {
+        // Signal payload carries empty strings for deviceName/connection/id by
+        // design — merge from last known state so the tooltip doesn't blank
+        // between battery emit and the next poll.
+        // See daemon/src/battery.rs Task 0.2b TODO.
+        if (this._latest) {
+            if (!state.deviceName) state = { ...state, deviceName: this._latest.deviceName };
+            if (!state.connection) state = { ...state, connection: this._latest.connection };
+            if (!state.deviceId)   state = { ...state, deviceId:   this._latest.deviceId   };
+        }
         this._latest = state;
         for (const cb of this._subscribers) {
             try {
