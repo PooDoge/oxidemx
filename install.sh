@@ -467,6 +467,12 @@ install_files() {
     sudo install -Dm755 daemon/target/release/juhradiald "$BIN_DIR/juhradiald"
     log_success "Daemon binary"
 
+    # Install indicator popup binary (popup-rs)
+    if [ -f popup-rs/target/release/juhradial-popup ]; then
+        sudo install -Dm755 popup-rs/target/release/juhradial-popup "$BIN_DIR/juhradial-popup"
+        log_success "Indicator popup binary"
+    fi
+
     # Install overlay scripts
     sudo mkdir -p /usr/share/juhradial
     sudo cp -r overlay/*.py /usr/share/juhradial/

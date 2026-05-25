@@ -24,6 +24,7 @@ members = [
     "juhradial-widgets",
     "juhradial-window",
     "overlay-rs",
+    "popup-rs",
     "settings-rs",
     "spike-iced",
 ]
