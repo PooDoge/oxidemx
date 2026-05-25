@@ -9,7 +9,10 @@ use tracing::{info, warn};
 use zbus::{proxy, Connection};
 
 // ---------------------------------------------------------------------------
-// D-Bus proxy
+// D-Bus proxy — mirrors only the methods the daemon actually exposes.
+//
+// Source of truth: daemon/src/dbus/interface.rs
+// Only list methods this popup actually calls; the proxy is not a full mirror.
 // ---------------------------------------------------------------------------
 
 #[proxy(
@@ -21,33 +24,22 @@ trait Daemon {
     /// Set gaming-mode on/off. Bumps DPI and hides the radial when on.
     fn set_gaming_mode(&self, enabled: bool) -> zbus::Result<()>;
 
-    /// Enable / disable haptic feedback.
-    fn set_haptics_enabled(&self, enabled: bool) -> zbus::Result<()>;
-
-    /// Show / hide the radial overlay.
-    fn set_radial_enabled(&self, enabled: bool) -> zbus::Result<()>;
-
     /// Enable / disable SmartShift (free-spin scroll).
-    fn set_smart_shift(&self, enabled: bool) -> zbus::Result<()>;
+    /// `threshold` is the torque percentage at which ratchet engages (1–100).
+    /// When the popup toggle only signals on/off, pass 30 as the default
+    /// threshold — this matches the daemon's own default in config::defaults.
+    fn set_smart_shift(&self, enabled: bool, threshold: u8) -> zbus::Result<()>;
 
     /// Set pointer DPI (200 – 6400).
     fn set_dpi(&self, dpi: u16) -> zbus::Result<()>;
 
-    /// Set scroll sensitivity (1 – 10).
-    fn set_scroll_sensitivity(&self, level: u8) -> zbus::Result<()>;
-
-    /// Set haptic intensity (0 = off, higher = stronger).
-    fn set_haptic_intensity(&self, level: u8) -> zbus::Result<()>;
-
-    /// Set pointer acceleration (clamped to -1.0 – 1.0 by the daemon).
-    fn set_pointer_accel(&self, accel: f64) -> zbus::Result<()>;
-
     /// Switch the active Easy-Switch host (0-indexed, 0–2).
-    fn switch_easy_switch_host(&self, host: u8) -> zbus::Result<()>;
+    /// Returns true when the host switch was accepted by the device.
+    fn set_host(&self, host_index: u8) -> zbus::Result<bool>;
 
     /// Fetch the current active device state.
-    /// Returns: (battery_pct, charging, connected, device_name, connection_type, firmware_version)
-    fn get_active_device_state(&self) -> zbus::Result<(u8, bool, bool, String, String, String)>;
+    /// Returns: (battery_pct, charging, connection, device_name, device_id)
+    fn get_active_device_state(&self) -> zbus::Result<(u8, bool, String, String, String)>;
 }
 
 // ---------------------------------------------------------------------------
@@ -58,31 +50,41 @@ trait Daemon {
 #[derive(Debug, Clone)]
 pub enum Action {
     Gaming(bool),
+    /// Haptic feedback toggle — not yet wired on the daemon side (Phase 3.5).
     Haptics(bool),
+    /// Radial overlay toggle — not yet wired on the daemon side (Phase 3.5).
     Radial(bool),
     Smart(bool),
-    /// Flow cross-device scroll — not yet wired on the daemon side.
+    /// Flow cross-device scroll — not yet wired on the daemon side (Phase 3.5).
     Flow(bool),
-    /// Cursor highlight — not yet wired on the daemon side.
+    /// Cursor highlight — not yet wired on the daemon side (Phase 3.5).
     Highlight(bool),
     Dpi(u16),
+    /// Scroll sensitivity — not yet wired on the daemon side (Phase 3.5).
     Scroll(u8),
+    /// Haptic intensity — not yet wired on the daemon side (Phase 3.5).
     HapticIntensity(u8),
+    /// Pointer acceleration — not yet wired on the daemon side (Phase 3.5).
     Accel(f32),
     EasySwitch(u8),
 }
 
 /// Dispatch an action to the daemon. Returns `Ok(())` even for
-/// unimplemented variants (Flow, Highlight) — they log a warning
-/// instead of returning an error so the caller treats them identically.
+/// unimplemented variants — they log a warning instead of returning an error
+/// so the caller treats them identically.
 pub async fn apply(action: Action) -> Result<(), String> {
-    match action {
-        Action::Flow(_) => {
-            warn!("Action::Flow is not yet wired on the daemon — skipping");
-            return Ok(());
-        }
-        Action::Highlight(_) => {
-            warn!("Action::Highlight is not yet wired on the daemon — skipping");
+    // Actions not yet backed by a daemon method: log and return early so we
+    // don't attempt a D-Bus connection for a no-op. Tracked as Phase 3.5
+    // follow-up work.
+    match &action {
+        Action::Haptics(_)
+        | Action::Radial(_)
+        | Action::Scroll(_)
+        | Action::HapticIntensity(_)
+        | Action::Accel(_)
+        | Action::Flow(_)
+        | Action::Highlight(_) => {
+            warn!(action = ?action, "action not yet wired to daemon - tracked as Phase 3.5 follow-up");
             return Ok(());
         }
         _ => {}
@@ -100,40 +102,29 @@ pub async fn apply(action: Action) -> Result<(), String> {
             info!(enabled = v, "dispatch: set_gaming_mode");
             proxy.set_gaming_mode(v).await
         }
-        Action::Haptics(v) => {
-            info!(enabled = v, "dispatch: set_haptics_enabled");
-            proxy.set_haptics_enabled(v).await
-        }
-        Action::Radial(v) => {
-            info!(enabled = v, "dispatch: set_radial_enabled");
-            proxy.set_radial_enabled(v).await
-        }
         Action::Smart(v) => {
-            info!(enabled = v, "dispatch: set_smart_shift");
-            proxy.set_smart_shift(v).await
+            // set_smart_shift takes (enabled, threshold). The popup toggle
+            // only signals on/off; pass 30 as the default threshold — this
+            // matches the daemon's own SmartShift default (30% torque).
+            info!(enabled = v, threshold = 30u8, "dispatch: set_smart_shift");
+            proxy.set_smart_shift(v, 30).await
         }
         Action::Dpi(dpi) => {
             info!(dpi, "dispatch: set_dpi");
             proxy.set_dpi(dpi).await
         }
-        Action::Scroll(level) => {
-            info!(level, "dispatch: set_scroll_sensitivity");
-            proxy.set_scroll_sensitivity(level).await
-        }
-        Action::HapticIntensity(level) => {
-            info!(level, "dispatch: set_haptic_intensity");
-            proxy.set_haptic_intensity(level).await
-        }
-        Action::Accel(accel) => {
-            info!(accel, "dispatch: set_pointer_accel");
-            proxy.set_pointer_accel(accel as f64).await
-        }
         Action::EasySwitch(host) => {
-            info!(host, "dispatch: switch_easy_switch_host");
-            proxy.switch_easy_switch_host(host).await
+            info!(host, "dispatch: set_host");
+            proxy.set_host(host).await.map(|_accepted| ())
         }
-        // Already handled above.
-        Action::Flow(_) | Action::Highlight(_) => unreachable!(),
+        // Already handled in the early-return arm above.
+        Action::Haptics(_)
+        | Action::Radial(_)
+        | Action::Scroll(_)
+        | Action::HapticIntensity(_)
+        | Action::Accel(_)
+        | Action::Flow(_)
+        | Action::Highlight(_) => unreachable!(),
     };
 
     result.map_err(|e| format!("daemon D-Bus call failed: {e}"))
@@ -144,12 +135,14 @@ pub async fn apply(action: Action) -> Result<(), String> {
 pub async fn fetch_device_state() -> Option<DeviceState> {
     let conn = Connection::session().await.ok()?;
     let proxy = DaemonProxy::new(&conn).await.ok()?;
+    // Daemon returns (battery_pct, charging, connection, device_name, device_id) — 5 fields.
     match proxy.get_active_device_state().await {
-        Ok((battery_pct, charging, connected, device_name, connection_type, _firmware)) => {
+        Ok((battery_pct, charging, connection_type, device_name, _device_id)) => {
             Some(DeviceState {
                 battery_pct,
                 charging,
-                connected,
+                // Treat non-empty connection string as connected.
+                connected: !connection_type.is_empty() && connection_type != "disconnected",
                 device_name,
                 connection_type,
             })

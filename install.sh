@@ -458,7 +458,9 @@ build_project() {
 
     step "Building indicator popup"
     log_info "Compiling popup-rs..."
-    cargo build --release -p juhradial-popup-rs
+    cd popup-rs
+    cargo build --release
+    cd ..
 
     log_success "Build complete"
 }

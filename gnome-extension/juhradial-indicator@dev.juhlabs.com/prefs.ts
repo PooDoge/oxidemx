@@ -53,7 +53,7 @@ const PANEL_TARGET_LABELS = [
     'Auto-detect',
     'Top bar only',
     'Dash to Panel only',
-    'Both panels',
+    'Both panels (currently top-bar only)',
 ];
 
 // Map click-behavior enum values → display labels.

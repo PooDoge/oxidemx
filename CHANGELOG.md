@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > No code yet. See [`INDICATOR_DESIGN.md`](INDICATOR_DESIGN.md) and
 > [`docs/plans/indicator-implementation.md`](docs/plans/indicator-implementation.md).
 
-### Added (planned)
+### Added
 
 - **GNOME Shell indicator** — new `juhradial-indicator@dev.juhlabs.com` extension. Top-bar battery + mouse glyph with user-editable thresholds and colors, libadwaita single-page prefs, mode/icon/percent display, Dash-to-Panel auto-detect. Critical-band one-shot desktop notification.
 - **Quick-action popup** — new `juhradial-popup` binary (Rust + Iced 0.14), spawned on demand by the daemon when the indicator is clicked. Easy-Switch host buttons, quick toggles, quick sliders (Power User mode), volume-on-scroll via `wpctl`.
@@ -24,7 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `popup-rs/` — the daemon-spawned popup binary itself.
 - **TypeScript GNOME extensions** — shared `gnome-extension/tsconfig.json` and `package.json`. New indicator is TS from day one; existing `juhradial-cursor` extension migrates from plain JS to TS in the same PR.
 
-### Changed (planned)
+### Changed
 
 - **D-Bus name flag-day rename** — `org.kde.juhradialmx` → `org.juhradial.Daemon`. Path `/org/kde/juhradialmx/Daemon` → `/org/juhradial/Daemon`. Touches daemon (5 files), overlay-rs (4 files), settings-rs/src/daemon.rs, packaging desktop file (renamed to `org.juhradial.settings.desktop`), `install.sh`, `local-test-install.sh`, `dev-test.sh`, and two root design-doc references. No behaviour change.
 - **Overlay app_id** — `org.kde.juhradialmx.overlay` → `org.juhradial.overlay`. Popup app_id is `org.juhradial.popup`. Cursor-helper extension service stays `org.juhradial.CursorHelper` (already in the new namespace).
