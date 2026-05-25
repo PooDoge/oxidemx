@@ -154,9 +154,16 @@ A future iteration can fold them into one process, but not for the rewrite.
 
 ### Daemon → overlay D-Bus
 
-Unchanged. The daemon emits `MenuRequested(x, y)` and `HideMenu()` on
-`org.kde.juhradialmx` with `(double, double)` cursor coords in Mutter logical
-pixels. The new overlay subscribes to these via `zbus`.
+Unchanged shape. The daemon emits `MenuRequested(x, y)` and `HideMenu()` with
+`(double, double)` cursor coords in Mutter logical pixels. The new overlay
+subscribes to these via `zbus`.
+
+> **Naming note (2026-05-24):** the service formerly known as
+> `org.kde.juhradialmx` is being renamed to `org.juhradial.Daemon` in Phase 0
+> of the indicator work. See [`INDICATOR_DESIGN.md`](INDICATOR_DESIGN.md) §4
+> and [`docs/plans/indicator-implementation.md`](docs/plans/indicator-implementation.md)
+> Task 0.0. This doc still references the legacy name in historical-context
+> paragraphs; the running implementation uses the new name once Phase 0 lands.
 
 ### Layer-shell positioning sketch
 

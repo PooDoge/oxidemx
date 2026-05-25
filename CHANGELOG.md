@@ -5,6 +5,36 @@ All notable changes to JuhRadial MX will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+> Planning + spec lock for the GNOME indicator + popup + settings tab.
+> No code yet. See [`INDICATOR_DESIGN.md`](INDICATOR_DESIGN.md) and
+> [`docs/plans/indicator-implementation.md`](docs/plans/indicator-implementation.md).
+
+### Added (planned)
+
+- **GNOME Shell indicator** — new `juhradial-indicator@dev.juhlabs.com` extension. Top-bar battery + mouse glyph with user-editable thresholds and colors, libadwaita single-page prefs, mode/icon/percent display, Dash-to-Panel auto-detect. Critical-band one-shot desktop notification.
+- **Quick-action popup** — new `juhradial-popup` binary (Rust + Iced 0.14), spawned on demand by the daemon when the indicator is clicked. Easy-Switch host buttons, quick toggles, quick sliders (Power User mode), volume-on-scroll via `wpctl`.
+- **Indicator Popup settings tab** — new tab in `juhradial-settings` between *Point & Scroll* and *Haptic Feedback*. Mode picker, host-button options, reorderable quick toggles + sliders, interaction toggles. Persists to `~/.config/juhradial/config.json` (new `popup` block on `AppConfig`).
+- **Stack supervisor responsibility on the indicator** — health probes for the daemon process (`systemctl --user is-active`), device link, radial overlay process, gaming-mode bridges, cursor-helper extension. Unified health surface in the panel icon color, popup header line, and right-click menu. New daemon D-Bus method `EnsureOverlayRunning()` keeps long-lived process spawns inside the daemon.
+- **New D-Bus surface on `org.juhradial.Daemon`** — `GetActiveDeviceState() -> (battery, charging, connection, deviceName, deviceId)`, `ShowPopup(panel_rect)`, `EnsureOverlayRunning()`, `DeviceStateChanged(...)` push signal.
+- **New workspace crates**:
+  - `juhradial-widgets/` — extracted from `settings-rs/src/{widgets,style,palette}.rs`. Shared by `settings-rs` and the new `popup-rs`.
+  - `juhradial-window/` — frameless-topmost iced window helper + cursor-helper D-Bus client extracted from `overlay-rs/src/ext_positioner.rs`. Shared by `overlay-rs` and `popup-rs`.
+  - `popup-rs/` — the daemon-spawned popup binary itself.
+- **TypeScript GNOME extensions** — shared `gnome-extension/tsconfig.json` and `package.json`. New indicator is TS from day one; existing `juhradial-cursor` extension migrates from plain JS to TS in the same PR.
+
+### Changed (planned)
+
+- **D-Bus name flag-day rename** — `org.kde.juhradialmx` → `org.juhradial.Daemon`. Path `/org/kde/juhradialmx/Daemon` → `/org/juhradial/Daemon`. Touches daemon (5 files), overlay-rs (4 files), settings-rs/src/daemon.rs, packaging desktop file (renamed to `org.juhradial.settings.desktop`), `install.sh`, `local-test-install.sh`, `dev-test.sh`, and two root design-doc references. No behaviour change.
+- **Overlay app_id** — `org.kde.juhradialmx.overlay` → `org.juhradial.overlay`. Popup app_id is `org.juhradial.popup`. Cursor-helper extension service stays `org.juhradial.CursorHelper` (already in the new namespace).
+
+### Notes
+
+- Original UI spec preserved as [`design/juhradial-indicator/CLAUDE_CODE_PROMPT.md`](design/juhradial-indicator/CLAUDE_CODE_PROMPT.md).
+- Deltas between the original prompt and what we're actually building: [`design/juhradial-indicator/SPEC_ADDENDUM.md`](design/juhradial-indicator/SPEC_ADDENDUM.md).
+- Phased rollout: Phase 0 (rename + new D-Bus surface + GSettings schema), Phase A (sibling crate extractions), Phase 1 (GNOME extensions), Phase 2 (settings tab), Phase 3 (popup binary).
+
 ## [0.3.2] - 2026-04-27
 
 ### Fixed
