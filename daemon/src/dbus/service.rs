@@ -7,6 +7,7 @@ use crate::config::SharedConfig;
 use crate::gaming::SharedGamingMode;
 use crate::hidpp::SharedHapticManager;
 use crate::macros::{MacroEngine, MacroRecorder, SharedTriggerMap, TriggerMap};
+use crate::overlay_spawner::OverlaySpawner;
 
 /// JuhRadial MX D-Bus service
 ///
@@ -34,6 +35,8 @@ pub struct JuhRadialService {
     pub(crate) macro_recorder: Arc<Mutex<MacroRecorder>>,
     /// Macro trigger map (evdev button code -> macro ID)
     pub(crate) trigger_map: SharedTriggerMap,
+    /// Overlay process spawner — backs EnsureOverlayRunning() D-Bus handler.
+    pub(crate) overlay_spawner: Arc<OverlaySpawner>,
 }
 
 impl JuhRadialService {
@@ -56,6 +59,7 @@ impl JuhRadialService {
             macro_engine: Arc::new(Mutex::new(MacroEngine::new())),
             macro_recorder: Arc::new(Mutex::new(MacroRecorder::new())),
             trigger_map: Arc::new(std::sync::RwLock::new(TriggerMap::default())),
+            overlay_spawner: Arc::new(OverlaySpawner::new()),
         }
     }
 
@@ -71,6 +75,7 @@ impl JuhRadialService {
         macro_engine: Arc<Mutex<MacroEngine>>,
         macro_recorder: Arc<Mutex<MacroRecorder>>,
         trigger_map: SharedTriggerMap,
+        overlay_spawner: Arc<OverlaySpawner>,
     ) -> Self {
         Self {
             current_profile: "default".to_string(),
@@ -84,6 +89,7 @@ impl JuhRadialService {
             macro_engine,
             macro_recorder,
             trigger_map,
+            overlay_spawner,
         }
     }
 }
@@ -121,6 +127,7 @@ mod tests {
         let macro_engine = Arc::new(Mutex::new(MacroEngine::new()));
         let macro_recorder = Arc::new(Mutex::new(MacroRecorder::new()));
         let trigger_map = Arc::new(std::sync::RwLock::new(TriggerMap::default()));
+        let overlay_spawner = Arc::new(crate::overlay_spawner::OverlaySpawner::new());
         let service = JuhRadialService::new_with_device(
             battery_state,
             config,
@@ -131,6 +138,7 @@ mod tests {
             macro_engine,
             macro_recorder,
             trigger_map,
+            overlay_spawner,
         );
         assert_eq!(service.device_mode, "generic");
         assert_eq!(service.device_name, "SteelSeries Rival 3");

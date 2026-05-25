@@ -426,6 +426,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let macro_engine_for_events = macro_engine.clone();
 
     // Initialize D-Bus service with battery state, config, haptic manager, device info, and macro state
+    let overlay_spawner = std::sync::Arc::new(juhradiald::overlay_spawner::OverlaySpawner::new());
     let dbus_connection = match init_dbus_service_with_device(
         battery_state.clone(),
         shared_config.clone(),
@@ -436,6 +437,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         macro_engine,
         macro_recorder,
         trigger_map,
+        overlay_spawner,
     )
     .await
     {

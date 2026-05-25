@@ -7,6 +7,7 @@ use crate::config::SharedConfig;
 use crate::gaming::SharedGamingMode;
 use crate::hidpp::SharedHapticManager;
 use crate::macros::{MacroEngine, MacroRecorder, SharedTriggerMap, TriggerMap};
+use crate::overlay_spawner::OverlaySpawner;
 
 use super::service::JuhRadialService;
 use super::{DBUS_NAME, DBUS_PATH};
@@ -24,6 +25,7 @@ pub async fn init_dbus_service(
     let macro_engine = Arc::new(Mutex::new(MacroEngine::new()));
     let macro_recorder = Arc::new(Mutex::new(MacroRecorder::new()));
     let trigger_map = Arc::new(std::sync::RwLock::new(TriggerMap::default()));
+    let overlay_spawner = Arc::new(OverlaySpawner::new());
     init_dbus_service_with_device(
         battery_state,
         config,
@@ -34,6 +36,7 @@ pub async fn init_dbus_service(
         macro_engine,
         macro_recorder,
         trigger_map,
+        overlay_spawner,
     )
     .await
 }
@@ -50,6 +53,7 @@ pub async fn init_dbus_service_with_device(
     macro_engine: Arc<Mutex<MacroEngine>>,
     macro_recorder: Arc<Mutex<MacroRecorder>>,
     trigger_map: SharedTriggerMap,
+    overlay_spawner: Arc<OverlaySpawner>,
 ) -> zbus::Result<zbus::Connection> {
     let service = JuhRadialService::new_with_device(
         battery_state,
@@ -61,6 +65,7 @@ pub async fn init_dbus_service_with_device(
         macro_engine,
         macro_recorder,
         trigger_map,
+        overlay_spawner,
     );
 
     let connection = zbus::connection::Builder::session()?

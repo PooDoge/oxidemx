@@ -460,6 +460,94 @@ impl JuhRadialService {
     }
 
     // =========================================================================
+    // INDICATOR METHODS
+    // =========================================================================
+
+    /// Returns the active device state in one shot.
+    /// Tuple: (battery_percent, charging, connection_kind, device_name, device_id)
+    /// connection_kind ∈ {"bluetooth", "unifying", "bolt", "usb", "off"}.
+    ///
+    /// Phase 0.2a returns placeholder values for connection_kind / name /
+    /// id (battery + charging come from the real state). The indicator
+    /// extension can ship today using this method; Task 0.2b wires the
+    /// remaining fields to the hidpp manager's device-info cache.
+    async fn get_active_device_state(
+        &self,
+    ) -> fdo::Result<(u8, bool, String, String, String)> {
+        let state = self.battery_state.read().await;
+        let (battery, charging) = if state.available {
+            (state.percentage, state.charging)
+        } else {
+            (0u8, false)
+        };
+        // TODO(Task 0.2b): wire real values from hidpp manager.
+        let connection = String::from("off");
+        let name = String::new();
+        let id = String::new();
+        Ok((battery, charging, connection, name, id))
+    }
+
+    /// Spawns the indicator popup as a one-shot subprocess.
+    /// panel_{x,y,w,h} are stage-absolute Mutter logical pixels of the
+    /// indicator's panel rect so the popup can position its tip
+    /// underneath. Fire-and-forget — the popup exits on its own
+    /// dismiss path; the daemon doesn't track its lifetime.
+    async fn show_popup(
+        &self,
+        panel_x: i32,
+        panel_y: i32,
+        panel_w: i32,
+        panel_h: i32,
+    ) -> fdo::Result<()> {
+        let rect = format!("{panel_x},{panel_y},{panel_w},{panel_h}");
+        tracing::info!(rect = %rect, "ShowPopup spawning juhradial-popup");
+        match tokio::process::Command::new("juhradial-popup")
+            .args(["--panel-rect", &rect])
+            .spawn()
+        {
+            Ok(_child) => Ok(()),
+            Err(e) => {
+                tracing::warn!(error = %e, "Failed to spawn juhradial-popup");
+                Err(fdo::Error::Failed(format!("spawn juhradial-popup: {e}")))
+            }
+        }
+    }
+
+    /// Idempotent overlay-process ensure. See `crate::overlay_spawner`
+    /// for the contract and timing.
+    async fn ensure_overlay_running(&self) -> fdo::Result<()> {
+        // Need a session-bus connection. The daemon already has one via
+        // its own service registration. zbus exposes the connection on
+        // any SignalEmitter, but we don't want to require an emitter for
+        // a method that doesn't fire signals — so we open a fresh
+        // session connection (zbus pools internally, so this is cheap).
+        let conn = zbus::Connection::session()
+            .await
+            .map_err(|e| fdo::Error::Failed(format!("session bus: {e}")))?;
+        self.overlay_spawner
+            .ensure_running(&conn)
+            .await
+            .map_err(fdo::Error::Failed)
+    }
+
+    /// Emitted when any of (battery, charging, connection, name) changes.
+    /// Subscribed-to by the GNOME indicator extension for push updates so
+    /// it doesn't have to poll the daemon on the critical path.
+    ///
+    /// Phase 0.2a declares the signal so consumers can subscribe; Task
+    /// 0.2b adds the actual emit from `daemon/src/battery.rs` after
+    /// each successful poll.
+    #[zbus(signal)]
+    async fn device_state_changed(
+        emitter: &SignalEmitter<'_>,
+        battery: u8,
+        charging: bool,
+        connection: String,
+        device_name: String,
+        device_id: String,
+    ) -> zbus::Result<()>;
+
+    // =========================================================================
     // DPI METHODS
     // =========================================================================
 

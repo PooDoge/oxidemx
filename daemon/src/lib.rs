@@ -14,6 +14,7 @@ pub mod gaming;
 pub mod hidpp;
 pub mod hidraw;
 pub mod macros;
+pub mod overlay_spawner;
 pub mod performance_monitor;
 pub mod profiles;
 pub mod theme;
