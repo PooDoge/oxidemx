@@ -1,0 +1,7 @@
+# Compiled TS output — sources are .ts files. Run `npm run build` in this directory.
+*.js
+*.js.map
+
+# npm
+node_modules/
+package-lock.json
