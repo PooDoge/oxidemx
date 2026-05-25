@@ -49,7 +49,11 @@ impl OverlaySpawner {
     /// `juhradial-overlay-rs` and polls until the name appears or
     /// `SPAWN_WAIT_TIMEOUT` elapses.
     pub async fn ensure_running(&self, conn: &Connection) -> Result<(), String> {
-        if name_owned(conn, OVERLAY_BUS_NAME).await {
+        let proxy = match zbus::fdo::DBusProxy::new(conn).await {
+            Ok(p) => p,
+            Err(e) => return Err(format!("DBusProxy construct: {e}")),
+        };
+        if name_owned(&proxy, OVERLAY_BUS_NAME).await {
             return Ok(());
         }
         match Command::new("juhradial-overlay-rs").spawn() {
@@ -64,7 +68,7 @@ impl OverlaySpawner {
         }
         let deadline = Instant::now() + SPAWN_WAIT_TIMEOUT;
         while Instant::now() < deadline {
-            if name_owned(conn, OVERLAY_BUS_NAME).await {
+            if name_owned(&proxy, OVERLAY_BUS_NAME).await {
                 return Ok(());
             }
             tokio::time::sleep(SPAWN_WAIT_POLL).await;
@@ -80,10 +84,7 @@ impl Default for OverlaySpawner {
     fn default() -> Self { Self::new() }
 }
 
-async fn name_owned(conn: &Connection, name: &str) -> bool {
-    let Ok(proxy) = zbus::fdo::DBusProxy::new(conn).await else {
-        return false;
-    };
+async fn name_owned(proxy: &zbus::fdo::DBusProxy<'_>, name: &str) -> bool {
     let Ok(name_owned) = name.try_into() else { return false };
     proxy.name_has_owner(name_owned).await.unwrap_or(false)
 }

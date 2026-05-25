@@ -491,7 +491,9 @@ impl JuhRadialService {
     /// panel_{x,y,w,h} are stage-absolute Mutter logical pixels of the
     /// indicator's panel rect so the popup can position its tip
     /// underneath. Fire-and-forget — the popup exits on its own
-    /// dismiss path; the daemon doesn't track its lifetime.
+    /// dismiss path; the daemon doesn't track its lifetime. A detached
+    /// tokio task awaits the child so the popup is reaped cleanly
+    /// without holding any handle here.
     async fn show_popup(
         &self,
         panel_x: i32,
@@ -505,7 +507,15 @@ impl JuhRadialService {
             .args(["--panel-rect", &rect])
             .spawn()
         {
-            Ok(_child) => Ok(()),
+            Ok(mut child) => {
+                // Detach: reap the popup's exit asynchronously so it doesn't
+                // linger as a zombie until the daemon exits. The popup is
+                // genuinely fire-and-forget from this method's perspective.
+                tokio::spawn(async move {
+                    let _ = child.wait().await;
+                });
+                Ok(())
+            }
             Err(e) => {
                 tracing::warn!(error = %e, "Failed to spawn juhradial-popup");
                 Err(fdo::Error::Failed(format!("spawn juhradial-popup: {e}")))
