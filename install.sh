@@ -350,9 +350,13 @@ print_system_info() {
         echo -e "  ${DIM}Mouse${RESET}        ${YELLOW}No Logitech receiver found${RESET} ${GRAY}— plug in to continue${RESET}"
     fi
 
-    # Image type (atomic/immutable vs traditional)
+    # Image type (atomic/immutable vs traditional). Wording deliberately
+    # avoids "layering required" — on Bazzite/Silverblue with the Rust
+    # workspace, the base image already has every runtime lib; we
+    # install binaries to /usr/local/bin and the GNOME extensions to
+    # ~/.local/share/ with zero rpm-ostree calls.
     if [ "$IS_ATOMIC" = true ]; then
-        echo -e "  ${DIM}Image${RESET}        ${CYAN}Atomic${RESET} ${GRAY}(rpm-ostree — layering required)${RESET}"
+        echo -e "  ${DIM}Image${RESET}        ${CYAN}Atomic${RESET} ${GRAY}(${ATOMIC_FLAVOR} — base image used directly, no layering by default)${RESET}"
     fi
 
     # Install mode
@@ -419,12 +423,135 @@ windowrulev2 = noanim, title:^(JuhRadial MX)$'
 
 # ── Dependency installation ──────────────────────────────────────────
 
-# rpm-ostree layering for Bazzite / Silverblue / Kinoite / Bluefin / Aurora.
-# Bazzite docs recommend Flatpak/Homebrew/Distrobox first and treat rpm-ostree
-# as a last resort (see https://docs.bazzite.gg/Installing_and_Managing_Software/rpm-ostree/).
-# JuhRadial MX needs a system daemon (hidraw + udev + systemd) AND a host-side
-# Python/GTK overlay UI, so layering is the appropriate choice here.
+# Dependency strategy for rpm-ostree atomic distros (Bazzite, Silverblue,
+# Kinoite, Bluefin, Aurora, Universal Blue family).
+#
+# DEFAULT BEHAVIOUR: do NOT layer packages. The base image already ships
+# every runtime shared library juhradiald links against (libdbus, libudev,
+# libsystemd, libevdev, libhidapi) plus ydotool, python3, gtk4, libadwaita,
+# python3-gobject — which is everything the running stack needs. Build deps
+# (rust + *-devel headers) live in the user's distrobox / toolbox; they
+# never need to touch the host image.
+#
+# Per the Bazzite docs (https://docs.bazzite.gg/Installing_and_Managing_Software/rpm-ostree/),
+# rpm-ostree layering is the LAST resort because it:
+#   - delays every future image update by re-layering on each rebase
+#   - makes rollback messy (you re-apply layered packages after rollback)
+#   - is unnecessary when an alternative install path exists (Flatpak,
+#     Homebrew, distrobox, AppImage)
+#
+# This function detects what's actually missing on the host. If nothing's
+# missing → skip layering entirely (the Bazzite default). If something IS
+# missing → suggest Flatpak/Homebrew/distrobox alternatives FIRST, with
+# rpm-ostree as the explicit opt-in path via JUHRADIAL_USE_RPM_OSTREE=1.
 install_deps_fedora_atomic() {
+    log_info "Atomic image detected — probing host for runtime libraries"
+
+    # Runtime probe: shared libraries the daemon (and overlay/popup
+    # binaries) actually dlopen at runtime. ldconfig is the canonical way
+    # to check this — works regardless of whether the lib came from the
+    # base image, a layered package, or a Flatpak runtime extension.
+    local missing_runtime_libs=()
+    for lib in libdbus-1.so.3 libudev.so.1 libsystemd.so.0 libevdev.so.2 libhidapi-hidraw.so.0; do
+        if ! ldconfig -p 2>/dev/null | grep -qF "$lib"; then
+            missing_runtime_libs+=("$lib")
+        fi
+    done
+
+    # Runtime commands the daemon shells out to. Single-element loop
+    # today (ydotool only); kept as a loop so adding more commands later
+    # is one line. shellcheck disable=SC2043
+    local missing_runtime_cmds=()
+    local runtime_cmds=(ydotool)
+    for cmd in "${runtime_cmds[@]}"; do
+        if ! command -v "$cmd" &> /dev/null; then
+            missing_runtime_cmds+=("$cmd")
+        fi
+    done
+
+    # Build toolchain — only needed if we're going to compile here.
+    # When binaries already exist in target/release/, we skip the
+    # toolchain probe entirely (build-once, install-many workflow).
+    local need_build=true
+    if [ -x target/release/juhradiald ] || [ -x daemon/target/release/juhradiald ]; then
+        need_build=false
+    fi
+    local missing_build_tools=()
+    if [ "$need_build" = true ]; then
+        if ! command -v cargo &> /dev/null; then
+            missing_build_tools+=("cargo (rust toolchain)")
+        fi
+    fi
+
+    local total_missing=$((${#missing_runtime_libs[@]} + ${#missing_runtime_cmds[@]} + ${#missing_build_tools[@]}))
+
+    # Happy path: nothing missing. This is the Bazzite default.
+    if [ "$total_missing" -eq 0 ]; then
+        log_success "All runtime dependencies present — no layering needed"
+        log_dim "  Runtime libs: libdbus, libudev, libsystemd, libevdev, libhidapi — all in base image"
+        log_dim "  Runtime cmds: ydotool present"
+        if [ "$need_build" = false ]; then
+            log_dim "  Build: skipped — release binaries already in target/release/"
+        else
+            log_dim "  Build: cargo on PATH (or distrobox-managed via dev.sh build all)"
+        fi
+        return 0
+    fi
+
+    # Something is missing — report + offer alternatives in order of
+    # increasing intrusiveness.
+    echo ""
+    log_warning "Host is missing ${total_missing} dependenc${total_missing:+ies}:"
+    if [ ${#missing_runtime_libs[@]} -gt 0 ]; then
+        log_dim "  Runtime libraries: ${missing_runtime_libs[*]}"
+    fi
+    if [ ${#missing_runtime_cmds[@]} -gt 0 ]; then
+        log_dim "  Runtime commands:  ${missing_runtime_cmds[*]}"
+    fi
+    if [ ${#missing_build_tools[@]} -gt 0 ]; then
+        log_dim "  Build tools:       ${missing_build_tools[*]}"
+    fi
+
+    echo ""
+    log_info "Atomic-Fedora-friendly install paths (least → most intrusive):"
+    echo ""
+    if [ ${#missing_build_tools[@]} -gt 0 ]; then
+        log_dim "  ${BOLD}Build tools${RESET} — these never need to touch the host image."
+        log_dim "    Inside your distrobox / toolbox:"
+        log_dim "        sudo dnf install -y rust cargo dbus-devel systemd-devel \\"
+        log_dim "             libevdev-devel hidapi-devel git make"
+        log_dim "    Then build via:  ./dev.sh build all"
+        log_dim ""
+    fi
+    if [ ${#missing_runtime_cmds[@]} -gt 0 ]; then
+        log_dim "  ${BOLD}Runtime commands${RESET} — try Homebrew first (no host-image changes):"
+        log_dim "        brew install ${missing_runtime_cmds[*]}"
+        log_dim ""
+    fi
+    if [ ${#missing_runtime_libs[@]} -gt 0 ]; then
+        log_dim "  ${BOLD}Runtime libraries${RESET} are part of the rpm-ostree base image."
+        log_dim "    These would only be missing on a non-standard image; if you really"
+        log_dim "    need them, layer JUST the missing packages (not the full dev set)."
+        log_dim ""
+    fi
+    log_dim "  ${BOLD}rpm-ostree layering${RESET} (last resort — delays image updates):"
+    log_dim "      JUHRADIAL_USE_RPM_OSTREE=1 ./install.sh"
+    echo ""
+
+    if [ "${JUHRADIAL_USE_RPM_OSTREE:-}" = "1" ]; then
+        log_warning "JUHRADIAL_USE_RPM_OSTREE=1 set — falling through to rpm-ostree layering"
+        install_deps_fedora_atomic_rpm_ostree
+    else
+        log_error "Stopping. Install the missing dependencies via the suggested paths and re-run."
+        log_dim "Or set JUHRADIAL_USE_RPM_OSTREE=1 to layer with rpm-ostree anyway."
+        exit 1
+    fi
+}
+
+# Opt-in legacy path. Only reachable when JUHRADIAL_USE_RPM_OSTREE=1.
+# Layers the FULL dependency set (build + runtime + python overlay deps)
+# via rpm-ostree, prompts for the required reboot.
+install_deps_fedora_atomic_rpm_ostree() {
     local packages=(
         rust cargo
         python3 python3-pip
@@ -438,10 +565,9 @@ install_deps_fedora_atomic() {
         git make
     )
 
-    log_info "Atomic image detected — using ${BOLD}rpm-ostree${RESET} for package layering"
+    log_info "Using ${BOLD}rpm-ostree${RESET} to layer ${#packages[@]} packages on the host image."
     log_dim "Docs: https://docs.bazzite.gg/Installing_and_Managing_Software/rpm-ostree/"
 
-    # Figure out what's actually missing so we don't re-layer on subsequent runs
     local to_install=()
     for pkg in "${packages[@]}"; do
         if ! rpm -q "$pkg" &> /dev/null; then
@@ -450,21 +576,15 @@ install_deps_fedora_atomic() {
     done
 
     if [ ${#to_install[@]} -eq 0 ]; then
-        log_success "All required packages are already layered"
+        log_success "All packages already layered"
         return 0
     fi
 
     echo ""
     log_info "Packages to layer (${#to_install[@]}):"
-    local pkg_list=""
-    for pkg in "${to_install[@]}"; do
-        pkg_list+="$pkg "
-    done
-    log_dim "$pkg_list"
+    log_dim "  ${to_install[*]}"
     echo ""
     log_warning "rpm-ostree layering requires a REBOOT to activate packages."
-    log_warning "Per Bazzite docs, layered packages can delay future image updates."
-    log_dim "After rebooting, re-run this installer to finish the setup."
     echo ""
 
     echo -e "  ${BOLD}Proceed with rpm-ostree install?${RESET} ${DIM}[Y/n]${RESET} \c"
@@ -474,14 +594,12 @@ install_deps_fedora_atomic() {
         echo ""
         log_info "Cancelled. To layer manually:"
         log_dim "  sudo rpm-ostree install ${to_install[*]}"
-        log_dim "Then reboot and re-run this installer."
         exit 0
     fi
 
     echo ""
     if ! sudo rpm-ostree install --idempotent "${to_install[@]}"; then
         log_error "rpm-ostree install failed"
-        log_dim "Try installing packages one at a time, or file an issue with the error output."
         exit 1
     fi
 

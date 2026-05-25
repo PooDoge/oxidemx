@@ -8,10 +8,28 @@ Followups doc: [docs/plans/followups.md](plans/followups.md) — addresses what'
 
 | Path | When to use | What runs |
 |---|---|---|
-| **A. `./install.sh` (one-shot)** | First-time install, or you don't already have build tooling in distrobox | Atomic-Fedora-aware. Detects `/run/ostree-booted`; offers `rpm-ostree install --idempotent` for system deps (asks before, prompts for reboot after); installs binaries to `/usr/local/bin/`, shared data to `/usr/local/share/juhradial/`, GNOME extensions to `~/.local/share/gnome-shell/extensions/`. |
-| **B. Manual steps below (this doc)** | Iterating during dev — you already have rust+cargo in distrobox and want explicit control over each step | Same end state as path A but you drive each install yourself. Lets you skip dependency layering and use the dev distrobox for cargo. |
+| **A. `./install.sh` (one-shot)** | First-time install. Atomic-Fedora-aware. | **By default, layers NOTHING via rpm-ostree.** Probes the host for runtime libs (`libdbus`/`libudev`/`libsystemd`/`libevdev`/`libhidapi`) + commands (`ydotool`) via `ldconfig` + `command -v`; on Bazzite all of those are in the base image so the script proceeds straight to build+install. If something IS missing, it suggests Homebrew / Flatpak / distrobox FIRST. rpm-ostree layering is an explicit opt-in via `JUHRADIAL_USE_RPM_OSTREE=1 ./install.sh`. |
+| **B. Manual steps below** | Iterating during dev — you want explicit control over each step | Same end state. Lets you reuse your dev distrobox for cargo. |
 
 Steps 1–7 below are path B. If you take path A, skip to step 5 (smoke-test) after `./install.sh` returns.
+
+### Path A on Bazzite: what actually runs (no layering)
+
+```
+$ ./install.sh
+   ...
+   Image        Atomic (rpm-ostree — base image used directly, no layering by default)
+   ...
+[2] Installing dependencies
+   → Atomic image detected — probing host for runtime libraries
+   ✓ All runtime dependencies present — no layering needed
+       Runtime libs: libdbus, libudev, libsystemd, libevdev, libhidapi — all in base image
+       Runtime cmds: ydotool present
+       Build: cargo on PATH (or distrobox-managed via dev.sh build all)
+[3] Build → [4] Install files → [5] Enable service → [6] Desktop integration → done.
+```
+
+Two sudo prompts total: (a) `install -Dm755 ... /usr/local/bin/<bin>` for the four binaries, (b) `install -Dm644 ... /etc/udev/rules.d/99-juhradialmx.rules`. `rpm-ostree status` stays untouched; `usroverlay` stays read-only.
 
 ---
 
