@@ -1,0 +1,24 @@
+# JuhRadial MX — gamepad-rumble → haptic bridge
+#
+# Installed to /usr/lib/udev/rules.d/ (or /etc/udev/rules.d/). See
+# HAPTIC_GAMEPAD_BRIDGE_DESIGN.md §5.3.
+#
+# Two things this rule does:
+#   1. Lets the daemon (running as the logged-in user) open
+#      /dev/uinput so it can create the virtual gamepad. By default
+#      /dev/uinput is root:root 0660 — unreachable without this.
+#   2. Tags the virtual gamepad node as a joystick and grants the
+#      logged-in user access, so games can open it.
+#
+# After installing: `sudo udevadm control --reload && sudo udevadm trigger`
+
+# 1. Allow the active-session user to open /dev/uinput.
+KERNEL=="uinput", SUBSYSTEM=="misc", OPTIONS+="static_node=uinput", \
+    TAG+="uaccess", MODE="0660", GROUP="input"
+
+# 2. The virtual gamepad we create. Matched on the device name set
+#    via uinput_setup (see daemon/src/gamepad_haptics/virtual_pad.rs).
+#    ID_INPUT_JOYSTICK=1 makes SDL2 / Steam enumerate it as a
+#    controller; uaccess grants the logged-in user read/write.
+SUBSYSTEM=="input", ATTRS{name}=="MX Master 4 Haptic Gamepad", \
+    ENV{ID_INPUT_JOYSTICK}="1", TAG+="uaccess"

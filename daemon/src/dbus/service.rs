@@ -1,6 +1,7 @@
 //! JuhRadial MX D-Bus service struct and constructors
 
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
+use std::time::Instant;
 
 use crate::battery::SharedBatteryState;
 use crate::config::SharedConfig;
@@ -8,6 +9,24 @@ use crate::gaming::SharedGamingMode;
 use crate::hidpp::SharedHapticManager;
 use crate::macros::{MacroEngine, MacroRecorder, SharedTriggerMap, TriggerMap};
 use crate::overlay_spawner::OverlaySpawner;
+use crate::thumb_wheel::{new_shared_state as new_thumb_wheel_state, SharedThumbWheelState};
+
+/// TTL cache for HID++ Easy-Switch queries. Settings polls the
+/// daemon every 5s; without caching, each poll re-issues the
+/// HOSTS_INFO HID++ chain (one getHostDescriptor + N
+/// getHostFriendlyName chunks per host slot). That hammered
+/// the device with redundant traffic AND spammed the daemon log
+/// every poll on devices that error on optional sub-functions
+/// for unpaired slots. Cache invalidates after 30s — host names
+/// + count change rarely (only on pair / unpair / host switch).
+#[derive(Debug, Clone, Default)]
+pub(crate) struct EasySwitchCache {
+    pub host_names: Option<(Vec<String>, Instant)>,
+    pub info: Option<((u8, u8), Instant)>,
+}
+
+pub(crate) const EASY_SWITCH_TTL: std::time::Duration =
+    std::time::Duration::from_secs(30);
 
 /// JuhRadial MX D-Bus service
 ///
@@ -37,6 +56,18 @@ pub struct JuhRadialService {
     pub(crate) trigger_map: SharedTriggerMap,
     /// Overlay process spawner — backs EnsureOverlayRunning() D-Bus handler.
     pub(crate) overlay_spawner: Arc<OverlaySpawner>,
+    /// TTL cache for Easy-Switch HID++ queries — see
+    /// `EasySwitchCache`. Wrapped in RwLock so the read-heavy
+    /// path (settings poll) doesn't block on a single cache
+    /// look-up.
+    pub(crate) easy_switch_cache: Arc<RwLock<EasySwitchCache>>,
+    /// Shared thumb-wheel state. Owns the uinput forwarder when
+    /// horizontal-scroll inversion is active and carries the
+    /// HID++ feature index so the hidraw loop can route diverted
+    /// notifications back into the forwarder. Cloned into the
+    /// hidraw loop at startup; the D-Bus side mutates it when the
+    /// user toggles the invert setting.
+    pub(crate) thumb_wheel_state: SharedThumbWheelState,
 }
 
 impl JuhRadialService {
@@ -60,10 +91,17 @@ impl JuhRadialService {
             macro_recorder: Arc::new(Mutex::new(MacroRecorder::new())),
             trigger_map: Arc::new(std::sync::RwLock::new(TriggerMap::default())),
             overlay_spawner: Arc::new(OverlaySpawner::new()),
+            easy_switch_cache: Arc::new(RwLock::new(EasySwitchCache::default())),
+            thumb_wheel_state: new_thumb_wheel_state(),
         }
     }
 
-    /// Create a new D-Bus service instance with device mode info
+    /// Create a new D-Bus service instance with device mode info.
+    ///
+    /// `thumb_wheel_state` must be the same `Arc` clone handed to the
+    /// hidraw read loop, so the D-Bus side (which manages activation)
+    /// and the read side (which dispatches notifications) see the
+    /// same forwarder + feature index.
     #[allow(clippy::too_many_arguments)]
     pub fn new_with_device(
         battery_state: SharedBatteryState,
@@ -76,6 +114,7 @@ impl JuhRadialService {
         macro_recorder: Arc<Mutex<MacroRecorder>>,
         trigger_map: SharedTriggerMap,
         overlay_spawner: Arc<OverlaySpawner>,
+        thumb_wheel_state: SharedThumbWheelState,
     ) -> Self {
         Self {
             current_profile: "default".to_string(),
@@ -90,6 +129,8 @@ impl JuhRadialService {
             macro_recorder,
             trigger_map,
             overlay_spawner,
+            easy_switch_cache: Arc::new(RwLock::new(EasySwitchCache::default())),
+            thumb_wheel_state,
         }
     }
 }
@@ -139,6 +180,7 @@ mod tests {
             macro_recorder,
             trigger_map,
             overlay_spawner,
+            new_thumb_wheel_state(),
         );
         assert_eq!(service.device_mode, "generic");
         assert_eq!(service.device_name, "SteelSeries Rival 3");

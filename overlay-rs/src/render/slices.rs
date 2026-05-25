@@ -13,10 +13,10 @@
 //! here once the icon resolver picks up its first compile-clean
 //! iced surface API.
 
-use iced::widget::canvas::{path::Arc, Frame, Path, Stroke};
-use iced::{Color, Point, Radians};
+use iced::widget::canvas::{self, Frame, Path, Stroke};
+use iced::{Color, Point, Radians, Vector};
 use juhradial_shared::theme::{parse_hex_rgba, ThemeColors};
-use juhradial_shared::{ElementAnimation, Slice};
+use juhradial_shared::{ComposedTransform, ElementAnimation, Slice};
 
 use crate::anim;
 use crate::radial::{
@@ -24,7 +24,132 @@ use crate::radial::{
 };
 use crate::render::icons::{draw_icon, IconCache};
 
+/// Default wedge sweep for the legacy 8-slot ring. Kept for the
+/// submenu pop-out which still uses this for parent-bisector
+/// math; the main ring computes its sweep from the active page's
+/// `slot_count` at render time.
+#[allow(dead_code)]
 const SLICE_DEGREES: f32 = 45.0;
+
+/// Render an entire 8-slot ring of slices with an optional uniform
+/// rotation + scale around the centre. The transform is applied via
+/// iced's canvas matrix stack so wedges, icon backgrounds, and icon
+/// glyphs all rotate/scale together. `extra_rotation_rad == 0.0`
+/// and `scale == 1.0` reduce to the plain single-ring path with
+/// just one save/restore — the page-transition code uses this to
+/// double-render an outgoing + incoming ring during a scroll-cycle.
+///
+/// `slices` may be shorter than 8; missing slots render as empty
+/// wedges (same as `draw_slice` with `slice = None`).
+/// `highlights` is the per-slot hover progress, mirrors the
+/// `RadialState::highlights` array layout — pass `&[0.0; 8]` when
+/// the ring shouldn't show any hover state (e.g. the outgoing
+/// ring during a transition).
+/// `wedge_fill_mul` scales the alpha of the canvas-painted wedge
+/// fill, stroke, and hover wash — leaves icons + icon-glow rings
+/// untouched. The SDF wedge spike pipes `1.0 - sdf_intensity`
+/// through here so the canvas wedges fade out as the SDF layer
+/// fades in. `1.0` (the default at every existing call site) is
+/// the historic full-strength canvas behaviour.
+///
+/// `ring_transform` carries any per-ring translate/rotate/scale/
+/// flip composed for this draw — used by the page-cycle
+/// transition (incoming ring uses Enter, outgoing uses Exit) and
+/// by future custom-track-driven preset paths. Pass
+/// `&ComposedTransform::IDENTITY` for the no-transform case.
+///
+/// `slot_transforms` carries optional per-slot transforms applied
+/// AROUND each slice's icon centre (useful for slice-highlight
+/// custom tracks). `None` skips the per-slot wrapping entirely.
+#[allow(clippy::too_many_arguments)]
+pub fn draw_ring_transformed(
+    frame: &mut Frame,
+    center: Point,
+    inner_r: f32,
+    outer_r: f32,
+    icon_r: f32,
+    icon_bg_radius: f32,
+    slices: &[Slice],
+    palette: &ThemeColors,
+    highlights: &[f32; 8],
+    menu_opacity: f32,
+    bg_opacity: f32,
+    highlight_opacity: f32,
+    icons: &IconCache,
+    ring_transform: &ComposedTransform,
+    slot_transforms: Option<&[ComposedTransform; 8]>,
+    slot_count: usize,
+    wedge_fill_mul: f32,
+) {
+    let n = slot_count.clamp(2, 8);
+    frame.with_save(|f| {
+        // Apply the ring-level composed transform around the menu
+        // centre (translate + rotate + flip-scale + uniform-scale
+        // are all baked into `ring_transform.scale`-multiplied
+        // radii via `mscale` upstream; this call applies the
+        // remaining channels). Identity transform = no-op.
+        crate::render::animation::apply_composed_transform(
+            f,
+            center,
+            ring_transform,
+        );
+        let ring_alpha = ring_transform.alpha.clamp(0.0, 1.0);
+        for i in 0..n {
+            let highlight = highlights.get(i).copied().unwrap_or(0.0);
+            let slice_for_render = slices.get(i).filter(|s| {
+                s.visible_if.as_ref().map(|c| c.eval()).unwrap_or(true)
+            });
+            // Per-slot transform: wrap slice draw in with_save so
+            // the per-slot transform doesn't leak across to the
+            // next slot's draw_slice call. Skipped when
+            // slot_transforms is None.
+            let slot_t = slot_transforms.and_then(|s| s.get(i));
+            let needs_slot_save = slot_t.is_some();
+            // icon centre — needed both for the slot-pivot and as
+            // the slice-internal computation. Keep it here so the
+            // slot transform can pivot around it.
+            let n_f = n as f32;
+            let slice_degrees = 360.0 / n_f;
+            let icon_angle =
+                ((i as f32) * slice_degrees - 90.0).to_radians();
+            let icon_pos = polar(center, icon_r, icon_angle);
+
+            let draw = |fr: &mut Frame| {
+                draw_slice(
+                    fr,
+                    center,
+                    inner_r,
+                    outer_r,
+                    icon_r,
+                    icon_bg_radius,
+                    i,
+                    slice_for_render,
+                    palette,
+                    highlight,
+                    menu_opacity * ring_alpha,
+                    bg_opacity,
+                    highlight_opacity,
+                    icons,
+                    n,
+                    wedge_fill_mul,
+                );
+            };
+
+            if needs_slot_save {
+                f.with_save(|fr| {
+                    if let Some(t) = slot_t {
+                        crate::render::animation::apply_composed_transform(
+                            fr, icon_pos, t,
+                        );
+                    }
+                    draw(fr);
+                });
+            } else {
+                draw(f);
+            }
+        }
+    });
+}
 
 /// Render a single slice. `highlight` is per-slice hover progress in
 /// `[0.0, 1.0]`; `slice` carries the user-configured label / colour /
@@ -46,16 +171,15 @@ pub fn draw_slice(
     bg_opacity: f32,
     highlight_opacity: f32,
     icons: &IconCache,
+    slot_count: usize,
+    wedge_fill_mul: f32,
 ) {
-    // Slice angular range in cairo coords (clockwise from +X axis,
-    // radians). Python uses `index * 45 - 22.5 - 90` with degrees;
-    // the −90 rotates "0° = top" into iced's "0° = right".
-    let start_deg = (index as f32) * SLICE_DEGREES - SLICE_DEGREES / 2.0 - 90.0;
-    let end_deg = start_deg + SLICE_DEGREES;
-    let start_rad = start_deg.to_radians();
-    let end_rad = end_deg.to_radians();
+    // Wedge sweep — 360° / slot_count. The legacy 8-slot ring
+    // hits 45°; a 4-slot ring uses 90° per wedge, etc. Half-sweep
+    // shift centres slot 0 on 12 o'clock.
+    let n = slot_count.max(1) as f32;
+    let slice_degrees = 360.0 / n;
 
-    let wedge = build_wedge(center, inner_r, outer_r, start_rad, end_rad);
     let mo = menu_opacity.clamp(0.0, 1.0);
     let bgo = bg_opacity.clamp(0.0, 1.0);
     let hlo = highlight_opacity.clamp(0.0, 1.0);
@@ -65,55 +189,88 @@ pub fn draw_slice(
     // tracks `bg_opacity` so users can darken the wheel substrate
     // without losing the hover feedback.
     let hl = highlight * hlo;
+    let wfm = wedge_fill_mul.clamp(0.0, 1.0);
 
-    // Base fill — surface0 @ alpha 80/255.
-    frame.fill(&wedge, rgba(&palette.surface0, (80.0 / 255.0) * mo * bgo));
-
-    // Stroke — interpolate surface2 → white, alpha 60..120, line
-    // width 1.0..1.5.
-    let stroke_color = lerp(rgba(&palette.surface2, 1.0), Color::WHITE, hl);
-    let alpha = ((60.0 + 60.0 * hl) / 255.0) * mo;
-    frame.stroke(
-        &wedge,
-        Stroke::default()
-            .with_color(Color { a: alpha, ..stroke_color })
-            .with_width(1.0 + 0.5 * hl),
-    );
-
-    // Hover fade-in.
-    if hl > 0.0 {
-        frame.fill(
-            &wedge,
-            Color::from_rgba(1.0, 1.0, 1.0, (45.0 / 255.0) * hl * mo),
-        );
-    }
-
-    // Icon centre on the slice bisector.
-    let icon_angle = ((index as f32) * SLICE_DEGREES - 90.0).to_radians();
+    // Icon centre on the slice bisector — needed by both the
+    // wedge-decoration block (icon bg disc, hover glow) and the
+    // icon-glyph block below, so compute it before the gate.
+    let icon_angle = ((index as f32) * slice_degrees - 90.0).to_radians();
     let icon_pos = polar(center, icon_r, icon_angle);
 
-    // Glow ring on hover.
-    if hl > 0.0 {
-        let glow = Path::circle(icon_pos, icon_bg_radius + 2.0);
+    // ---- Wedge geometry block ----
+    // When the SDF spike has fully taken over (`wfm` near zero)
+    // we skip every wedge-related Path construction + frame
+    // call. The output alpha would be ≤ 2 % anyway and the
+    // tessellation work is the dominant cost during a multi-
+    // shader frame. This is what users notice as "lag during
+    // menu open" when the SDF is at full intensity.
+    if wfm > 0.02 {
+        let start_deg =
+            (index as f32) * slice_degrees - slice_degrees / 2.0 - 90.0;
+        let end_deg = start_deg + slice_degrees;
+        let start_rad = start_deg.to_radians();
+        let end_rad = end_deg.to_radians();
+        let wedge = build_wedge(center, inner_r, outer_r, start_rad, end_rad);
+
+        // Base wedge fill — surface0 with alpha driven directly
+        // by the user's "menu background opacity" slider.
+        frame.fill(&wedge, rgba(&palette.surface0, mo * bgo * wfm));
+
+        // Resolve the active accent once — every hover-driven
+        // highlight (stroke, wash, icon glow) interpolates
+        // toward this so the feedback colour follows the
+        // active theme instead of falling back to a hard-coded
+        // white wash.
+        let accent_color = rgba(&palette.accent, 1.0);
+
+        // Stroke — interpolate surface2 → accent, alpha 60..150,
+        // line width 1.0..1.5.
+        let stroke_color =
+            lerp(rgba(&palette.surface2, 1.0), accent_color, hl);
+        let alpha = ((60.0 + 90.0 * hl) / 255.0) * mo * wfm;
         frame.stroke(
-            &glow,
+            &wedge,
             Stroke::default()
-                .with_color(Color::from_rgba(
-                    1.0, 1.0, 1.0, (40.0 / 255.0) * hl * mo,
-                ))
-                .with_width(3.0),
+                .with_color(Color { a: alpha, ..stroke_color })
+                .with_width(1.0 + 0.5 * hl),
+        );
+
+        // Hover fade-in — wedge wash in the accent colour.
+        if hl > 0.0 {
+            frame.fill(
+                &wedge,
+                Color {
+                    a: (70.0 / 255.0) * hl * mo * wfm,
+                    ..accent_color
+                },
+            );
+        }
+
+        // Glow ring on hover — accent halo around the icon disc.
+        if hl > 0.0 {
+            let glow = Path::circle(icon_pos, icon_bg_radius + 2.0);
+            frame.stroke(
+                &glow,
+                Stroke::default()
+                    .with_color(Color {
+                        a: (90.0 / 255.0) * hl * mo * wfm,
+                        ..accent_color
+                    })
+                    .with_width(3.0),
+            );
+        }
+
+        // Icon background — interpolate surface1 → surface2.
+        let s1 = rgba(&palette.surface1, 1.0);
+        let s2 = rgba(&palette.surface2, 1.0);
+        let bg = lerp(s1, s2, hl);
+        let bg_alpha = ((230.0 + 25.0 * hl) / 255.0) * mo * wfm;
+        frame.fill(
+            &Path::circle(icon_pos, icon_bg_radius),
+            Color { a: bg_alpha, ..bg },
         );
     }
-
-    // Icon background — interpolate surface1 → surface2.
-    let s1 = rgba(&palette.surface1, 1.0);
-    let s2 = rgba(&palette.surface2, 1.0);
-    let bg = lerp(s1, s2, hl);
-    let bg_alpha = ((230.0 + 25.0 * hl) / 255.0) * mo;
-    frame.fill(
-        &Path::circle(icon_pos, icon_bg_radius),
-        Color { a: bg_alpha, ..bg },
-    );
+    // ---- end wedge geometry block ----
 
     // Icon colour for the slot — uses the configured slice color
     // (e.g. "green", "sapphire") looked up in the active palette.
@@ -143,11 +300,188 @@ pub fn draw_slice(
         icons.resolve(icon_source, glyph_size_px, icon_color_rgba)
     };
     if let Some(handle) = resolved {
-        draw_icon(frame, icon_pos.x, icon_pos.y, glyph_size, &handle);
+        draw_icon(frame, icon_pos.x, icon_pos.y, glyph_size, &handle, mo);
     } else {
         let dot_color = Color::from_rgba(sr as f32, sg as f32, sb as f32, mo);
         frame.fill(&Path::circle(icon_pos, icon_bg_radius * 0.35), dot_color);
     }
+}
+
+
+/// Draw the page-name flash inside the centre puck — handles the
+/// slide-in / cross-slide-out / fade-out sequence in one place.
+/// Caller passes the current and (optional) previous page name,
+/// the slide direction (+1 forward / -1 backward / 0 no-slide),
+/// timing knobs, and the elapsed-since-trigger clock.
+///
+/// Timeline:
+///   * `0..transition_ms` — incoming slides + fades in from
+///     `direction × slide_distance` to 0; outgoing (if any)
+///     slides + fades out from 0 to `−direction × slide_distance`.
+///   * `transition_ms..(transition_ms + visible_ms)` — incoming
+///     at full opacity, no slide.
+///   * `(transition_ms + visible_ms)..total` — incoming fades
+///     out to 0 over the same `transition_ms` window.
+///
+/// `total = 2 × transition_ms + visible_ms`. Returns `false` when
+/// `elapsed >= total` so the caller can clear its timer.
+#[allow(clippy::too_many_arguments)]
+pub fn draw_page_name_transition(
+    frame: &mut Frame,
+    center: Point,
+    radius: f32,
+    palette: &ThemeColors,
+    menu_opacity: f32,
+    current_name: &str,
+    previous_name: Option<&str>,
+    direction: i32,
+    elapsed_ms: u64,
+    visible_ms: u32,
+    transition_ms: u32,
+    slide_distance_px: f32,
+    label_size: f32,
+    label_font: iced::Font,
+    arced: bool,
+) -> bool {
+    let mo = menu_opacity.clamp(0.0, 1.0);
+    let trans = transition_ms.max(1) as f32;
+    let visible = visible_ms as f32;
+    let total = trans + visible + trans;
+
+    if (elapsed_ms as f32) >= total {
+        return false;
+    }
+    let t = elapsed_ms as f32;
+
+    // Incoming alpha + x_offset.
+    // Phase 1 (0..trans): alpha ramps 0 → 1, x_offset ramps
+    //   `direction * slide` → 0 (eased ease-out).
+    // Phase 2 (trans..trans+visible): alpha 1, offset 0.
+    // Phase 3 (trans+visible..total): alpha 1 → 0, offset 0.
+    let (in_alpha, in_x) = if t < trans {
+        let p = t / trans;
+        let eased = 1.0 - (1.0 - p).powi(3); // ease-out cubic
+        (eased, direction as f32 * slide_distance_px * (1.0 - eased))
+    } else if t < trans + visible {
+        (1.0, 0.0)
+    } else {
+        let p = (t - trans - visible) / trans;
+        let eased = 1.0 - (1.0 - p).powi(3);
+        (1.0 - eased, 0.0)
+    };
+
+    // Outgoing alpha + x_offset (only during phase 1).
+    let outgoing = if t < trans && previous_name.is_some() && direction != 0 {
+        let p = t / trans;
+        let eased = 1.0 - (1.0 - p).powi(3);
+        let alpha = 1.0 - eased;
+        let x = -(direction as f32) * slide_distance_px * eased;
+        Some((alpha, x))
+    } else {
+        None
+    };
+
+    let (tr, tg, tb, _) =
+        parse_hex_rgba(&palette.text).unwrap_or((1.0, 1.0, 1.0, 1.0));
+
+    // Approximate visible-character width — same constant the
+    // hover label uses (`label_size * 0.55`).
+    let approx_w = |s: &str| s.chars().count() as f32 * label_size * 0.55;
+    // Aggressive truncate so long page names fit the puck.
+    let truncate = |s: &str| -> String {
+        let max_chars =
+            ((radius * 2.0 / (label_size * 0.55)).max(4.0)) as usize;
+        if s.chars().count() > max_chars {
+            let mut out: String =
+                s.chars().take(max_chars.saturating_sub(1)).collect();
+            out.push('…');
+            out
+        } else {
+            s.to_string()
+        }
+    };
+
+    let txt_color = |alpha: f32| {
+        iced::Color::from_rgba(
+            tr as f32,
+            tg as f32,
+            tb as f32,
+            (mo * alpha).clamp(0.0, 1.0),
+        )
+    };
+
+    let draw_label = |frame: &mut Frame, content: &str, alpha: f32, x_off: f32| {
+        if alpha <= 0.001 {
+            return;
+        }
+        let display = truncate(content);
+        if arced {
+            // Arced layout: each character on a small arc lifted
+            // above the puck so the cursor (which sits on the
+            // centre during page-cycle scrolling) doesn't sit
+            // behind the label. `arc_radius` clears the puck
+            // edge by ~font_size * 0.5; the slide translates the
+            // whole arc horizontally so animations stay coherent
+            // with the flat layout's behaviour.
+            let arc_radius = radius + label_size * 0.9;
+            let cell_w = label_size * 0.6;
+            let chars: Vec<char> = display.chars().collect();
+            let count = chars.len() as f32;
+            let step = (cell_w / arc_radius).max(0.001);
+            let centre_angle = -std::f32::consts::FRAC_PI_2;
+            for (i, ch) in chars.iter().enumerate() {
+                // Distribute chars symmetrically around 12 o'clock.
+                let centred = i as f32 - (count - 1.0) / 2.0;
+                let angle = centre_angle + centred * step;
+                let pos = Point::new(
+                    center.x + arc_radius * angle.cos() + x_off,
+                    center.y + arc_radius * angle.sin(),
+                );
+                // Tangent so chars rotate to follow the arc.
+                // Top of menu → tangent = angle + π/2 keeps the
+                // top of each glyph pointing outward (away from
+                // the puck).
+                let tangent = angle + std::f32::consts::FRAC_PI_2;
+                let s: String = ch.to_string();
+                frame.with_save(|f| {
+                    f.translate(Vector::new(pos.x, pos.y));
+                    f.rotate(Radians(tangent));
+                    f.fill_text(iced::widget::canvas::Text {
+                        content: s,
+                        position: iced::Point::new(
+                            -cell_w / 2.0,
+                            -label_size / 2.0,
+                        ),
+                        color: txt_color(alpha),
+                        size: label_size.into(),
+                        font: label_font,
+                        ..iced::widget::canvas::Text::default()
+                    });
+                });
+            }
+        } else {
+            // Flat layout: single fill_text centred in the puck.
+            let w = approx_w(&display);
+            frame.fill_text(iced::widget::canvas::Text {
+                content: display,
+                position: iced::Point::new(
+                    center.x - w / 2.0 + x_off,
+                    center.y - label_size / 2.0,
+                ),
+                color: txt_color(alpha),
+                size: label_size.into(),
+                font: label_font,
+                ..iced::widget::canvas::Text::default()
+            });
+        }
+    };
+
+    if let (Some(prev), Some((alpha, x_off))) = (previous_name, outgoing) {
+        draw_label(frame, prev, alpha, x_off);
+    }
+    draw_label(frame, current_name, in_alpha, in_x);
+
+    true
 }
 
 /// Render the submenu pop-out arc for an open `SubmenuState`. Each
@@ -289,7 +623,7 @@ pub fn draw_submenu(
             icons.resolve(item.icon.as_str(), glyph_size_px, icon_color)
         };
         if let Some(handle) = resolved {
-            draw_icon(frame, item_pos.x, item_pos.y, glyph_size, &handle);
+            draw_icon(frame, item_pos.x, item_pos.y, glyph_size, &handle, item_opacity);
         } else {
             frame.fill(
                 &Path::circle(item_pos, scaled_radius * 0.35),
@@ -304,6 +638,13 @@ pub fn draw_submenu(
 /// Ports `_draw_center` from the Python overlay; the centre-text
 /// rendering is the long-promised "/* text overlay lands in a
 /// follow-up */" finally landing here.
+/// `label_alpha_mul` — extra opacity multiplier applied **only**
+/// to the centre label and description. Lets transient labels
+/// (e.g. the page-name flash on a cycle) fade out independently
+/// of the puck fill / rim. Pass `1.0` for the standard
+/// hover-label path; the page-name flash passes a ramped value
+/// while it fades out.
+#[allow(clippy::too_many_arguments)]
 pub fn draw_center(
     frame: &mut Frame,
     center: Point,
@@ -312,19 +653,71 @@ pub fn draw_center(
     menu_opacity: f32,
     bg_opacity: f32,
     label: Option<&str>,
+    description: Option<&str>,
     label_size: f32,
     label_font: iced::Font,
+    accent_flash: f32,
+    label_alpha_mul: f32,
 ) {
     let mo = menu_opacity.clamp(0.0, 1.0);
     let bgo = bg_opacity.clamp(0.0, 1.0);
+    let flash = accent_flash.clamp(0.0, 1.0);
     let puck = Path::circle(center, radius);
-    frame.fill(&puck, rgba(&palette.surface0, (220.0 / 255.0) * mo * bgo));
+    // Puck fill tracks the same opacity slider as the wedge fill,
+    // so the user gets one consistent "how see-through is the
+    // menu" knob instead of the previous split where the puck
+    // had its own 86 % cap.
+    frame.fill(&puck, rgba(&palette.surface0, mo * bgo));
+    // Default rim stroke — uses accent_dim. During an accent flash
+    // (CenterPulse page transition) the rim brightens up to the
+    // full accent colour and thickens slightly so the swap reads
+    // as "the centre just clicked into a new page".
+    let base_rim = rgba(&palette.accent_dim, (140.0 / 255.0) * mo * bgo);
+    let rim_color = if flash > 0.0 {
+        let bright = rgba(&palette.accent, mo * bgo);
+        // Linear blend in unpremultiplied RGBA — close enough at
+        // these alphas, and lerp() is local to this module's hover
+        // code so we'd be reaching past visibility.
+        iced::Color {
+            r: base_rim.r + (bright.r - base_rim.r) * flash,
+            g: base_rim.g + (bright.g - base_rim.g) * flash,
+            b: base_rim.b + (bright.b - base_rim.b) * flash,
+            a: base_rim.a + (bright.a - base_rim.a) * flash,
+        }
+    } else {
+        base_rim
+    };
+    let rim_width = 2.0 + 2.0 * flash;
     frame.stroke(
         &puck,
         Stroke::default()
-            .with_color(rgba(&palette.accent_dim, (140.0 / 255.0) * mo * bgo))
-            .with_width(2.0),
+            .with_color(rim_color)
+            .with_width(rim_width),
     );
+    // Outer halo ring — only during a flash. Sits just outside the
+    // puck and fades in/out with the pulse. Gives the swap a
+    // visible "ripple" rather than a silent radius bump.
+    if flash > 0.0 {
+        let halo = Path::circle(center, radius + 6.0);
+        let (ar, ag, ab, _) =
+            parse_hex_rgba(&palette.accent).unwrap_or((1.0, 1.0, 1.0, 1.0));
+        frame.stroke(
+            &halo,
+            Stroke::default()
+                .with_color(iced::Color::from_rgba(
+                    ar as f32,
+                    ag as f32,
+                    ab as f32,
+                    0.55 * flash * mo,
+                ))
+                .with_width(2.0),
+        );
+    }
+
+    let has_description = description
+        .map(|d| !d.trim().is_empty())
+        .unwrap_or(false);
+    let description_size = (label_size * 0.62).max(8.0);
 
     if let Some(text) = label {
         if !text.is_empty() {
@@ -342,14 +735,68 @@ pub fn draw_center(
             };
             let approx_w = display.chars().count() as f32 * label_size * 0.55;
             let (tr, tg, tb, _) = parse_hex_rgba(&palette.text).unwrap_or((1.0, 1.0, 1.0, 1.0));
+            // Lift the label slightly when a description is also
+            // shown so the two lines stack symmetrically across the
+            // puck centre instead of the label sitting dead-centre
+            // and the description hanging below.
+            let label_y_offset = if has_description {
+                -(description_size * 0.65)
+            } else {
+                0.0
+            };
+            let label_alpha = (mo * label_alpha_mul).clamp(0.0, 1.0);
             frame.fill_text(iced::widget::canvas::Text {
                 content: display,
                 position: iced::Point::new(
                     center.x - approx_w / 2.0,
-                    center.y - label_size / 2.0,
+                    center.y - label_size / 2.0 + label_y_offset,
                 ),
-                color: iced::Color::from_rgba(tr as f32, tg as f32, tb as f32, mo),
+                color: iced::Color::from_rgba(tr as f32, tg as f32, tb as f32, label_alpha),
                 size: label_size.into(),
+                font: label_font,
+                ..iced::widget::canvas::Text::default()
+            });
+        }
+    }
+
+    if let Some(text) = description {
+        let trimmed = text.trim();
+        if !trimmed.is_empty() {
+            // Description sits a half-line below the label; truncate
+            // a bit more aggressively because the smaller font fits
+            // more glyphs across the puck.
+            let max_chars =
+                ((radius * 2.0 / (description_size * 0.55)).max(6.0)) as usize;
+            let display: String = if trimmed.chars().count() > max_chars {
+                let mut out: String = trimmed
+                    .chars()
+                    .take(max_chars.saturating_sub(1))
+                    .collect();
+                out.push('…');
+                out
+            } else {
+                trimmed.to_string()
+            };
+            let approx_w = display.chars().count() as f32 * description_size * 0.55;
+            let (tr, tg, tb, _) =
+                parse_hex_rgba(&palette.subtext0).unwrap_or((0.7, 0.7, 0.7, 1.0));
+            // Anchor description below the label baseline. The label
+            // (when present) was nudged up by ~0.65× description
+            // size; place description ~0.85× description size below
+            // centre so the gap reads as a natural line break.
+            frame.fill_text(iced::widget::canvas::Text {
+                content: display,
+                position: iced::Point::new(
+                    center.x - approx_w / 2.0,
+                    center.y + label_size * 0.05,
+                ),
+                color: iced::Color::from_rgba(
+                    tr as f32,
+                    tg as f32,
+                    tb as f32,
+                    (mo * label_alpha_mul * 0.85).clamp(0.0, 1.0),
+                ),
+                size: description_size.into(),
                 font: label_font,
                 ..iced::widget::canvas::Text::default()
             });
@@ -357,12 +804,223 @@ pub fn draw_center(
     }
 }
 
-/// Draw the multi-page indicator — small dots inside the centre
-/// puck showing how many pages are in the scroll cycle and which
-/// one is active. No-op for single-page menus.
+/// Styling knobs for `draw_arc_tooltip`. Bundled into a struct so
+/// the call site doesn't have to thread eight individual params
+/// through the renderer.
+pub struct ArcTooltipStyle {
+    /// Font used for the text. Pass `iced::Font::MONOSPACE` for
+    /// perfectly even arc spacing, or any other family the user
+    /// has installed for a more typographic look. The cell-width
+    /// estimate stays the same in either case (`0.60 × font_size`)
+    /// — proportional fonts will bunch / overlap a little.
+    pub font: iced::Font,
+    /// Whether `font` is a monospace family. Affects only the
+    /// per-character width assumption: monospace = exact, prop =
+    /// approximate. Reserved for future per-glyph width tweaks
+    /// when proportional fonts are picked.
+    #[allow(dead_code)]
+    pub monospace: bool,
+    /// Foreground (text) colour.
+    pub fg: iced::Color,
+    /// Background ribbon colour.
+    pub bg: iced::Color,
+    /// Background ribbon alpha multiplier in [0, 1]. The ribbon's
+    /// final alpha is `bg.a * bg_alpha * menu_opacity * tween_alpha`.
+    pub bg_alpha: f32,
+}
+
+/// Draw a tooltip arced around the outer ring, centred on the
+/// hovered slice's bisector. Each char is drawn with a subtle
+/// dark shadow underneath + a coloured ribbon background for
+/// legibility against the busy radial substrate.
 ///
-/// Sits low in the puck (below the centre-hover label) so the
-/// label and the dots don't fight for the same pixels.
+/// **Half-flip**: when the slice is in the bottom half of the
+/// menu the text would naturally appear upside-down. We detect
+/// that case (via the bisector's sin component in canvas coords)
+/// and flip both the rotation (chars head-toward-centre instead
+/// of head-away) and the character draw order (so reading still
+/// proceeds left-to-right visually).
+#[allow(clippy::too_many_arguments)]
+pub fn draw_arc_tooltip(
+    frame: &mut Frame,
+    center: Point,
+    outer_r: f32,
+    slot_index: usize,
+    slot_count: usize,
+    text: &str,
+    palette: &ThemeColors,
+    menu_opacity: f32,
+    alpha: f32,
+    font_size: f32,
+    style: ArcTooltipStyle,
+) {
+    let trimmed = text.trim();
+    if trimmed.is_empty() || font_size < 0.5 || alpha <= 0.001 {
+        return;
+    }
+    let n = slot_count.max(1) as f32;
+    let slice_degrees = 360.0 / n;
+    let bisector_deg = (slot_index as f32) * slice_degrees - 90.0;
+    let bisector = bisector_deg.to_radians();
+    let flip = bisector.sin() > 0.0;
+    let radius = outer_r + font_size * 0.95;
+
+    // Monospace cell width — `0.6 * font_size` is the canonical
+    // ratio for most monospace fonts (DejaVu Sans Mono, Liberation
+    // Mono, Cascadia, etc. all sit within ±0.05 of this).
+    let cell_w = font_size * 0.60;
+    let chars: Vec<char> = trimmed.chars().collect();
+
+    // Cap arc width so a runaway description doesn't wrap behind
+    // the menu. Truncate with ellipsis when overflow would
+    // otherwise push past the wedge + half a wedge each side.
+    let max_arc_rad = (slice_degrees * 2.0).to_radians();
+    let mut visible: Vec<char> = chars.clone();
+    while (visible.len() as f32 * cell_w) / radius > max_arc_rad
+        && visible.len() > 1
+    {
+        visible.pop();
+        if visible.last() != Some(&'…') {
+            *visible.last_mut().unwrap() = '…';
+        }
+    }
+    let count = visible.len() as f32;
+    let step = cell_w / radius;
+
+    // ----- Background ribbon -----
+    // Annular sector (ring slice) behind the text so the chars
+    // read against a uniform dark backdrop instead of fighting
+    // with the wedges + icons + desktop showing through. Span
+    // covers all visible chars + horizontal padding on each end.
+    // Half-flip-aware: the ribbon's start/end angles match the
+    // chars' draw direction so the ribbon and text agree on
+    // which edge is "left".
+    //
+    // Padding values:
+    // - `pad_rad` ≈ one full character cell on each end. iced's
+    //   text-bounding-box width approximates the glyph but the
+    //   visible-character ends don't reach the corners, so a
+    //   full cell of padding gives a comfortable margin.
+    // - Radial thickness is **asymmetric** AND **flip-aware**.
+    //   iced's text bounding box already pads the cap-height +
+    //   leading on the glyph TOP, so we only need a lean
+    //   margin on whichever geometric side coincides with the
+    //   reader's "top of text". Half-flip swaps which side that
+    //   is: top-half slices have visual top = outer (away from
+    //   menu centre); bottom-half slices flip the chars so
+    //   visual top = inner (toward menu centre).
+    //     cap_pad = 0.55 * font_size  ← lean: bbox already pads
+    //     base_pad = 0.85 * font_size  ← generous: descender room
+    let mo = menu_opacity.clamp(0.0, 1.0);
+    let pad_rad = step * 1.0;
+    let half_arc = (count * step) / 2.0 + pad_rad;
+    let ribbon_start = bisector - half_arc;
+    let ribbon_end = bisector + half_arc;
+    let cap_pad = font_size * 0.55;
+    let base_pad = font_size * 0.85;
+    let (inner_pad, outer_pad) = if flip {
+        // Bottom-half slices: chars are flipped so glyph top
+        // points inward → cap-padding sits on the inner edge.
+        (cap_pad, base_pad)
+    } else {
+        // Top-half slices: glyph top points outward.
+        (base_pad, cap_pad)
+    };
+    let ribbon_inner = radius - inner_pad;
+    let ribbon_outer = radius + outer_pad;
+    // Round the OUTER corners (geometrically furthest from menu
+    // centre — see `build_tooltip_ribbon`). Visually these are
+    // the "label corners" while the inner pair tucks against the
+    // menu's outer ring and reads better when sharp. ~0.35 of
+    // font_size (~3.85 px at fs=11) is a tasteful softening; the
+    // ribbon function caps it if the geometry is too tight.
+    let corner_px = font_size * 0.35;
+    let ribbon = build_tooltip_ribbon(
+        center,
+        ribbon_inner,
+        ribbon_outer,
+        ribbon_start,
+        ribbon_end,
+        corner_px,
+    );
+    // Honour user-configured background colour + alpha.
+    let bg_alpha_eff = style.bg_alpha.clamp(0.0, 1.0) * mo * alpha;
+    if bg_alpha_eff > 0.001 {
+        frame.fill(
+            &ribbon,
+            iced::Color {
+                a: style.bg.a * bg_alpha_eff,
+                ..style.bg
+            },
+        );
+        // Thin accent_dim stroke gives the ribbon a defined edge.
+        // Scaled by the same effective alpha so the stroke fades
+        // out alongside the fill.
+        frame.stroke(
+            &ribbon,
+            Stroke::default()
+                .with_color(rgba(&palette.accent_dim, 0.5 * bg_alpha_eff))
+                .with_width(1.0),
+        );
+    }
+
+    let fg = iced::Color {
+        a: style.fg.a * mo * alpha,
+        ..style.fg
+    };
+    // Text shadow removed — the ribbon background already
+    // provides enough contrast for the glyphs to read against
+    // the busy radial substrate. Adding a drop shadow on top
+    // of the ribbon was redundant and slightly muddied the
+    // text edges.
+
+    for (visual_index, ch) in visible.iter().enumerate() {
+        // Centre the run on the bisector. visual_index 0 is the
+        // leftmost reading character.
+        let centered = visual_index as f32 - (count - 1.0) / 2.0;
+        let angle = if flip {
+            bisector - centered * step
+        } else {
+            bisector + centered * step
+        };
+        let pos = Point::new(
+            center.x + radius * angle.cos(),
+            center.y + radius * angle.sin(),
+        );
+        let tangent = if flip {
+            angle - std::f32::consts::FRAC_PI_2
+        } else {
+            angle + std::f32::consts::FRAC_PI_2
+        };
+
+        let s: String = ch.to_string();
+        let draw = |f: &mut Frame, color: iced::Color, dx: f32, dy: f32| {
+            f.fill_text(iced::widget::canvas::Text {
+                content: s.clone(),
+                position: Point::new(-cell_w / 2.0 + dx, -font_size / 2.0 + dy),
+                color,
+                size: font_size.into(),
+                font: style.font,
+                ..iced::widget::canvas::Text::default()
+            });
+        };
+        frame.with_save(|f| {
+            f.translate(Vector::new(pos.x, pos.y));
+            f.rotate(Radians(tangent));
+            draw(f, fg, 0.0, 0.0);
+        });
+    }
+}
+
+/// Draw the multi-page indicator — small dots arrayed in a shallow
+/// arc that hugs the bottom rim of the centre puck. The arc is
+/// anchored at 90° (straight down) and fans symmetrically left/right
+/// from there, so when the active page is the middle of the cycle
+/// the active dot sits at dead-bottom. No-op for single-page menus.
+///
+/// Sits along the puck's inside edge (just inboard of the rim
+/// stroke) so the dots and the centre-hover label don't fight for
+/// the same pixels.
 pub fn draw_page_indicator(
     frame: &mut Frame,
     center: Point,
@@ -377,17 +1035,29 @@ pub fn draw_page_indicator(
     }
     let mo = menu_opacity.clamp(0.0, 1.0);
     let dot_r: f32 = 2.5;
-    // Tighten the gap when there are many pages so the strip stays
-    // inside the puck (5 pages → 32 px wide at 8 px gap, fine
-    // inside a 90 px puck; 8 pages → cap gap to keep clearance).
-    let max_strip = radius * 1.4;
-    let mut gap: f32 = 8.0;
-    if (page_count as f32 - 1.0) * gap > max_strip {
-        gap = max_strip / (page_count as f32 - 1.0).max(1.0);
+
+    // Place the dots on a circle slightly inside the puck rim so
+    // they read as "on the puck" without clipping the stroke.
+    let arc_radius = (radius - dot_r * 2.5).max(dot_r * 2.0);
+
+    // Angular step between adjacent dots. Aim for ~8 px chord
+    // distance so the spacing visually matches the old straight
+    // strip; clamp to a minimum so two-page menus don't crowd.
+    let target_chord: f32 = 8.0;
+    let mut step_rad = (target_chord / arc_radius.max(1.0)).max(0.22); // ≈ 12.6° min
+    // Cap the total arc so the strip never sweeps past ~±45° from
+    // straight-down — beyond that the dots start overlapping the
+    // hover label and the page-cycle reads as a curve rather than
+    // an indicator.
+    let max_total_rad: f32 = std::f32::consts::FRAC_PI_2; // 90° total
+    if (page_count as f32 - 1.0) * step_rad > max_total_rad {
+        step_rad = max_total_rad / (page_count as f32 - 1.0).max(1.0);
     }
-    let total_w = (page_count as f32 - 1.0) * gap;
-    let start_x = center.x - total_w / 2.0;
-    let y = center.y + radius * 0.62;
+    let center_idx = (page_count as f32 - 1.0) / 2.0;
+    // Bottom of the puck in iced canvas coords is +Y, which is
+    // angle = π/2 (90°) from polar() since polar() uses
+    // sin(angle) for Y with the canvas Y-down convention.
+    let base_angle = std::f32::consts::FRAC_PI_2;
 
     let (ar, ag, ab, _) =
         parse_hex_rgba(&palette.accent).unwrap_or((1.0, 1.0, 1.0, 1.0));
@@ -395,7 +1065,15 @@ pub fn draw_page_indicator(
         parse_hex_rgba(&palette.text).unwrap_or((1.0, 1.0, 1.0, 1.0));
 
     for i in 0..page_count {
-        let pos = Point::new(start_x + i as f32 * gap, y);
+        // Negate the offset so dot 0 lands on the LEFT and dot
+        // N-1 on the RIGHT (Western reading order). Iced's
+        // canvas Y is down, so a positive angle offset moves the
+        // sample point counter-clockwise (toward the left at the
+        // bottom of the puck). We want the opposite: dot index
+        // grows left-to-right, so flip.
+        let offset = (center_idx - i as f32) * step_rad;
+        let angle = base_angle + offset;
+        let pos = polar(center, arc_radius, angle);
         let path = Path::circle(pos, dot_r);
         let is_active = active == Some(i);
         let color = if is_active {
@@ -411,6 +1089,47 @@ pub fn draw_page_indicator(
 // helpers
 // =============================================================================
 
+/// Build a donut wedge (annular sector) as a single continuous
+/// closed sub-path.
+///
+/// **Why we don't use `p.arc(...)`**: iced's canvas
+/// `path::Builder::arc` internally calls `move_to(arc.start)` (see
+/// `ellipse()` in iced_graphics::geometry::path::builder), which
+/// terminates the current sub-path and starts a new one. Mixing
+/// `line_to` + `arc` in the same path therefore produces several
+/// *disconnected* sub-paths — when filled with α<1 they
+/// double-fill at overlaps, creating dark triangular patches and
+/// odd cuts across the shape.
+///
+/// We manually subdivide each arc into short `line_to` segments
+/// so the whole wedge stays in one sub-path. Step size scales
+/// with the arc's radius so a tiny inner arc doesn't waste
+/// segments and a large outer arc still looks smooth.
+/// Append `line_to` points along an arc from `from` to `to` at
+/// `radius`, picking enough samples that the chord error stays
+/// under ~0.5 px. `from > to` is fine — we always step from
+/// `from` toward `to` regardless of direction. Module-private
+/// helper shared by `build_wedge` and `build_tooltip_ribbon`.
+fn arc_line_to(
+    p: &mut canvas::path::Builder,
+    center: Point,
+    radius: f32,
+    from: f32,
+    to: f32,
+) {
+    let sweep = (to - from).abs();
+    if sweep < 1e-4 || radius < 0.5 {
+        return;
+    }
+    let max_step = (4.0_f32 / radius.max(1.0)).sqrt().max(0.05);
+    let segments = ((sweep / max_step).ceil() as usize).max(12);
+    for i in 1..=segments {
+        let t = i as f32 / segments as f32;
+        let a = from + (to - from) * t;
+        p.line_to(polar(center, radius, a));
+    }
+}
+
 fn build_wedge(
     center: Point,
     inner_r: f32,
@@ -421,22 +1140,90 @@ fn build_wedge(
     Path::new(|p| {
         let inner_start = polar(center, inner_r, start_rad);
         let outer_start = polar(center, outer_r, start_rad);
-        let inner_end = polar(center, inner_r, end_rad);
+        // Walk the wedge boundary as one continuous sub-path:
+        //   inner_start → outer_start (radial line, start side)
+        //   outer arc start_rad → end_rad
+        //   outer_end → inner_end (radial line, end side)
+        //   inner arc end_rad → start_rad (back the other way)
         p.move_to(inner_start);
         p.line_to(outer_start);
-        p.arc(Arc {
+        arc_line_to(p, center, outer_r, start_rad, end_rad);
+        p.line_to(polar(center, inner_r, end_rad));
+        arc_line_to(p, center, inner_r, end_rad, start_rad);
+        p.close();
+    })
+}
+
+/// Annular sector with rounded *outer* corners only — the inner
+/// corners (closest to the menu centre) stay sharp. Used by the
+/// arced tooltip ribbon so its outer edge feels like a softened
+/// label background while the inner edge tucks neatly against
+/// the menu's outer ring.
+///
+/// Geometry: the outer corner is rounded with `corner_px` of
+/// arc-length, achieved by insetting both radially (start at
+/// `outer_r - corner_px` along the radial edge) and angularly
+/// (resume the outer arc at `start_rad + corner_px / outer_r`).
+/// A single quadratic Bézier with the sharp-corner point as the
+/// control point bridges the two — close enough to a quarter
+/// circle for the small radii we use here without the cost of
+/// a cubic curve or arc-approximation.
+fn build_tooltip_ribbon(
+    center: Point,
+    inner_r: f32,
+    outer_r: f32,
+    start_rad: f32,
+    end_rad: f32,
+    corner_px: f32,
+) -> Path {
+    // Cap the corner radius so it doesn't eat the whole ribbon
+    // when the angular sweep is small or the radial thickness is
+    // thin. Half of either dimension is the geometric upper
+    // bound; we go a little tighter to keep the curve visibly
+    // rounded rather than degenerate.
+    let radial_thickness = (outer_r - inner_r).max(0.0);
+    let arc_length = (end_rad - start_rad).abs() * outer_r.max(1.0);
+    let max_corner = (radial_thickness * 0.45).min(arc_length * 0.4);
+    let r = corner_px.max(0.0).min(max_corner.max(0.0));
+    if r < 0.5 {
+        // Corner radius too small to render visibly — fall back
+        // to a plain wedge to avoid degenerate Bézier control
+        // points.
+        return build_wedge(center, inner_r, outer_r, start_rad, end_rad);
+    }
+    let angular_inset = r / outer_r.max(1.0);
+
+    Path::new(|p| {
+        let inner_start = polar(center, inner_r, start_rad);
+        let inner_end = polar(center, inner_r, end_rad);
+        // 1. Inner-start → up along the start-side radial to
+        //    where the rounded corner begins (inset radially).
+        p.move_to(inner_start);
+        p.line_to(polar(center, outer_r - r, start_rad));
+        // 2. Quadratic-curve the outer-start corner. Control
+        //    point is the sharp original corner; endpoint is on
+        //    the outer arc, inset angularly.
+        let ctrl_start = polar(center, outer_r, start_rad);
+        let outer_arc_in = polar(center, outer_r, start_rad + angular_inset);
+        p.quadratic_curve_to(ctrl_start, outer_arc_in);
+        // 3. Outer arc proper — from (start + inset) to (end - inset).
+        arc_line_to(
+            p,
             center,
-            radius: outer_r,
-            start_angle: Radians(start_rad),
-            end_angle: Radians(end_rad),
-        });
+            outer_r,
+            start_rad + angular_inset,
+            end_rad - angular_inset,
+        );
+        // 4. Quadratic-curve the outer-end corner. Endpoint is
+        //    inset radially from outer.
+        let ctrl_end = polar(center, outer_r, end_rad);
+        let outer_arc_out = polar(center, outer_r - r, end_rad);
+        p.quadratic_curve_to(ctrl_end, outer_arc_out);
+        // 5. Radial line down to inner-end.
         p.line_to(inner_end);
-        p.arc(Arc {
-            center,
-            radius: inner_r,
-            start_angle: Radians(end_rad),
-            end_angle: Radians(start_rad),
-        });
+        // 6. Inner arc back from end → start (sharp corners by
+        //    spec — only the OUTER corners are rounded).
+        arc_line_to(p, center, inner_r, end_rad, start_rad);
         p.close();
     })
 }

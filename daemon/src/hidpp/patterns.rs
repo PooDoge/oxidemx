@@ -50,6 +50,24 @@ pub mod haptic_profiles {
         intensity: 50,
         duration_ms: 20,
     };
+
+    /// Submenu pop-out (45% intensity, 18ms) — fired the moment a
+    /// submenu appears around its parent slice. Sits between
+    /// slice_change and page_change in weight so the ring
+    /// expansion feels meaningfully different from a plain hover.
+    pub const SUBMENU_OPEN: HapticPulse = HapticPulse {
+        intensity: 45,
+        duration_ms: 18,
+    };
+
+    /// Submenu collapse (25% intensity, 12ms) — fired when an open
+    /// submenu folds back into the outer ring. Lighter than open
+    /// because the user is also about to receive a slice_change
+    /// pulse; we don't want them to land on top of each other.
+    pub const SUBMENU_CLOSE: HapticPulse = HapticPulse {
+        intensity: 25,
+        duration_ms: 12,
+    };
 }
 
 /// Haptic pulse pattern type
@@ -224,6 +242,13 @@ pub enum HapticEvent {
     /// User cycled between radial-menu pages via the scroll
     /// wheel over the centre puck.
     PageChange,
+    /// A submenu popped out around a hovered slice (the user
+    /// landed on a slice with `kind = Submenu` and the sub-items
+    /// just became visible).
+    SubmenuOpen,
+    /// A previously-open submenu collapsed back into its parent
+    /// slice without a selection (cursor moved away).
+    SubmenuClose,
 }
 
 impl HapticEvent {
@@ -235,6 +260,8 @@ impl HapticEvent {
             HapticEvent::SelectionConfirm => haptic_profiles::CONFIRM,
             HapticEvent::InvalidAction => haptic_profiles::INVALID,
             HapticEvent::PageChange => haptic_profiles::PAGE_CHANGE,
+            HapticEvent::SubmenuOpen => haptic_profiles::SUBMENU_OPEN,
+            HapticEvent::SubmenuClose => haptic_profiles::SUBMENU_CLOSE,
         }
     }
 
@@ -246,6 +273,8 @@ impl HapticEvent {
             HapticEvent::SelectionConfirm => HapticPattern::Double,
             HapticEvent::InvalidAction => HapticPattern::Triple,
             HapticEvent::PageChange => HapticPattern::Single,
+            HapticEvent::SubmenuOpen => HapticPattern::Single,
+            HapticEvent::SubmenuClose => HapticPattern::Single,
         }
     }
 
@@ -277,6 +306,12 @@ impl HapticEvent {
             // Page change: damped transition feel — heavier than
             // slice_change since it's a bigger change of context.
             HapticEvent::PageChange => Mx4HapticPattern::DampStateChange,
+            // Submenu open: soft "pop" — the ring just expanded.
+            HapticEvent::SubmenuOpen => Mx4HapticPattern::DampCollision,
+            // Submenu close: barely-there feedback — the user is
+            // about to also feel a slice_change pulse on the way
+            // back to the outer ring, so we keep this whisper-light.
+            HapticEvent::SubmenuClose => Mx4HapticPattern::WhisperCollision,
         }
     }
 }
@@ -289,6 +324,8 @@ impl fmt::Display for HapticEvent {
             HapticEvent::SelectionConfirm => write!(f, "selection_confirm"),
             HapticEvent::InvalidAction => write!(f, "invalid_action"),
             HapticEvent::PageChange => write!(f, "page_change"),
+            HapticEvent::SubmenuOpen => write!(f, "submenu_open"),
+            HapticEvent::SubmenuClose => write!(f, "submenu_close"),
         }
     }
 }
@@ -306,6 +343,10 @@ pub struct PerEventPattern {
     pub invalid: Mx4HapticPattern,
     /// Pattern for radial-menu page change (scroll-wheel cycle).
     pub page_change: Mx4HapticPattern,
+    /// Pattern for a submenu popping out around a hovered slice.
+    pub submenu_open: Mx4HapticPattern,
+    /// Pattern for a previously-open submenu collapsing back.
+    pub submenu_close: Mx4HapticPattern,
 }
 
 impl Default for PerEventPattern {
@@ -316,6 +357,8 @@ impl Default for PerEventPattern {
             confirm: Mx4HapticPattern::SharpStateChange,
             invalid: Mx4HapticPattern::AngryAlert,
             page_change: Mx4HapticPattern::DampStateChange,
+            submenu_open: Mx4HapticPattern::DampCollision,
+            submenu_close: Mx4HapticPattern::WhisperCollision,
         }
     }
 }
@@ -329,6 +372,8 @@ impl PerEventPattern {
             HapticEvent::SelectionConfirm => self.confirm,
             HapticEvent::InvalidAction => self.invalid,
             HapticEvent::PageChange => self.page_change,
+            HapticEvent::SubmenuOpen => self.submenu_open,
+            HapticEvent::SubmenuClose => self.submenu_close,
         }
     }
 }

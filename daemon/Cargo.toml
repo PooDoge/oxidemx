@@ -22,6 +22,11 @@ evdev = { version = "0.13", features = ["tokio"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
+# Shared config types (serde-only crate — adds no transitive deps).
+# Used for the gaming-mode config block; over time the daemon's
+# hand-rolled config mirrors should migrate onto these.
+juhradial-shared = { path = "../juhradial-shared" }
+
 # CLI argument parsing
 clap = { version = "4", features = ["derive"] }
 

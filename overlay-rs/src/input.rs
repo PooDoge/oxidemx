@@ -20,28 +20,38 @@
 use crate::geometry::WINDOW_SIZE;
 
 /// Turn an `(x, y)` offset from the menu centre into the highlighted
-/// slice index (0..7), or `None` when the cursor is in the centre
-/// deadzone or past the outer ring.
+/// slice index (`0..slot_count-1`), or `None` when the cursor is in
+/// the centre deadzone or past the outer ring.
 ///
 /// Slice 0 is the slot at the top (12 o'clock). Indexing proceeds
-/// clockwise (1 = top-right, 2 = right, …, 7 = top-left). The angle
-/// is measured from the +Y-up axis; GTK and cairo both have +Y
-/// pointing *down*, so we flip it: `atan2(dx, -dy)`. The `+22.5`
-/// then `/45` rounds to the nearest 45° slot.
-pub fn slice_index_at(dx: f64, dy: f64, center_radius: f64, max_radius: f64) -> Option<usize> {
+/// clockwise. The angle is measured from the +Y-up axis; GTK and
+/// cairo both have +Y pointing *down*, so we flip it:
+/// `atan2(dx, -dy)`. Wedge size = 360° / slot_count; the half-wedge
+/// offset (`degrees/2`) shifts the boundary so each wedge is
+/// centred on its bisector.
+pub fn slice_index_at(
+    dx: f64,
+    dy: f64,
+    center_radius: f64,
+    max_radius: f64,
+    slot_count: usize,
+) -> Option<usize> {
     let distance = (dx * dx + dy * dy).sqrt();
     if distance < center_radius || distance > max_radius {
         return None;
     }
+    let n = slot_count.max(1);
+    let wedge = 360.0 / n as f64;
     let mut angle = dx.atan2(-dy).to_degrees();
     if angle < 0.0 {
         angle += 360.0;
     }
-    Some(((angle + 22.5) / 45.0) as usize % 8)
+    Some(((angle + wedge / 2.0) / wedge) as usize % n)
 }
 
 /// Half the menu diameter in logical pixels — the (cx, cy) origin
 /// against which `gtk::EventControllerMotion` deltas are computed.
+#[allow(dead_code)]
 pub const HALF: f64 = WINDOW_SIZE / 2.0;
 
 #[cfg(test)]
@@ -50,7 +60,7 @@ mod tests {
     use crate::geometry::{CENTER_ZONE_RADIUS, MENU_RADIUS};
 
     fn slot(dx: f64, dy: f64) -> Option<usize> {
-        slice_index_at(dx, dy, CENTER_ZONE_RADIUS, MENU_RADIUS)
+        slice_index_at(dx, dy, CENTER_ZONE_RADIUS, MENU_RADIUS, 8)
     }
 
     #[test]

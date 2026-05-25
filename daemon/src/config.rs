@@ -45,6 +45,16 @@ pub struct HapticEventConfig {
     /// scroll wheel over the centre puck (default: damp_state_change).
     #[serde(default = "default_page_change")]
     pub page_change: String,
+
+    /// Pattern when a submenu pops out around a hovered slice
+    /// (default: damp_collision).
+    #[serde(default = "default_submenu_open")]
+    pub submenu_open: String,
+
+    /// Pattern when a previously-open submenu collapses back into
+    /// its parent slice (default: whisper_collision).
+    #[serde(default = "default_submenu_close")]
+    pub submenu_close: String,
 }
 
 fn default_menu_appear() -> String {
@@ -62,6 +72,12 @@ fn default_invalid() -> String {
 fn default_page_change() -> String {
     "damp_state_change".to_string()
 }
+fn default_submenu_open() -> String {
+    "damp_collision".to_string()
+}
+fn default_submenu_close() -> String {
+    "whisper_collision".to_string()
+}
 
 impl Default for HapticEventConfig {
     fn default() -> Self {
@@ -71,6 +87,8 @@ impl Default for HapticEventConfig {
             confirm: default_confirm(),
             invalid: default_invalid(),
             page_change: default_page_change(),
+            submenu_open: default_submenu_open(),
+            submenu_close: default_submenu_close(),
         }
     }
 }
@@ -307,6 +325,14 @@ pub struct Config {
     #[serde(default)]
     pub scroll: ScrollConfig,
 
+    /// Game-Mode block — currently the gamepad-rumble → haptic
+    /// redirect knobs. Uses the shared crate's type directly (no
+    /// daemon-side mirror) since it's brand-new and there's no
+    /// legacy daemon struct to keep compatible. See
+    /// `HAPTIC_GAMEPAD_BRIDGE_DESIGN.md`.
+    #[serde(default)]
+    pub gaming: juhradial_shared::GamingConfig,
+
     /// Configuration file path (not serialized)
     #[serde(skip)]
     pub config_path: Option<PathBuf>,
@@ -350,6 +376,14 @@ pub struct ScrollConfig {
     pub smartshift_threshold: u32,
     #[serde(default = "default_scroll_mode")]
     pub mode: String,
+    /// Reverse horizontal (side-scroll / thumb-wheel) direction.
+    /// Mirror of the settings-rs `ScrollConfig.horizontal_invert`.
+    /// Apply path: not yet wired — daemon does not currently
+    /// intercept `REL_HWHEEL` or expose HID++ ThumbWheel feature
+    /// (`0x2150`). Persisted so the field round-trips through
+    /// JSON cleanly while the integration is implemented.
+    #[serde(default)]
+    pub horizontal_invert: bool,
 }
 
 fn default_smartshift_threshold() -> u32 {
@@ -366,6 +400,7 @@ impl Default for ScrollConfig {
             smooth: true,
             smartshift: true,
             smartshift_threshold: default_smartshift_threshold(),
+            horizontal_invert: false,
             mode: default_scroll_mode(),
         }
     }
@@ -384,6 +419,7 @@ impl Default for Config {
             buttons: ButtonsConfig::default(),
             pointer: PointerConfig::default(),
             scroll: ScrollConfig::default(),
+            gaming: juhradial_shared::GamingConfig::default(),
             config_path: None,
         }
     }

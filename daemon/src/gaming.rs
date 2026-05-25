@@ -14,6 +14,9 @@
 
 use std::sync::{Arc, RwLock};
 
+use juhradial_shared::HapticRedirectConfig;
+
+use crate::gamepad_haptics::GamepadHapticsService;
 use crate::hidpp::SharedHapticManager;
 use crate::macros::dpi::DpiManager;
 
@@ -34,6 +37,13 @@ pub struct GamingMode {
 
     /// Reference to the HID++ device manager
     haptic_manager: SharedHapticManager,
+
+    /// Running gamepad-rumble → haptic bridge, if `enable()` was
+    /// called with `haptic_redirect.enabled = true`. `None` while
+    /// gaming mode is off or the redirect feature is disabled.
+    /// Dropping it tears the virtual gamepad down — that's all
+    /// `disable()` has to do.
+    haptic_redirect: Option<GamepadHapticsService>,
 }
 
 impl GamingMode {
@@ -44,14 +54,21 @@ impl GamingMode {
             suppress_overlay: true,
             dpi_manager: DpiManager::new(),
             haptic_manager,
+            haptic_redirect: None,
         }
     }
 
     /// Enable gaming mode
     ///
-    /// Saves current DPI, applies gaming DPI profile, and sets the
-    /// suppress_overlay flag so MenuRequested signals are not emitted.
-    pub fn enable(&mut self) {
+    /// Saves current DPI, applies gaming DPI profile, sets the
+    /// suppress_overlay flag so MenuRequested signals are not
+    /// emitted, and — when `redirect_cfg.enabled` — spawns the
+    /// gamepad-rumble → haptic bridge.
+    ///
+    /// `redirect_cfg` is read fresh from `config.gaming.haptic_redirect`
+    /// by the caller (the `SetGamingMode` D-Bus handler) so the
+    /// bridge always starts with the user's current settings.
+    pub fn enable(&mut self, redirect_cfg: &HapticRedirectConfig) {
         if self.enabled {
             tracing::debug!("Gaming mode already enabled");
             return;
@@ -67,10 +84,24 @@ impl GamingMode {
             tracing::warn!(error = %e, "Failed to apply gaming DPI profile");
         }
 
+        // Spawn the gamepad-rumble → haptic bridge if the user opted
+        // in. Best-effort: a failure to create the virtual gamepad
+        // is logged inside the service task and doesn't abort the
+        // rest of gaming-mode setup. The bridge dispatches its
+        // translated pulses through the same shared HapticManager.
+        if redirect_cfg.enabled {
+            tracing::info!("Gaming mode: starting gamepad-rumble → haptic bridge");
+            self.haptic_redirect = Some(GamepadHapticsService::start(
+                redirect_cfg.clone(),
+                self.haptic_manager.clone(),
+            ));
+        }
+
         self.enabled = true;
 
         tracing::info!(
             dpi_profile = ?self.dpi_manager.active_profile().map(|p| &p.name),
+            haptic_redirect = redirect_cfg.enabled,
             "Gaming mode enabled"
         );
     }
@@ -89,6 +120,12 @@ impl GamingMode {
         // Restore saved DPI
         if let Err(e) = self.dpi_manager.restore_saved_dpi(&self.haptic_manager) {
             tracing::warn!(error = %e, "Failed to restore saved DPI");
+        }
+
+        // Tear down the gamepad-rumble → haptic bridge. Dropping the
+        // service signals its task to destroy the virtual gamepad.
+        if self.haptic_redirect.take().is_some() {
+            tracing::info!("Gaming mode: stopping gamepad-rumble → haptic bridge");
         }
 
         self.enabled = false;
@@ -179,7 +216,7 @@ mod tests {
         let hm = test_haptic_manager();
         let mut gm = GamingMode::new(hm);
 
-        gm.enable();
+        gm.enable(&HapticRedirectConfig::default());
         assert!(gm.is_enabled());
         assert!(gm.should_suppress_overlay());
 
@@ -193,8 +230,8 @@ mod tests {
         let hm = test_haptic_manager();
         let mut gm = GamingMode::new(hm);
 
-        gm.enable();
-        gm.enable(); // Should be a no-op
+        gm.enable(&HapticRedirectConfig::default());
+        gm.enable(&HapticRedirectConfig::default()); // Should be a no-op
         assert!(gm.is_enabled());
     }
 
@@ -212,7 +249,7 @@ mod tests {
         let hm = test_haptic_manager();
         let mut gm = GamingMode::new(hm);
 
-        gm.enable();
+        gm.enable(&HapticRedirectConfig::default());
         assert!(gm.should_suppress_overlay());
 
         gm.set_suppress_overlay(false);
@@ -230,6 +267,26 @@ mod tests {
     }
 
     #[test]
+    fn gaming_mode_starts_without_haptic_redirect() {
+        let hm = test_haptic_manager();
+        let gm = GamingMode::new(hm);
+        assert!(gm.haptic_redirect.is_none());
+    }
+
+    #[test]
+    fn disabled_redirect_config_does_not_start_bridge() {
+        // The default HapticRedirectConfig has `enabled = false`, so
+        // `enable()` must not spawn the bridge (and therefore must
+        // not call `tokio::spawn` — this test runs without a
+        // runtime, which would panic if a spawn were attempted).
+        let hm = test_haptic_manager();
+        let mut gm = GamingMode::new(hm);
+        gm.enable(&HapticRedirectConfig::default());
+        assert!(gm.is_enabled());
+        assert!(gm.haptic_redirect.is_none());
+    }
+
+    #[test]
     fn test_shared_gaming_mode() {
         let hm = test_haptic_manager();
         let sgm = new_shared_gaming_mode(hm);
@@ -241,7 +298,7 @@ mod tests {
 
         {
             let mut gm = sgm.write().unwrap();
-            gm.enable();
+            gm.enable(&HapticRedirectConfig::default());
         }
 
         {

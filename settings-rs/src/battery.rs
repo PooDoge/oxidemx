@@ -119,6 +119,7 @@ pub fn widget<'a, Message: 'a>(
         .into()
 }
 
+#[allow(dead_code)]
 struct BatteryPainter {
     status: Option<BatteryStatus>,
     stroke: Color,
@@ -174,7 +175,14 @@ impl<Message> canvas::Program<Message> for BatteryPainter {
             let pct = (s.percent as f32 / 100.0).clamp(0.0, 1.0);
             let fill_w = max_w * pct;
             if fill_w > 0.5 {
-                let fill_color = if s.percent <= 15 {
+                // Fill colour: when charging, force the accent
+                // green regardless of percent so the swap from
+                // "discharging-yellow/red" → "charging-green" is
+                // unmistakable. Otherwise stay on the standard
+                // capacity thresholds.
+                let fill_color = if s.charging {
+                    self.green
+                } else if s.percent <= 15 {
                     self.red
                 } else if s.percent <= 30 {
                     self.yellow
@@ -191,25 +199,54 @@ impl<Message> canvas::Program<Message> for BatteryPainter {
                 frame.fill(&bar, fill_color);
             }
 
-            // Percentage text — centred on the body, rendered both
-            // black and white-ish so it stays readable over the
-            // coloured fill regardless of palette. Shadow first
-            // (subtle outline), then the main glyph. When
-            // charging we prefix a `⚡` so the lightning is part
-            // of the same centred glyph string (no second-element
-            // layout needed).
-            let prefix = if s.charging { "⚡" } else { "" };
+            // Charging indicator — a centred lightning-bolt path
+            // overlaid on the body, drawn before the percent text.
+            // Visible immediately at any icon size; the previous
+            // `⚡` glyph prefix was easy to miss at the 56 px
+            // sidebar render. Yellow on dark themes / accent on
+            // light, so it punches through whatever fill colour
+            // sits underneath.
+            if s.charging {
+                let bolt = lightning_bolt(
+                    body_x + body_w / 2.0,
+                    body_y + body_h / 2.0,
+                    body_h * 0.55,
+                );
+                // Black outline first so the bolt reads against
+                // any fill.
+                frame.stroke(
+                    &bolt,
+                    Stroke::default()
+                        .with_color(Color::from_rgba(0.0, 0.0, 0.0, 0.8))
+                        .with_width(2.4),
+                );
+                // Bright fill on top.
+                frame.fill(&bolt, self.yellow);
+            }
+
+            // Percentage text — sits below the lightning bolt
+            // when charging (smaller so they share the body),
+            // centre when not. Rendered with a subtle shadow for
+            // readability over the colour bar.
             let label = if s.percent >= 100 {
-                format!("{prefix}100%")
+                "100%".to_string()
             } else {
-                format!("{prefix}{}%", s.percent)
+                format!("{}%", s.percent)
             };
-            // Sized to ~50 % of body height so 100% (4 chars) stays
-            // inside the body even at small icon widths.
-            let label_size = body_h * 0.55;
+            let label_size = if s.charging {
+                body_h * 0.40
+            } else {
+                body_h * 0.55
+            };
             let approx_w = label.chars().count() as f32 * label_size * 0.55;
             let cx = body_x + body_w / 2.0 - approx_w / 2.0;
-            let cy = body_y + body_h / 2.0 - label_size * 0.6;
+            // When charging: percent text under the bolt. Otherwise
+            // centred vertically.
+            let cy = if s.charging {
+                body_y + body_h - label_size * 1.05
+            } else {
+                body_y + body_h / 2.0 - label_size * 0.6
+            };
 
             // Subtle shadow for readability over the colour bar.
             frame.fill_text(canvas::Text {
@@ -255,6 +292,33 @@ impl<Message> canvas::Program<Message> for BatteryPainter {
 // ============================================================================
 // Path helpers
 // ============================================================================
+
+/// Stylised lightning-bolt path centred at `(cx, cy)` with the
+/// given total `height`. The bolt's width is ~0.55 × height so
+/// it reads as a tall narrow zig-zag. Designed for overlay use:
+/// stroke + fill against any background fill colour.
+fn lightning_bolt(cx: f32, cy: f32, height: f32) -> Path {
+    let h = height.max(4.0);
+    let w = h * 0.55;
+    // Six-point zig-zag: top → upper-right notch → middle-left
+    // → middle-right notch → bottom → lower-left notch → close.
+    let pts: [(f32, f32); 6] = [
+        ( 0.10, -0.50), // top tip (slightly off-centre)
+        (-0.40,  0.05), // upper-left valley
+        (-0.05,  0.05), // mid-shelf
+        (-0.18,  0.50), // bottom tip
+        ( 0.30, -0.05), // lower-right plateau
+        (-0.05, -0.05), // mid-shelf back
+    ];
+    let mut b = Builder::new();
+    let p0 = pts[0];
+    b.move_to(Point::new(cx + p0.0 * w, cy + p0.1 * h));
+    for &(px, py) in pts.iter().skip(1) {
+        b.line_to(Point::new(cx + px * w, cy + py * h));
+    }
+    b.close();
+    b.build()
+}
 
 fn rounded_rect(x: f32, y: f32, w: f32, h: f32, r: f32) -> Path {
     let r = r.min(w / 2.0).min(h / 2.0).max(0.0);

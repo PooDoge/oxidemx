@@ -1,147 +1,27 @@
-//! "Buttons" tab — centerpiece of the legacy juhradial UI:
-//!   - mouse photo + button-target callouts
-//!   - per-button assignments list
-//!   - right column: live "Actions Ring" preview + Easy-Switch
-//!     toggle + slices editor (add / remove / reorder / edit)
+//! "Menu" tab — radial menu configuration:
+//!   - page picker (multi-page menu support)
+//!   - live "Actions Ring" preview
+//!   - Easy-Switch toggle
+//!   - selected-slice editor (action / icon / colour / etc.)
+//!
+//! Mouse-button assignments USED to live on the left of this
+//! tab; they're now on `Tab::MouseButtons` (separate sidebar
+//! entry) so the radial-menu editor gets the full window width
+//! to work in.
 
-use crate::mouse_callouts::mouse_widget;
 use crate::radial_preview::radial_preview_widget;
-use juhradial_widgets::widgets::section_header;
 use crate::{Message, State};
 use juhradial_widgets::style;
+use juhradial_widgets::widgets::section_header;
 use iced::widget::{button, column, container, pick_list, row, rule, text, text_input, toggler, Space};
 use iced::{Alignment, Element, Length};
 use juhradial_shared::{ActionKind, Condition, RadialPage, Slice};
-use std::path::PathBuf;
-
-const MOUSE_IMAGE_PATH: &str = "assets/devices/logitechmouse.png";
 
 // ============================================================================
 // View entry
 // ============================================================================
 
 pub fn view(state: &State) -> Element<'_, Message> {
-    row![
-        center_panel(state),
-        Space::new().width(Length::Fixed(20.0)),
-        right_panel(state),
-    ]
-    .spacing(0)
-    .into()
-}
-
-// ============================================================================
-// Center: mouse photo + callout list
-// ============================================================================
-
-fn center_panel(state: &State) -> Element<'_, Message> {
-    let pal = &state.palette;
-
-    let mut button_col = column![].spacing(4);
-    for mb in juhradial_shared::MouseButton::all() {
-        button_col = button_col.push(button_assignment_row(state, *mb));
-    }
-
-    let mouse_image = mouse_photo(state);
-
-    container(
-        column![
-            section_header("MX Master 4"),
-            text("Click any action below to remap that button.")
-                .size(12)
-                .style(style::text_dim(pal)),
-            container(mouse_image)
-                .padding(8)
-                .center_x(Length::Fill),
-            container(button_col)
-                .padding(12)
-                .style(style::card_quiet(pal))
-                .width(Length::Fill),
-        ]
-        .spacing(14),
-    )
-    // Left column carries the mouse photo + per-button assignment
-    // list. Both fit comfortably in a narrow column, so we cap the
-    // portion to keep the radial menu editor (right column, where
-    // most editing actually happens) wide enough to be usable.
-    .width(Length::FillPortion(2))
-    .max_width(560.0)
-    .into()
-}
-
-fn mouse_photo(state: &State) -> Element<'_, Message> {
-    // Canvas-based mouse photo + overlaid callouts. Width and
-    // height keep ~3:4 ratio (the asset's native aspect) and leave
-    // generous space on the left for the L-shaped thumb labels +
-    // top space for the wheel labels.
-    let path = locate_mouse_image();
-    mouse_widget(&state.palette, path, 540.0, 560.0)
-}
-
-fn locate_mouse_image() -> PathBuf {
-    // Try sibling-of-binary first (deployed installs), then walk up
-    // for a workspace-root assets/ dir (cargo build / dev runs).
-    if let Ok(exe) = std::env::current_exe() {
-        let mut cur = exe.parent().map(|p| p.to_path_buf()).unwrap_or_default();
-        for _ in 0..6 {
-            let candidate = cur.join(MOUSE_IMAGE_PATH);
-            if candidate.exists() {
-                return candidate;
-            }
-            if !cur.pop() {
-                break;
-            }
-        }
-    }
-    PathBuf::from(MOUSE_IMAGE_PATH)
-}
-
-fn button_assignment_row(state: &State, mb: juhradial_shared::MouseButton) -> Element<'_, Message> {
-    let pal = &state.palette;
-    let current = mb.get(&state.config.buttons);
-
-    let options: Vec<ActionOption> = juhradial_shared::ButtonAction::all()
-        .iter()
-        .map(|a| ActionOption(*a))
-        .collect();
-    let selected = ActionOption(current);
-
-    let picker = pick_list(options, Some(selected), move |opt: ActionOption| {
-        Message::SetButtonAssignment(mb, opt.0)
-    })
-    .style(style::pick_list_style(pal))
-    .text_size(12);
-
-    container(
-        row![
-            container(text("⌖").size(13).style(style::text_dim(pal)))
-                .padding([4, 8])
-                .style(style::chip(pal)),
-            text(mb.label()).size(13),
-            Space::new().width(Length::Fill),
-            picker,
-        ]
-        .align_y(Alignment::Center)
-        .spacing(12)
-        .padding([6, 8]),
-    )
-    .into()
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct ActionOption(juhradial_shared::ButtonAction);
-
-impl std::fmt::Display for ActionOption {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.0.label())
-    }
-}
-
-// ============================================================================
-// Right column: Actions Ring + Easy-Switch + Slices editor
-// ============================================================================
-
-fn right_panel(state: &State) -> Element<'_, Message> {
     container(
         column![
             page_picker_card(state),
@@ -151,11 +31,9 @@ fn right_panel(state: &State) -> Element<'_, Message> {
         ]
         .spacing(16),
     )
-    // Right column owns the radial-menu editor — slice editor +
-    // page picker + icon picker. These widgets need real estate
-    // to be usable; bumping the portion to 3 (vs. left's 2)
-    // gives the editor side ~60% of the row at any window size.
-    .width(Length::FillPortion(3))
+    // Take full panel width — the editor can use every pixel
+    // to keep slice rows + preview + easy-switch from cramping.
+    .width(Length::Fill)
     .into()
 }
 
@@ -365,8 +243,57 @@ fn page_props_editor(state: &State, active: usize) -> Element<'_, Message> {
         .into()
     };
 
-    column![name_input, classes_row, context_hint, scroll_row].spacing(8).into()
+    let active_for_slots = active;
+    let slot_count_row = row![
+        column![
+            text("Slot count").size(13),
+            text(
+                "How many wedges this page renders. 8 is the default \
+                 dense layout; 4-5 makes each slice bigger and easier \
+                 to hit by mouse-flick."
+            )
+            .size(11)
+            .style(style::text_dim(pal)),
+        ]
+        .spacing(2),
+        Space::new().width(Length::Fill),
+        pick_list(
+            SLOT_COUNT_OPTIONS.as_slice(),
+            Some(SlotCountOption(page.effective_slot_count())),
+            move |opt: SlotCountOption| Message::SetPageSlotCount {
+                page: active_for_slots,
+                count: opt.0,
+            },
+        )
+        .style(style::pick_list_style(pal))
+        .text_size(12),
+    ]
+    .align_y(Alignment::Center)
+    .spacing(12);
+
+    column![name_input, classes_row, context_hint, scroll_row, slot_count_row]
+        .spacing(8)
+        .into()
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct SlotCountOption(u8);
+
+impl std::fmt::Display for SlotCountOption {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} wedges", self.0)
+    }
+}
+
+const SLOT_COUNT_OPTIONS: [SlotCountOption; 7] = [
+    SlotCountOption(2),
+    SlotCountOption(3),
+    SlotCountOption(4),
+    SlotCountOption(5),
+    SlotCountOption(6),
+    SlotCountOption(7),
+    SlotCountOption(8),
+];
 
 fn format_page_label(idx: usize, page: &RadialPage) -> String {
     let n = page.name.trim();
@@ -536,18 +463,32 @@ fn slice_editor_row<'a>(
     .on_input(move |s| Message::SetSliceDescription(idx, s))
     .padding(5)
     .size(11);
-    let cmd_input = text_input("Command", slice.command.as_str())
-        .on_input(move |s| Message::SetSliceCommand(idx, s))
-        .padding(6)
-        .size(12);
-    // Quick-fill from an installed .desktop entry: opens an inline
-    // app picker that, on click, populates command + icon + label
-    // (if empty) + Full-colour mode in one go.
-    let app_pick_btn = button(text("Pick app…").size(11))
-        .style(style::btn_secondary(pal))
-        .on_press(Message::OpenAppCommandPicker(
-            crate::app_picker::AppCommandTarget::Slice(idx),
-        ));
+    // Action-kind-specific value editor. The slice's `command`
+    // field carries different things depending on `kind`:
+    //   * Exec / Settings / Emoji  → shell command
+    //   * Macro                    → macro id (we render a pick_list
+    //                                of saved macros for usability)
+    //   * Shortcut                 → key chord ("ctrl+shift+v")
+    //   * EasySwitch               → 1-based host index ("1", "2", "3")
+    let cmd_input: Element<Message> = action_value_editor(state, idx, slice);
+    // "Pick app…" only makes sense for shell-command kinds; hiding
+    // it for Macro / Shortcut / EasySwitch keeps the row tidy and
+    // avoids tempting the user with a control that would overwrite
+    // their carefully-set macro id with a flatpak run command.
+    let needs_app_pick = matches!(
+        slice.kind,
+        ActionKind::Exec | ActionKind::Emoji | ActionKind::Settings
+    );
+    let app_pick_btn: Element<Message> = if needs_app_pick {
+        button(text("Pick app…").size(11))
+            .style(style::btn_secondary(pal))
+            .on_press(Message::OpenAppCommandPicker(
+                crate::app_picker::AppCommandTarget::Slice(idx),
+            ))
+            .into()
+    } else {
+        Space::new().width(Length::Shrink).into()
+    };
 
     let kind_picker = pick_list(
         KIND_OPTIONS.as_slice(),
@@ -635,11 +576,20 @@ fn slice_editor_row<'a>(
         header,
         label_input,
         desc_input,
-        row![kind_picker, color_picker, cmd_input.width(Length::Fill), app_pick_btn]
-            .align_y(Alignment::Center)
-            .spacing(8),
+        row![
+            kind_picker,
+            color_picker,
+            iced::widget::container(cmd_input).width(Length::Fill),
+            app_pick_btn,
+        ]
+        .align_y(Alignment::Center)
+        .spacing(8),
         icon_row,
-        visibility_editor(state, idx, slice.visible_if.as_ref()),
+        visibility_editor(
+            state,
+            VisibilityTarget::Slice { idx },
+            slice.visible_if.as_ref(),
+        ),
     ]
     .spacing(6);
 
@@ -772,38 +722,60 @@ fn condition_for_kind(kind: VisKind, prev: Option<&Condition>) -> Option<Conditi
 }
 
 /// Render the visibility predicate editor row for one slice.
+/// Where a visibility-editor change should be sent. `Slice` writes
+/// to `state.config[active_page].slices[idx].visible_if`; `SubItem`
+/// writes one level deeper. The single editor function dispatches
+/// the right `Message` variant based on which target is in use,
+/// so the slice + sub-item editors share one implementation.
+#[derive(Debug, Clone, Copy)]
+enum VisibilityTarget {
+    Slice { idx: usize },
+    SubItem { parent: usize, idx: usize },
+}
+
+impl VisibilityTarget {
+    fn make_message(&self, condition: Option<Condition>) -> Message {
+        match *self {
+            VisibilityTarget::Slice { idx } => Message::SetSliceVisibility {
+                slice: idx,
+                condition,
+            },
+            VisibilityTarget::SubItem { parent, idx } => {
+                Message::SetSubItemVisibility {
+                    parent,
+                    idx,
+                    condition,
+                }
+            }
+        }
+    }
+}
+
 /// Layout: small header → variant picker + (optional) one or two
-/// text inputs for the variant's args.
+/// text inputs for the variant's args. Single function used for
+/// both slice-level and sub-item visibility predicates — the
+/// `target` enum carries enough context to dispatch the right
+/// Message variant on every change.
 fn visibility_editor<'a>(
     state: &'a State,
-    slice_idx: usize,
+    target: VisibilityTarget,
     current: Option<&'a Condition>,
 ) -> Element<'a, Message> {
     let pal = &state.palette;
     let kind = VisKind::from_condition(current);
 
-    // Compound variant is grey-only — show it in the picker so the
-    // user can see "yeah this is set, but I have to edit JSON" but
-    // don't include it in the picker options unless it's already
-    // the current state (avoids accidental selection).
     let mut options: Vec<VisKind> = VisKind::ALL_SIMPLE.to_vec();
     if kind == VisKind::Compound {
         options.push(VisKind::Compound);
     }
 
     let prev_clone = current.cloned();
+    let target_for_kind = target;
     let kind_picker = pick_list(options, Some(kind), move |new_kind| {
-        // No-op when the user clicks the current Compound entry.
         if new_kind == VisKind::Compound {
-            return Message::SetSliceVisibility {
-                slice: slice_idx,
-                condition: prev_clone.clone(),
-            };
+            return target_for_kind.make_message(prev_clone.clone());
         }
-        Message::SetSliceVisibility {
-            slice: slice_idx,
-            condition: condition_for_kind(new_kind, prev_clone.as_ref()),
-        }
+        target_for_kind.make_message(condition_for_kind(new_kind, prev_clone.as_ref()))
     })
     .style(style::pick_list_style(pal))
     .text_size(11);
@@ -820,15 +792,14 @@ fn visibility_editor<'a>(
     // Condition on every keystroke — no draft state needed.
     let args: Element<Message> = match current {
         Some(Condition::Executable { name }) => {
-            let prev = current.cloned();
             let owned_name = name.clone();
+            let target_for_input = target;
             text_input(
                 "Executable name (e.g. \"git\", \"spotify\") or absolute path",
                 &owned_name,
             )
-            .on_input(move |v| Message::SetSliceVisibility {
-                slice: slice_idx,
-                condition: Some(Condition::Executable { name: v }),
+            .on_input(move |v| {
+                target_for_input.make_message(Some(Condition::Executable { name: v }))
             })
             .padding(5)
             .size(11)
@@ -836,13 +807,13 @@ fn visibility_editor<'a>(
         }
         Some(Condition::FileExists { path }) => {
             let owned_path = path.clone();
+            let target_for_input = target;
             text_input(
                 "Path (~ and $VAR are expanded, e.g. \"~/.config/foo\")",
                 &owned_path,
             )
-            .on_input(move |v| Message::SetSliceVisibility {
-                slice: slice_idx,
-                condition: Some(Condition::FileExists { path: v }),
+            .on_input(move |v| {
+                target_for_input.make_message(Some(Condition::FileExists { path: v }))
             })
             .padding(5)
             .size(11)
@@ -850,13 +821,13 @@ fn visibility_editor<'a>(
         }
         Some(Condition::ProcessRunning { comm }) => {
             let owned_comm = comm.clone();
+            let target_for_input = target;
             text_input(
                 "Process comm (the short name in /proc/PID/comm, e.g. \"spotify\")",
                 &owned_comm,
             )
-            .on_input(move |v| Message::SetSliceVisibility {
-                slice: slice_idx,
-                condition: Some(Condition::ProcessRunning { comm: v }),
+            .on_input(move |v| {
+                target_for_input.make_message(Some(Condition::ProcessRunning { comm: v }))
             })
             .padding(5)
             .size(11)
@@ -864,13 +835,13 @@ fn visibility_editor<'a>(
         }
         Some(Condition::EnvSet { var }) => {
             let owned_var = var.clone();
+            let target_for_input = target;
             text_input(
                 "Environment variable name (e.g. \"WAYLAND_DISPLAY\")",
                 &owned_var,
             )
-            .on_input(move |v| Message::SetSliceVisibility {
-                slice: slice_idx,
-                condition: Some(Condition::EnvSet { var: v }),
+            .on_input(move |v| {
+                target_for_input.make_message(Some(Condition::EnvSet { var: v }))
             })
             .padding(5)
             .size(11)
@@ -881,26 +852,26 @@ fn visibility_editor<'a>(
             let var_for_val = var.clone();
             let val_for_var = value.clone();
             let val_for_val = value.clone();
+            let target_for_var = target;
+            let target_for_val = target;
             row![
                 text_input("Variable", &var_for_var)
-                    .on_input(move |v| Message::SetSliceVisibility {
-                        slice: slice_idx,
-                        condition: Some(Condition::EnvEquals {
+                    .on_input(move |v| {
+                        target_for_var.make_message(Some(Condition::EnvEquals {
                             var: v,
                             value: val_for_var.clone(),
-                        }),
+                        }))
                     })
                     .padding(5)
                     .size(11)
                     .width(Length::FillPortion(2)),
                 text("=").size(11).style(style::text_faint(pal)),
                 text_input("Value", &val_for_val)
-                    .on_input(move |v| Message::SetSliceVisibility {
-                        slice: slice_idx,
-                        condition: Some(Condition::EnvEquals {
+                    .on_input(move |v| {
+                        target_for_val.make_message(Some(Condition::EnvEquals {
                             var: var_for_val.clone(),
                             value: v,
-                        }),
+                        }))
                     })
                     .padding(5)
                     .size(11)
@@ -926,7 +897,6 @@ fn visibility_editor<'a>(
         .size(10)
         .style(style::text_faint(pal))
         .into(),
-        // Always / Never / None — no args needed.
         _ => Space::new().height(Length::Fixed(0.0)).into(),
     };
 
@@ -982,11 +952,10 @@ fn submenu_item_row<'a>(
         .padding(5)
         .size(11)
         .width(Length::FillPortion(2));
-    let cmd_input = text_input("Command", item.command.as_str())
-        .on_input(move |s| Message::SetSubItemCommand(parent, idx, s))
-        .padding(5)
-        .size(11)
-        .width(Length::FillPortion(3));
+    // Same kind-aware value editor as `slice_editor_row` — Macro
+    // gets a dropdown of saved macros, EasySwitch gets a host
+    // picker, Shortcut shows a chord-format placeholder, etc.
+    let cmd_input: Element<Message> = sub_item_value_editor(state, parent, idx, item);
     let selected_color = if item.icon_untinted {
         ColorOption(FULL_COLOR_KEY.to_string())
     } else if item.color.is_empty() {
@@ -1033,11 +1002,20 @@ fn submenu_item_row<'a>(
         .padding(5)
         .size(11);
     let sub_browse_target = crate::icon_picker::IconPickerTarget::SubItem { parent, idx };
-    let sub_app_btn = button(text("Pick app…").size(10))
-        .style(style::btn_secondary(pal))
-        .on_press(Message::OpenAppCommandPicker(
-            crate::app_picker::AppCommandTarget::SubItem { parent, idx },
-        ));
+    let sub_needs_app_pick = matches!(
+        item.kind,
+        ActionKind::Exec | ActionKind::Emoji | ActionKind::Settings
+    );
+    let sub_app_btn: Element<Message> = if sub_needs_app_pick {
+        button(text("Pick app…").size(10))
+            .style(style::btn_secondary(pal))
+            .on_press(Message::OpenAppCommandPicker(
+                crate::app_picker::AppCommandTarget::SubItem { parent, idx },
+            ))
+            .into()
+    } else {
+        Space::new().width(Length::Shrink).into()
+    };
     let sub_browse_btn = button(text("Browse…").size(10))
         .style(style::btn_secondary(pal))
         .on_press(Message::OpenIconPicker(sub_browse_target));
@@ -1046,14 +1024,14 @@ fn submenu_item_row<'a>(
         .on_press(Message::BrowseIconFile(sub_browse_target));
 
     // (Untinted toggle folded into the colour pick_list above.)
-    let mut col = column![
+    let col = column![
         row![
             text(format!("{}.", idx + 1))
                 .size(10)
                 .style(style::text_faint(pal)),
             label_input,
             color_picker,
-            cmd_input,
+            iced::widget::container(cmd_input).width(Length::FillPortion(3)),
             test_btn,
             up_btn,
             down_btn,
@@ -1064,12 +1042,284 @@ fn submenu_item_row<'a>(
         row![kind_picker, icon_input.width(Length::Fill), sub_app_btn, sub_browse_btn, sub_file_btn]
             .align_y(Alignment::Center)
             .spacing(6),
+        visibility_editor(
+            state,
+            VisibilityTarget::SubItem { parent, idx },
+            item.visible_if.as_ref(),
+        ),
     ]
     .spacing(4);
 
     // (Pickers render full-panel via the shell short-circuit in
     // main.rs::view, no inline rendering here any more.)
     col.into()
+}
+
+// ============================================================================
+// Action-kind-specific value editor
+// ============================================================================
+
+/// Render the right widget for editing `slice.command` based on
+/// the slice's `kind`. Generic kinds (Exec / Settings / Emoji)
+/// fall back to a free-form text input. Macro / EasySwitch get
+/// pick_lists so the user doesn't have to remember an opaque id.
+/// Shortcut keeps a text input but with a kind-specific
+/// placeholder hint.
+fn action_value_editor<'a>(
+    state: &'a State,
+    idx: usize,
+    slice: &'a Slice,
+) -> Element<'a, Message> {
+    let pal = &state.palette;
+    match slice.kind {
+        ActionKind::Macro => {
+            let options: Vec<MacroOption> = state
+                .macros
+                .iter()
+                .map(|m| MacroOption {
+                    id: m.id.clone(),
+                    label: if m.name.trim().is_empty() {
+                        m.id.clone()
+                    } else {
+                        m.name.clone()
+                    },
+                })
+                .collect();
+            let selected = options.iter().find(|o| o.id == slice.command).cloned();
+            if options.is_empty() {
+                // No macros recorded yet — render a hint instead of
+                // an empty pick_list so the user knows where to go.
+                return text("Record a macro on the Macros tab first.")
+                    .size(11)
+                    .style(style::text_dim(pal))
+                    .into();
+            }
+            pick_list(options, selected, move |opt: MacroOption| {
+                Message::SetSliceCommand(idx, opt.id)
+            })
+            .style(style::pick_list_style(pal))
+            .text_size(12)
+            .placeholder("Pick a macro…")
+            .into()
+        }
+        ActionKind::EasySwitch => {
+            let options = host_options(state);
+            let selected = slice.command.parse::<u8>().ok().map(|n| HostOption {
+                idx: n,
+                name: options
+                    .iter()
+                    .find(|o| o.idx == n)
+                    .and_then(|o| o.name.clone()),
+            });
+            pick_list(options, selected, move |opt: HostOption| {
+                Message::SetSliceCommand(idx, opt.idx.to_string())
+            })
+            .style(style::pick_list_style(pal))
+            .text_size(12)
+            .placeholder("Pick host…")
+            .into()
+        }
+        ActionKind::Shortcut => {
+            let target = crate::ShortcutCaptureTarget::Slice(idx);
+            let capturing = state.capturing_shortcut == Some(target);
+            let placeholder = if capturing {
+                "Press a key chord… (Esc to cancel)".to_string()
+            } else {
+                "Key chord (e.g. \"ctrl+shift+v\", \"super+e\")".to_string()
+            };
+            let input = text_input(&placeholder, slice.command.as_str())
+                .on_input(move |s| Message::SetSliceCommand(idx, s))
+                .padding(6)
+                .size(12);
+            let capture_btn = button(
+                text(if capturing { "Cancel" } else { "Capture" }).size(11),
+            )
+            .style(style::btn_secondary(pal))
+            .on_press(Message::BeginShortcutCapture(target));
+            row![input.width(Length::Fill), capture_btn]
+                .align_y(Alignment::Center)
+                .spacing(6)
+                .into()
+        }
+        ActionKind::Submenu => text("(no command — sub-items dispatch instead)")
+            .size(11)
+            .style(style::text_dim(pal))
+            .into(),
+        ActionKind::None => text("(no action)")
+            .size(11)
+            .style(style::text_dim(pal))
+            .into(),
+        ActionKind::Exec | ActionKind::Settings | ActionKind::Emoji => {
+            text_input("Command", slice.command.as_str())
+                .on_input(move |s| Message::SetSliceCommand(idx, s))
+                .padding(6)
+                .size(12)
+                .into()
+        }
+    }
+}
+
+/// Sub-item analogue of `action_value_editor`. Identical control
+/// shapes; only the `Message` constructor differs (`SetSubItemCommand`
+/// vs `SetSliceCommand`) so the changes flow back into the right
+/// nested struct.
+fn sub_item_value_editor<'a>(
+    state: &'a State,
+    parent: usize,
+    idx: usize,
+    item: &'a Slice,
+) -> Element<'a, Message> {
+    let pal = &state.palette;
+    match item.kind {
+        ActionKind::Macro => {
+            let options: Vec<MacroOption> = state
+                .macros
+                .iter()
+                .map(|m| MacroOption {
+                    id: m.id.clone(),
+                    label: if m.name.trim().is_empty() {
+                        m.id.clone()
+                    } else {
+                        m.name.clone()
+                    },
+                })
+                .collect();
+            let selected = options.iter().find(|o| o.id == item.command).cloned();
+            if options.is_empty() {
+                return text("Record a macro on the Macros tab first.")
+                    .size(10)
+                    .style(style::text_dim(pal))
+                    .into();
+            }
+            pick_list(options, selected, move |opt: MacroOption| {
+                Message::SetSubItemCommand(parent, idx, opt.id)
+            })
+            .style(style::pick_list_style(pal))
+            .text_size(11)
+            .placeholder("Pick a macro…")
+            .into()
+        }
+        ActionKind::EasySwitch => {
+            let options = host_options(state);
+            let selected = item.command.parse::<u8>().ok().map(|n| HostOption {
+                idx: n,
+                name: options
+                    .iter()
+                    .find(|o| o.idx == n)
+                    .and_then(|o| o.name.clone()),
+            });
+            pick_list(options, selected, move |opt: HostOption| {
+                Message::SetSubItemCommand(parent, idx, opt.idx.to_string())
+            })
+            .style(style::pick_list_style(pal))
+            .text_size(11)
+            .placeholder("Pick host…")
+            .into()
+        }
+        ActionKind::Shortcut => {
+            let target = crate::ShortcutCaptureTarget::SubItem { parent, idx };
+            let capturing = state.capturing_shortcut == Some(target);
+            let placeholder = if capturing {
+                "Press a key chord… (Esc to cancel)".to_string()
+            } else {
+                "Key chord (e.g. \"ctrl+shift+v\")".to_string()
+            };
+            let input = text_input(&placeholder, item.command.as_str())
+                .on_input(move |s| Message::SetSubItemCommand(parent, idx, s))
+                .padding(5)
+                .size(11);
+            let capture_btn = button(
+                text(if capturing { "Cancel" } else { "Capture" }).size(10),
+            )
+            .style(style::btn_secondary(pal))
+            .on_press(Message::BeginShortcutCapture(target));
+            row![input.width(Length::Fill), capture_btn]
+                .align_y(Alignment::Center)
+                .spacing(4)
+                .into()
+        }
+        ActionKind::Submenu => text("(submenu — sub-items don't nest)")
+            .size(10)
+            .style(style::text_dim(pal))
+            .into(),
+        ActionKind::None => text("(no action)")
+            .size(10)
+            .style(style::text_dim(pal))
+            .into(),
+        ActionKind::Exec | ActionKind::Settings | ActionKind::Emoji => {
+            text_input("Command", item.command.as_str())
+                .on_input(move |s| Message::SetSubItemCommand(parent, idx, s))
+                .padding(5)
+                .size(11)
+                .into()
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct MacroOption {
+    id: String,
+    label: String,
+}
+
+impl std::fmt::Display for MacroOption {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.label)
+    }
+}
+
+/// A single host slot in the Easy-Switch picker. `idx` is the
+/// 1-based number printed on the mouse; `name` is the friendly
+/// label the daemon learned from the device pairing (e.g.
+/// "MacBook Pro", "ThinkPad", or "Host 1" when nothing's bonded).
+/// `PartialEq` ignores `name` so the picker correctly highlights
+/// the saved index even if the friendly name lookup hasn't
+/// completed (or the host name has since changed).
+#[derive(Debug, Clone)]
+struct HostOption {
+    idx: u8,
+    name: Option<String>,
+}
+
+impl PartialEq for HostOption {
+    fn eq(&self, other: &Self) -> bool {
+        self.idx == other.idx
+    }
+}
+impl Eq for HostOption {}
+
+impl std::fmt::Display for HostOption {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.name.as_deref().filter(|n| !n.trim().is_empty()) {
+            Some(n) => write!(f, "Host {} — {}", self.idx, n),
+            None => write!(f, "Host {}", self.idx),
+        }
+    }
+}
+
+/// Build the host picker options. Pulls names from the daemon
+/// snapshot when available (slot count + names polled every 5 s
+/// in the main poll loop); falls back to a generic 3-host list
+/// when the device hasn't been read yet or isn't connected.
+fn host_options(state: &State) -> Vec<HostOption> {
+    let names = state
+        .daemon
+        .easy_switch
+        .as_ref()
+        .map(|es| es.host_names.clone())
+        .unwrap_or_default();
+    let slot_count = state
+        .daemon
+        .easy_switch
+        .as_ref()
+        .map(|es| es.slot_count.max(1) as usize)
+        .unwrap_or(3);
+    (1..=slot_count as u8)
+        .map(|idx| HostOption {
+            idx,
+            name: names.get(idx as usize - 1).cloned(),
+        })
+        .collect()
 }
 
 // ============================================================================

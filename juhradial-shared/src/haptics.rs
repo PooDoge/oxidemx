@@ -60,6 +60,25 @@ pub struct PerEventPatterns {
     /// noticeable confirm. Defaults to `damp_state_change`.
     #[serde(default = "default_page_change_pattern")]
     pub page_change: String,
+
+    /// Pattern fired the moment a submenu pops out around a
+    /// hovered slice (kind = Submenu, sub-items appear). Distinct
+    /// from `slice_change` because the visual change is much
+    /// larger and the user is now navigating a different ring.
+    /// Defaults to `damp_collision` — a softer "pop" than the
+    /// crisp slice click.
+    #[serde(default = "default_submenu_open_pattern")]
+    pub submenu_open: String,
+
+    /// Pattern fired when an open submenu collapses (cursor
+    /// leaves the parent slice / submenu) without a selection.
+    /// Distinct from both `submenu_open` and `slice_change` so
+    /// the user feels the ring "rewinding". Defaults to
+    /// `whisper_collision` so it doesn't compete with the
+    /// slice_change pulse that fires on the way back to the
+    /// outer ring.
+    #[serde(default = "default_submenu_close_pattern")]
+    pub submenu_close: String,
 }
 
 impl Default for PerEventPatterns {
@@ -70,6 +89,8 @@ impl Default for PerEventPatterns {
             confirm: default_confirm_pattern(),
             invalid: default_invalid_pattern(),
             page_change: default_page_change_pattern(),
+            submenu_open: default_submenu_open_pattern(),
+            submenu_close: default_submenu_close_pattern(),
         }
     }
 }
@@ -94,6 +115,12 @@ fn default_invalid_pattern() -> String {
 }
 fn default_page_change_pattern() -> String {
     "damp_state_change".into()
+}
+fn default_submenu_open_pattern() -> String {
+    "damp_collision".into()
+}
+fn default_submenu_close_pattern() -> String {
+    "whisper_collision".into()
 }
 fn default_per_event() -> PerEventPatterns {
     PerEventPatterns::default()

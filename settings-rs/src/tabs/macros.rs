@@ -132,6 +132,11 @@ pub fn view(state: &State) -> Element<'_, Message> {
         .push(Space::new().width(Length::Fill))
         .push(record_btn)
         .push(
+            button(text("Import…").size(11))
+                .style(style::btn_secondary(pal))
+                .on_press(Message::ImportMacro),
+        )
+        .push(
             button(text("Refresh").size(11))
                 .style(style::btn_secondary(pal))
                 .on_press(Message::RefreshMacros),
@@ -265,6 +270,9 @@ fn macro_card<'a>(state: &'a State, m: &'a MacroSummary) -> Element<'a, Message>
             ]
             .spacing(2),
             Space::new().width(Length::Fill),
+            button(text("Export").size(11))
+                .style(style::btn_secondary(pal))
+                .on_press(Message::ExportMacro(m.id.clone())),
             button(text("Edit").size(11))
                 .style(style::btn_secondary(pal))
                 .on_press(Message::StartEditMacro(m.id.clone())),

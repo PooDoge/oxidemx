@@ -17,6 +17,7 @@ pub mod applications;
 pub mod buttons;
 pub mod conditions;
 pub mod config;
+pub mod gaming;
 pub mod haptics;
 pub mod pointer;
 pub mod popup;
@@ -25,15 +26,24 @@ pub mod theme;
 
 pub use action::ActionKind;
 pub use animation::{
-    AnimationConfig, ChainConfig, Easing, ElementAnimation, TransitionConfig, TransitionKind,
+    AnimationConfig, AnimationTrack, Axis, ChainConfig, ComposedTransform, Easing,
+    ElementAnimation, PageTransitionConfig, PageTransitionShaderConfig,
+    PageTransitionShaderStyle, PageTransitionStyle, TrackKind, TransitionConfig,
+    TransitionDirection, TransitionKind,
 };
 pub use applications::{
     clean_exec_line, enumerate_applications, parse_desktop_file, parse_desktop_string,
     search as search_applications, DesktopEntry,
 };
 pub use conditions::Condition;
-pub use config::{AppConfig, RadialMenuConfig, RadialPage, Slice, VisualSettings};
+pub use config::{
+    AppConfig, DispatchBurstStyle, RadialMenuConfig, RadialPage, Slice, VisualSettings,
+};
 pub use buttons::{ButtonAction, ButtonsConfig, MouseButton};
+pub use gaming::{
+    GamingConfig, HapticEventMode, HapticRedirectConfig, HapticRedirectCurve,
+    HapticRedirectMode,
+};
 pub use haptics::{HapticsConfig, PerEventPatterns, HAPTIC_PATTERNS};
 pub use pointer::{PointerConfig, ScrollConfig};
 pub use popup::{

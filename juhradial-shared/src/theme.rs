@@ -126,7 +126,7 @@ pub struct Theme {
 /// other themes were styled after). Each field is the standard hex
 /// `#rrggbb` notation; a `parse_hex` helper turns it into floats for
 /// cairo at render time.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ThemeColors {
     pub crust: String,
     pub mantle: String,
@@ -180,6 +180,42 @@ pub struct RadialParams {
 }
 
 impl ThemeColors {
+    /// Look up *any* colour key by name and return its hex string.
+    /// Covers every named slot in `ThemeColors` (surfaces, text,
+    /// accents, slice palette). Returns `None` for unknown keys
+    /// — caller decides the fallback. Used by tooltip styling and
+    /// other "user picks a palette colour by name" surfaces.
+    pub fn lookup(&self, key: &str) -> Option<&str> {
+        let s = match key {
+            "crust" => &self.crust,
+            "mantle" => &self.mantle,
+            "base" => &self.base,
+            "surface0" => &self.surface0,
+            "surface1" => &self.surface1,
+            "surface2" => &self.surface2,
+            "overlay0" => &self.overlay0,
+            "overlay1" => &self.overlay1,
+            "text" => &self.text,
+            "subtext1" => &self.subtext1,
+            "subtext0" => &self.subtext0,
+            "accent" => &self.accent,
+            "accent2" => &self.accent2,
+            "accent_dim" => &self.accent_dim,
+            "green" => &self.green,
+            "yellow" => &self.yellow,
+            "red" => &self.red,
+            "blue" => &self.blue,
+            "mauve" => &self.mauve,
+            "pink" => &self.pink,
+            "peach" => &self.peach,
+            "teal" => &self.teal,
+            "sapphire" => &self.sapphire,
+            "lavender" => &self.lavender,
+            _ => return None,
+        };
+        Some(s.as_str())
+    }
+
     /// Look up a slice colour key (e.g. "green", "sapphire") and
     /// return it as a cairo-friendly RGBA tuple in the [0.0, 1.0]
     /// range. Falls back to the theme's `accent` for unknown keys so
@@ -316,6 +352,50 @@ impl Theme {
 /// picks up automatically.
 pub fn user_themes_dir_pub() -> Option<PathBuf> {
     user_themes_dir()
+}
+
+/// Delete a saved user theme by its slug. Returns `Ok(())` even
+/// when the file is already gone (idempotent — the user pressing
+/// Delete twice should not error). Bundled themes can't be
+/// removed; this only touches `{user_themes_dir}/{slug}.json`.
+pub fn delete_user_theme(slug: &str) -> Result<(), std::io::Error> {
+    let dir = match user_themes_dir() {
+        Some(d) => d,
+        None => return Ok(()),
+    };
+    let path = dir.join(format!("{slug}.json"));
+    match std::fs::remove_file(&path) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(e),
+    }
+}
+
+/// Enumerate the slugs (filename stems) of every saved user
+/// theme. Empty when the user-themes dir doesn't exist yet, or no
+/// `*.json` files live inside. Sorted alphabetically so the
+/// settings UI lists them deterministically across reloads.
+pub fn list_user_theme_slugs() -> Vec<String> {
+    let dir = match user_themes_dir() {
+        Some(d) => d,
+        None => return Vec::new(),
+    };
+    let entries = match std::fs::read_dir(&dir) {
+        Ok(e) => e,
+        Err(_) => return Vec::new(),
+    };
+    let mut out: Vec<String> = entries
+        .filter_map(|e| e.ok())
+        .filter_map(|e| {
+            let p = e.path();
+            if p.extension().and_then(|s| s.to_str()) != Some("json") {
+                return None;
+            }
+            p.file_stem().and_then(|s| s.to_str()).map(|s| s.to_string())
+        })
+        .collect();
+    out.sort();
+    out
 }
 
 /// Persist a `Theme` as `{user_themes_dir}/{slug}.json`. Settings

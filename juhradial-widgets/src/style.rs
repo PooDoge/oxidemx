@@ -145,6 +145,7 @@ pub fn page(palette: &Palette) -> impl Fn(&Theme) -> container::Style + 'static 
 // ============================================================================
 
 /// Primary suggested-action button. Solid accent fill.
+#[allow(dead_code)]
 pub fn btn_primary(palette: &Palette) -> impl Fn(&Theme, button::Status) -> button::Style + 'static {
     let accent = palette.accent;
     let on_accent = if palette.is_dark {
@@ -237,6 +238,7 @@ pub fn nav_item(
 }
 
 /// Flat / tertiary button (icon-only, header bar actions).
+#[allow(dead_code)]
 pub fn btn_flat(palette: &Palette) -> impl Fn(&Theme, button::Status) -> button::Style + 'static {
     let text = palette.text;
     let row_hover = palette.row_hover;
@@ -288,6 +290,10 @@ pub fn btn_danger(palette: &Palette) -> impl Fn(&Theme, button::Status) -> butto
 // FORMS — slider, toggler, pick_list
 // ============================================================================
 
+/// Custom slider styling. Currently unused — sliders pick up their
+/// look from the iced::Theme::custom built in main(). Kept here in
+/// case a per-slider override is needed later.
+#[allow(dead_code)]
 pub fn slider_style(palette: &Palette) -> impl Fn(&Theme, slider::Status) -> slider::Style + 'static {
     let track_bg = palette.surface0;
     let highlight = palette.accent;

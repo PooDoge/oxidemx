@@ -86,16 +86,29 @@ impl IconCache {
     }
 }
 
-/// Composite an icon `handle` centred at `(cx, cy)` into `frame`.
-pub fn draw_icon(frame: &mut Frame, cx: f32, cy: f32, size: f32, handle: &Handle) {
+/// Composite an icon `handle` centred at `(cx, cy)` into `frame`
+/// at the given `opacity` (0..1). Alpha is applied via iced's
+/// per-image multiplier so the cached texture stays alpha=1 — a
+/// crossfade ramp re-uses the same handle for every frame instead
+/// of forcing a re-raster per alpha step.
+pub fn draw_icon(frame: &mut Frame, cx: f32, cy: f32, size: f32, handle: &Handle, opacity: f32) {
     let bounds = Rectangle::new(
         Point::new(cx - size / 2.0, cy - size / 2.0),
         Size::new(size, size),
     );
-    frame.draw_image(bounds, Image::new(handle.clone()));
+    frame.draw_image(
+        bounds,
+        Image::new(handle.clone()).opacity(opacity.clamp(0.0, 1.0)),
+    );
 }
 
-fn pack_color((r, g, b, a): (f32, f32, f32, f32)) -> u32 {
+/// Pack the *RGB* part of an icon tint into a 24-bit cache key.
+/// Alpha is intentionally dropped — every frame of a fade animates
+/// through dozens of alpha values, and we don't want each step to
+/// produce a fresh cache entry. The render-time opacity multiplier
+/// (see `draw_icon`) handles the fade without burning the
+/// rasteriser.
+fn pack_color((r, g, b, _a): (f32, f32, f32, f32)) -> u32 {
     let to_u8 = |v: f32| (v.clamp(0.0, 1.0) * 255.0) as u32;
-    (to_u8(a) << 24) | (to_u8(r) << 16) | (to_u8(g) << 8) | to_u8(b)
+    (to_u8(r) << 16) | (to_u8(g) << 8) | to_u8(b)
 }

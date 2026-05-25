@@ -20,6 +20,7 @@ use tracing::warn;
 use zbus::{proxy, Connection};
 
 const HELPER_SERVICE: &str = "org.juhradial.CursorHelper";
+#[allow(dead_code)]
 const HELPER_PATH: &str = "/org/juhradial/CursorHelper";
 
 #[proxy(

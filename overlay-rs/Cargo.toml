@@ -21,6 +21,12 @@ juhradial-window = { path = "../juhradial-window" }
 # via wayland-info from the dev distrobox), and keeping the build
 # pure-Rust avoids the *-devel rpm-ostree pain on atomic Fedora.
 iced = { version = "0.14", features = ["canvas", "wayland", "x11", "tokio", "image"] }
+# Direct wgpu access for the aurora backdrop shader. Versions
+# pinned to whatever iced_wgpu 0.14 itself uses so the wgpu
+# device/queue handed in by iced are ABI-compatible — bumping
+# iced means bumping these in lockstep.
+wgpu = "27.0"
+bytemuck = { version = "1.0", features = ["derive"] }
 
 # IPC with the daemon (signals on org.juhradial.Daemon) and with the
 # GNOME shell extension (window positioning).

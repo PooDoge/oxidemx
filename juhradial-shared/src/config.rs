@@ -2,6 +2,7 @@ use crate::action::ActionKind;
 use crate::animation::AnimationConfig;
 use crate::buttons::ButtonsConfig;
 use crate::conditions::Condition;
+use crate::gaming::GamingConfig;
 use crate::haptics::HapticsConfig;
 use crate::pointer::{PointerConfig, ScrollConfig};
 use crate::theme::ThemeName;
@@ -52,11 +53,11 @@ pub struct Slice {
     pub icon_untinted: bool,
 
     /// Optional longer-form notes / tooltip text for the slice.
-    /// Today this is a settings-side notes field — use it for
-    /// "deploy to staging via shipit (don't run on prod!)" type
-    /// reminders. A future overlay change may display it as a
-    /// subtitle under the centre-puck label on hover; for now
-    /// it's a JSON-resident field that survives across edits.
+    /// Renders as a smaller subtitle under the slice label inside
+    /// the overlay's centre puck while the slice is hovered — use
+    /// it for "deploy to staging via shipit (don't run on prod!)"
+    /// type reminders. Empty string = no subtitle (the puck just
+    /// shows the label, same as before this field existed).
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub description: String,
 
@@ -102,10 +103,22 @@ pub struct RadialPage {
     /// through app focus (not via scroll cycling from another page).
     #[serde(default = "default_include_in_scroll")]
     pub include_in_scroll: bool,
+
+    /// How many wedges this page renders. Clamped to 2..=8 by the
+    /// overlay; smaller counts give bigger easier-to-hit slices,
+    /// 8 (the default) is the dense layout most users expect.
+    /// Per-page so a "quick actions" page can be a 4-slot ring
+    /// while a "full launcher" page stays at 8.
+    #[serde(default = "default_slot_count")]
+    pub slot_count: u8,
 }
 
 fn default_include_in_scroll() -> bool {
     true
+}
+
+fn default_slot_count() -> u8 {
+    8
 }
 
 impl Default for RadialPage {
@@ -115,7 +128,18 @@ impl Default for RadialPage {
             slices: Vec::new(),
             app_classes: Vec::new(),
             include_in_scroll: true,
+            slot_count: default_slot_count(),
         }
+    }
+}
+
+impl RadialPage {
+    /// Resolve the page's slot count, clamped to the overlay's
+    /// supported range (2..=8). Use this everywhere that reads
+    /// `slot_count` so a malformed config (0, 99, …) can't render
+    /// undefined geometry.
+    pub fn effective_slot_count(&self) -> u8 {
+        self.slot_count.clamp(2, 8)
     }
 }
 
@@ -147,6 +171,254 @@ pub struct VisualSettings {
     /// system font.
     #[serde(default)]
     pub font_family: String,
+
+    /// How long the user must dwell on a slice before its
+    /// description tooltip appears, in milliseconds. 0 disables
+    /// the delay (instant tooltip), `u32::MAX`/large values
+    /// effectively disable the tooltip. Sensible range 200-1500.
+    #[serde(default = "default_tooltip_delay_ms")]
+    pub tooltip_delay_ms: u32,
+
+    /// Font size for the arced tooltip text. 0 hides the tooltip
+    /// entirely (icon-only ring).
+    #[serde(default = "default_tooltip_font_size")]
+    pub tooltip_font_size: f32,
+
+    /// When `true`, the tooltip ignores `tooltip_font_family` and
+    /// uses iced's bundled monospace. Monospace makes per-glyph
+    /// arc spacing exact (every cell is the same width), at the
+    /// cost of looking more "technical". Default true because
+    /// proportional fonts on a curved arc tend to bunch.
+    #[serde(default = "default_tooltip_use_monospace")]
+    pub tooltip_use_monospace: bool,
+
+    /// Optional font family for the arced tooltip (only used when
+    /// `tooltip_use_monospace` is `false`). Empty = inherit
+    /// `font_family`. Family must be installed on the system.
+    #[serde(default)]
+    pub tooltip_font_family: String,
+
+    /// Palette colour key used for the tooltip's background
+    /// ribbon. One of the surface keys: `crust`, `mantle`,
+    /// `base`, `surface0`, `surface1`, `surface2`, `overlay0`,
+    /// `overlay1`. Defaults to `crust` (darkest), which gives the
+    /// most contrast against light text.
+    #[serde(default = "default_tooltip_bg_color")]
+    pub tooltip_bg_color: String,
+
+    /// Background ribbon alpha, 0..1. 0 hides the ribbon entirely
+    /// (text on transparent), 1 = fully opaque colour. Default
+    /// 0.85 leaves a hair of show-through.
+    #[serde(default = "default_tooltip_bg_alpha")]
+    pub tooltip_bg_alpha: f32,
+
+    /// Palette colour key used for the tooltip text. One of:
+    /// `text`, `subtext1`, `subtext0`, `accent`. Defaults to
+    /// `text` (highest-contrast option in any theme).
+    #[serde(default = "default_tooltip_text_color")]
+    pub tooltip_text_color: String,
+
+    /// Intensity of the aurora backdrop shader (0..=1). 0 hides
+    /// the effect entirely (no GPU work). Drives a per-frame
+    /// fragment shader that paints a slow conic gradient between
+    /// the active theme's accents behind the menu — purely
+    /// decorative, runs only when the menu is open.
+    #[serde(default = "default_aurora_intensity")]
+    pub aurora_intensity: f32,
+
+    /// Intensity of the haptic-ripple shader (0..=1). 0 disables
+    /// — no shader pass runs on haptic events. > 0 paints a
+    /// thin expanding ring from menu centre every time a haptic
+    /// event fires (menu_appear, slice_change, page_change,
+    /// confirm, etc.) — visual feedback synced to the physical
+    /// motor pulse.
+    #[serde(default = "default_ripple_intensity")]
+    pub ripple_intensity: f32,
+
+    /// Intensity of the SDF hover-glow shader (0..=1). 0
+    /// disables. Replaces the canvas-side hover wash with a
+    /// resolution-independent glow that follows the wedge
+    /// boundary and uses the active accent colour. Coloured
+    /// outline + soft outer aura that scales with the highlight
+    /// tween.
+    #[serde(default = "default_hover_glow_intensity")]
+    pub hover_glow_intensity: f32,
+
+    /// Intensity of the dispatch-burst shader (0..=1). 0
+    /// disables. Renders a one-shot burst from the activated
+    /// slice when an action fires (confirm haptic). Style picks
+    /// between sparks / shockwave / glow looks.
+    #[serde(default = "default_dispatch_burst_intensity")]
+    pub dispatch_burst_intensity: f32,
+
+    /// Visual style of the dispatch-burst shader. See
+    /// [`DispatchBurstStyle`] for variants.
+    #[serde(default = "default_dispatch_burst_style")]
+    pub dispatch_burst_style: DispatchBurstStyle,
+
+    /// Intensity of the SDF wedge-ring shader (0..=1). 0
+    /// disables — canvas paints wedges as historically. > 0
+    /// fades the canvas-side wedge fills out and lets the SDF
+    /// layer paint them instead. Spike feature; defaults to off
+    /// while the look is being validated.
+    #[serde(default = "default_sdf_ring_intensity")]
+    pub sdf_ring_intensity: f32,
+
+    /// Intensity of the parallax-tilt shader (0..=1). 0 disables
+    /// the effect entirely (no GPU work). When > 0, the hovered
+    /// slice gets a directional specular highlight + soft inset
+    /// shadow that tracks the cursor — cheap visual analogue of
+    /// "the slice is tilting toward your finger". Pairs well
+    /// with `hover_glow` (different visual layer; tilt is
+    /// inside-the-wedge, glow is along-the-edge).
+    #[serde(default = "default_hover_tilt_intensity")]
+    pub hover_tilt_intensity: f32,
+
+    /// How much the parallax-tilt shader darkens the side of the
+    /// wedge facing AWAY from the cursor (0..=1). 0 = no shadow
+    /// (only highlight); 1 = strong inset shadow opposite the
+    /// cursor. Default 0.5 reads as a "leaned" surface without
+    /// looking blown out.
+    #[serde(default = "default_hover_tilt_shadow")]
+    pub hover_tilt_shadow: f32,
+
+    /// Specular highlight tightness for the parallax-tilt shader
+    /// (0..=1). Higher = smaller, sharper highlight; lower =
+    /// broader wash. 0.5 is the visual sweet spot for an MX-Master-
+    /// sized menu.
+    #[serde(default = "default_hover_tilt_sharpness")]
+    pub hover_tilt_sharpness: f32,
+
+    /// Intensity of the disc-bevel shader (0..=1). 0 disables —
+    /// no GPU work. > 0 paints a directional rim light along the
+    /// outer edge + a carved inset shadow at the inner ring,
+    /// framing the menu in 3D regardless of hover.
+    #[serde(default = "default_disc_bevel_intensity")]
+    pub disc_bevel_intensity: f32,
+
+    /// Intensity of the centre-dome shader (0..=1). 0 disables.
+    /// > 0 turns the centre puck into a Phong-shaded sphere with
+    /// directional Lambert wash + tight specular highlight.
+    #[serde(default = "default_center_dome_intensity")]
+    pub center_dome_intensity: f32,
+
+    /// Intensity of the slice-bevel shader (0..=1). 0 disables.
+    /// > 0 paints carved grooves between every wedge with
+    /// directional rim lighting — each slice reads as its own
+    /// raised 3D button.
+    #[serde(default = "default_slice_bevel_intensity")]
+    pub slice_bevel_intensity: f32,
+
+    /// Intensity of the drop-shadow shader (0..=1). 0 disables.
+    /// > 0 paints a soft falloff shadow OUTSIDE the disc, offset
+    /// away from the light source. Reads as the menu casting a
+    /// real cast shadow onto whatever is behind it — turns the
+    /// ring from "painted on the screen" into a floating object.
+    #[serde(default = "default_drop_shadow_intensity")]
+    pub drop_shadow_intensity: f32,
+
+    /// Intensity of the specular-sweep shader (0..=1). 0 disables.
+    /// > 0 paints an animated narrow band of light that slowly
+    /// rotates around the disc rim — like a polished surface
+    /// catching ambient light. Lit-side gated so the sweep
+    /// fades out on the shadow hemisphere.
+    #[serde(default = "default_specular_sweep_intensity")]
+    pub specular_sweep_intensity: f32,
+
+    /// Period in seconds for one full revolution of the
+    /// specular sweep around the disc. Larger = slower, more
+    /// meditative; smaller = faster, more energetic. Default 8s.
+    #[serde(default = "default_specular_sweep_period_s")]
+    pub specular_sweep_period_s: f32,
+
+    /// Direction of the virtual light source for every 3D-framing
+    /// shader (drop_shadow / disc_bevel / slice_bevel / center_
+    /// dome / hover_tilt), in radians, canvas convention (slice 0
+    /// at `-π/2` = top). Default `-3π/4` is upper-left, the
+    /// universal "this is 3D" convention. Rotating this knob
+    /// rotates the whole menu's lighting cohesively — highlights
+    /// and shadows stay consistent across all shaders because
+    /// they all read the same value.
+    #[serde(default = "default_light_angle_rad")]
+    pub light_angle_rad: f32,
+
+    /// Display the page name briefly in the centre puck on a
+    /// page swap (scroll-cycle, app-context auto-swap on open).
+    /// `true` = visible flash; `false` = no flash. Hover labels
+    /// always take precedence either way.
+    #[serde(default = "default_page_name_show")]
+    pub page_name_show: bool,
+
+    /// How long the page name stays at FULL opacity after the
+    /// slide-in completes, before starting its fade-out tail.
+    /// Total on-screen time = `2 × transition_ms + visible_ms`.
+    #[serde(default = "default_page_name_visible_ms")]
+    pub page_name_visible_ms: u32,
+
+    /// Duration of both the slide-in (with optional cross-slide
+    /// of the previous page's name) AND the final fade-out.
+    /// Same value used for both phases for visual symmetry.
+    #[serde(default = "default_page_name_transition_ms")]
+    pub page_name_transition_ms: u32,
+
+    /// Horizontal slide distance in logical pixels. Forward
+    /// cycles slide the new name in from `+slide_distance` and
+    /// the old name out to `-slide_distance`; backward cycles
+    /// flip both signs. `0` collapses to pure crossfade.
+    #[serde(default = "default_page_name_slide_distance_px")]
+    pub page_name_slide_distance_px: f32,
+
+    /// Render the page-name flash as an arc lifted above the
+    /// centre puck, instead of inside it. Keeps the label out
+    /// of the cursor's path (since the cursor sits on the puck
+    /// when scrolling to cycle pages) and echoes the menu's
+    /// circular geometry. `false` renders the label flat and
+    /// centred inside the puck (legacy look).
+    #[serde(default = "default_page_name_arced")]
+    pub page_name_arced: bool,
+
+    /// Force monospace for the page name. The arced layout
+    /// assigns each character a uniform angular slot — a
+    /// proportional font produces uneven gaps (narrow glyphs
+    /// look isolated, wide ones look cramped). Monospace makes
+    /// every cell hold an equal-width glyph, fixing the
+    /// spacing. Defaults `true`; turn off to use a proportional
+    /// font for the flat layout (or to experiment with arced
+    /// proportional rendering).
+    #[serde(default = "default_page_name_use_monospace")]
+    pub page_name_use_monospace: bool,
+
+    /// Page-name-specific font family override. Empty string
+    /// inherits `font_family`. Ignored when
+    /// `page_name_use_monospace` is true (which forces the
+    /// platform monospace family).
+    #[serde(default)]
+    pub page_name_font_family: String,
+}
+
+/// What the dispatch-burst shader looks like. Selectable from
+/// the GPU shaders card in settings — each style is a different
+/// fragment-shader branch in `dispatch_burst.wgsl`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DispatchBurstStyle {
+    /// Bright particles fly outward from the activated slice in
+    /// scattered directions, fading as they expand. Reads as
+    /// "this action sparked".
+    Sparks,
+    /// Multiple concentric rings expand from the activated
+    /// slice's icon — more emphatic version of the haptic
+    /// ripple, anchored at the slice rather than menu centre.
+    Shockwave,
+    /// Single bright flash centred on the activated slice that
+    /// fades quickly. Subtle, fastest visual feedback.
+    Glow,
+}
+
+impl Default for DispatchBurstStyle {
+    fn default() -> Self {
+        DispatchBurstStyle::Sparks
+    }
 }
 
 /// Helper for `#[serde(skip_serializing_if = ...)]` on the
@@ -165,7 +437,92 @@ fn default_slice_highlight_opacity() -> f32 {
 fn default_center_label_size() -> f32 {
     13.0
 }
-
+fn default_tooltip_delay_ms() -> u32 {
+    600
+}
+fn default_tooltip_font_size() -> f32 {
+    11.0
+}
+fn default_tooltip_use_monospace() -> bool {
+    true
+}
+fn default_tooltip_bg_color() -> String {
+    "crust".to_string()
+}
+fn default_tooltip_bg_alpha() -> f32 {
+    0.85
+}
+fn default_tooltip_text_color() -> String {
+    "text".to_string()
+}
+fn default_aurora_intensity() -> f32 {
+    0.6
+}
+fn default_ripple_intensity() -> f32 {
+    0.7
+}
+fn default_hover_glow_intensity() -> f32 {
+    0.6
+}
+fn default_dispatch_burst_intensity() -> f32 {
+    0.7
+}
+fn default_dispatch_burst_style() -> DispatchBurstStyle {
+    DispatchBurstStyle::Sparks
+}
+fn default_sdf_ring_intensity() -> f32 {
+    0.0
+}
+fn default_hover_tilt_intensity() -> f32 {
+    0.65
+}
+fn default_hover_tilt_shadow() -> f32 {
+    0.5
+}
+fn default_hover_tilt_sharpness() -> f32 {
+    0.5
+}
+fn default_disc_bevel_intensity() -> f32 {
+    0.6
+}
+fn default_center_dome_intensity() -> f32 {
+    0.6
+}
+fn default_slice_bevel_intensity() -> f32 {
+    0.55
+}
+fn default_drop_shadow_intensity() -> f32 {
+    0.55
+}
+fn default_specular_sweep_intensity() -> f32 {
+    0.4
+}
+fn default_specular_sweep_period_s() -> f32 {
+    8.0
+}
+fn default_light_angle_rad() -> f32 {
+    // -3π/4 = upper-left in canvas convention (slice 0 at -π/2
+    // = top). Universal "this is 3D" lighting convention.
+    -std::f32::consts::FRAC_PI_2 - std::f32::consts::FRAC_PI_4
+}
+fn default_page_name_show() -> bool {
+    true
+}
+fn default_page_name_visible_ms() -> u32 {
+    1200
+}
+fn default_page_name_transition_ms() -> u32 {
+    300
+}
+fn default_page_name_slide_distance_px() -> f32 {
+    30.0
+}
+fn default_page_name_arced() -> bool {
+    true
+}
+fn default_page_name_use_monospace() -> bool {
+    true
+}
 impl Default for VisualSettings {
     fn default() -> Self {
         VisualSettings {
@@ -173,6 +530,36 @@ impl Default for VisualSettings {
             slice_highlight_opacity: default_slice_highlight_opacity(),
             center_label_size: default_center_label_size(),
             font_family: String::new(),
+            tooltip_delay_ms: default_tooltip_delay_ms(),
+            tooltip_font_size: default_tooltip_font_size(),
+            tooltip_use_monospace: default_tooltip_use_monospace(),
+            tooltip_font_family: String::new(),
+            tooltip_bg_color: default_tooltip_bg_color(),
+            tooltip_bg_alpha: default_tooltip_bg_alpha(),
+            tooltip_text_color: default_tooltip_text_color(),
+            aurora_intensity: default_aurora_intensity(),
+            ripple_intensity: default_ripple_intensity(),
+            hover_glow_intensity: default_hover_glow_intensity(),
+            dispatch_burst_intensity: default_dispatch_burst_intensity(),
+            dispatch_burst_style: default_dispatch_burst_style(),
+            sdf_ring_intensity: default_sdf_ring_intensity(),
+            hover_tilt_intensity: default_hover_tilt_intensity(),
+            hover_tilt_shadow: default_hover_tilt_shadow(),
+            hover_tilt_sharpness: default_hover_tilt_sharpness(),
+            disc_bevel_intensity: default_disc_bevel_intensity(),
+            center_dome_intensity: default_center_dome_intensity(),
+            slice_bevel_intensity: default_slice_bevel_intensity(),
+            drop_shadow_intensity: default_drop_shadow_intensity(),
+            specular_sweep_intensity: default_specular_sweep_intensity(),
+            specular_sweep_period_s: default_specular_sweep_period_s(),
+            light_angle_rad: default_light_angle_rad(),
+            page_name_show: default_page_name_show(),
+            page_name_visible_ms: default_page_name_visible_ms(),
+            page_name_transition_ms: default_page_name_transition_ms(),
+            page_name_slide_distance_px: default_page_name_slide_distance_px(),
+            page_name_arced: default_page_name_arced(),
+            page_name_use_monospace: default_page_name_use_monospace(),
+            page_name_font_family: String::new(),
         }
     }
 }
@@ -231,6 +618,7 @@ impl RadialMenuConfig {
                     slices: legacy,
                     app_classes: Vec::new(),
                     include_in_scroll: true,
+                    slot_count: default_slot_count(),
                 });
             } else if self.pages[0].slices.is_empty() {
                 // Tolerate a config that has both fields populated by
@@ -317,6 +705,13 @@ pub struct AppConfig {
     /// daemon's `daemon::config::ButtonsConfig`.
     #[serde(default)]
     pub buttons: ButtonsConfig,
+
+    /// Game-Mode block — currently the gamepad-rumble → haptic
+    /// redirect knobs. See `juhradial-mx/HAPTIC_GAMEPAD_BRIDGE_DESIGN.md`.
+    /// Optional; missing block deserialises to `GamingConfig::default()`
+    /// which leaves every feature off.
+    #[serde(default)]
+    pub gaming: GamingConfig,
 
     /// Per-app menu profile names. When the focused window's WM_CLASS (or
     /// equivalent) matches a key here, the daemon points the overlay at

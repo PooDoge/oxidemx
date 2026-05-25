@@ -32,6 +32,7 @@ pub const CENTER: f64 = WINDOW_SIZE / 2.0;
 /// instead of half a dozen floats — and a future user-configurable
 /// menu radius drops in here without touching the call sites.
 #[derive(Debug, Clone, Copy)]
+#[allow(dead_code)]
 pub struct Geometry {
     pub cx: f64,
     pub cy: f64,

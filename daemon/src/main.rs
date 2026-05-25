@@ -425,6 +425,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let trigger_map_for_events = trigger_map.clone();
     let macro_engine_for_events = macro_engine.clone();
 
+    // Shared thumb-wheel state — created here so the D-Bus interface
+    // and the hidraw read loop see the same `Arc`. The D-Bus side
+    // owns activation (creating/dropping the uinput forwarder when
+    // the user toggles horizontal-scroll invert); the hidraw side
+    // dispatches diverted 0x2150 notifications into the forwarder.
+    let thumb_wheel_state = juhradiald::new_thumb_wheel_state();
+    let thumb_wheel_state_for_hidraw = thumb_wheel_state.clone();
+
     // Initialize D-Bus service with battery state, config, haptic manager, device info, and macro state
     let overlay_spawner = std::sync::Arc::new(juhradiald::overlay_spawner::OverlaySpawner::new());
     let dbus_connection = match init_dbus_service_with_device(
@@ -438,6 +446,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         macro_recorder,
         trigger_map,
         overlay_spawner,
+        thumb_wheel_state,
     )
     .await
     {
@@ -524,6 +533,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             hidraw_config,
             hidraw_hotplug,
             haptic_manager_for_hidraw,
+            thumb_wheel_state_for_hidraw,
         )
         .await
     });
@@ -719,6 +729,7 @@ async fn refresh_hidpp_button_diverts(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn run_hidraw_loop(
     event_tx: mpsc::Sender<GestureEvent>,
     mut preferred_path: Option<PathBuf>,
@@ -726,11 +737,13 @@ async fn run_hidraw_loop(
     shared_config: juhradiald::config::SharedConfig,
     hotplug: Arc<tokio::sync::Notify>,
     haptic_manager: SharedHapticManager,
+    thumb_wheel_state: juhradiald::SharedThumbWheelState,
 ) {
     let mut handler = HidrawHandler::new(event_tx);
     let macro_cids_for_divert = macro_cids.clone();
     handler.set_macro_cids(macro_cids);
     handler.set_shared_config(shared_config);
+    handler.set_thumb_wheel_state(thumb_wheel_state.clone());
 
     loop {
         if let Some(path) =
@@ -738,6 +751,15 @@ async fn run_hidraw_loop(
                 .await
         {
             preferred_path = Some(path);
+        }
+
+        // Publish the THUMB_WHEEL feature index now that the device
+        // is (re)connected. The D-Bus interface reads it from the
+        // shared state when the user enables invert.
+        if let Ok(manager) = haptic_manager.lock() {
+            if let Ok(mut state) = thumb_wheel_state.lock() {
+                state.feature_index = manager.thumb_wheel_feature_index();
+            }
         }
 
         // Try to open - use preferred path from HidppDevice if available

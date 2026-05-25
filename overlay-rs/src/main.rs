@@ -37,8 +37,20 @@ mod input;
 mod radial;
 mod render {
     pub mod animation;
+    pub mod aurora;
+    pub mod center_dome;
+    pub mod disc_bevel;
+    pub mod dispatch_burst;
+    pub mod drop_shadow;
+    pub mod hover_glow;
+    pub mod hover_tilt;
     pub mod icons;
+    pub mod page_fx;
+    pub mod ripple;
+    pub mod sdf_ring;
+    pub mod slice_bevel;
     pub mod slices;
+    pub mod specular_sweep;
 }
 mod theme;
 mod tray;

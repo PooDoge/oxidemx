@@ -51,6 +51,17 @@ pub struct ScrollConfig {
     /// string so editor UIs can ship new modes without enum churn.
     #[serde(default = "default_mode")]
     pub mode: String,
+    /// Reverse the side-scroll (horizontal) direction
+    /// independently of the main wheel's `natural` toggle. The
+    /// MX Master 4's thumb-wheel emits horizontal scroll events
+    /// that some users want flipped without affecting vertical.
+    /// Daemon-side application requires HID++ ThumbWheel
+    /// (`0x2150`) support OR an evdev/uinput grab to swap
+    /// `REL_HWHEEL` events — neither is wired yet, so this
+    /// currently persists to config as a no-op pending that
+    /// integration. Tracked in the hardware-integration audit.
+    #[serde(default)]
+    pub horizontal_invert: bool,
 }
 
 fn default_smooth() -> bool {
@@ -74,6 +85,7 @@ impl Default for ScrollConfig {
             smartshift: default_smartshift(),
             smartshift_threshold: default_smartshift_threshold(),
             mode: default_mode(),
+            horizontal_invert: false,
         }
     }
 }

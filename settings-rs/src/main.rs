@@ -17,13 +17,19 @@ mod tabs {
     pub mod haptics;
     pub mod indicator_popup;
     pub mod macros;
+    pub mod mouse_buttons;
     pub mod placeholder;
     pub mod scroll;
     pub mod settings_page;
     pub mod visuals;
 }
+mod animation_editor;
 mod app_picker;
 mod battery;
+mod bundle;
+mod ui_state;
+mod color_canvas;
+mod theme_customiser;
 mod cursor_helper;
 mod daemon;
 mod fonts;
@@ -38,7 +44,8 @@ mod singleton;
 use iced::widget::{button, column, container, row, rule, scrollable, text, Space};
 use iced::{Element, Length, Subscription, Task};
 use juhradial_shared::{
-    AnimationConfig, AppConfig, ElementAnimation, TransitionConfig, VisualSettings,
+    AnimationConfig, AppConfig, ElementAnimation, HapticEventMode, HapticRedirectCurve,
+    HapticRedirectMode, TransitionConfig, VisualSettings,
 };
 use juhradial_widgets::{palette, style};
 use std::sync::OnceLock;
@@ -57,7 +64,13 @@ static FOCUS_RX: OnceLock<async_channel::Receiver<()>> = OnceLock::new();
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tab {
-    Buttons,
+    /// Per-button action assignments for the MX Master 4 itself
+    /// (left, right, side, gesture, etc. → action mapping).
+    MouseButtons,
+    /// Radial menu editor — page picker, slice editor, preview.
+    /// Was bundled with `MouseButtons` in the original "Buttons"
+    /// tab; split out here so each concern gets the full window.
+    Menu,
     PointScroll,
     IndicatorPopup,
     Haptic,
@@ -72,7 +85,8 @@ pub enum Tab {
 impl Tab {
     pub fn label(&self) -> &'static str {
         match self {
-            Tab::Buttons => "Buttons",
+            Tab::MouseButtons => "Mouse Buttons",
+            Tab::Menu => "Menu",
             Tab::PointScroll => "Point & Scroll",
             Tab::IndicatorPopup => "Indicator Popup",
             Tab::Haptic => "Haptic Feedback",
@@ -93,12 +107,14 @@ impl Tab {
         matches!(self, Tab::Flow)
     }
 
-    /// Single-glyph icon shown in the sidebar. Picked to read at
-    /// a glance; the legacy UI uses bespoke SVGs which we'll
-    /// substitute later when we add an icon resolver here too.
+    /// Single-glyph icon shown in the sidebar — used as a fallback
+    /// when the freedesktop symbolic icon named by `icon_name()`
+    /// isn't available in the current theme. Picked to read at a
+    /// glance.
     pub fn glyph(&self) -> &'static str {
         match self {
-            Tab::Buttons => "M",
+            Tab::MouseButtons => "M",
+            Tab::Menu => "R",
             Tab::PointScroll => "S",
             Tab::IndicatorPopup => "I",
             Tab::Haptic => "H",
@@ -111,8 +127,76 @@ impl Tab {
         }
     }
 
-    pub const ALL: [Tab; 10] = [
-        Tab::Buttons,
+    /// freedesktop / hicolor symbolic icon name for the tab.
+    /// The sidebar tries to resolve this through the shared
+    /// `IconCache` first; an unresolved name falls back to
+    /// `glyph()` so the sidebar always renders something useful
+    /// even on bare-bones themes.
+    pub fn icon_name(&self) -> &'static str {
+        match self {
+            Tab::MouseButtons => "input-mouse-symbolic",
+            Tab::Menu => "applications-graphics-symbolic",
+            Tab::PointScroll => "preferences-desktop-cursors-symbolic",
+            Tab::IndicatorPopup => "applications-system-symbolic",
+            Tab::Haptic => "audio-volume-high-symbolic",
+            Tab::Devices => "computer-symbolic",
+            Tab::EasySwitch => "system-switch-user-symbolic",
+            Tab::Flow => "view-grid-symbolic",
+            Tab::Macros => "media-playback-start-symbolic",
+            Tab::Gaming => "applications-games-symbolic",
+            Tab::Settings => "preferences-system-symbolic",
+        }
+    }
+
+    /// Stable, lower-case tag for serialising the active tab to
+    /// disk. Matches no user-facing string so renaming a label
+    /// won't invalidate saved state.
+    pub fn tag(self) -> &'static str {
+        match self {
+            Tab::MouseButtons => "mouse_buttons",
+            Tab::Menu => "menu",
+            Tab::PointScroll => "point_scroll",
+            Tab::IndicatorPopup => "indicator_popup",
+            Tab::Haptic => "haptic",
+            Tab::Devices => "devices",
+            Tab::EasySwitch => "easy_switch",
+            Tab::Flow => "flow",
+            Tab::Macros => "macros",
+            Tab::Gaming => "gaming",
+            Tab::Settings => "settings",
+        }
+    }
+
+    /// Inverse of `tag()` — None when the input is unknown
+    /// (handles the case of a tag stored before a tab was
+    /// added/removed). Legacy `"buttons"` tag (from before the
+    /// Mouse-buttons / Menu split) maps to `Tab::Menu` so users
+    /// who saved their state on the old combined tab don't get
+    /// kicked back to the default on first launch after upgrade.
+    pub fn from_tag(s: &str) -> Option<Self> {
+        Some(match s {
+            "mouse_buttons" => Tab::MouseButtons,
+            "menu" => Tab::Menu,
+            // Legacy: combined "Buttons" tab → split. The radial
+            // menu editor (now `Tab::Menu`) is the more
+            // commonly-used half of the two, so default to it.
+            "buttons" => Tab::Menu,
+            "point_scroll" => Tab::PointScroll,
+            "indicator_popup" => Tab::IndicatorPopup,
+            "haptic" => Tab::Haptic,
+            "devices" => Tab::Devices,
+            "easy_switch" => Tab::EasySwitch,
+            "flow" => Tab::Flow,
+            "macros" => Tab::Macros,
+            "gaming" => Tab::Gaming,
+            "settings" => Tab::Settings,
+            _ => return None,
+        })
+    }
+
+    pub const ALL: [Tab; 11] = [
+        Tab::MouseButtons,
+        Tab::Menu,
         Tab::PointScroll,
         Tab::IndicatorPopup,
         Tab::Haptic,
@@ -136,9 +220,146 @@ pub enum Message {
     /// Font family override for rendered text (Visuals tab).
     /// Empty string = system default.
     SetFontFamily(String),
+    /// Arced-tooltip hover delay in milliseconds. 0 = instant.
+    SetTooltipDelay(u32),
+    /// Toggle the centre-puck page-name flash on/off.
+    SetPageNameShow(bool),
+    /// Page-name flash visible duration (full-opacity hold) ms.
+    SetPageNameVisibleMs(u32),
+    /// Page-name slide-in / fade-out duration ms.
+    SetPageNameTransitionMs(u32),
+    /// Horizontal slide distance for page-name flash. 0 = pure
+    /// crossfade.
+    SetPageNameSlideDistance(f32),
+    /// Toggle the arced (above-puck) layout vs the flat
+    /// (centre-puck) layout for the page-name flash.
+    SetPageNameArced(bool),
+    /// Toggle monospace for the page-name flash. Strongly
+    /// recommended for arced layouts (proportional fonts leave
+    /// uneven gaps because every char gets a uniform angular
+    /// slot).
+    SetPageNameUseMonospace(bool),
+    /// Page-name-specific font family override. Empty = inherit
+    /// the menu font_family. Ignored when monospace is forced.
+    SetPageNameFontFamily(String),
+    /// Toggle whether the tooltip forces monospace.
+    SetTooltipUseMonospace(bool),
+    /// Tooltip-specific font family override. Empty string =
+    /// inherit `visuals.font_family`.
+    SetTooltipFontFamily(String),
+    /// Palette key for the tooltip's background ribbon. One of
+    /// the surface keys (`crust`, `surface0`, …).
+    SetTooltipBgColor(String),
+    /// Background ribbon alpha multiplier in [0, 1].
+    SetTooltipBgAlpha(f32),
+    /// Palette key for the tooltip's text colour.
+    SetTooltipTextColor(String),
+    /// Reset every tooltip-styling field back to its default.
+    /// Doesn't touch `tooltip_font_size` or `tooltip_delay_ms` —
+    /// those are layout knobs, not styling.
+    ResetTooltipStyle,
+    /// Fire-and-forget haptic preview from the Haptics tab.
+    /// `event` is the daemon's per-event identifier
+    /// (`"menu_appear"`, `"slice_change"`, etc.).
+    TestHapticEvent(String),
+    /// Result of a `TestHapticEvent` — only used to swallow the
+    /// completion of the fire-and-forget D-Bus call so iced has a
+    /// concrete message to dispatch back. No state changes.
+    HapticTestFired,
     SetTransition(AnimElement, AnimDirection, TransitionConfig),
     SetChainStagger(AnimElement, u32),
     ResetElementAnimation(AnimElement),
+    /// Replace the page-cycle transition config (Animation tab,
+    /// Page-transition card). Carries the full block so the picker
+    /// + sliders can each just clone-mutate-emit.
+    SetPageTransition(juhradial_shared::PageTransitionConfig),
+    /// Pick the dispatch-burst shader style (Sparks / Shockwave / Glow).
+    SetDispatchBurstStyle(juhradial_shared::DispatchBurstStyle),
+    /// Reset the page-cycle transition to its default (spin +
+    /// crossfade, 220 ms, ease-out, 22.5° rotation).
+    ResetPageTransition,
+    /// Empty tick fired during the status auto-fade tail to keep
+    /// the alpha ramp rendering at ~30 fps. Handler does nothing
+    /// — the redraw side effect is the whole point.
+    StatusFadeTick,
+    /// Tab-persistence fire-and-forget completion. We just need a
+    /// concrete Message to dispatch back so iced has a typed
+    /// completion; the handler is a no-op.
+    LastTabPersisted,
+    /// Open a save dialog to write the current config to a JSON
+    /// file. Useful for backups, sharing setups, or migrating
+    /// between machines.
+    ExportConfig,
+    /// Result of `ExportConfig` — `Ok(path)` on success,
+    /// `Err(message)` on failure or user cancellation.
+    ConfigExported(Result<String, String>),
+    /// Open a file picker to import a config JSON. Replaces the
+    /// current config wholesale; the existing reset-armed timer
+    /// gates the destructive part with a status warning.
+    ImportConfig,
+    /// Result of `ImportConfig` — `Ok((parsed_config, errors))`
+    /// if the file loaded + parsed (errors are non-fatal issues
+    /// from individual macro/theme writes), `Err(message)` on
+    /// read/parse failure or cancellation.
+    ConfigImported(Result<(Box<juhradial_shared::AppConfig>, Vec<String>), String>),
+    /// Open the config directory in the user's file manager via
+    /// `xdg-open`. Spawned detached so the settings UI doesn't
+    /// block on the file manager's startup.
+    OpenConfigFolder,
+    /// Import a theme JSON from disk. Picks a file, parses it as
+    /// `Theme`, saves under `~/.local/share/juhradial/themes/`
+    /// using a slug derived from the file's stem, and switches
+    /// the picker to it.
+    ImportTheme,
+    /// Result of `ImportTheme` — `Ok(slug)` to switch to the
+    /// imported theme, `Err(message)` for status feedback.
+    ThemeImported(Result<String, String>),
+    /// Save the named user theme to a user-chosen file. The
+    /// theme is loaded fresh from disk so any in-flight customiser
+    /// edits don't leak in unexpectedly.
+    ExportTheme(String),
+    /// Result of `ExportTheme` — `Ok(path)` for status, `Err(msg)`
+    /// for failure or cancellation.
+    ThemeExported(Result<String, String>),
+    /// Open the rename editor for a saved user theme — flips
+    /// `state.renaming_theme` to `Some(slug)` so the picker row
+    /// shows a text input.
+    BeginRenameTheme(String),
+    /// Update the in-flight rename draft. Stored on State because
+    /// the user can edit across multiple frames before committing.
+    SetRenameThemeDraft(String),
+    /// Commit the in-flight rename — saves the theme under the
+    /// new slug, deletes the old file, switches the active picker
+    /// when the renamed theme was active.
+    CommitRenameTheme,
+    /// Cancel the in-flight rename, discarding the draft.
+    CancelRenameTheme,
+    /// Result of the rename's async file work.
+    ThemeRenamed(Result<(String, String), String>),
+    /// Begin capturing the next key chord pressed by the user
+    /// into the named slice / sub-item's command field. Switches
+    /// the editor into a "press a chord…" mode and arms the
+    /// keyboard subscription. Cancel by pressing Esc or clicking
+    /// the Capture button again.
+    BeginShortcutCapture(ShortcutCaptureTarget),
+    /// Cancel an in-flight capture without writing a value.
+    CancelShortcutCapture,
+    /// A key chord arrived from the keyboard subscription.
+    /// `chord` is already formatted in xdotool style
+    /// (`"ctrl+shift+v"`); writing it triggers `SetSliceCommand` /
+    /// `SetSubItemCommand` for the captured target and clears
+    /// `capturing_shortcut`.
+    ShortcutCaptured(String),
+    /// Open the radial overlay so the user can preview the
+    /// currently-tweaked animation / theme without lifting hands
+    /// off the keyboard. Daemon picks up the show request and the
+    /// overlay positions itself at the user's cursor (or screen
+    /// centre when cursor pos isn't available).
+    OpenOverlayForPreview,
+    /// Result of `OpenOverlayForPreview` — fire-and-forget; we
+    /// just need a Message to dispatch back so iced has a typed
+    /// completion.
+    OverlayPreviewFired,
     ResetAll,
     /// Easy-Switch shortcut toggle (Buttons tab right column).
     SetEasySwitchShortcuts(bool),
@@ -183,6 +404,13 @@ pub enum Message {
     /// equivalent at runtime; we write the slimmer `None` shape on
     /// disk for that case.
     SetSliceVisibility { slice: usize, condition: Option<juhradial_shared::Condition> },
+    /// Sub-item analogue of `SetSliceVisibility`. Same shape, just
+    /// addressed under a parent slice's submenu.
+    SetSubItemVisibility {
+        parent: usize,
+        idx: usize,
+        condition: Option<juhradial_shared::Condition>,
+    },
     /// Spawn the slice's command via `sh -c` so the user can
     /// validate shell quoting + that the command actually launches
     /// before relying on the radial menu to dispatch it. Non-Exec
@@ -209,6 +437,10 @@ pub enum Message {
     SetPointerSpeed(u32),
     SetPointerAcceleration(bool),
     SetScrollNatural(bool),
+    /// Toggle horizontal-axis scroll inversion (ThumbWheel HID++
+    /// 0x2150). Independent of the main wheel's `natural` flag —
+    /// flips just the side scroll.
+    SetScrollHorizontalInvert(bool),
     SetScrollSmooth(bool),
     SetScrollSmartshift(bool),
     SetScrollSmartshiftThreshold(u32),
@@ -227,6 +459,21 @@ pub enum Message {
     RefreshMacros,
     OpenMacrosFolder,
     DeleteMacro(String),
+    /// Export the named macro to a user-chosen file. Useful for
+    /// sharing single macros without exporting the whole config
+    /// bundle.
+    ExportMacro(String),
+    /// Result of `ExportMacro` — `Ok(path)` for status feedback,
+    /// `Err(msg)` on cancellation or write failure.
+    MacroExported(Result<String, String>),
+    /// Import one macro JSON from disk. File stem becomes the
+    /// new macro id, body is written verbatim under
+    /// `~/.config/juhradial/macros/{stem}.json`. Existing macros
+    /// with the same id are overwritten.
+    ImportMacro,
+    /// Result of `ImportMacro` — `Ok(id)` (so we can refresh +
+    /// surface the new entry), `Err(msg)` on read/parse failure.
+    MacroImported(Result<String, String>),
 
     // --- Daemon snapshot (battery + name + DPI + Easy-Switch) ---
     DaemonTick,
@@ -274,6 +521,30 @@ pub enum Message {
     CycleGamingDpi,
     GamingDpiCycled(Result<String, String>),
 
+    // --- Gaming → haptic-redirect bridge ---
+    // Phase-2 UI: write to config.gaming.haptic_redirect.*; daemon
+    // reads via inotify. No D-Bus apply path yet (Phase 3+ will wire
+    // the daemon).
+    SetHapticRedirectEnabled(bool),
+    SetHapticRedirectMode(HapticRedirectMode),
+    SetHapticRedirectCurve(HapticRedirectCurve),
+    SetHapticRedirectEventMode(HapticEventMode),
+    SetHapticRedirectIntensityScale(f32),
+    SetHapticRedirectMinIntensity(f32),
+    SetHapticRedirectStrongWeight(f32),
+    SetHapticRedirectWeakWeight(f32),
+    SetHapticRedirectThrottleMs(u16),
+    SetHapticRedirectPassthroughToPad(bool),
+    SetHapticRedirectHardHide(bool),
+    /// Period (s) for the "keep gamepad awake" pulse; 0 = disabled.
+    SetHapticRedirectKeepGamepadActive(u16),
+    /// Fire a one-shot test pulse through the daemon.
+    TestHapticRedirect,
+    HapticRedirectTested(Result<(), String>),
+    /// Request a diagnostic report from the daemon.
+    DiagnoseHapticRedirect,
+    HapticRedirectDiagnosed(Result<String, String>),
+
     // --- HiResScroll (Point & Scroll tab) ---
     SetHiResScrollHires(bool),
     SetHiResScrollInvert(bool),
@@ -289,12 +560,55 @@ pub enum Message {
     RemoveAppBinding(String),
 
     // --- Custom theme palette editor (Settings tab → Theme card) ---
+    /// Set the wedge count for a specific radial page. Clamped to
+    /// 2..=8 by the overlay's `RadialPage::effective_slot_count`.
+    SetPageSlotCount { page: usize, count: u8 },
     /// Toggle the "Customise theme" expander.
     ToggleThemeCustomiser,
+    /// Remove a user-saved theme from disk. Bundled themes can't
+    /// be deleted (the slug just won't match anything), but we
+    /// still cover that no-op silently. If the user is currently
+    /// on the deleted theme, fall back to the default so the UI
+    /// doesn't render with a stale palette reference.
+    DeleteUserTheme(String),
+    /// Restore every palette field to the snapshot taken when the
+    /// customiser was opened. No-op if no editor is active. Doesn't
+    /// touch the typed slug — the user might want to keep their
+    /// "Save as" name across a revert.
+    RevertCustomTheme,
     /// Edit one palette field. Field name is one of the
     /// ThemeColors keys ("crust", "accent", etc.); value is the
     /// new "#rrggbb" hex.
     SetThemeColor { field: String, value: String },
+    /// Open the inline color-picker for a named palette field, or
+    /// close it when the same field is already open. Clicking a
+    /// row's swatch toggles it.
+    ToggleThemeColorPicker(String),
+    /// Drag any of the R/G/B sliders in the open color-picker
+    /// panel — recomputes the field's hex string and forwards to
+    /// `SetThemeColor` so the live-preview path stays single-source.
+    SetThemeColorChannel {
+        field: String,
+        channel: ColorChannel,
+        value: u8,
+    },
+    /// Drag in the HSV square — sets saturation + value for the
+    /// editing field while keeping the current hue. Hue updates
+    /// flow through `SetThemeColorHue` to keep the message shape
+    /// flat (saves us threading an `enum` of {SV, H, RGB}).
+    SetThemeColorSv {
+        field: String,
+        s: f32,
+        v: f32,
+    },
+    /// Drag in the rainbow hue strip. SV are preserved — when the
+    /// current colour is greyscale (s == 0), saturation jumps to
+    /// 1.0 and value preserves so the user actually *sees* their
+    /// new hue land.
+    SetThemeColorHue {
+        field: String,
+        h: f32,
+    },
     /// Save the active palette as a user theme with the typed slug.
     SaveCustomTheme,
     /// Slug being typed into the "Save as" input.
@@ -369,6 +683,50 @@ pub enum Message {
     /// one click.
     OpenAppCommandPicker(app_picker::AppCommandTarget),
     CloseAppCommandPicker,
+    // --- Custom animation editor (full panel) ---
+    /// Open the animation editor on a specific element. Mirrors
+    /// the "Customize" button on each element's row in the
+    /// Animation tab.
+    OpenAnimationEditor(animation_editor::AnimEditorElement),
+    /// Close the editor — Back button.
+    CloseAnimationEditor,
+    /// Select a track on either side for parameter editing.
+    AnimationEditorSelectTrack(animation_editor::AnimEditorDirection, usize),
+    /// Append a new track to the given direction. Track type
+    /// name comes from the type combobox; the new track gets
+    /// `TrackKind::default_for(name)` + sensible defaults for
+    /// delay (0) / duration (250 ms) / easing (EaseOut).
+    AnimationEditorAddTrack(animation_editor::AnimEditorDirection, &'static str),
+    /// Remove a track by index. Adjusts the selected track if
+    /// the deleted one was selected (or shifted by the removal).
+    AnimationEditorDeleteTrack(animation_editor::AnimEditorDirection, usize),
+    /// Replace a track's `kind` while preserving timing + easing.
+    /// Used by the type picker in the parameter editor.
+    AnimationEditorChangeKind(
+        animation_editor::AnimEditorDirection,
+        usize,
+        &'static str,
+    ),
+    /// Mutate a single field of the selected track. The
+    /// `TrackParam` enum collapses ~8 different setters into one
+    /// message so the update handler stays compact.
+    AnimationEditorSetParam(
+        animation_editor::AnimEditorDirection,
+        usize,
+        animation_editor::TrackParam,
+    ),
+    /// Switch the easing variant on a track. Spring keeps any
+    /// existing stiffness/damping; non-Spring variants ignore
+    /// those (they're ineffective on Linear / EaseIn / EaseOut /
+    /// EaseInOut anyway).
+    AnimationEditorSetEasingKind(
+        animation_editor::AnimEditorDirection,
+        usize,
+        animation_editor::EasingPickOption,
+    ),
+    /// Reset both Enter and Exit `custom_tracks` for the active
+    /// element to the empty list — falls back to the preset.
+    AnimationEditorReset,
     SetAppCommandSearch(String),
     /// Toggle whether the app pick replaces the slice's icon
     /// (defaults to true). Off = command + label only, leave the
@@ -450,6 +808,46 @@ pub enum VisualField {
     SliceHighlightOpacity,
     /// Centre-label font size in px (Visuals tab → "Centre label size").
     CenterLabelSize,
+    /// Arced-tooltip font size in px. 0 hides the tooltip.
+    TooltipFontSize,
+    /// Aurora backdrop intensity (0..=1). 0 disables the
+    /// shader entirely.
+    AuroraIntensity,
+    /// Haptic ripple shader intensity (0..=1). 0 disables.
+    RippleIntensity,
+    /// SDF hover glow shader intensity (0..=1). 0 disables.
+    HoverGlowIntensity,
+    /// Dispatch-burst shader intensity (0..=1). 0 disables.
+    DispatchBurstIntensity,
+    /// SDF wedge-ring shader intensity (0..=1). 0 disables —
+    /// canvas-only wedge rendering. > 0 fades canvas wedge fills
+    /// out and lets the SDF layer paint them instead.
+    SdfRingIntensity,
+    /// Parallax-tilt shader intensity (0..=1). 0 disables.
+    HoverTiltIntensity,
+    /// Parallax-tilt shadow strength (0..=1). How much the side
+    /// of the wedge facing AWAY from the cursor darkens.
+    HoverTiltShadow,
+    /// Parallax-tilt specular sharpness (0..=1). Higher =
+    /// smaller, sharper highlight; lower = broader wash.
+    HoverTiltSharpness,
+    /// Disc-bevel rim/inset shader intensity (0..=1). 0 disables.
+    DiscBevelIntensity,
+    /// Centre-dome Phong-sphere shader intensity (0..=1).
+    /// 0 disables.
+    CenterDomeIntensity,
+    /// Slice-bevel shader intensity (0..=1). 0 disables.
+    SliceBevelIntensity,
+    /// Drop-shadow shader intensity (0..=1). 0 disables.
+    DropShadowIntensity,
+    /// Global light direction in radians (canvas convention).
+    /// Drives all 3D-framing shaders' `light_angle` uniform so
+    /// highlights/shadows stay coherent across the disc.
+    LightAngleRad,
+    /// Specular-sweep shader intensity (0..=1). 0 disables.
+    SpecularSweepIntensity,
+    /// Specular-sweep revolution period in seconds.
+    SpecularSweepPeriod,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -559,12 +957,39 @@ pub struct State {
     pub last_edit: Option<Instant>,
     pub saved_pending: bool,
     pub status: String,
+    /// Snapshot of `status` taken on the last SaveTick. Used to
+    /// detect "the status changed since the last tick" without
+    /// touching every call site that writes to `status` — the
+    /// auto-clear timer reads `status` against `status_seen` and
+    /// stamps `status_set_at` on a fresh string.
+    pub status_seen: String,
+    /// When the current `status` was first observed by the auto-
+    /// clear logic. Reset every time `status_seen != status`.
+    /// Cleared on tick once the message is older than
+    /// [`STATUS_LIFETIME`].
+    pub status_set_at: Option<std::time::Instant>,
+    /// `Some(when)` while the user has clicked "Reset all to
+    /// defaults" once and hasn't yet confirmed. Second click
+    /// within [`RESET_CONFIRM_WINDOW`] actually performs the
+    /// reset; click after the window times out arms again instead
+    /// of acting. `None` = no reset pending.
+    pub reset_armed_at: Option<std::time::Instant>,
     /// Currently-selected slot in the radial preview, if any.
     /// Drives the per-slice editor in the Buttons-tab right column.
     pub selected_slice: Option<usize>,
-    /// Latest UPower battery reading. None until the first poll
-    /// completes (or if UPower / a Logitech mouse aren't around).
+    /// Latest battery reading. Sourced from the daemon when
+    /// available (HID++ — instant + accurate charging state)
+    /// with UPower as a fallback. The daemon is authoritative;
+    /// UPower only fills in when the daemon snapshot is stale
+    /// (older than `BATTERY_DAEMON_FRESH_SECS`).
     pub battery: Option<battery::BatteryStatus>,
+    /// Wall-clock instant of the most recent daemon-sourced
+    /// battery update. UPower writes are gated on this so a
+    /// subsequent UPower poll doesn't clobber the daemon's
+    /// charging=true state with `charging=false` (UPower's
+    /// reporting on Bluetooth/HID is often wrong, ours via
+    /// HID++ is canonical).
+    pub battery_daemon_at: Option<std::time::Instant>,
     /// Cached list of macros in `~/.config/juhradial/macros/`.
     /// Refreshed on tab switch + user-triggered Refresh.
     pub macros: Vec<tabs::macros::MacroSummary>,
@@ -623,6 +1048,26 @@ pub struct State {
     /// fills the slice's command + icon + label-if-empty + flips
     /// to "Full colour" mode in one click.
     pub app_command_picker: Option<app_picker::AppCommandPickerState>,
+    /// Custom-animation editor full-panel state, if open. Set
+    /// by Message::OpenAnimationEditor (clicked from a
+    /// "Customize" button on the Animation tab); cleared by
+    /// Message::CloseAnimationEditor (Back arrow). When `Some`,
+    /// the main view swaps to the editor panel and hides the
+    /// normal tab content.
+    pub animation_editor: Option<animation_editor::AnimationEditorState>,
+    /// Active shortcut-capture target, if the user clicked
+    /// "Capture" on a Shortcut-kind slice/sub-item editor. Drives
+    /// the keyboard subscription gate and the Capture button's
+    /// label flip ("Capture" → "Press a chord… (Esc to cancel)").
+    pub capturing_shortcut: Option<ShortcutCaptureTarget>,
+    /// Slug of the saved user theme currently being renamed, plus
+    /// the in-flight draft string. `None` = no rename open.
+    pub renaming_theme: Option<RenameThemeDraft>,
+    /// Searchable font-family picker state. Holds the deduplicated
+    /// list of system families discovered via `fc-list` once at
+    /// boot; the combo_box widget filters in place as the user
+    /// types.
+    pub font_picker: iced::widget::combo_box::State<FontChoice>,
     /// Shared rasterised icon cache (XDG resolver + tinting). Lives
     /// at State level so it persists across re-renders and across
     /// theme changes (colours change → new cache entries; old
@@ -633,6 +1078,10 @@ pub struct State {
     pub iced_handles: std::rc::Rc<
         std::cell::RefCell<std::collections::HashMap<radial_preview::IconKey, iced::widget::image::Handle>>,
     >,
+    /// Latest gamepad-rumble → haptic diagnostic report, shown in
+    /// the Gaming tab after the user clicks "Diagnose". `None` until
+    /// the first diagnose; refreshed on each subsequent click.
+    pub haptic_diagnosis: Option<String>,
 }
 
 impl Default for State {
@@ -647,20 +1096,31 @@ impl Default for State {
         // before any slice-editor message can mutate state.
         config.radial_menu.normalize_pages();
         let pal = palette::Palette::resolve(&config.theme);
+        // Restore the last-visited tab from disk if the user has
+        // one saved. Falls back to Buttons (the home tab) when
+        // there's no record or it points at an unknown tag.
+        let initial_tab = ui_state::load_last_tab()
+            .as_deref()
+            .and_then(Tab::from_tag)
+            .unwrap_or(Tab::MouseButtons);
         State {
             config,
             palette: pal,
-            tab: Tab::Buttons,
+            tab: initial_tab,
             config_path: path,
             last_edit: None,
             saved_pending: false,
             status: String::new(),
+            status_seen: String::new(),
+            status_set_at: None,
+            reset_armed_at: None,
             selected_slice: None,
             icons: std::rc::Rc::new(juhradial_icons::IconCache::new()),
             iced_handles: std::rc::Rc::new(std::cell::RefCell::new(
                 std::collections::HashMap::new(),
             )),
             battery: None,
+            battery_daemon_at: None,
             macros: tabs::macros::list(),
             daemon: daemon::DaemonSnapshot::default(),
             recording: RecordingState::Idle,
@@ -674,6 +1134,20 @@ impl Default for State {
             recent_icons: recents::load(),
             installed_apps: juhradial_shared::enumerate_applications(),
             app_command_picker: None,
+            animation_editor: None,
+            capturing_shortcut: None,
+            renaming_theme: None,
+            font_picker: iced::widget::combo_box::State::new(
+                std::iter::once(FontChoice::default())
+                    .chain(
+                        fonts::system_families()
+                            .iter()
+                            .cloned()
+                            .map(FontChoice::Family),
+                    )
+                    .collect(),
+            ),
+            haptic_diagnosis: None,
         }
     }
 }
@@ -706,18 +1180,105 @@ pub struct MacroEditDraft {
     pub trigger: String,
 }
 
+/// Single RGB channel selector for the inline colour picker.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ColorChannel {
+    Red,
+    Green,
+    Blue,
+}
+
+/// Where a captured key chord should be written when the user
+/// finishes a shortcut-capture session. Mirrors the shape of the
+/// icon-picker's target enum so the same dispatch pattern works.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ShortcutCaptureTarget {
+    Slice(usize),
+    SubItem { parent: usize, idx: usize },
+}
+
+/// In-flight rename of a saved user theme. `original` is the slug
+/// the user clicked Rename on; `draft` is the new slug they're
+/// typing. Committing saves the working theme under `draft`,
+/// deletes the file at `original`, and (if the renamed theme
+/// was active) updates `state.config.theme`.
+#[derive(Debug, Clone)]
+pub struct RenameThemeDraft {
+    pub original: String,
+    pub draft: String,
+}
+
+/// One entry in the font-family picker. `Default` sentinel covers
+/// the "let the system decide" option (config field stored as ""),
+/// `Family(name)` is one installed family. Display impl drives the
+/// combo_box's filtering + on-screen text, and PartialEq is used by
+/// iced to look up the currently-selected entry.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FontChoice {
+    Default,
+    Family(String),
+}
+
+impl Default for FontChoice {
+    fn default() -> Self {
+        FontChoice::Default
+    }
+}
+
+impl FontChoice {
+    /// Resolve to the on-disk config representation — empty string
+    /// for the system default, family name otherwise.
+    pub fn as_config_value(&self) -> String {
+        match self {
+            FontChoice::Default => String::new(),
+            FontChoice::Family(s) => s.clone(),
+        }
+    }
+
+    /// Inverse of `as_config_value` — picks the matching enum
+    /// variant from a stored config string.
+    pub fn from_config_value(s: &str) -> Self {
+        let trimmed = s.trim();
+        if trimmed.is_empty() {
+            FontChoice::Default
+        } else {
+            FontChoice::Family(trimmed.to_string())
+        }
+    }
+}
+
+impl std::fmt::Display for FontChoice {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            FontChoice::Default => f.write_str("(System default)"),
+            FontChoice::Family(s) => f.write_str(s),
+        }
+    }
+}
+
 /// In-flight state of the custom-theme editor.
 #[derive(Debug, Clone)]
 pub struct ThemeEditor {
     /// Working palette — starts as a clone of the active theme's
     /// colours and accumulates the user's edits. Saved on click.
     pub working: juhradial_shared::theme::ThemeColors,
+    /// Pristine snapshot taken when the editor was opened. Used by
+    /// the Revert button to restore the user's edits to where they
+    /// started without having to close and re-open the customiser
+    /// (which would also drop their typed slug and any other UI
+    /// state). Never mutated.
+    pub original: juhradial_shared::theme::ThemeColors,
     /// is_dark flag for the working theme. Mirrors the theme this
     /// was forked from.
     pub is_dark: bool,
     /// Slug typed into the "Save as" input. Becomes both the
     /// filename and the picker entry on save.
     pub slug: String,
+    /// Which palette field's color picker is currently expanded,
+    /// or `None` when no row is being edited. Click a swatch in
+    /// the editor → set this; click the swatch again or press
+    /// Done → clear it.
+    pub editing_field: Option<String>,
 }
 
 /// Apply a `#rrggbb` (or any string the user typed) to the named
@@ -754,6 +1315,93 @@ fn set_theme_color_field(c: &mut juhradial_shared::theme::ThemeColors, field: &s
     }
 }
 
+/// Read a named palette field as its current hex string. Returns
+/// the empty string for unknown fields. Used by the inline colour
+/// picker to seed its R/G/B sliders from the existing value.
+fn theme_field_value(c: &juhradial_shared::theme::ThemeColors, field: &str) -> String {
+    match field {
+        "crust" => c.crust.clone(),
+        "mantle" => c.mantle.clone(),
+        "base" => c.base.clone(),
+        "surface0" => c.surface0.clone(),
+        "surface1" => c.surface1.clone(),
+        "surface2" => c.surface2.clone(),
+        "overlay0" => c.overlay0.clone(),
+        "overlay1" => c.overlay1.clone(),
+        "text" => c.text.clone(),
+        "subtext1" => c.subtext1.clone(),
+        "subtext0" => c.subtext0.clone(),
+        "accent" => c.accent.clone(),
+        "accent2" => c.accent2.clone(),
+        "accent_dim" => c.accent_dim.clone(),
+        "green" => c.green.clone(),
+        "yellow" => c.yellow.clone(),
+        "red" => c.red.clone(),
+        "blue" => c.blue.clone(),
+        "mauve" => c.mauve.clone(),
+        "pink" => c.pink.clone(),
+        "peach" => c.peach.clone(),
+        "teal" => c.teal.clone(),
+        "sapphire" => c.sapphire.clone(),
+        "lavender" => c.lavender.clone(),
+        _ => String::new(),
+    }
+}
+
+/// Apply an HSV update to the editing field. `transform` receives
+/// the field's current `(h, s, v)` (decoded from the stored hex)
+/// and returns the new `(h, s, v)`. Used by both the SV-square
+/// drag and the hue-strip drag so they go through one place.
+fn apply_hsv_change<F>(state: &mut State, field: &str, transform: F)
+where
+    F: FnOnce(f32, f32, f32) -> (f32, f32, f32),
+{
+    let editor = match state.theme_editor.as_mut() {
+        Some(e) => e,
+        None => return,
+    };
+    let current = theme_field_value(&editor.working, field);
+    let (r, g, b) = parse_hex_channels(&current);
+    let (h, s, v) = color_canvas::rgb_to_hsv(
+        r as f32 / 255.0,
+        g as f32 / 255.0,
+        b as f32 / 255.0,
+    );
+    let (nh, ns, nv) = transform(h, s, v);
+    let (nr, ng, nb) = color_canvas::hsv_to_rgb(nh, ns, nv);
+    let hex = format!(
+        "#{:02x}{:02x}{:02x}",
+        (nr * 255.0).round().clamp(0.0, 255.0) as u8,
+        (ng * 255.0).round().clamp(0.0, 255.0) as u8,
+        (nb * 255.0).round().clamp(0.0, 255.0) as u8,
+    );
+    set_theme_color_field(&mut editor.working, field, hex);
+    let preview = juhradial_shared::theme::Theme {
+        name: "(custom)".into(),
+        description: String::new(),
+        is_dark: editor.is_dark,
+        radial_image: None,
+        radial_params: None,
+        colors: editor.working.clone(),
+    };
+    state.palette = palette::Palette::from_theme(&preview);
+    state.touch();
+}
+
+/// Decode a `#rrggbb` (or `rrggbb`) hex into its three byte
+/// channels. Unknown / malformed input returns black so the picker
+/// always has a sane base to work from.
+pub fn parse_hex_channels(s: &str) -> (u8, u8, u8) {
+    let s = s.trim().trim_start_matches('#');
+    if s.len() != 6 {
+        return (0, 0, 0);
+    }
+    let r = u8::from_str_radix(&s[0..2], 16).unwrap_or(0);
+    let g = u8::from_str_radix(&s[2..4], 16).unwrap_or(0);
+    let b = u8::from_str_radix(&s[4..6], 16).unwrap_or(0);
+    (r, g, b)
+}
+
 /// Spawn a slice's Exec command via `sh -c` so the user can
 /// validate it from the editor without going through the radial
 /// menu. Mirrors the daemon's exec convention (see
@@ -761,6 +1409,7 @@ fn set_theme_color_field(c: &mut juhradial_shared::theme::ThemeColors, field: &s
 /// is what the daemon will run later. Status messages surface
 /// failures; the spawn itself is non-blocking.
 fn run_test_action(state: &mut State, slice: Option<&juhradial_shared::Slice>) {
+    use juhradial_shared::ActionKind;
     let slice = match slice {
         Some(s) => s,
         None => {
@@ -768,28 +1417,69 @@ fn run_test_action(state: &mut State, slice: Option<&juhradial_shared::Slice>) {
             return;
         }
     };
-    if !matches!(slice.kind, juhradial_shared::ActionKind::Exec) {
-        state.status = format!(
-            "Test only supports Exec actions; this slice is {:?}. \
-             Trigger via the radial menu to test other kinds.",
-            slice.kind
-        );
-        return;
-    }
     let cmd = slice.command.trim();
-    if cmd.is_empty() {
-        state.status = "Cannot test: command is empty.".into();
-        return;
-    }
-    match std::process::Command::new("sh")
-        .args(["-c", cmd])
-        .spawn()
-    {
-        Ok(child) => {
-            state.status = format!("Spawned (PID {}): {}", child.id(), cmd);
+    match slice.kind {
+        ActionKind::Exec | ActionKind::Emoji => {
+            if cmd.is_empty() {
+                state.status = "Cannot test: command is empty.".into();
+                return;
+            }
+            match std::process::Command::new("sh")
+                .args(["-c", cmd])
+                .spawn()
+            {
+                Ok(child) => {
+                    state.status = format!("Spawned (PID {}): {}", child.id(), cmd);
+                }
+                Err(e) => {
+                    state.status = format!("Failed to spawn: {e}");
+                }
+            }
         }
-        Err(e) => {
-            state.status = format!("Failed to spawn: {e}");
+        ActionKind::Settings => {
+            // Test would just re-launch this very window. Skip the
+            // spawn but tell the user what would happen.
+            state.status =
+                "Settings slice opens this window; already here.".into();
+        }
+        ActionKind::Macro => {
+            if cmd.is_empty() {
+                state.status = "Cannot test: macro id is empty.".into();
+                return;
+            }
+            // Fire-and-forget through the existing daemon trigger
+            // path. Status reflects the dispatch attempt; the
+            // daemon's own logs cover playback success/failure.
+            let id = cmd.to_string();
+            tokio::spawn(daemon::trigger_macro(id.clone()));
+            state.status = format!("Triggering macro \"{id}\" via daemon");
+        }
+        ActionKind::Shortcut => {
+            if cmd.is_empty() {
+                state.status = "Cannot test: key chord is empty.".into();
+                return;
+            }
+            let keys = cmd.to_string();
+            tokio::spawn(daemon::trigger_shortcut(keys.clone()));
+            state.status = format!("Sending shortcut \"{keys}\" via daemon");
+        }
+        ActionKind::EasySwitch => {
+            match cmd.parse::<u8>() {
+                Ok(idx) if (1..=3).contains(&idx) => {
+                    tokio::spawn(daemon::trigger_set_host(idx));
+                    state.status = format!("Switching to host {idx} via daemon");
+                }
+                _ => {
+                    state.status =
+                        format!("Easy-Switch host must be 1, 2, or 3 (got {cmd:?})");
+                }
+            }
+        }
+        ActionKind::Submenu => {
+            state.status = "Submenu slices have no action — test sub-items individually.".into();
+        }
+        ActionKind::None => {
+            state.status = "This slice has no action configured.".into();
         }
     }
 }
@@ -848,6 +1538,44 @@ fn sanitize_slug(s: &str) -> String {
         .to_string()
 }
 
+/// Compute the effective wheel mode the device should be in,
+/// given the current scroll config. The settings UI splits
+/// "wheel mode picker" from "smartshift toggle"; the daemon
+/// expects a single 3-state mode string. This helper is the
+/// merge point.
+fn effective_wheel_mode(scroll: &juhradial_shared::ScrollConfig) -> &'static str {
+    match scroll.mode.as_str() {
+        // "free" and "freespin" both → freespin (Python used
+        // "freespin", early Rust wrote "free"; daemon accepts
+        // both).
+        "freespin" | "free" => "freespin",
+        "ratchet" => "ratchet",
+        // The "smartshift" picker entry — only if the SmartShift
+        // toggle is also on. With the toggle off, treat as plain
+        // ratchet so the user gets the always-clicky behaviour
+        // they asked for.
+        _ => {
+            if scroll.smartshift {
+                "smartshift"
+            } else {
+                "ratchet"
+            }
+        }
+    }
+}
+
+/// Fire the daemon's `set_wheel_mode` D-Bus call with the
+/// effective mode + current threshold. Wired to every scroll-
+/// mode picker / smartshift toggle / threshold slider change so
+/// the device updates instantly without waiting for the debounced
+/// config save + ReloadConfig round trip.
+fn fire_wheel_mode_apply(state: &State) -> Task<Message> {
+    let scroll = &state.config.scroll;
+    let mode = effective_wheel_mode(scroll).to_string();
+    let threshold = scroll.smartshift_threshold.min(100) as u8;
+    Task::perform(daemon::set_wheel_mode(mode, threshold), |_| Message::Noop)
+}
+
 /// Optimistically update the HiResScroll snapshot field + fire the
 /// async D-Bus write. The 5s daemon poll will reconcile if the
 /// device reports something different.
@@ -893,10 +1621,58 @@ impl From<radial_preview::Action> for Message {
     }
 }
 
+/// How long a status message stays in the footer before being
+/// auto-cleared. Long enough for the user to read a save-success
+/// toast or a "Spawned (PID …)" line; short enough that stale
+/// messages don't linger across unrelated edits. The last
+/// `STATUS_FADE_TAIL` of this window is a smooth fade-out instead
+/// of a hard cut, so the toast feels less abrupt.
+const STATUS_LIFETIME: Duration = Duration::from_secs(5);
+/// Tail of `STATUS_LIFETIME` over which the status text fades
+/// from full alpha down to zero. Renderer reads `status_set_at`
+/// and computes a per-frame alpha — the auto-clear logic still
+/// drops the text once we're past `STATUS_LIFETIME`, but the
+/// final stretch reads as a fade rather than a snap.
+pub const STATUS_FADE_TAIL: Duration = Duration::from_millis(800);
+
+/// Window the user has to confirm a destructive "Reset all to
+/// defaults" click. First click arms; second click within this
+/// window performs the reset; outside the window the button just
+/// rearms instead of acting (treating a stale arming as a fresh
+/// intent).
+const RESET_CONFIRM_WINDOW: Duration = Duration::from_secs(3);
+
 impl State {
     fn touch(&mut self) {
         self.last_edit = Some(Instant::now());
         self.saved_pending = true;
+    }
+
+    /// Tick the status auto-clear timer. Picks up new strings on
+    /// the same tick they're written without requiring every call
+    /// site to stamp a timestamp; clears strings older than
+    /// [`STATUS_LIFETIME`]. Idempotent + cheap (string compare +
+    /// elapsed check).
+    fn maybe_clear_status(&mut self) {
+        if self.status != self.status_seen {
+            self.status_seen = self.status.clone();
+            self.status_set_at = if self.status.is_empty() {
+                None
+            } else {
+                Some(Instant::now())
+            };
+            return;
+        }
+        if self.status.is_empty() {
+            return;
+        }
+        if let Some(set_at) = self.status_set_at {
+            if set_at.elapsed() >= STATUS_LIFETIME {
+                self.status.clear();
+                self.status_seen.clear();
+                self.status_set_at = None;
+            }
+        }
     }
 
     /// Mutable access to the slice list of the currently-active
@@ -965,7 +1741,11 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             if t == Tab::Macros {
                 state.macros = tabs::macros::list();
             }
-            Task::none()
+            // Persist the new tab fire-and-forget so re-opening
+            // the settings window lands on the same surface.
+            Task::perform(ui_state::save_last_tab(t.tag().to_string()), |_| {
+                Message::LastTabPersisted
+            })
         }
         Message::SetVisual(field, v) => {
             match field {
@@ -984,6 +1764,81 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                     state.config.radial_menu.visuals.center_label_size =
                         v.clamp(0.0, 32.0);
                 }
+                VisualField::TooltipFontSize => {
+                    state.config.radial_menu.visuals.tooltip_font_size =
+                        v.clamp(0.0, 24.0);
+                }
+                VisualField::AuroraIntensity => {
+                    state.config.radial_menu.visuals.aurora_intensity =
+                        v.clamp(0.0, 1.0);
+                }
+                VisualField::RippleIntensity => {
+                    state.config.radial_menu.visuals.ripple_intensity =
+                        v.clamp(0.0, 1.0);
+                }
+                VisualField::HoverGlowIntensity => {
+                    state.config.radial_menu.visuals.hover_glow_intensity =
+                        v.clamp(0.0, 1.0);
+                }
+                VisualField::DispatchBurstIntensity => {
+                    state.config.radial_menu.visuals.dispatch_burst_intensity =
+                        v.clamp(0.0, 1.0);
+                }
+                VisualField::SdfRingIntensity => {
+                    state.config.radial_menu.visuals.sdf_ring_intensity =
+                        v.clamp(0.0, 1.0);
+                }
+                VisualField::HoverTiltIntensity => {
+                    state.config.radial_menu.visuals.hover_tilt_intensity =
+                        v.clamp(0.0, 1.0);
+                }
+                VisualField::HoverTiltShadow => {
+                    state.config.radial_menu.visuals.hover_tilt_shadow =
+                        v.clamp(0.0, 1.0);
+                }
+                VisualField::HoverTiltSharpness => {
+                    state.config.radial_menu.visuals.hover_tilt_sharpness =
+                        v.clamp(0.0, 1.0);
+                }
+                VisualField::DiscBevelIntensity => {
+                    state.config.radial_menu.visuals.disc_bevel_intensity =
+                        v.clamp(0.0, 1.0);
+                }
+                VisualField::CenterDomeIntensity => {
+                    state.config.radial_menu.visuals.center_dome_intensity =
+                        v.clamp(0.0, 1.0);
+                }
+                VisualField::SliceBevelIntensity => {
+                    state.config.radial_menu.visuals.slice_bevel_intensity =
+                        v.clamp(0.0, 1.0);
+                }
+                VisualField::DropShadowIntensity => {
+                    state.config.radial_menu.visuals.drop_shadow_intensity =
+                        v.clamp(0.0, 1.0);
+                }
+                VisualField::LightAngleRad => {
+                    // Wrap to (-π, π] so the value stays in a
+                    // sane numeric range as the user spins the
+                    // slider past one full revolution.
+                    use std::f32::consts::PI;
+                    let mut a = v % (2.0 * PI);
+                    if a > PI {
+                        a -= 2.0 * PI;
+                    } else if a <= -PI {
+                        a += 2.0 * PI;
+                    }
+                    state.config.radial_menu.visuals.light_angle_rad = a;
+                }
+                VisualField::SpecularSweepIntensity => {
+                    state.config.radial_menu.visuals.specular_sweep_intensity =
+                        v.clamp(0.0, 1.0);
+                }
+                VisualField::SpecularSweepPeriod => {
+                    // Clamp to a sane range — too fast looks
+                    // like a strobe; too slow looks frozen.
+                    state.config.radial_menu.visuals.specular_sweep_period_s =
+                        v.clamp(1.0, 30.0);
+                }
             }
             state.touch();
             Task::none()
@@ -993,6 +1848,99 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             state.touch();
             Task::none()
         }
+        Message::SetTooltipDelay(ms) => {
+            // Cap at 5s — anything longer is effectively "off" and
+            // the user should set the font size to 0 instead.
+            state.config.radial_menu.visuals.tooltip_delay_ms = ms.min(5000);
+            state.touch();
+            Task::none()
+        }
+        Message::SetPageNameShow(on) => {
+            state.config.radial_menu.visuals.page_name_show = on;
+            state.touch();
+            Task::none()
+        }
+        Message::SetPageNameVisibleMs(ms) => {
+            // Cap at 4s — beyond that the flash starts feeling
+            // less like an announcement and more like a static
+            // label.
+            state.config.radial_menu.visuals.page_name_visible_ms =
+                ms.min(4000);
+            state.touch();
+            Task::none()
+        }
+        Message::SetPageNameTransitionMs(ms) => {
+            // Floor at 50 ms (the slide animation needs at least
+            // that to feel intentional) and cap at 1 s.
+            state.config.radial_menu.visuals.page_name_transition_ms =
+                ms.clamp(50, 1000);
+            state.touch();
+            Task::none()
+        }
+        Message::SetPageNameSlideDistance(px) => {
+            state.config.radial_menu.visuals.page_name_slide_distance_px =
+                px.clamp(0.0, 200.0);
+            state.touch();
+            Task::none()
+        }
+        Message::SetPageNameArced(v) => {
+            state.config.radial_menu.visuals.page_name_arced = v;
+            state.touch();
+            Task::none()
+        }
+        Message::SetPageNameUseMonospace(v) => {
+            state.config.radial_menu.visuals.page_name_use_monospace = v;
+            state.touch();
+            Task::none()
+        }
+        Message::SetPageNameFontFamily(s) => {
+            state.config.radial_menu.visuals.page_name_font_family = s;
+            state.touch();
+            Task::none()
+        }
+        Message::SetTooltipUseMonospace(v) => {
+            state.config.radial_menu.visuals.tooltip_use_monospace = v;
+            state.touch();
+            Task::none()
+        }
+        Message::SetTooltipFontFamily(s) => {
+            state.config.radial_menu.visuals.tooltip_font_family = s;
+            state.touch();
+            Task::none()
+        }
+        Message::SetTooltipBgColor(s) => {
+            state.config.radial_menu.visuals.tooltip_bg_color = s;
+            state.touch();
+            Task::none()
+        }
+        Message::SetTooltipBgAlpha(a) => {
+            state.config.radial_menu.visuals.tooltip_bg_alpha = a.clamp(0.0, 1.0);
+            state.touch();
+            Task::none()
+        }
+        Message::SetTooltipTextColor(s) => {
+            state.config.radial_menu.visuals.tooltip_text_color = s;
+            state.touch();
+            Task::none()
+        }
+        Message::ResetTooltipStyle => {
+            let defaults = juhradial_shared::VisualSettings::default();
+            let v = &mut state.config.radial_menu.visuals;
+            v.tooltip_use_monospace = defaults.tooltip_use_monospace;
+            v.tooltip_font_family = defaults.tooltip_font_family;
+            v.tooltip_bg_color = defaults.tooltip_bg_color;
+            v.tooltip_bg_alpha = defaults.tooltip_bg_alpha;
+            v.tooltip_text_color = defaults.tooltip_text_color;
+            state.status = "Tooltip styling reset to defaults".into();
+            state.touch();
+            Task::none()
+        }
+        Message::TestHapticEvent(event) => {
+            Task::perform(daemon::trigger_haptic_event(event), |_| {
+                Message::HapticTestFired
+            })
+        }
+        Message::HapticTestFired => Task::none(),
         Message::SetTransition(elem, dir, cfg) => {
             let anim = elem.get_mut(&mut state.config.radial_menu.animation);
             *dir.pick_mut(anim) = cfg;
@@ -1011,10 +1959,389 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             state.touch();
             Task::none()
         }
-        Message::ResetAll => {
-            state.config.radial_menu.animation = AnimationConfig::default();
-            state.config.radial_menu.visuals = VisualSettings::default();
+        Message::SetPageTransition(cfg) => {
+            state.config.radial_menu.animation.page_transition = cfg;
             state.touch();
+            Task::none()
+        }
+        Message::SetDispatchBurstStyle(s) => {
+            state.config.radial_menu.visuals.dispatch_burst_style = s;
+            state.touch();
+            Task::none()
+        }
+        Message::ResetPageTransition => {
+            state.config.radial_menu.animation.page_transition =
+                juhradial_shared::PageTransitionConfig::default();
+            state.touch();
+            Task::none()
+        }
+        Message::BeginShortcutCapture(target) => {
+            // Toggle behaviour: clicking Capture twice cancels.
+            if state.capturing_shortcut == Some(target) {
+                state.capturing_shortcut = None;
+                state.status = "Shortcut capture cancelled".into();
+            } else {
+                state.capturing_shortcut = Some(target);
+                state.status = "Press a key chord… (Esc to cancel)".into();
+            }
+            Task::none()
+        }
+        Message::CancelShortcutCapture => {
+            state.capturing_shortcut = None;
+            state.status = "Shortcut capture cancelled".into();
+            Task::none()
+        }
+        Message::ShortcutCaptured(chord) => {
+            if let Some(target) = state.capturing_shortcut {
+                match target {
+                    ShortcutCaptureTarget::Slice(idx) => {
+                        if let Some(slice) = state.active_slices_mut().get_mut(idx) {
+                            slice.command = chord.clone();
+                            state.touch();
+                        }
+                    }
+                    ShortcutCaptureTarget::SubItem { parent, idx } => {
+                        if let Some(item) = state
+                            .active_slices_mut()
+                            .get_mut(parent)
+                            .and_then(|p| p.submenu.get_mut(idx))
+                        {
+                            item.command = chord.clone();
+                            state.touch();
+                        }
+                    }
+                }
+                state.capturing_shortcut = None;
+                state.status = format!("Captured: {chord}");
+            }
+            Task::none()
+        }
+        Message::ExportConfig => {
+            // Capture the full bundle (config + macros + user
+            // themes) on the iced thread so file I/O happens
+            // before we hand control to the dialog future. Bundle
+            // lookups read the same dirs as the daemon, so an
+            // export captures everything a fresh install would
+            // need to re-create the user's setup.
+            let bundle = bundle::ConfigBundle::capture(state.config.clone());
+            Task::perform(
+                async move {
+                    let json = serde_json::to_string_pretty(&bundle)
+                        .map_err(|e| format!("serialise: {e}"))?;
+                    let chosen = rfd::AsyncFileDialog::new()
+                        .set_title("Export config")
+                        .set_file_name("juhradial-bundle.json")
+                        .add_filter("JSON", &["json"])
+                        .save_file()
+                        .await;
+                    let handle = chosen.ok_or_else(|| "cancelled".to_string())?;
+                    let path = handle.path().to_path_buf();
+                    std::fs::write(&path, json).map_err(|e| format!("write: {e}"))?;
+                    Ok::<String, String>(path.display().to_string())
+                },
+                Message::ConfigExported,
+            )
+        }
+        Message::ConfigExported(Ok(path)) => {
+            state.status = format!("Config exported to {path}");
+            Task::none()
+        }
+        Message::ConfigExported(Err(e)) => {
+            if e == "cancelled" {
+                state.status = "Export cancelled".into();
+            } else {
+                state.status = format!("Export failed: {e}");
+            }
+            Task::none()
+        }
+        Message::ImportConfig => Task::perform(
+            async move {
+                let chosen = rfd::AsyncFileDialog::new()
+                    .set_title("Import config")
+                    .add_filter("JSON", &["json"])
+                    .pick_file()
+                    .await;
+                let handle = chosen.ok_or_else(|| "cancelled".to_string())?;
+                let bytes = std::fs::read(handle.path())
+                    .map_err(|e| format!("read: {e}"))?;
+                // parse_and_install handles both the new bundle
+                // format and the older bare-AppConfig export,
+                // unpacking macros + themes to disk as a side
+                // effect of the bundle path.
+                let (mut cfg, errors) = bundle::parse_and_install(&bytes)?;
+                cfg.radial_menu.normalize_pages();
+                Ok::<(Box<juhradial_shared::AppConfig>, Vec<String>), String>(
+                    (Box::new(cfg), errors),
+                )
+            },
+            Message::ConfigImported,
+        ),
+        Message::ConfigImported(Ok((cfg, errors))) => {
+            state.config = *cfg;
+            state.palette = palette::Palette::resolve(&state.config.theme);
+            state.theme_editor = None;
+            // Re-read macros from disk so the editor sees newly
+            // installed bundle entries; the daemon also reloads
+            // them on its next use.
+            state.macros = tabs::macros::list();
+            state.touch();
+            state.status = if errors.is_empty() {
+                "Config imported (incl. macros + themes) — saving…".into()
+            } else {
+                format!(
+                    "Config imported with {} non-fatal issue(s): {}",
+                    errors.len(),
+                    errors.first().cloned().unwrap_or_default()
+                )
+            };
+            Task::none()
+        }
+        Message::ConfigImported(Err(e)) => {
+            if e == "cancelled" {
+                state.status = "Import cancelled".into();
+            } else {
+                state.status = format!("Import failed: {e}");
+            }
+            Task::none()
+        }
+        Message::StatusFadeTick => {
+            // Pure redraw trigger — also runs the auto-clear so
+            // the string drops the moment LIFETIME elapses
+            // instead of waiting for the next slow SaveTick.
+            state.maybe_clear_status();
+            Task::none()
+        }
+        Message::LastTabPersisted => Task::none(),
+        Message::ExportTheme(slug) => {
+            // Load fresh from disk so any unsaved customiser edits
+            // don't leak in. If the theme can't load (file went
+            // missing under us) surface the error rather than
+            // exporting bundled defaults silently.
+            let theme = match juhradial_shared::theme::Theme::load(
+                &juhradial_shared::theme::ThemeName::from(slug.as_str()),
+            ) {
+                Some(t) => t,
+                None => {
+                    state.status = format!("Could not load theme \"{slug}\" for export");
+                    return Task::none();
+                }
+            };
+            let suggested = format!("{slug}.json");
+            Task::perform(
+                async move {
+                    let json = serde_json::to_string_pretty(&theme)
+                        .map_err(|e| format!("serialise: {e}"))?;
+                    let chosen = rfd::AsyncFileDialog::new()
+                        .set_title("Export theme")
+                        .set_file_name(&suggested)
+                        .add_filter("Theme JSON", &["json"])
+                        .save_file()
+                        .await;
+                    let handle = chosen.ok_or_else(|| "cancelled".to_string())?;
+                    std::fs::write(handle.path(), json)
+                        .map_err(|e| format!("write: {e}"))?;
+                    Ok::<String, String>(handle.path().display().to_string())
+                },
+                Message::ThemeExported,
+            )
+        }
+        Message::ThemeExported(Ok(path)) => {
+            state.status = format!("Theme exported to {path}");
+            Task::none()
+        }
+        Message::ThemeExported(Err(e)) => {
+            if e == "cancelled" {
+                state.status = "Theme export cancelled".into();
+            } else {
+                state.status = format!("Theme export failed: {e}");
+            }
+            Task::none()
+        }
+        Message::BeginRenameTheme(slug) => {
+            state.renaming_theme = Some(RenameThemeDraft {
+                original: slug.clone(),
+                draft: slug,
+            });
+            Task::none()
+        }
+        Message::SetRenameThemeDraft(s) => {
+            if let Some(r) = state.renaming_theme.as_mut() {
+                r.draft = s;
+            }
+            Task::none()
+        }
+        Message::CancelRenameTheme => {
+            state.renaming_theme = None;
+            Task::none()
+        }
+        Message::CommitRenameTheme => {
+            let rename = match state.renaming_theme.take() {
+                Some(r) => r,
+                None => return Task::none(),
+            };
+            let new_slug = sanitize_slug(&rename.draft);
+            if new_slug.is_empty() {
+                state.status = "Rename failed: name is empty".into();
+                state.renaming_theme = Some(rename);
+                return Task::none();
+            }
+            if new_slug == rename.original {
+                // No change — silently close.
+                return Task::none();
+            }
+            let theme = match juhradial_shared::theme::Theme::load(
+                &juhradial_shared::theme::ThemeName::from(rename.original.as_str()),
+            ) {
+                Some(t) => t,
+                None => {
+                    state.status = format!(
+                        "Rename failed: could not load \"{}\"",
+                        rename.original
+                    );
+                    return Task::none();
+                }
+            };
+            let original = rename.original.clone();
+            let was_active = state.config.theme.as_str() == rename.original;
+            // Save under new slug, then delete the old file. Doing
+            // it in this order means a partial failure leaves both
+            // copies on disk rather than losing the theme.
+            let _ = juhradial_shared::theme::save_user_theme(&new_slug, &theme)
+                .map_err(|e| {
+                    state.status = format!("Rename save failed: {e}");
+                });
+            let _ = juhradial_shared::theme::delete_user_theme(&original)
+                .map_err(|e| {
+                    state.status = format!("Rename cleanup failed: {e}");
+                });
+            if was_active {
+                state.config.theme =
+                    juhradial_shared::theme::ThemeName::from(new_slug.as_str());
+                state.palette = palette::Palette::resolve(&state.config.theme);
+                state.touch();
+            }
+            state.status = format!("Renamed \"{original}\" → \"{new_slug}\"");
+            Task::none()
+        }
+        Message::ThemeRenamed(Ok((_old, _new))) => Task::none(),
+        Message::ThemeRenamed(Err(e)) => {
+            state.status = format!("Rename failed: {e}");
+            Task::none()
+        }
+        Message::ImportTheme => Task::perform(
+            async move {
+                let chosen = rfd::AsyncFileDialog::new()
+                    .set_title("Import theme")
+                    .add_filter("Theme JSON", &["json"])
+                    .pick_file()
+                    .await;
+                let handle = chosen.ok_or_else(|| "cancelled".to_string())?;
+                let stem = handle
+                    .path()
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .map(|s| s.to_string())
+                    .ok_or_else(|| "filename has no stem".to_string())?;
+                let slug = sanitize_slug(&stem);
+                if slug.is_empty() {
+                    return Err("filename gives empty slug".to_string());
+                }
+                let bytes = std::fs::read(handle.path())
+                    .map_err(|e| format!("read: {e}"))?;
+                let theme: juhradial_shared::theme::Theme =
+                    serde_json::from_slice(&bytes).map_err(|e| format!("parse: {e}"))?;
+                juhradial_shared::theme::save_user_theme(&slug, &theme)
+                    .map_err(|e| format!("save: {e}"))?;
+                Ok::<String, String>(slug)
+            },
+            Message::ThemeImported,
+        ),
+        Message::ThemeImported(Ok(slug)) => {
+            state.config.theme = juhradial_shared::theme::ThemeName::from(slug.as_str());
+            state.palette = palette::Palette::resolve(&state.config.theme);
+            state.touch();
+            state.status = format!("Imported theme \"{slug}\" and switched to it");
+            Task::none()
+        }
+        Message::ThemeImported(Err(e)) => {
+            if e == "cancelled" {
+                state.status = "Theme import cancelled".into();
+            } else {
+                state.status = format!("Theme import failed: {e}");
+            }
+            Task::none()
+        }
+        Message::OpenConfigFolder => {
+            let path = juhradial_shared::config::default_config_path()
+                .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+                .unwrap_or_else(|| std::path::PathBuf::from("."));
+            match std::process::Command::new("xdg-open")
+                .arg(&path)
+                .spawn()
+            {
+                Ok(_) => {
+                    state.status = format!("Opening {}", path.display());
+                }
+                Err(e) => {
+                    state.status = format!("Could not open folder ({e})");
+                }
+            }
+            Task::none()
+        }
+        Message::OpenOverlayForPreview => {
+            // Coords go to the daemon → overlay positioner. We
+            // don't have a cheap way to query the actual cursor
+            // here from inside iced, so use a sensible screen-
+            // centre default; the GNOME extension's overlay
+            // positioner will keep the menu on-screen even on
+            // smaller displays. The user can always click to
+            // dismiss and re-trigger via their bound mouse button
+            // for a real cursor-anchored test.
+            state.status = "Opening radial menu… scroll wheel over centre puck to test transitions".into();
+            Task::perform(daemon::show_radial_at(960, 540), |_| {
+                Message::OverlayPreviewFired
+            })
+        }
+        Message::OverlayPreviewFired => Task::none(),
+        Message::ResetAll => {
+            // Two-press confirmation. First click arms the reset
+            // and shows a warning in the footer; second click
+            // within RESET_CONFIRM_WINDOW actually resets. After
+            // the window times out the next click rearms instead
+            // of acting — so a stale arming can't accidentally
+            // wipe state when the user comes back to the window.
+            //
+            // The reset is "all visual + interaction defaults":
+            // animation block (incl. page transition), visuals
+            // (opacity + label sizes + font), and haptics
+            // (per-event patterns + debounce). User-defined slice
+            // bindings, pages, app-context bindings, and macros
+            // are *not* touched — those are real user data, not
+            // settings.
+            let now = Instant::now();
+            let armed = state
+                .reset_armed_at
+                .map(|t| now.duration_since(t) <= RESET_CONFIRM_WINDOW)
+                .unwrap_or(false);
+            if armed {
+                state.config.radial_menu.animation = AnimationConfig::default();
+                state.config.radial_menu.visuals = VisualSettings::default();
+                state.config.haptics =
+                    juhradial_shared::haptics::HapticsConfig::default();
+                state.reset_armed_at = None;
+                state.status =
+                    "Reset complete — animation + visuals + haptics back to defaults"
+                        .into();
+                state.touch();
+            } else {
+                state.reset_armed_at = Some(now);
+                state.status = format!(
+                    "Click \"Reset\" again within {}s to confirm — this wipes \
+                     animation + visuals + haptics back to defaults. Slices, \
+                     pages, and macros are kept.",
+                    RESET_CONFIRM_WINDOW.as_secs()
+                );
+            }
             Task::none()
         }
         Message::SetEasySwitchShortcuts(on) => {
@@ -1042,11 +2369,20 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                 }),
             ])
         }
-        Message::SaveTick => state.maybe_save().unwrap_or_else(Task::none),
+        Message::SaveTick => {
+            state.maybe_clear_status();
+            state.maybe_save().unwrap_or_else(Task::none)
+        }
         Message::Saved(Ok(())) => {
             info!("config saved");
             state.status = "Saved".to_string();
-            Task::none()
+            // Tell the daemon to re-read the file we just wrote.
+            // Without this, button reassignments + scroll /
+            // pointer / haptic edits persist to disk but never
+            // reach the device — daemon keeps running with the
+            // config it loaded at startup. Fire-and-forget;
+            // silent no-op when the daemon isn't running.
+            Task::perform(daemon::request_reload(), |_| Message::Noop)
         }
         Message::Saved(Err(e)) => {
             warn!("save failed: {e}");
@@ -1193,6 +2529,20 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             }
             Task::none()
         }
+        Message::SetSubItemVisibility { parent, idx, condition } => {
+            if let Some(item) = state
+                .active_slices_mut()
+                .get_mut(parent)
+                .and_then(|p| p.submenu.get_mut(idx))
+            {
+                item.visible_if = match condition {
+                    Some(juhradial_shared::Condition::Always) | None => None,
+                    other => other,
+                };
+                state.touch();
+            }
+            Task::none()
+        }
 
         // --- Radial preview interactions ---
         Message::SelectSlice(i) => {
@@ -1269,6 +2619,8 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                 HapticsEvent::Confirm => pe.confirm = pattern,
                 HapticsEvent::Invalid => pe.invalid = pattern,
                 HapticsEvent::PageChange => pe.page_change = pattern,
+                HapticsEvent::SubmenuOpen => pe.submenu_open = pattern,
+                HapticsEvent::SubmenuClose => pe.submenu_close = pattern,
             }
             state.touch();
             Task::none()
@@ -1310,6 +2662,15 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             state.touch();
             Task::none()
         }
+        Message::SetScrollHorizontalInvert(on) => {
+            state.config.scroll.horizontal_invert = on;
+            state.touch();
+            // Direct D-Bus apply via ThumbWheel — bypasses the
+            // ReloadConfig path so the device flips instantly.
+            // Best-effort: silently no-ops if the daemon or
+            // device doesn't expose 0x2150.
+            Task::perform(daemon::set_thumb_wheel_invert(on), |_| Message::Noop)
+        }
         Message::SetScrollSmooth(on) => {
             state.config.scroll.smooth = on;
             state.touch();
@@ -1318,17 +2679,22 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
         Message::SetScrollSmartshift(on) => {
             state.config.scroll.smartshift = on;
             state.touch();
-            Task::none()
+            // Direct D-Bus apply — bypasses the ReloadConfig path
+            // so the device updates instantly. The reload still
+            // fires later via Saved → request_reload, but the
+            // gate logic there will see no-op since the daemon's
+            // already on the new state.
+            fire_wheel_mode_apply(state)
         }
         Message::SetScrollSmartshiftThreshold(v) => {
             state.config.scroll.smartshift_threshold = v;
             state.touch();
-            Task::none()
+            fire_wheel_mode_apply(state)
         }
         Message::SetScrollMode(s) => {
             state.config.scroll.mode = s;
             state.touch();
-            Task::none()
+            fire_wheel_mode_apply(state)
         }
         Message::SetButtonAssignment(button, action) => {
             button.set(&mut state.config.buttons, action);
@@ -1339,7 +2705,19 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
         // --- Battery ---
         Message::BatteryTick => Task::perform(battery::poll(), Message::BatteryUpdate),
         Message::BatteryUpdate(s) => {
-            state.battery = s;
+            // UPower fallback. Skip when the daemon has provided
+            // a recent reading — its HID++ source is canonical
+            // for charging state (UPower on Bluetooth/HID
+            // routinely reports `Discharging` even when the
+            // device is plugged in, which would otherwise erase
+            // the daemon's correct charging=true).
+            let daemon_fresh = state
+                .battery_daemon_at
+                .map(|t| t.elapsed() < std::time::Duration::from_secs(15))
+                .unwrap_or(false);
+            if !daemon_fresh {
+                state.battery = s;
+            }
             Task::none()
         }
 
@@ -1371,20 +2749,149 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             }
             Task::none()
         }
+        Message::ExportMacro(id) => {
+            // Read the raw JSON off disk so we export the daemon-
+            // authoritative shape verbatim rather than serialising
+            // our reduced `MacroSummary`.
+            let raw = match tabs::macros::read_raw(&id) {
+                Ok(v) => v,
+                Err(e) => {
+                    state.status = format!("Could not read macro: {e}");
+                    return Task::none();
+                }
+            };
+            let suggested = format!("{id}.json");
+            Task::perform(
+                async move {
+                    let json = serde_json::to_string_pretty(&raw)
+                        .map_err(|e| format!("serialise: {e}"))?;
+                    let chosen = rfd::AsyncFileDialog::new()
+                        .set_title("Export macro")
+                        .set_file_name(&suggested)
+                        .add_filter("Macro JSON", &["json"])
+                        .save_file()
+                        .await;
+                    let handle = chosen.ok_or_else(|| "cancelled".to_string())?;
+                    std::fs::write(handle.path(), json)
+                        .map_err(|e| format!("write: {e}"))?;
+                    Ok::<String, String>(handle.path().display().to_string())
+                },
+                Message::MacroExported,
+            )
+        }
+        Message::MacroExported(Ok(path)) => {
+            state.status = format!("Macro exported to {path}");
+            Task::none()
+        }
+        Message::MacroExported(Err(e)) => {
+            if e == "cancelled" {
+                state.status = "Macro export cancelled".into();
+            } else {
+                state.status = format!("Macro export failed: {e}");
+            }
+            Task::none()
+        }
+        Message::ImportMacro => Task::perform(
+            async move {
+                let chosen = rfd::AsyncFileDialog::new()
+                    .set_title("Import macro")
+                    .add_filter("Macro JSON", &["json"])
+                    .pick_file()
+                    .await;
+                let handle = chosen.ok_or_else(|| "cancelled".to_string())?;
+                let stem = handle
+                    .path()
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .map(|s| s.to_string())
+                    .ok_or_else(|| "filename has no stem".to_string())?;
+                let id = sanitize_slug(&stem);
+                if id.is_empty() {
+                    return Err("filename gives empty id".to_string());
+                }
+                let bytes = std::fs::read(handle.path())
+                    .map_err(|e| format!("read: {e}"))?;
+                let value: serde_json::Value =
+                    serde_json::from_slice(&bytes).map_err(|e| format!("parse: {e}"))?;
+                tabs::macros::write_raw(&id, &value)
+                    .map_err(|e| format!("write: {e}"))?;
+                Ok::<String, String>(id)
+            },
+            Message::MacroImported,
+        ),
+        Message::MacroImported(Ok(id)) => {
+            state.macros = tabs::macros::list();
+            state.status = format!("Imported macro \"{id}\"");
+            Task::none()
+        }
+        Message::MacroImported(Err(e)) => {
+            if e == "cancelled" {
+                state.status = "Macro import cancelled".into();
+            } else {
+                state.status = format!("Macro import failed: {e}");
+            }
+            Task::none()
+        }
 
         // --- Daemon snapshot ---
         Message::DaemonTick => Task::perform(daemon::poll(), Message::DaemonSnapshotReceived),
         Message::DaemonSnapshotReceived(snap) => {
-            // Prefer the daemon's battery reading over UPower when
-            // it's present — it's instant rather than UPower's
-            // ~30s lag. Fall back to UPower if daemon battery is
-            // missing.
+            // Prefer the daemon's battery reading over UPower —
+            // it's instant rather than UPower's ~30s lag AND
+            // its HID++ charging-status byte is canonical (UPower
+            // routinely shows Discharging on connected wireless
+            // mice even when they're charging via USB-C). Stamp
+            // the freshness instant so the UPower fallback path
+            // doesn't overwrite us until the daemon goes quiet.
             if let Some((p, c)) = snap.battery {
                 state.battery = Some(battery::BatteryStatus {
                     percent: p,
                     charging: c,
                 });
+                state.battery_daemon_at = Some(std::time::Instant::now());
             }
+
+            // Reflect the device-side wheel mode + threshold back
+            // into the local config so the picker matches whatever
+            // the mouse currently has — including changes the user
+            // made by pressing the SmartShift button on the device.
+            // Only writes when there's a real difference so we
+            // don't churn the autosave debouncer on every poll.
+            if let Some((slug, threshold)) = &snap.wheel_mode {
+                let cur_mode = if state.config.scroll.mode == "free" {
+                    "freespin"
+                } else {
+                    state.config.scroll.mode.as_str()
+                };
+                if cur_mode != slug.as_str() {
+                    state.config.scroll.mode = slug.clone();
+                    state.touch();
+                }
+                // smartshift toggle mirrors the slug — UI semantic
+                // is "smartshift = auto-disengage active".
+                let want_smartshift = slug == "smartshift";
+                if state.config.scroll.smartshift != want_smartshift {
+                    state.config.scroll.smartshift = want_smartshift;
+                    state.touch();
+                }
+                if want_smartshift && *threshold > 0
+                    && state.config.scroll.smartshift_threshold != *threshold as u32
+                {
+                    state.config.scroll.smartshift_threshold = *threshold as u32;
+                    state.touch();
+                }
+            }
+
+            // ThumbWheel invert reflects back into the toggle so
+            // the user sees what the device actually has, not the
+            // last value persisted to disk.
+            if let Some((_divert, invert)) = snap.thumb_wheel {
+                if state.config.scroll.horizontal_invert != invert {
+                    state.config.scroll.horizontal_invert = invert;
+                    state.touch();
+                }
+            }
+
             state.daemon = snap;
             Task::none()
         }
@@ -1627,6 +3134,92 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             Task::none()
         }
 
+        // --- Gaming → haptic redirect bridge (Phase 2: config-only) ---
+        Message::SetHapticRedirectEnabled(on) => {
+            state.config.gaming.haptic_redirect.enabled = on;
+            state.touch();
+            Task::none()
+        }
+        Message::SetHapticRedirectMode(m) => {
+            state.config.gaming.haptic_redirect.mode = m;
+            state.touch();
+            Task::none()
+        }
+        Message::SetHapticRedirectCurve(c) => {
+            state.config.gaming.haptic_redirect.curve = c;
+            state.touch();
+            Task::none()
+        }
+        Message::SetHapticRedirectEventMode(em) => {
+            state.config.gaming.haptic_redirect.event_mode = em;
+            state.touch();
+            Task::none()
+        }
+        Message::SetHapticRedirectIntensityScale(v) => {
+            state.config.gaming.haptic_redirect.intensity_scale = v;
+            state.touch();
+            Task::none()
+        }
+        Message::SetHapticRedirectMinIntensity(v) => {
+            state.config.gaming.haptic_redirect.min_intensity = v;
+            state.touch();
+            Task::none()
+        }
+        Message::SetHapticRedirectStrongWeight(v) => {
+            state.config.gaming.haptic_redirect.strong_weight = v;
+            state.touch();
+            Task::none()
+        }
+        Message::SetHapticRedirectWeakWeight(v) => {
+            state.config.gaming.haptic_redirect.weak_weight = v;
+            state.touch();
+            Task::none()
+        }
+        Message::SetHapticRedirectThrottleMs(v) => {
+            state.config.gaming.haptic_redirect.throttle_ms = v;
+            state.touch();
+            Task::none()
+        }
+        Message::SetHapticRedirectPassthroughToPad(on) => {
+            state.config.gaming.haptic_redirect.passthrough_to_pad = on;
+            state.touch();
+            Task::none()
+        }
+        Message::SetHapticRedirectHardHide(on) => {
+            state.config.gaming.haptic_redirect.hard_hide_real_controller = on;
+            state.touch();
+            Task::none()
+        }
+        Message::SetHapticRedirectKeepGamepadActive(secs) => {
+            state.config.gaming.haptic_redirect.keep_gamepad_active_secs = secs;
+            state.touch();
+            Task::none()
+        }
+        Message::TestHapticRedirect => Task::perform(
+            daemon::test_haptic_redirect(),
+            Message::HapticRedirectTested,
+        ),
+        Message::HapticRedirectTested(Ok(())) => {
+            state.status = "Haptic test pulse sent".into();
+            Task::none()
+        }
+        Message::HapticRedirectTested(Err(e)) => {
+            state.status = format!("Haptic test failed: {e}");
+            Task::none()
+        }
+        Message::DiagnoseHapticRedirect => Task::perform(
+            daemon::diagnose_haptic_redirect(),
+            Message::HapticRedirectDiagnosed,
+        ),
+        Message::HapticRedirectDiagnosed(Ok(report)) => {
+            state.haptic_diagnosis = Some(report);
+            Task::none()
+        }
+        Message::HapticRedirectDiagnosed(Err(e)) => {
+            state.status = format!("Diagnose failed: {e}");
+            Task::none()
+        }
+
         // --- App profile bindings ---
         Message::SetAppBindingDraft { class, profile } => {
             state.app_binding_draft = AppBindingDraft { class, profile };
@@ -1654,6 +3247,27 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             Task::none()
         }
 
+        Message::DeleteUserTheme(slug) => {
+            match juhradial_shared::theme::delete_user_theme(&slug) {
+                Ok(()) => {
+                    state.status = format!("Deleted theme \"{slug}\"");
+                    // If the deleted theme was active, fall back to
+                    // the default. Otherwise just leave the picker
+                    // alone — the catalogue will have one fewer
+                    // entry on next render.
+                    if state.config.theme.as_str() == slug {
+                        state.config.theme =
+                            juhradial_shared::theme::ThemeName::CatppuccinMocha;
+                        state.palette = palette::Palette::resolve(&state.config.theme);
+                        state.touch();
+                    }
+                }
+                Err(e) => {
+                    state.status = format!("Delete failed: {e}");
+                }
+            }
+            Task::none()
+        }
         // --- Custom theme editor ---
         Message::ToggleThemeCustomiser => {
             state.theme_editor = match state.theme_editor.take() {
@@ -1668,11 +3282,29 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                         });
                     Some(ThemeEditor {
                         working: active.colors.clone(),
+                        original: active.colors.clone(),
                         is_dark: active.is_dark,
                         slug: String::new(),
+                        editing_field: None,
                     })
                 }
             };
+            Task::none()
+        }
+        Message::RevertCustomTheme => {
+            if let Some(editor) = state.theme_editor.as_mut() {
+                editor.working = editor.original.clone();
+                let preview = juhradial_shared::theme::Theme {
+                    name: "(custom)".into(),
+                    description: String::new(),
+                    is_dark: editor.is_dark,
+                    radial_image: None,
+                    radial_params: None,
+                    colors: editor.working.clone(),
+                };
+                state.palette = palette::Palette::from_theme(&preview);
+                state.touch();
+            }
             Task::none()
         }
         Message::SetThemeColor { field, value } => {
@@ -1688,6 +3320,54 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                     colors: editor.working.clone(),
                 };
                 state.palette = palette::Palette::from_theme(&preview);
+            }
+            Task::none()
+        }
+        Message::ToggleThemeColorPicker(field) => {
+            if let Some(editor) = state.theme_editor.as_mut() {
+                editor.editing_field = match editor.editing_field.take() {
+                    Some(cur) if cur == field => None,
+                    _ => Some(field),
+                };
+            }
+            Task::none()
+        }
+        Message::SetThemeColorSv { field, s, v } => {
+            apply_hsv_change(state, &field, |h, _, _| (h, s, v));
+            Task::none()
+        }
+        Message::SetThemeColorHue { field, h } => {
+            apply_hsv_change(state, &field, |_, s, v| {
+                // Greyscale → bring saturation up so the picked hue
+                // actually shows on screen. Otherwise dragging the
+                // hue strip on a black/white field would feel inert.
+                let new_s = if s < 0.001 { 1.0 } else { s };
+                let new_v = if v < 0.001 { 1.0 } else { v };
+                (h, new_s, new_v)
+            });
+            Task::none()
+        }
+        Message::SetThemeColorChannel { field, channel, value } => {
+            if let Some(editor) = state.theme_editor.as_mut() {
+                let current = theme_field_value(&editor.working, &field);
+                let (mut r, mut g, mut b) = parse_hex_channels(&current);
+                match channel {
+                    ColorChannel::Red => r = value,
+                    ColorChannel::Green => g = value,
+                    ColorChannel::Blue => b = value,
+                }
+                let hex = format!("#{r:02x}{g:02x}{b:02x}");
+                set_theme_color_field(&mut editor.working, &field, hex);
+                let preview = juhradial_shared::theme::Theme {
+                    name: "(custom)".into(),
+                    description: String::new(),
+                    is_dark: editor.is_dark,
+                    radial_image: None,
+                    radial_params: None,
+                    colors: editor.working.clone(),
+                };
+                state.palette = palette::Palette::from_theme(&preview);
+                state.touch();
             }
             Task::none()
         }
@@ -1871,6 +3551,7 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                 slices: Vec::new(),
                 app_classes: Vec::new(),
                 include_in_scroll: true,
+                slot_count: 8,
             });
             state.active_page = state.config.radial_menu.pages.len() - 1;
             state.app_classes_drafts.clear();
@@ -1927,6 +3608,16 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             }
             Task::none()
         }
+        Message::SetPageSlotCount { page, count } => {
+            if let Some(p) = state.config.radial_menu.pages.get_mut(page) {
+                p.slot_count = count.clamp(2, 8);
+                // Slices beyond the new slot count just don't
+                // render — keep them in the page so re-bumping the
+                // count later doesn't lose work.
+                state.touch();
+            }
+            Task::none()
+        }
         Message::MovePageLeft(idx) => {
             if idx > 0 && idx < state.config.radial_menu.pages.len() {
                 state.config.radial_menu.pages.swap(idx, idx - 1);
@@ -1951,6 +3642,7 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                     // app classes deliberately.
                     app_classes: Vec::new(),
                     include_in_scroll: src.include_in_scroll,
+                    slot_count: src.slot_count,
                 };
                 state.config.radial_menu.pages.push(copy);
                 state.active_page = state.config.radial_menu.pages.len() - 1;
@@ -2060,6 +3752,159 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
         }
         Message::CloseAppCommandPicker => {
             state.app_command_picker = None;
+            Task::none()
+        }
+        Message::OpenAnimationEditor(el) => {
+            state.animation_editor =
+                Some(animation_editor::AnimationEditorState::new(el));
+            Task::none()
+        }
+        Message::CloseAnimationEditor => {
+            state.animation_editor = None;
+            Task::none()
+        }
+        Message::AnimationEditorSelectTrack(direction, idx) => {
+            if let Some(editor) = state.animation_editor.as_mut() {
+                editor.selected = Some((direction, idx));
+            }
+            Task::none()
+        }
+        Message::AnimationEditorAddTrack(direction, kind_name) => {
+            let element = match state.animation_editor.as_ref() {
+                Some(e) => e.element,
+                None => return Task::none(),
+            };
+            let new_track = juhradial_shared::AnimationTrack {
+                kind: juhradial_shared::TrackKind::default_for(kind_name),
+                ..Default::default()
+            };
+            let anim = animation_editor::element_animation_mut(state, element);
+            let cfg = match direction {
+                animation_editor::AnimEditorDirection::Enter => &mut anim.enter,
+                animation_editor::AnimEditorDirection::Exit => &mut anim.exit,
+            };
+            cfg.custom_tracks.push(new_track);
+            // Auto-select the new track so the parameter editor
+            // appears immediately — saves the user a click.
+            let new_idx = cfg.custom_tracks.len() - 1;
+            if let Some(editor) = state.animation_editor.as_mut() {
+                editor.selected = Some((direction, new_idx));
+            }
+            state.touch();
+            Task::none()
+        }
+        Message::AnimationEditorDeleteTrack(direction, idx) => {
+            let element = match state.animation_editor.as_ref() {
+                Some(e) => e.element,
+                None => return Task::none(),
+            };
+            let anim = animation_editor::element_animation_mut(state, element);
+            let cfg = match direction {
+                animation_editor::AnimEditorDirection::Enter => &mut anim.enter,
+                animation_editor::AnimEditorDirection::Exit => &mut anim.exit,
+            };
+            if idx < cfg.custom_tracks.len() {
+                cfg.custom_tracks.remove(idx);
+            }
+            // Clear / shift the selection so it doesn't dangle.
+            if let Some(editor) = state.animation_editor.as_mut() {
+                if let Some((sel_dir, sel_idx)) = editor.selected {
+                    if sel_dir == direction {
+                        if sel_idx == idx {
+                            editor.selected = None;
+                        } else if sel_idx > idx {
+                            editor.selected = Some((sel_dir, sel_idx - 1));
+                        }
+                    }
+                }
+            }
+            state.touch();
+            Task::none()
+        }
+        Message::AnimationEditorChangeKind(direction, idx, kind_name) => {
+            let element = match state.animation_editor.as_ref() {
+                Some(e) => e.element,
+                None => return Task::none(),
+            };
+            let anim = animation_editor::element_animation_mut(state, element);
+            let cfg = match direction {
+                animation_editor::AnimEditorDirection::Enter => &mut anim.enter,
+                animation_editor::AnimEditorDirection::Exit => &mut anim.exit,
+            };
+            if let Some(track) = cfg.custom_tracks.get_mut(idx) {
+                track.kind = juhradial_shared::TrackKind::default_for(kind_name);
+            }
+            state.touch();
+            Task::none()
+        }
+        Message::AnimationEditorSetParam(direction, idx, param) => {
+            let element = match state.animation_editor.as_ref() {
+                Some(e) => e.element,
+                None => return Task::none(),
+            };
+            let anim = animation_editor::element_animation_mut(state, element);
+            let cfg = match direction {
+                animation_editor::AnimEditorDirection::Enter => &mut anim.enter,
+                animation_editor::AnimEditorDirection::Exit => &mut anim.exit,
+            };
+            if let Some(track) = cfg.custom_tracks.get_mut(idx) {
+                animation_editor::apply_track_param(track, param);
+            }
+            state.touch();
+            Task::none()
+        }
+        Message::AnimationEditorSetEasingKind(direction, idx, opt) => {
+            let element = match state.animation_editor.as_ref() {
+                Some(e) => e.element,
+                None => return Task::none(),
+            };
+            let anim = animation_editor::element_animation_mut(state, element);
+            let cfg = match direction {
+                animation_editor::AnimEditorDirection::Enter => &mut anim.enter,
+                animation_editor::AnimEditorDirection::Exit => &mut anim.exit,
+            };
+            if let Some(track) = cfg.custom_tracks.get_mut(idx) {
+                track.easing = match opt {
+                    animation_editor::EasingPickOption::Linear =>
+                        juhradial_shared::Easing::Linear,
+                    animation_editor::EasingPickOption::EaseIn =>
+                        juhradial_shared::Easing::EaseIn,
+                    animation_editor::EasingPickOption::EaseOut =>
+                        juhradial_shared::Easing::EaseOut,
+                    animation_editor::EasingPickOption::EaseInOut =>
+                        juhradial_shared::Easing::EaseInOut,
+                    animation_editor::EasingPickOption::Spring => {
+                        // Preserve old stiffness/damping if already
+                        // a spring; otherwise use Motion.dev "gentle"
+                        // defaults.
+                        if let juhradial_shared::Easing::Spring { .. } =
+                            track.easing
+                        {
+                            track.easing
+                        } else {
+                            juhradial_shared::Easing::Spring {
+                                stiffness: 180.0,
+                                damping: 14.0,
+                            }
+                        }
+                    }
+                };
+            }
+            state.touch();
+            Task::none()
+        }
+        Message::AnimationEditorReset => {
+            let element = match state.animation_editor.as_ref() {
+                Some(e) => e.element,
+                None => return Task::none(),
+            };
+            let anim = animation_editor::element_animation_mut(state, element);
+            anim.enter.custom_tracks.clear();
+            anim.exit.custom_tracks.clear();
+            if let Some(editor) = state.animation_editor.as_mut() {
+                editor.selected = None;
+            }
+            state.touch();
             Task::none()
         }
         Message::SetAppCommandSearch(q) => {
@@ -2589,9 +4434,24 @@ fn view(state: &State) -> Element<'_, Message> {
         full_panel(state, "Pick app for command", app_picker::view(state, p), Message::CloseAppCommandPicker)
     } else if let Some(p) = state.icon_picker.as_ref() {
         full_panel(state, "Pick an icon", icon_picker::view(state, p), Message::CloseIconPicker)
+    } else if let Some(editor) = state.theme_editor.as_ref() {
+        full_panel(
+            state,
+            "Customise theme",
+            theme_customiser::view(state, editor),
+            Message::ToggleThemeCustomiser,
+        )
+    } else if let Some(editor) = state.animation_editor.as_ref() {
+        full_panel(
+            state,
+            "Custom animation editor",
+            animation_editor::view(state, editor),
+            Message::CloseAnimationEditor,
+        )
     } else {
         match state.tab {
-            Tab::Buttons => tabs::buttons::view(state),
+            Tab::MouseButtons => tabs::mouse_buttons::view(state),
+            Tab::Menu => tabs::buttons::view(state),
             Tab::Settings => tabs::settings_page::view(state),
             Tab::PointScroll => tabs::scroll::view(state),
             Tab::IndicatorPopup => tabs::indicator_popup::view(state),
@@ -2704,12 +4564,36 @@ fn sidebar_view(state: &State) -> Element<'_, Message> {
 
 fn sidebar_button<'a>(state: &'a State, tab: Tab, active: bool) -> Element<'a, Message> {
     let pal = &state.palette;
-    let mut inner = row![
-        text(tab.glyph()).size(13),
-        text(tab.label()).size(13),
-    ]
-    .align_y(iced::Alignment::Center)
-    .spacing(12);
+    // Tint the symbolic icon with the active accent when the row
+    // is highlighted, otherwise the regular text colour. Same
+    // alpha-mask rasterisation as the slice icons → the icon
+    // colour follows whichever theme the user picked.
+    let tint = if active { pal.accent } else { pal.text };
+    let icon_size: f32 = 16.0;
+    let icon_handle = crate::radial_preview::resolve_icon_handle(
+        &state.icons,
+        &state.iced_handles,
+        tab.icon_name(),
+        icon_size as u32,
+        tint,
+    );
+    let icon_widget: Element<Message> = match icon_handle {
+        Some(h) => iced::widget::image(h)
+            .width(Length::Fixed(icon_size))
+            .height(Length::Fixed(icon_size))
+            .into(),
+        // Theme doesn't ship the symbolic — fall back to the
+        // single-letter mnemonic so the sidebar always renders
+        // something at the same column width.
+        None => container(text(tab.glyph()).size(13))
+            .center_x(Length::Fixed(icon_size))
+            .center_y(Length::Fixed(icon_size))
+            .into(),
+    };
+
+    let mut inner = row![icon_widget, text(tab.label()).size(13)]
+        .align_y(iced::Alignment::Center)
+        .spacing(12);
 
     if tab.is_stub() {
         inner = inner.push(Space::new().width(Length::Fill));
@@ -2746,9 +4630,40 @@ fn footer_view(state: &State) -> Element<'_, Message> {
             .style(style::text_dim(pal))
             .into()
     } else if !state.status.is_empty() {
+        // Compute the fade-out alpha. The toast is fully opaque
+        // for `STATUS_LIFETIME - STATUS_FADE_TAIL`, then eases
+        // smoothly to 0 over the tail. Once past `STATUS_LIFETIME`
+        // the auto-clear has already wiped the string so this
+        // branch isn't reached.
+        let alpha = match state.status_set_at {
+            Some(t) => {
+                let elapsed = t.elapsed();
+                if elapsed + STATUS_FADE_TAIL >= STATUS_LIFETIME {
+                    let into_tail = elapsed
+                        .saturating_sub(STATUS_LIFETIME - STATUS_FADE_TAIL)
+                        .as_secs_f32();
+                    let normalised = (into_tail / STATUS_FADE_TAIL.as_secs_f32())
+                        .clamp(0.0, 1.0);
+                    // 1 - t^3: linger near full alpha for most of
+                    // the tail (~88 % visible at the halfway mark),
+                    // then accelerate the decay. Reads as a soft
+                    // fade rather than a long blur.
+                    1.0 - normalised * normalised * normalised
+                } else {
+                    1.0
+                }
+            }
+            None => 1.0,
+        };
+        let accent = pal.accent;
         text(state.status.as_str())
             .size(11)
-            .style(style::text_accent(pal))
+            .style(move |_| iced::widget::text::Style {
+                color: Some(iced::Color {
+                    a: accent.a * alpha,
+                    ..accent
+                }),
+            })
             .into()
     } else {
         text("Idle.").size(11).style(style::text_faint(pal)).into()
@@ -2776,7 +4691,7 @@ fn footer_view(state: &State) -> Element<'_, Message> {
 // Subscription + main
 // ============================================================================
 
-fn subscription(_state: &State) -> Subscription<Message> {
+fn subscription(state: &State) -> Subscription<Message> {
     let mut subs = vec![
         iced::time::every(Duration::from_millis(200)).map(|_| Message::SaveTick),
         // UPower poll — 30 s is plenty for steady state. The first
@@ -2788,6 +4703,31 @@ fn subscription(_state: &State) -> Subscription<Message> {
         // compared to UPower.
         iced::time::every(Duration::from_secs(5)).map(|_| Message::DaemonTick),
     ];
+    // Shortcut-capture subscription — only active while the user
+    // has armed a Capture button. Listens for keyboard events,
+    // formats the chord, and emits ShortcutCaptured. Esc cancels.
+    if state.capturing_shortcut.is_some() {
+        subs.push(iced::event::listen_with(shortcut_capture_filter));
+    }
+    // Faster tick during the status auto-fade tail so the alpha
+    // ramp renders smoothly (~30 fps) instead of stepping along
+    // the 200 ms SaveTick. Gated so we don't pay the 50 ms wakeup
+    // cost when no status is on screen.
+    let in_fade = state
+        .status_set_at
+        .map(|t| {
+            let e = t.elapsed();
+            !state.status.is_empty()
+                && e + STATUS_FADE_TAIL >= STATUS_LIFETIME
+                && e <= STATUS_LIFETIME
+        })
+        .unwrap_or(false);
+    if in_fade {
+        subs.push(
+            iced::time::every(Duration::from_millis(50))
+                .map(|_| Message::StatusFadeTick),
+        );
+    }
     if FOCUS_RX.get().is_some() {
         // The singleton handshake gave us a receiver — wire it in
         // so subsequent `juhradial-settings` invocations call
@@ -2798,6 +4738,101 @@ fn subscription(_state: &State) -> Subscription<Message> {
         subs.push(Subscription::run(focus_subscription_builder).map(|_| Message::Focus));
     }
     Subscription::batch(subs)
+}
+
+/// Filter every runtime event for keyboard presses while the user
+/// is mid-capture. Returns `Some(ShortcutCaptured(chord))` when a
+/// non-modifier key arrives (so the user releasing only Shift
+/// won't accidentally save "+shift"), `Some(CancelShortcutCapture)`
+/// on Esc, and `None` otherwise. Modifier-only presses are
+/// ignored so the user can hold Ctrl+Shift before pressing the
+/// final key.
+fn shortcut_capture_filter(
+    event: iced::Event,
+    _status: iced::event::Status,
+    _window: iced::window::Id,
+) -> Option<Message> {
+    use iced::keyboard::{key, Event as KbdEvent, Key};
+    let (key, modifiers) = match event {
+        iced::Event::Keyboard(KbdEvent::KeyPressed {
+            key, modifiers, ..
+        }) => (key, modifiers),
+        _ => return None,
+    };
+    // Esc cancels.
+    if matches!(key, Key::Named(key::Named::Escape)) {
+        return Some(Message::CancelShortcutCapture);
+    }
+    // Ignore bare modifier presses — wait for a real key.
+    if matches!(
+        key,
+        Key::Named(key::Named::Control)
+            | Key::Named(key::Named::Shift)
+            | Key::Named(key::Named::Alt)
+            | Key::Named(key::Named::Super)
+            | Key::Named(key::Named::Meta)
+    ) {
+        return None;
+    }
+    let key_label = match &key {
+        Key::Character(c) => c.to_lowercase(),
+        Key::Named(n) => named_key_label(*n)?,
+        Key::Unidentified => return None,
+    };
+    let mut parts: Vec<&str> = Vec::with_capacity(5);
+    if modifiers.control() {
+        parts.push("ctrl");
+    }
+    if modifiers.alt() {
+        parts.push("alt");
+    }
+    if modifiers.shift() {
+        parts.push("shift");
+    }
+    if modifiers.logo() {
+        parts.push("super");
+    }
+    parts.push(&key_label);
+    Some(Message::ShortcutCaptured(parts.join("+")))
+}
+
+/// Map iced's `Named` key enum to the xdotool/ydotool name the
+/// daemon expects. Returns None for keys that don't have a
+/// sensible mapping (e.g. dead keys, lock keys) — those are
+/// silently dropped so the capture session keeps waiting for a
+/// usable chord.
+fn named_key_label(n: iced::keyboard::key::Named) -> Option<String> {
+    use iced::keyboard::key::Named::*;
+    let s = match n {
+        Enter => "Return",
+        Tab => "Tab",
+        Space => "space",
+        Backspace => "BackSpace",
+        Delete => "Delete",
+        Insert => "Insert",
+        Home => "Home",
+        End => "End",
+        PageUp => "Prior",
+        PageDown => "Next",
+        ArrowUp => "Up",
+        ArrowDown => "Down",
+        ArrowLeft => "Left",
+        ArrowRight => "Right",
+        F1 => "F1",
+        F2 => "F2",
+        F3 => "F3",
+        F4 => "F4",
+        F5 => "F5",
+        F6 => "F6",
+        F7 => "F7",
+        F8 => "F8",
+        F9 => "F9",
+        F10 => "F10",
+        F11 => "F11",
+        F12 => "F12",
+        _ => return None,
+    };
+    Some(s.to_string())
 }
 
 fn focus_subscription_builder() -> impl futures_util::stream::Stream<Item = ()> {
@@ -2848,14 +4883,29 @@ fn main() -> iced::Result {
         .title("JuhRadial Settings")
         .window(window)
         .theme(|state: &State| {
-            // Anchor iced's built-in theme to our palette's dark/light
-            // orientation so widgets we haven't custom-styled still
-            // look right.
-            if state.palette.is_dark {
-                iced::Theme::Dark
-            } else {
-                iced::Theme::Light
-            }
+            // Build an iced custom theme from our app palette so
+            // built-in widgets (sliders, togglers, default-styled
+            // buttons, pick_list highlights) automatically follow
+            // the active accent + surface colours instead of
+            // falling back to iced's stock blue.
+            //
+            // Only the six core slots (background, text, primary,
+            // success, warning, danger) flow through; widgets that
+            // need finer control still go through our `style::*`
+            // helpers, but those that don't will at least pick up
+            // the accent and surface colour from this theme.
+            let pal = &state.palette;
+            iced::Theme::custom(
+                if pal.is_dark { "JuhRadial Dark" } else { "JuhRadial Light" },
+                iced::theme::Palette {
+                    background: pal.base,
+                    text: pal.text,
+                    primary: pal.accent,
+                    success: pal.success,
+                    warning: pal.warning,
+                    danger: pal.danger,
+                },
+            )
         })
         .subscription(subscription)
         .run()

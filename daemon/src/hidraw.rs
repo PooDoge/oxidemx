@@ -71,6 +71,12 @@ pub struct HidrawHandler {
     shared_config: Option<crate::config::SharedConfig>,
     /// The action that was triggered on button press (for release handling)
     active_button_action: Option<crate::config::ButtonAction>,
+    /// Shared thumb-wheel state — holds the THUMB_WHEEL (0x2150)
+    /// feature index and the uinput forwarder when horizontal-scroll
+    /// inversion is active. When `None`, thumb-wheel notifications
+    /// are ignored (not even routed); this stays `None` for any
+    /// non-MX-Master deployments that don't use the feature.
+    thumb_wheel_state: Option<crate::thumb_wheel::SharedThumbWheelState>,
 }
 
 /// Map HID++ CID to evdev key code for macro trigger forwarding
@@ -107,7 +113,19 @@ impl HidrawHandler {
             active_macro_cid: None,
             shared_config: None,
             active_button_action: None,
+            thumb_wheel_state: None,
         }
+    }
+
+    /// Hand the handler a clone of the shared thumb-wheel state.
+    /// Called once at startup by main.rs; from then on the handler
+    /// dispatches matching 0x2150 notifications into the forwarder
+    /// the D-Bus side has (or hasn't) installed.
+    pub fn set_thumb_wheel_state(
+        &mut self,
+        state: crate::thumb_wheel::SharedThumbWheelState,
+    ) {
+        self.thumb_wheel_state = Some(state);
     }
 
     /// Register CIDs that are diverted for macro triggers (not gesture buttons)
@@ -330,6 +348,26 @@ impl HidrawHandler {
         // We also validate the CID in handle_button_event to ignore unknown buttons.
         if function_id == DIVERTED_BUTTONS_EVENT {
             self.handle_button_event(data).await;
+        }
+
+        // THUMB_WHEEL (0x2150) function-0 broadcast notification —
+        // only inspected when the D-Bus side has activated the
+        // forwarder (which means it has also set divert=true on the
+        // device). Signed i16 displacement lives in bytes [4..6],
+        // big-endian, per Solaar's diversion.py:1486-1489. The other
+        // payload bytes (status flags / proximity) are ignored — we
+        // only need direction + magnitude for the forward path.
+        if function_id == 0 && data.len() >= 6 {
+            if let Some(state) = self.thumb_wheel_state.as_ref() {
+                if let Ok(mut state) = state.lock() {
+                    if state.feature_index == Some(feature_index) {
+                        if let Some(fwd) = state.forwarder.as_mut() {
+                            let disp = i16::from_be_bytes([data[4], data[5]]);
+                            fwd.emit_displacement(disp);
+                        }
+                    }
+                }
+            }
         }
     }
 

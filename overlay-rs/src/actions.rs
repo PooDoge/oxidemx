@@ -37,17 +37,48 @@ pub fn dispatch(slice: &Slice) {
             // hover, not on release. Nothing to dispatch.
         }
         ActionKind::Macro => {
-            // TODO: D-Bus call into the daemon to trigger macro by id.
-            warn!("Macro dispatch not yet implemented (slice: {})", slice.label);
+            // The slice's `command` field holds the macro id (set
+            // by the settings UI when the user picks one from the
+            // Macros tab). Empty id is a misconfigured slice — log
+            // and bail rather than firing a no-op D-Bus call.
+            let id = slice.command.trim();
+            if id.is_empty() {
+                warn!("Macro slice '{}' has no macro id — skipping", slice.label);
+                return;
+            }
+            info!(label = %slice.label, macro_id = id, "dispatching macro");
+            crate::haptic_client::execute_macro_blocking(id.to_string());
         }
         ActionKind::Shortcut => {
-            // TODO: D-Bus call into the daemon to send a key chord
-            // via evdev/ydotool.
-            warn!("Shortcut dispatch not yet implemented (slice: {})", slice.label);
+            // `slice.command` holds the key chord in xdotool format
+            // ("ctrl+shift+z", "super+e"). Daemon's
+            // `ActionExecutor::execute_shortcut` does the rest.
+            let keys = slice.command.trim();
+            if keys.is_empty() {
+                warn!("Shortcut slice '{}' has no key chord — skipping", slice.label);
+                return;
+            }
+            info!(label = %slice.label, keys, "dispatching shortcut");
+            crate::haptic_client::execute_shortcut_blocking(keys.to_string());
         }
         ActionKind::EasySwitch => {
-            // TODO: D-Bus call into the daemon to switch Bolt host.
-            warn!("EasySwitch dispatch not yet implemented (slice: {})", slice.label);
+            // `slice.command` holds the 1-based host index ("1",
+            // "2", "3") — what's printed under each button on the
+            // mouse. Parse + clamp before sending so a typo doesn't
+            // panic the daemon's HID++ writer.
+            let raw = slice.command.trim();
+            match raw.parse::<u8>() {
+                Ok(idx) if (1..=3).contains(&idx) => {
+                    info!(label = %slice.label, host = idx, "dispatching host switch");
+                    crate::haptic_client::set_host_blocking(idx);
+                }
+                _ => {
+                    warn!(
+                        "EasySwitch slice '{}' command must be 1, 2, or 3 (got {raw:?})",
+                        slice.label
+                    );
+                }
+            }
         }
         ActionKind::None => {}
     }

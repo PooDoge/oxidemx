@@ -240,9 +240,17 @@ fn scroll_card(state: &State) -> Element<'_, Message> {
             label: (*label).to_string(),
         })
         .collect();
+    // Resolve the current mode against SCROLL_MODES, with a
+    // back-compat alias: legacy "free" → "freespin". Any other
+    // unknown slug falls back to the first option (smartshift).
+    let resolved_mode = if s.mode == "free" {
+        "freespin"
+    } else {
+        s.mode.as_str()
+    };
     let current_mode = mode_options
         .iter()
-        .find(|m| m.slug == s.mode)
+        .find(|m| m.slug == resolved_mode)
         .cloned()
         .unwrap_or_else(|| mode_options[0].clone());
     let mode_picker = pick_list(mode_options, Some(current_mode), |m: ScrollMode| {
@@ -268,17 +276,30 @@ fn scroll_card(state: &State) -> Element<'_, Message> {
             switch_row(
                 state,
                 "Natural scrolling",
-                "Reverse scroll direction (macOS-style).",
+                "Reverse vertical scroll direction (macOS-style). \
+                 Applies to both axes if your compositor doesn't \
+                 split horizontal — see the dedicated horizontal \
+                 toggle below for axis-only inversion.",
                 s.natural,
                 Message::SetScrollNatural,
             ),
-            stub_switch_row(
+            switch_row(
                 state,
-                "Smooth scrolling",
-                "Compositor-level smoothing — not yet wired to libinput \
-                 / GNOME. Toggle is read-only until that lands.",
-                s.smooth,
+                "Reverse horizontal scroll",
+                "Flip the thumb wheel's left/right direction. \
+                 Routes the wheel through HID++ and re-emits via a \
+                 small uinput device — the MX Master 4 firmware's \
+                 invert bit alone has no effect, so the daemon does \
+                 the flip in software. Toggling off restores normal \
+                 kernel-managed scrolling.",
+                s.horizontal_invert,
+                Message::SetScrollHorizontalInvert,
             ),
+            // Smooth-scrolling toggle removed — compositor-level
+            // smoothing isn't part of any daemon path we can drive
+            // (it's owned by GNOME / KWin / wlroots), so a control
+            // here would be misleading. Field still exists in the
+            // schema for back-compat; just hidden from the UI.
             switch_row(
                 state,
                 "SmartShift",
@@ -326,45 +347,17 @@ fn switch_row<'a>(
     .into()
 }
 
-/// Same shape as `switch_row` but the toggler has no on_toggle
-/// callback, so iced renders it as disabled. Use this for any
-/// setting whose apply path isn't wired yet — gives users a
-/// visible signal that the control isn't live.
-fn stub_switch_row<'a>(
-    state: &'a State,
-    label: &str,
-    description: &str,
-    on: bool,
-) -> Element<'a, Message> {
-    let pal = &state.palette;
-    row![
-        column![
-            row![
-                text(label.to_string()).size(13),
-                Space::new().width(Length::Fixed(8.0)),
-                container(text("STUB").size(9))
-                    .padding([2, 6])
-                    .style(style::chip(pal)),
-            ]
-            .align_y(Alignment::Center),
-            text(description.to_string())
-                .size(11)
-                .style(style::text_dim(pal)),
-        ]
-        .spacing(2),
-        Space::new().width(Length::Fill),
-        // No on_toggle → iced disables the control.
-        toggler(on).style(style::toggler_style(pal)),
-    ]
-    .align_y(Alignment::Center)
-    .spacing(12)
-    .into()
-}
-
+// Slugs match the legacy Python settings (proven working on
+// MX Master 4) so older config.json files round-trip cleanly:
+//   * "smartshift" — clicky-at-rest, auto-disengage past threshold
+//   * "ratchet"    — clicky always
+//   * "freespin"   — free always (legacy Python wrote "freespin",
+//                    early Rust wrote "free"; both still accepted
+//                    on the daemon side for back-compat)
 const SCROLL_MODES: &[(&str, &str)] = &[
     ("smartshift", "SmartShift (auto)"),
     ("ratchet", "Ratchet (clicky)"),
-    ("free", "Free spin"),
+    ("freespin", "Free spin"),
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq)]

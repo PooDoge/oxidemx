@@ -10,6 +10,7 @@ pub mod config;
 pub mod cursor;
 pub mod dbus;
 pub mod evdev;
+pub mod gamepad_haptics;
 pub mod gaming;
 pub mod hidpp;
 pub mod hidraw;
@@ -19,6 +20,7 @@ pub mod performance_monitor;
 pub mod profiles;
 pub mod theme;
 pub mod theme_watcher;
+pub mod thumb_wheel;
 pub mod window_tracker;
 
 /// Re-export commonly used types
@@ -35,6 +37,11 @@ pub use profiles::{Profile, ProfileManager};
 pub use theme::{Theme, ThemeManager};
 pub use theme_watcher::{ThemeEvent, ThemeHotReloader, ThemeWatcher};
 pub use window_tracker::{WindowInfo, WindowTracker};
+pub use gamepad_haptics::GamepadHapticsService;
 pub use gaming::{GamingMode, SharedGamingMode, new_shared_gaming_mode};
 pub use hidpp::{HapticManager, HapticEvent, SharedHapticManager, new_shared_haptic_manager};
 pub use macros::{MacroEngine, MacroRecorder, TriggerMap, SharedTriggerMap};
+pub use thumb_wheel::{
+    new_shared_state as new_thumb_wheel_state, SharedThumbWheelState, ThumbWheelForwarder,
+    ThumbWheelState,
+};

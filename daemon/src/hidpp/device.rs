@@ -42,10 +42,19 @@ pub struct HidppDevice {
     dpi_supported: bool,
     /// Adjustable DPI feature index (0x2201)
     dpi_feature_index: Option<u8>,
-    /// Whether SmartShift feature is available (0x2110)
+    /// Whether SmartShift feature is available (0x2110 OR 0x2111).
     smartshift_supported: bool,
-    /// SmartShift feature index (0x2110)
+    /// SmartShift feature index. Resolved at probe time to whichever
+    /// of `0x2110` (legacy) or `0x2111` (SmartShiftEnhanced — MX
+    /// Master 3+) is in the device's feature table.
     smartshift_feature_index: Option<u8>,
+    /// Which SmartShift feature ID was actually found. Drives the
+    /// function-ID selection in `get_smartshift` / `set_smartshift`:
+    /// legacy uses fn 0/1; enhanced uses fn 1/2 (Solaar's
+    /// `settings_templates.py:653-734`). Mixing them causes the
+    /// firmware to silently ignore writes — exactly the symptom
+    /// the user reported as "wheel mode doesn't change".
+    smartshift_feature_id: Option<u16>,
     /// Whether unified battery feature is available (0x1004)
     battery_supported: bool,
     /// Battery feature index (0x1004 or 0x1000)
@@ -56,6 +65,11 @@ pub struct HidppDevice {
     reprog_controls_supported: bool,
     /// REPROG_CONTROLS_V4 feature index (0x1B04) - for button divert
     reprog_controls_feature_index: Option<u8>,
+    /// Whether the ThumbWheel feature (0x2150) is available — side-
+    /// scroll wheel direction control on MX Master series.
+    thumb_wheel_supported: bool,
+    /// ThumbWheel feature index (0x2150).
+    thumb_wheel_feature_index: Option<u8>,
     /// Path to the hidraw device we connected to
     device_path: PathBuf,
 }
@@ -218,11 +232,14 @@ impl HidppDevice {
                     dpi_feature_index: None,
                     smartshift_supported: false,
                     smartshift_feature_index: None,
+                    smartshift_feature_id: None,
                     battery_supported: false,
                     battery_feature_index: None,
                     is_unified_battery: false,
                     reprog_controls_supported: false,
                     reprog_controls_feature_index: None,
+                    thumb_wheel_supported: false,
+                    thumb_wheel_feature_index: None,
                     device_path: device_path.clone(),
                 };
 
@@ -372,13 +389,32 @@ impl HidppDevice {
                                 0x08 => "Invalid address",
                                 _ => "Unknown error",
                             };
-                            tracing::warn!(
-                                error_code,
-                                error_msg,
-                                feature_index = response[3],
-                                "HID++ error response: {:02X?}",
-                                &response[..len]
-                            );
+                            // "Function not available" + "Not supported"
+                            // are routine probe responses — devices
+                            // commonly answer them for optional sub-
+                            // functions (e.g. unpaired host slots in
+                            // HostsInfo, missing capability bits).
+                            // Demote to debug so the daemon log isn't
+                            // a wall of noise on every poll. Real
+                            // errors (busy / connection failed /
+                            // invalid argument) still warn.
+                            if matches!(error_code, 0x02 | 0x04) {
+                                tracing::debug!(
+                                    error_code,
+                                    error_msg,
+                                    feature_index = response[3],
+                                    "HID++ optional-feature unavailable: {:02X?}",
+                                    &response[..len]
+                                );
+                            } else {
+                                tracing::warn!(
+                                    error_code,
+                                    error_msg,
+                                    feature_index = response[3],
+                                    "HID++ error response: {:02X?}",
+                                    &response[..len]
+                                );
+                            }
                             return None;
                         }
                         // Legacy error check (0x8F)
@@ -662,25 +698,33 @@ impl HidppDevice {
                     );
                 }
 
-                // Check for HiResScroll feature (0x2111) - MX Master 3/4 SmartShift control
+                // Check for SmartShiftEnhanced (0x2111) — what the
+                // constants file calls HIRES_SCROLL but is actually
+                // the *Enhanced* SmartShift feature on MX Master 3+.
+                // (Mislabel left in `constants.rs::HIRES_SCROLL` for
+                // back-compat with anyone matching on the name.)
+                // Stamp the feature_id so the get/set paths can pick
+                // the right function IDs at call time.
                 if feature_id == features::HIRES_SCROLL {
                     self.smartshift_supported = true;
                     self.smartshift_feature_index = Some(feature_index);
+                    self.smartshift_feature_id = Some(0x2111);
                     tracing::info!(
                         index = feature_index,
-                        "HiResScroll feature found (0x2111) - SmartShift control available"
+                        "SmartShiftEnhanced feature found (0x2111) — fn IDs 1/2"
                     );
                 }
 
                 // Also check for legacy SmartShift feature (0x2110) for older mice
                 if feature_id == features::SMARTSHIFT_LEGACY {
-                    // Only set if not already detected via HiResScroll
+                    // Only set if not already detected via 0x2111
                     if !self.smartshift_supported {
                         self.smartshift_supported = true;
                         self.smartshift_feature_index = Some(feature_index);
+                        self.smartshift_feature_id = Some(0x2110);
                         tracing::info!(
                             index = feature_index,
-                            "Legacy SmartShift feature found (0x2110)"
+                            "Legacy SmartShift feature found (0x2110) — fn IDs 0/1"
                         );
                     }
                 }
@@ -716,6 +760,19 @@ impl HidppDevice {
                         "REPROG_CONTROLS_V4 feature found (0x1B04) - button divert available"
                     );
                 }
+
+                // Check for ThumbWheel feature (0x2150) — side-scroll
+                // direction control on MX Master series. Solaar uses
+                // function presence as the only support gate; we
+                // mirror that.
+                if feature_id == features::THUMB_WHEEL {
+                    self.thumb_wheel_supported = true;
+                    self.thumb_wheel_feature_index = Some(feature_index);
+                    tracing::info!(
+                        index = feature_index,
+                        "ThumbWheel feature found (0x2150) - side-scroll direction control"
+                    );
+                }
             }
         }
 
@@ -727,6 +784,7 @@ impl HidppDevice {
             smartshift = self.smartshift_supported,
             battery = self.battery_supported,
             reprog_controls = self.reprog_controls_supported,
+            thumb_wheel = self.thumb_wheel_supported,
             "Feature enumeration complete (blocklisted features excluded)"
         );
     }
@@ -1299,13 +1357,24 @@ impl HidppDevice {
     /// - None if SmartShift is not supported
     pub fn get_smartshift(&mut self) -> Option<(u8, u8, u8)> {
         let feature_index = self.smartshift_feature_index?;
+        // Function ID depends on which SmartShift feature flavour:
+        //   0x2110 (legacy)   → read = fn 0
+        //   0x2111 (enhanced) → read = fn 1
+        // Solaar `settings_templates.py:653 / 695` for reference.
+        let read_fn = match self.smartshift_feature_id {
+            Some(0x2111) => 0x01,
+            _ => 0x00,
+        };
 
-        tracing::debug!(feature_index, "Getting SmartShift config from device");
+        tracing::debug!(
+            feature_index,
+            read_fn,
+            "Getting SmartShift config from device"
+        );
 
-        // Function [0] getRatchetControlMode() -> wheelMode, autoDisengage, autoDisengageDefault
         let params = [0x00, 0x00, 0x00];
 
-        self.hidpp_request(feature_index, 0x00, &params)
+        self.hidpp_request(feature_index, read_fn, &params)
             .and_then(|resp| {
                 if resp.len() >= 7 {
                     // Response: [report_type, device_idx, feature_idx, fn_sw_id, wheel_mode, auto_disengage, auto_disengage_default, ...]
@@ -1355,18 +1424,30 @@ impl HidppDevice {
             }
         };
 
+        // Function ID depends on which SmartShift feature flavour:
+        //   0x2110 (legacy)   → write = fn 1
+        //   0x2111 (enhanced) → write = fn 2
+        // Mismatching this byte against the actual feature is the
+        // canonical way to make the firmware silently ignore the
+        // write while still ACK-ing the request — symptom matches
+        // "wheel mode picker doesn't change anything on device".
+        let write_fn = match self.smartshift_feature_id {
+            Some(0x2111) => 0x02,
+            _ => 0x01,
+        };
+
         tracing::info!(
             feature_index,
+            write_fn,
             wheel_mode,
             auto_disengage,
             auto_disengage_default,
             "Setting SmartShift config"
         );
 
-        // Function [1] setRatchetControlMode(wheelMode, autoDisengage, autoDisengageDefault)
         let params = [wheel_mode, auto_disengage, auto_disengage_default];
 
-        match self.hidpp_request(feature_index, 0x01, &params) {
+        match self.hidpp_request(feature_index, write_fn, &params) {
             Some(resp) if resp.len() >= 7 => {
                 // Response echoes the parameters
                 let returned_wheel_mode = resp[4];
@@ -1713,6 +1794,93 @@ impl HidppDevice {
                 );
                 Ok(())
             }
+        }
+    }
+
+    // =========================================================================
+    // ThumbWheel Methods (0x2150) — side-scroll direction control
+    // =========================================================================
+
+    /// Whether the device exposes ThumbWheel (0x2150). Settings UI
+    /// uses this to enable / disable the horizontal-scroll-reverse
+    /// toggle.
+    pub fn thumb_wheel_supported(&self) -> bool {
+        self.thumb_wheel_supported
+    }
+
+    /// The HID++ feature index that the device assigned to
+    /// THUMB_WHEEL (0x2150). The hidraw read loop needs this to
+    /// recognise diverted thumb-wheel notifications — the index is
+    /// per-device, not a constant.
+    pub fn thumb_wheel_feature_index(&self) -> Option<u8> {
+        self.thumb_wheel_feature_index
+    }
+
+    /// Read the current (divert, invert) flags from the device.
+    /// Function 0x10 returns a 2-byte payload at response[4..6].
+    /// Returns `None` if the feature isn't supported or the request
+    /// fails. Solaar reference: `settings_templates.py:470-487`.
+    pub fn get_thumb_wheel_status(&mut self) -> Option<(bool, bool)> {
+        let feature_index = self.thumb_wheel_feature_index?;
+        let resp = self.hidpp_request(feature_index, 0x01, &[0, 0, 0])?;
+        if resp.len() < 6 {
+            tracing::warn!(len = resp.len(), "ThumbWheel get response too short");
+            return None;
+        }
+        // Bit 0 of byte 4 = divert, bit 0 of byte 5 = invert.
+        let divert = (resp[4] & 0x01) != 0;
+        let invert = (resp[5] & 0x01) != 0;
+        tracing::info!(
+            divert,
+            invert,
+            response = format!("{:02X?}", resp),
+            "ThumbWheel status read"
+        );
+        Some((divert, invert))
+    }
+
+    /// Write the (divert, invert) flags. `divert=true` routes the
+    /// thumb-wheel events to HID++ (so the daemon / app sees them);
+    /// most users want `false` to keep the kernel handling the
+    /// horizontal scroll. `invert=true` flips the side-scroll
+    /// direction.
+    ///
+    /// Function 0x20 takes a 2-byte payload `[divert_flag,
+    /// invert_flag]` (bit 0 in each). Solaar `settings_templates.py:
+    /// 470-487` writes the same shape.
+    pub fn set_thumb_wheel_reporting(
+        &mut self,
+        divert: bool,
+        invert: bool,
+    ) -> Result<(), HapticError> {
+        let feature_index = match self.thumb_wheel_feature_index {
+            Some(idx) => idx,
+            None => {
+                tracing::debug!("ThumbWheel not supported");
+                return Err(HapticError::NotSupported);
+            }
+        };
+        let div_byte = if divert { 0x01 } else { 0x00 };
+        let inv_byte = if invert { 0x01 } else { 0x00 };
+        tracing::info!(
+            divert,
+            invert,
+            div_byte = format!("0x{:02X}", div_byte),
+            inv_byte = format!("0x{:02X}", inv_byte),
+            "ThumbWheel write"
+        );
+        match self.hidpp_request(feature_index, 0x02, &[div_byte, inv_byte, 0]) {
+            Some(resp) => {
+                tracing::info!(
+                    response = format!("{:02X?}", resp),
+                    "ThumbWheel write response"
+                );
+                Ok(())
+            }
+            None => Err(HapticError::IoError(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                "ThumbWheel write returned no response",
+            ))),
         }
     }
 }

@@ -3,6 +3,13 @@
 //! Keeps the per-tab modules focused on layout instead of widget
 //! plumbing. Each helper here takes the minimum it needs (label,
 //! value, range, on_change closure) and returns an `Element`.
+//!
+//! Sliders aren't styled here — the app installs an
+//! [`iced::Theme::custom`] in `main` derived from the active palette
+//! so sliders, togglers, and default-styled buttons automatically
+//! follow the accent + surface colours of whichever theme the user
+//! has picked. Per-widget overrides still go through the helpers in
+//! [`crate::style`].
 
 use iced::widget::{column, row, slider, text, Space};
 use iced::{Element, Length};

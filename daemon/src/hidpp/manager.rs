@@ -99,6 +99,8 @@ impl HapticManager {
                 confirm: Mx4HapticPattern::from_name(&config.per_event.confirm),
                 invalid: Mx4HapticPattern::from_name(&config.per_event.invalid),
                 page_change: Mx4HapticPattern::from_name(&config.per_event.page_change),
+                submenu_open: Mx4HapticPattern::from_name(&config.per_event.submenu_open),
+                submenu_close: Mx4HapticPattern::from_name(&config.per_event.submenu_close),
             },
             enabled: config.enabled,
             last_pulse_ms: 0,
@@ -123,6 +125,8 @@ impl HapticManager {
             confirm: Mx4HapticPattern::from_name(&config.per_event.confirm),
             invalid: Mx4HapticPattern::from_name(&config.per_event.invalid),
             page_change: Mx4HapticPattern::from_name(&config.per_event.page_change),
+            submenu_open: Mx4HapticPattern::from_name(&config.per_event.submenu_open),
+            submenu_close: Mx4HapticPattern::from_name(&config.per_event.submenu_close),
         };
         self.enabled = config.enabled;
         self.debounce_ms = config.debounce_ms;
@@ -342,6 +346,69 @@ impl HapticManager {
                 tracing::debug!(error = %e, "Haptic pulse failed");
                 Ok(()) // Still return Ok - haptics are optional
             }
+        }
+    }
+
+    /// Send a specific MX Master 4 haptic waveform directly.
+    ///
+    /// Unlike [`Self::emit`], which looks the waveform up from the
+    /// per-event pattern map, this takes the [`Mx4HapticPattern`]
+    /// straight. It's used by the gamepad-rumble → haptic bridge,
+    /// which picks a pattern from a rumble-intensity curve rather
+    /// than a UX event.
+    ///
+    /// Honours the same enabled-check and shared haptic debounce as
+    /// `emit` / `pulse`. On non-MX4 devices it approximates with a
+    /// mid-strength legacy pulse.
+    ///
+    /// CRITICAL: like `emit`, this MUST NOT write to onboard memory.
+    pub fn pulse_pattern(&mut self, pattern: Mx4HapticPattern) -> Result<(), HapticError> {
+        if !self.enabled {
+            return Ok(());
+        }
+
+        // Resolve device support, then drop the borrow so the
+        // non-MX4 branch can call `self.pulse`.
+        let mx4 = match &mut self.device {
+            Some(d) if d.mx4_haptic_supported() => true,
+            Some(d) if d.haptic_supported() => false,
+            _ => return Ok(()),
+        };
+
+        // Shared debounce — same backstop emit()/pulse() apply.
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64;
+        if now.saturating_sub(self.last_pulse_ms) < self.debounce_ms {
+            return Ok(());
+        }
+
+        if mx4 {
+            let device = self
+                .device
+                .as_mut()
+                .expect("device presence checked above");
+            match device.send_haptic_pattern(pattern) {
+                Ok(()) => {
+                    self.last_pulse_ms = now;
+                    Ok(())
+                }
+                Err(HapticError::IoError(_)) => {
+                    self.handle_disconnect();
+                    Ok(()) // haptics are optional
+                }
+                Err(e) => {
+                    tracing::debug!(error = %e, "MX4 haptic pattern (bridge) failed");
+                    Ok(())
+                }
+            }
+        } else {
+            // Non-MX4 device: approximate with a mid-strength pulse.
+            self.pulse(HapticPulse {
+                intensity: 60,
+                duration_ms: 20,
+            })
         }
     }
 
@@ -676,6 +743,37 @@ impl HapticManager {
             })
     }
 
+    /// Read the device-side wheel mode and translate to the slug
+    /// the settings UI uses ("freespin" / "ratchet" / "smartshift")
+    /// + the user-friendly 1..100 threshold. Inverse of the
+    /// `apply_smartshift_config` mapping in the D-Bus layer.
+    ///
+    /// Returns `None` if the feature isn't supported or the read
+    /// fails.
+    pub fn get_wheel_mode(&mut self) -> Option<(String, u8)> {
+        self.get_smartshift()
+            .map(|(wheel_mode, auto_disengage, _default)| {
+                // Mirror the apply mapping from `dbus::interface`:
+                //   freespin   → wheel_mode=1, auto_disengage=0
+                //   ratchet    → wheel_mode=2, auto_disengage=0
+                //   smartshift → wheel_mode=1, auto_disengage>0
+                // Anything else falls back to "ratchet" so the
+                // picker has a defined slug to land on.
+                let slug = match (wheel_mode, auto_disengage) {
+                    (1, 0) => "freespin",
+                    (2, _) => "ratchet",
+                    (1, _) => "smartshift",
+                    _ => "ratchet",
+                };
+                // User-facing threshold (1..100). The wire byte goes
+                // 1..255 in the opposite direction (255-x*2.55).
+                let threshold = ((255u8.saturating_sub(auto_disengage)) as f32 / 2.55)
+                    .round()
+                    .clamp(0.0, 100.0) as u8;
+                (slug.to_string(), threshold)
+            })
+    }
+
     /// Set SmartShift configuration (simplified API for DBus)
     pub fn set_smart_shift(&mut self, enabled: bool, threshold: u8) -> Result<(), HapticError> {
         let wheel_mode = if enabled { 1 } else { 2 };
@@ -754,6 +852,46 @@ impl HapticManager {
             .as_ref()
             .map(|d| d.battery_supported())
             .unwrap_or(false)
+    }
+
+    /// Whether the device exposes ThumbWheel (0x2150). Used by the
+    /// settings UI to enable / disable the horizontal-scroll-reverse
+    /// toggle. Returns `false` when the device isn't connected yet.
+    pub fn thumb_wheel_supported(&self) -> bool {
+        self.device
+            .as_ref()
+            .map(|d| d.thumb_wheel_supported())
+            .unwrap_or(false)
+    }
+
+    /// HID++ feature index that the device assigned to THUMB_WHEEL,
+    /// for the hidraw read loop's notification dispatcher.
+    pub fn thumb_wheel_feature_index(&self) -> Option<u8> {
+        self.device.as_ref().and_then(|d| d.thumb_wheel_feature_index())
+    }
+
+    /// Read the current ThumbWheel (divert, invert) flags. Returns
+    /// None if the feature isn't supported or the device is offline.
+    pub fn get_thumb_wheel_status(&mut self) -> Option<(bool, bool)> {
+        if self.device.is_none() {
+            let _ = self.connect();
+        }
+        self.device.as_mut().and_then(|d| d.get_thumb_wheel_status())
+    }
+
+    /// Write the ThumbWheel reporting flags (divert + invert).
+    pub fn set_thumb_wheel_reporting(
+        &mut self,
+        divert: bool,
+        invert: bool,
+    ) -> Result<(), HapticError> {
+        if self.device.is_none() {
+            let _ = self.connect();
+        }
+        match self.device.as_mut() {
+            Some(device) => device.set_thumb_wheel_reporting(divert, invert),
+            None => Err(HapticError::DeviceNotFound),
+        }
     }
 
     // =========================================================================

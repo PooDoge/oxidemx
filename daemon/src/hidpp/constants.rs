@@ -63,6 +63,17 @@ pub mod features {
     /// Functions: [0] getRatchetControlMode, [1] setRatchetControlMode
     pub const SMARTSHIFT_LEGACY: u16 = 0x2110;
 
+    /// ThumbWheel — side-scroll wheel on MX Master series.
+    /// Functions:
+    ///   [0x00] getThumbWheelInfo (capabilities — Solaar doesn't use)
+    ///   [0x10] getThumbWheelStatus → 2-byte payload [divert, invert]
+    ///   [0x20] setThumbWheelReporting ← 2-byte payload [divert, invert]
+    /// Solaar `settings_templates.py:470-487` is the wire-format
+    /// reference — bit 0 of byte 0 = divert HID++ reports, bit 0 of
+    /// byte 1 = invert direction. Used for horizontal-scroll-reverse
+    /// independent of the main wheel's natural-scroll setting.
+    pub const THUMB_WHEEL: u16 = 0x2150;
+
     /// Change Host - Easy-Switch device slot switching (READ-ONLY safe)
     /// Functions: [0] getHostInfo (returns numHosts, currentHost), [1] setHost(slot)
     /// Used for reading current Easy-Switch status - we only use function 0

@@ -8,6 +8,7 @@ use crate::gaming::SharedGamingMode;
 use crate::hidpp::SharedHapticManager;
 use crate::macros::{MacroEngine, MacroRecorder, SharedTriggerMap, TriggerMap};
 use crate::overlay_spawner::OverlaySpawner;
+use crate::thumb_wheel::{new_shared_state as new_thumb_wheel_state, SharedThumbWheelState};
 
 use super::service::JuhRadialService;
 use super::{DBUS_NAME, DBUS_PATH};
@@ -37,6 +38,7 @@ pub async fn init_dbus_service(
         macro_recorder,
         trigger_map,
         overlay_spawner,
+        new_thumb_wheel_state(),
     )
     .await
 }
@@ -54,6 +56,7 @@ pub async fn init_dbus_service_with_device(
     macro_recorder: Arc<Mutex<MacroRecorder>>,
     trigger_map: SharedTriggerMap,
     overlay_spawner: Arc<OverlaySpawner>,
+    thumb_wheel_state: SharedThumbWheelState,
 ) -> zbus::Result<zbus::Connection> {
     let service = JuhRadialService::new_with_device(
         battery_state,
@@ -66,6 +69,7 @@ pub async fn init_dbus_service_with_device(
         macro_recorder,
         trigger_map,
         overlay_spawner,
+        thumb_wheel_state,
     );
 
     let connection = zbus::connection::Builder::session()?

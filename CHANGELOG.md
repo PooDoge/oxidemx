@@ -7,9 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-> Planning + spec lock for the GNOME indicator + popup + settings tab.
-> No code yet. See [`INDICATOR_DESIGN.md`](INDICATOR_DESIGN.md) and
-> [`docs/plans/indicator-implementation.md`](docs/plans/indicator-implementation.md).
+> GNOME indicator + popup + settings tab landed via `indicator-feature`
+> branch (25 commits). See [`INDICATOR_DESIGN.md`](INDICATOR_DESIGN.md)
+> and [`docs/plans/indicator-implementation.md`](docs/plans/indicator-implementation.md)
+> for the architecture and phased rollout record.
 
 ### Added
 

@@ -28,6 +28,7 @@ const RING_INNER_INSET: f32 = 6.0;
 const ICON_BG_RADIUS: f32 = 26.0;
 
 #[derive(Debug, Clone, Copy)]
+#[allow(dead_code)]
 enum Message {
     NextSlice,
 }

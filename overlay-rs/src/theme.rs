@@ -11,6 +11,7 @@ use tracing::warn;
 /// requested theme actually existed (and thus whether the slice
 /// painter should warn about missing custom themes).
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct ActiveTheme {
     pub requested: ThemeName,
     pub theme: Theme,

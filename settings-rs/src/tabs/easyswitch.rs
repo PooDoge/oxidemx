@@ -51,7 +51,7 @@ pub fn view(state: &State) -> Element<'_, Message> {
 }
 
 fn slot_grid<'a>(state: &'a State, es: &'a crate::daemon::EasySwitch) -> Element<'a, Message> {
-    let pal = &state.palette;
+    let _pal = &state.palette;
     let mut grid = column![].spacing(8);
     for idx in 0..es.slot_count {
         let name = es

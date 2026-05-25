@@ -11,14 +11,54 @@ use iced::{Alignment, Element, Length};
 
 pub fn view(state: &State) -> Element<'_, Message> {
     let pal = &state.palette;
+    // Two-press reset: first click arms (button label flips to a
+    // warning style); second click confirms. Style follows the
+    // armed state so the user gets clear visual feedback that
+    // their next click will wipe state.
+    let now = std::time::Instant::now();
+    let armed = state
+        .reset_armed_at
+        .map(|t| now.duration_since(t) <= crate::RESET_CONFIRM_WINDOW)
+        .unwrap_or(false);
+    let reset_label = if armed {
+        "Click again to confirm"
+    } else {
+        "Reset all to defaults"
+    };
+    let reset_btn: Element<Message> = if armed {
+        button(text(reset_label).size(11))
+            .style(style::btn_danger(pal))
+            .on_press(Message::ResetAll)
+            .into()
+    } else {
+        button(text(reset_label).size(11))
+            .style(style::btn_secondary(pal))
+            .on_press(Message::ResetAll)
+            .into()
+    };
+    // Config-bundle controls — Export / Import / Open folder. Live
+    // alongside Reset so the full "manage my config" toolkit is in
+    // one place at the top of the tab.
+    let export_btn = button(text("Export…").size(11))
+        .style(style::btn_secondary(pal))
+        .on_press(Message::ExportConfig);
+    let import_btn = button(text("Import…").size(11))
+        .style(style::btn_secondary(pal))
+        .on_press(Message::ImportConfig);
+    let folder_btn = button(text("Open config folder").size(11))
+        .style(style::btn_secondary(pal))
+        .on_press(Message::OpenConfigFolder);
+
     let header = row![
         section_header("Overlay settings"),
         Space::new().width(Length::Fill),
-        button(text("Reset all to defaults").size(11))
-            .style(style::btn_secondary(pal))
-            .on_press(Message::ResetAll),
+        export_btn,
+        import_btn,
+        folder_btn,
+        reset_btn,
     ]
-    .align_y(Alignment::Center);
+    .align_y(Alignment::Center)
+    .spacing(8);
 
     column![
         header,
@@ -38,6 +78,8 @@ pub fn view(state: &State) -> Element<'_, Message> {
         section_block(state, "Animation", tabs::animation::view(state)),
         Space::new().height(Length::Fixed(16.0)),
         section_block(state, "Application bindings", app_bindings(state)),
+        Space::new().height(Length::Fixed(16.0)),
+        section_block(state, "About + shortcuts", about_panel(state)),
     ]
     .spacing(10)
     .into()
@@ -143,6 +185,110 @@ fn binding_row<'a>(state: &'a State, class: &str, profile: &str) -> Element<'a, 
     .into()
 }
 
+/// "About + shortcuts" card — version, mouse-button cheat sheet,
+/// keyboard shortcuts, and links to the project's resources. Most
+/// users won't need any of this once they're set up, but having
+/// it parked at the bottom of the Settings tab gives a clean
+/// reference for new users / when something feels unintuitive.
+fn about_panel(state: &State) -> Element<'_, Message> {
+    let pal = &state.palette;
+    let version = env!("CARGO_PKG_VERSION");
+    let device_name = state
+        .daemon
+        .device_name
+        .clone()
+        .unwrap_or_else(|| "(disconnected)".to_string());
+
+    let about_col = column![
+        row![
+            text("JuhRadial MX").size(15),
+            text(format!("v{version}"))
+                .size(11)
+                .style(style::text_dim(pal)),
+        ]
+        .spacing(8)
+        .align_y(Alignment::Center),
+        text("Logitech MX Master 4 configuration utility — \
+              radial menu, haptics, macros, Easy-Switch.")
+            .size(11)
+            .style(style::text_dim(pal)),
+        rule::horizontal(1).style(style::rule_style(pal)),
+        text(format!("Connected device: {device_name}"))
+            .size(11)
+            .style(style::text_dim(pal)),
+    ]
+    .spacing(6);
+
+    let mouse_col = column![
+        text("Mouse").size(13),
+        cheat_row("Gesture button (thumb)", "Open radial menu"),
+        cheat_row("Centre puck + scroll wheel", "Cycle radial pages"),
+        cheat_row(
+            "Centre puck + click",
+            "Toggle hold/click mode (configurable)"
+        ),
+        cheat_row("Hover slice + release gesture", "Activate slice action"),
+        cheat_row("Drag past inner ring + release", "Reveal sub-items"),
+    ]
+    .spacing(4);
+
+    let keys_col = column![
+        text("Keyboard").size(13),
+        cheat_row("Esc", "Close radial menu / cancel capture"),
+        cheat_row("Click \"Capture\" + chord", "Bind a key chord to a slice"),
+        cheat_row("D-Bus: ShowMenuAtCursor", "Open the radial from any script"),
+    ]
+    .spacing(4);
+
+    let links_col = column![
+        text("Resources").size(13),
+        text("• Project repo: https://github.com/juhlabs/juhradial-mx")
+            .size(11)
+            .style(style::text_dim(pal)),
+        text("• Daemon logs: journalctl --user -u juhradiald -f")
+            .size(11)
+            .style(style::text_dim(pal)),
+        text("• Config: ~/.config/juhradial/config.json")
+            .size(11)
+            .style(style::text_dim(pal)),
+        text("• User themes: ~/.local/share/juhradial/themes/")
+            .size(11)
+            .style(style::text_dim(pal)),
+    ]
+    .spacing(4);
+
+    container(
+        column![
+            about_col,
+            Space::new().height(Length::Fixed(8.0)),
+            row![
+                container(mouse_col).width(Length::FillPortion(1)),
+                Space::new().width(Length::Fixed(16.0)),
+                container(keys_col).width(Length::FillPortion(1)),
+            ],
+            Space::new().height(Length::Fixed(8.0)),
+            links_col,
+        ]
+        .spacing(8),
+    )
+    .padding(12)
+    .style(style::card_quiet(pal))
+    .into()
+}
+
+fn cheat_row<'a>(action: &'a str, effect: &'a str) -> Element<'a, Message> {
+    row![
+        text(action.to_string())
+            .size(11)
+            .width(Length::Fixed(220.0)),
+        text(effect.to_string())
+            .size(11),
+    ]
+    .spacing(8)
+    .align_y(Alignment::Center)
+    .into()
+}
+
 fn section_block<'a>(
     state: &'a State,
     title: &str,
@@ -226,140 +372,128 @@ fn theme_picker(state: &State) -> Element<'_, Message> {
     ]
     .spacing(10);
 
-    if let Some(editor) = state.theme_editor.as_ref() {
-        col = col.push(palette_editor(state, editor));
-    }
+    // Saved-theme management — list every user-saved theme with a
+    // delete button. Bundled themes (Catppuccin variants, etc.)
+    // are not deletable so they don't appear here. Empty when the
+    // user has never hit "Save as user theme".
+    // Always render the saved-themes panel — even when the user
+    // has no themes yet, the Import button gives them somewhere
+    // to drop a downloaded community theme.
+    let user_slugs = juhradial_shared::theme::list_user_theme_slugs();
+    col = col.push(saved_themes_panel(state, user_slugs));
+
+    // The full-panel customiser takes over the entire content area
+    // when `theme_editor.is_some()` (handled in main::view), so
+    // we don't need to render an inline editor here. Clicking
+    // "Customise…" just toggles the editor state and the shell
+    // swaps the body.
     col.into()
 }
 
-// ============================================================================
-// Custom palette editor
-// ============================================================================
-
-fn palette_editor<'a>(
-    state: &'a State,
-    editor: &'a crate::ThemeEditor,
-) -> Element<'a, Message> {
+/// Render the "Saved themes" panel — one row per user-saved
+/// theme, each with a Delete button. Bundled themes are not
+/// represented here because they live inside the binary and
+/// can't be removed.
+fn saved_themes_panel<'a>(state: &'a State, slugs: Vec<String>) -> Element<'a, Message> {
     let pal = &state.palette;
+    let header_row = row![
+        text("Saved themes")
+            .size(13)
+            .style(style::text_dim(pal)),
+        Space::new().width(Length::Fill),
+        button(text("Import theme JSON…").size(11))
+            .style(style::btn_secondary(pal))
+            .on_press(Message::ImportTheme),
+    ]
+    .align_y(Alignment::Center);
+    let mut col = column![
+        header_row,
+        text(
+            "Themes saved from the customiser live in \
+             ~/.local/share/juhradial/themes/. Delete to remove the \
+             file from disk; bundled themes can't be deleted. \
+             \"Import theme JSON…\" loads any saved Theme file from \
+             disk into your themes folder + switches to it."
+        )
+        .size(11)
+        .style(style::text_dim(pal)),
+        rule::horizontal(1).style(style::rule_style(pal)),
+    ]
+    .spacing(6);
 
-    // 24 colour fields, three columns × eight rows.
-    let fields: &[(&str, &str)] = &[
-        // base + surface stack
-        ("crust", &editor.working.crust),
-        ("mantle", &editor.working.mantle),
-        ("base", &editor.working.base),
-        ("surface0", &editor.working.surface0),
-        ("surface1", &editor.working.surface1),
-        ("surface2", &editor.working.surface2),
-        ("overlay0", &editor.working.overlay0),
-        ("overlay1", &editor.working.overlay1),
-        // text
-        ("text", &editor.working.text),
-        ("subtext1", &editor.working.subtext1),
-        ("subtext0", &editor.working.subtext0),
-        // accents
-        ("accent", &editor.working.accent),
-        ("accent2", &editor.working.accent2),
-        ("accent_dim", &editor.working.accent_dim),
-        // slice colours
-        ("green", &editor.working.green),
-        ("yellow", &editor.working.yellow),
-        ("red", &editor.working.red),
-        ("blue", &editor.working.blue),
-        ("mauve", &editor.working.mauve),
-        ("pink", &editor.working.pink),
-        ("peach", &editor.working.peach),
-        ("teal", &editor.working.teal),
-        ("sapphire", &editor.working.sapphire),
-        ("lavender", &editor.working.lavender),
-    ];
-
-    let mut grid = column![].spacing(4);
-    let mut row_acc: Vec<Element<Message>> = Vec::new();
-    for (i, (name, value)) in fields.iter().enumerate() {
-        row_acc.push(color_row(*name, value));
-        if (i + 1) % 2 == 0 || i + 1 == fields.len() {
-            let mut r = row![].spacing(8);
-            for el in row_acc.drain(..) {
-                r = r.push(el);
-            }
-            grid = grid.push(r);
-        }
+    let active_slug = state.config.theme.as_str().to_string();
+    for slug in slugs {
+        let is_active = slug == active_slug;
+        let renaming = state
+            .renaming_theme
+            .as_ref()
+            .filter(|r| r.original == slug);
+        let row_el = if let Some(r) = renaming {
+            // Inline rename mode — replace the row with an input
+            // + Save / Cancel pair so the rename feels in-place.
+            let input_value = r.draft.clone();
+            row![
+                text("Rename:")
+                    .size(11)
+                    .style(style::text_dim(pal)),
+                text_input("New slug", &input_value)
+                    .on_input(Message::SetRenameThemeDraft)
+                    .on_submit(Message::CommitRenameTheme)
+                    .padding(4)
+                    .size(12)
+                    .width(Length::Fixed(220.0)),
+                button(text("Save").size(11))
+                    .style(style::btn_secondary(pal))
+                    .on_press(Message::CommitRenameTheme),
+                button(text("Cancel").size(11))
+                    .style(style::btn_secondary(pal))
+                    .on_press(Message::CancelRenameTheme),
+                Space::new().width(Length::Fill),
+            ]
+            .align_y(Alignment::Center)
+            .spacing(6)
+        } else {
+            let display_name = juhradial_shared::theme::Theme::load(
+                &juhradial_shared::theme::ThemeName::from(slug.as_str()),
+            )
+            .map(|t| t.name)
+            .unwrap_or_else(|| slug.clone());
+            let active_chip = if is_active {
+                text(" — active")
+                    .size(10)
+                    .style(style::text_faint(pal))
+            } else {
+                text("")
+            };
+            row![
+                text(display_name).size(12),
+                text(format!("({slug})"))
+                    .size(10)
+                    .style(style::text_faint(pal)),
+                active_chip,
+                Space::new().width(Length::Fill),
+                button(text("Export").size(11))
+                    .style(style::btn_secondary(pal))
+                    .on_press(Message::ExportTheme(slug.clone())),
+                button(text("Rename").size(11))
+                    .style(style::btn_secondary(pal))
+                    .on_press(Message::BeginRenameTheme(slug.clone())),
+                button(text("Delete").size(11))
+                    .style(style::btn_danger(pal))
+                    .on_press(Message::DeleteUserTheme(slug.clone())),
+            ]
+            .align_y(Alignment::Center)
+            .spacing(8)
+        };
+        col = col.push(row_el);
     }
 
-    let save_row = row![
-        text_input("Theme name (e.g. \"midnight\")", &editor.slug)
-            .on_input(Message::SetCustomThemeName)
-            .padding(6)
-            .size(12)
-            .width(Length::Fill),
-        button(text("Save as user theme").size(11))
-            .style(style::btn_secondary(pal))
-            .on_press(Message::SaveCustomTheme),
-    ]
-    .spacing(8)
-    .align_y(Alignment::Center);
-
-    container(
-        column![
-            text("Palette editor")
-                .size(13)
-                .style(style::text_dim(pal)),
-            text(
-                "Each field is a #rrggbb hex. The active settings window \
-                 re-skins live as you type. \"Save as user theme\" writes \
-                 it to ~/.local/share/juhradial/themes/<name>.json and \
-                 switches the picker to it."
-            )
-            .size(11)
-            .style(style::text_dim(pal)),
-            rule::horizontal(1).style(style::rule_style(pal)),
-            grid,
-            rule::horizontal(1).style(style::rule_style(pal)),
-            save_row,
-        ]
-        .spacing(8),
-    )
-    .padding(12)
-    .style(style::card_quiet(pal))
-    .into()
+    container(col)
+        .padding(10)
+        .style(style::card_quiet(pal))
+        .into()
 }
 
-fn color_row<'a>(field: &'a str, value: &'a str) -> Element<'a, Message> {
-    let owned_field = field.to_string();
-    let swatch_color = juhradial_shared::theme::parse_hex_rgba(value)
-        .map(|(r, g, b, _)| iced::Color::from_rgb(r as f32, g as f32, b as f32))
-        .unwrap_or(iced::Color::from_rgb(1.0, 0.0, 1.0));
-    row![
-        container(
-            Space::new()
-                .width(Length::Fixed(16.0))
-                .height(Length::Fixed(16.0)),
-        )
-        .style(move |_| iced::widget::container::Style {
-            background: Some(iced::Background::Color(swatch_color)),
-            border: iced::Border {
-                color: iced::Color::from_rgba(0.0, 0.0, 0.0, 0.18),
-                width: 1.0,
-                radius: 3.0.into(),
-            },
-            ..Default::default()
-        }),
-        text(field.to_string()).size(11).width(Length::Fixed(80.0)),
-        text_input("#rrggbb", value)
-            .on_input(move |v| Message::SetThemeColor {
-                field: owned_field.clone(),
-                value: v,
-            })
-            .padding(4)
-            .size(11)
-            .width(Length::Fill),
-    ]
-    .align_y(Alignment::Center)
-    .spacing(6)
-    .width(Length::FillPortion(1))
-    .into()
-}
 
 fn swatch_row(pal: &juhradial_widgets::palette::Palette) -> Element<'static, Message> {
     let swatches = [

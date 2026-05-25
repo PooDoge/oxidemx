@@ -79,7 +79,7 @@ cmd_build() {
   local comps; comps="$(components_for_arg "${1:-all}")"
   local crate_args=""
   for c in $comps; do crate_args="$crate_args -p $(crate_for "$c")"; done
-  echo "==> cargo build --release$crate_args  (inside distrobox: $DISTROBOX)"
+  echo "==> cargo build --release $crate_args  (inside distrobox: $DISTROBOX)"
   distrobox enter "$DISTROBOX" -- bash -c "cd '$ROOT' && cargo build --release $crate_args"
 }
 
@@ -113,6 +113,39 @@ start_one() {
   if is_running "$pidfile"; then
     echo "==> $c already running (PID $(cat "$pidfile"))"
     return 0
+  fi
+  # Daemon-specific group check: even when the user is in the
+  # `input` group per `getent group`, a session started before
+  # the usermod will have a stale group set. The daemon then
+  # silently can't read /dev/input/event* and the radial menu
+  # never activates. Detect + auto-reexec via `sg input` when
+  # the group is missing from the current process.
+  if [[ "$c" == "daemon" ]]; then
+    if id -nG | tr ' ' '\n' | grep -qx input; then
+      :
+    elif getent group input | grep -q "[:,]${USER}\(,\|$\)"; then
+      echo "==> shell session is missing the 'input' group (frozen at login)."
+      echo "    Re-launching daemon under 'sg input' so it can read evdev."
+      echo "    PID $$ groups: $(id -nG)"
+      echo "    starting daemon → $logfile"
+      setsid sg input -c "env RUST_LOG='$LOG_LEVEL' '$bin'" >"$logfile" 2>&1 &
+      local pid=$!
+      echo "$pid" >"$pidfile"
+      sleep 0.8
+      if is_running "$pidfile"; then
+        echo "    PID $pid alive (input group acquired via sg)"
+        return 0
+      else
+        echo "    !! failed to start under sg. Last 15 log lines:"
+        tail -15 "$logfile" | sed 's/^/      /'
+        rm -f "$pidfile"
+        exit 1
+      fi
+    else
+      echo "==> WARNING: user '$USER' is NOT in the 'input' group at all."
+      echo "    Run: sudo usermod -aG input $USER  (then log out + back in)"
+      echo "    The daemon will start anyway but won't see gesture buttons."
+    fi
   fi
   echo "==> starting $c  →  $logfile"
   # nohup + setsid → child outlives the shell that started it
