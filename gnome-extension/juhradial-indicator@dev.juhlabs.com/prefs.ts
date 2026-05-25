@@ -16,8 +16,11 @@
 import Adw from 'gi://Adw';
 import Gtk from 'gi://Gtk';
 import Gdk from 'gi://Gdk';
-import GLib from 'gi://GLib';
 import Gio from 'gi://Gio';
+// Cairo uses GJS's bare-module identifier ('cairo') rather than a
+// gi:// URI. This resolves because @girs/gjs declares a module
+// "cairo" in its ambient typing; if you switch to gi://cairo (a
+// non-existent module URI) tsc will fail.
 import Cairo from 'cairo';
 
 // ExtensionPreferences is imported from the @girs package path rather than the
@@ -194,10 +197,22 @@ export default class JuhRadialIndicatorPrefs extends ExtensionPreferences {
             this._buildPreviewGroup(settings);
         page.add(previewGroup);
 
-        page.add(this._buildDisplayGroup(settings, refreshPreview));
-        page.add(this._buildColorsGroup(settings, refreshPreview));
-        page.add(this._buildPlacementGroup(settings));
-        page.add(this._buildBehaviorGroup(settings));
+        const display = this._buildDisplayGroup(settings, refreshPreview);
+        page.add(display.group);
+        unsubs.push(...display.unsubs);
+
+        const colors = this._buildColorsGroup(settings, refreshPreview);
+        page.add(colors.group);
+        unsubs.push(...colors.unsubs);
+
+        const placement = this._buildPlacementGroup(settings);
+        page.add(placement.group);
+        unsubs.push(...placement.unsubs);
+
+        const behavior = this._buildBehaviorGroup(settings);
+        page.add(behavior.group);
+        unsubs.push(...behavior.unsubs);
+
         page.add(this._buildAboutGroup());
         page.add(this._buildResetGroup(settings));
 
@@ -335,8 +350,9 @@ export default class JuhRadialIndicatorPrefs extends ExtensionPreferences {
     private _buildDisplayGroup(
         settings: IndicatorSettings,
         refreshPreview: () => void,
-    ): Adw.PreferencesGroup {
+    ): { group: Adw.PreferencesGroup; unsubs: Array<() => void> } {
         const group = new Adw.PreferencesGroup({ title: 'Display' });
+        const unsubs: Array<() => void> = [];
 
         // ---- "Show as" row with toggle buttons ----
         const showAsRow = new Adw.ActionRow({
@@ -388,9 +404,9 @@ export default class JuhRadialIndicatorPrefs extends ExtensionPreferences {
         }
 
         // Keep buttons in sync when settings change externally.
-        settings.onChange((key) => {
+        unsubs.push(settings.onChange((key) => {
             if (key === 'display-mode') updateModeButtons(settings.displayMode());
-        });
+        }));
 
         // ---- "Show symbolic mouse glyph" switch row ----
         const showGlyphRow = new Adw.SwitchRow({
@@ -419,7 +435,7 @@ export default class JuhRadialIndicatorPrefs extends ExtensionPreferences {
         group.add(tintGlyphRow);
 
         // Sync on external changes.
-        settings.onChange((key) => {
+        unsubs.push(settings.onChange((key) => {
             if (key === 'show-mouse-glyph') {
                 showGlyphRow.active = settings.showMouseGlyph();
                 tintGlyphRow.sensitive = settings.showMouseGlyph();
@@ -427,9 +443,9 @@ export default class JuhRadialIndicatorPrefs extends ExtensionPreferences {
             if (key === 'tint-mouse-glyph') {
                 tintGlyphRow.active = settings.tintMouseGlyph();
             }
-        });
+        }));
 
-        return group;
+        return { group, unsubs };
     }
 
     // =========================================================================
@@ -439,8 +455,9 @@ export default class JuhRadialIndicatorPrefs extends ExtensionPreferences {
     private _buildColorsGroup(
         settings: IndicatorSettings,
         refreshPreview: () => void,
-    ): Adw.PreferencesGroup {
+    ): { group: Adw.PreferencesGroup; unsubs: Array<() => void> } {
         const group = new Adw.PreferencesGroup({ title: 'Battery level colors' });
+        const unsubs: Array<() => void> = [];
 
         // Wrap everything in a vertical Gtk.Box and add it once to the group.
         const vbox = new Gtk.Box({
@@ -611,12 +628,12 @@ export default class JuhRadialIndicatorPrefs extends ExtensionPreferences {
             cell.append(colorBtn);
 
             // Sync swatch on external changes.
-            settings.onChange((key) => {
+            unsubs.push(settings.onChange((key) => {
                 const colorKeys: Record<string, boolean> = {
                     'color-critical': true, 'color-low': true, 'color-healthy': true,
                 };
                 if (colorKeys[key]) swatch.queue_draw();
-            });
+            }));
 
             bandGrid.attach(cell, col, 0, 1, 1);
         }
@@ -675,14 +692,14 @@ export default class JuhRadialIndicatorPrefs extends ExtensionPreferences {
         });
 
         // Sync spinrows when settings change externally (e.g., reset).
-        settings.onChange((key) => {
+        unsubs.push(settings.onChange((key) => {
             if (key === 'threshold-critical') critRow.value = settings.thresholdCritical();
             if (key === 'threshold-low') lowRow.value = settings.thresholdLow();
             if (key === 'threshold-critical' || key === 'threshold-low') {
                 _updateRangeLabels();
                 barArea.queue_draw();
             }
-        });
+        }));
 
         const _updateRangeLabels = () => {
             const specs = bandSpecs;
@@ -701,20 +718,21 @@ export default class JuhRadialIndicatorPrefs extends ExtensionPreferences {
             settings.setApplyColorToText(applyColorRow.active);
             refreshPreview();
         });
-        settings.onChange((key) => {
+        unsubs.push(settings.onChange((key) => {
             if (key === 'apply-color-to-text') applyColorRow.active = settings.applyColorToText();
-        });
+        }));
         vbox.append(applyColorRow);
 
-        return group;
+        return { group, unsubs };
     }
 
     // =========================================================================
     // 4. Placement
     // =========================================================================
 
-    private _buildPlacementGroup(settings: IndicatorSettings): Adw.PreferencesGroup {
+    private _buildPlacementGroup(settings: IndicatorSettings): { group: Adw.PreferencesGroup; unsubs: Array<() => void> } {
         const group = new Adw.PreferencesGroup({ title: 'Placement' });
+        const unsubs: Array<() => void> = [];
 
         // ---- Panel combo ----
         const panelModel = new Gtk.StringList();
@@ -737,14 +755,14 @@ export default class JuhRadialIndicatorPrefs extends ExtensionPreferences {
                 settings.setPanelTarget(PANEL_TARGET_VALUES[idx]);
             }
         });
-        settings.onChange((key) => {
+        unsubs.push(settings.onChange((key) => {
             if (key === 'panel-target') {
                 _suppressPanelSignal = true;
                 const idx = PANEL_TARGET_VALUES.indexOf(settings.panelTarget());
                 panelRow.selected = idx >= 0 ? idx : 0;
                 _suppressPanelSignal = false;
             }
-        });
+        }));
         group.add(panelRow);
 
         // ---- Position row ----
@@ -795,9 +813,9 @@ export default class JuhRadialIndicatorPrefs extends ExtensionPreferences {
         }
         posBox.append(posToggleBox);
 
-        settings.onChange((key) => {
+        unsubs.push(settings.onChange((key) => {
             if (key === 'position') updatePosButtons(settings.position() as Position);
-        });
+        }));
 
         // Compact position-index SpinButton (not embeddable as SpinRow here).
         const idxAdj = new Gtk.Adjustment({
@@ -816,20 +834,21 @@ export default class JuhRadialIndicatorPrefs extends ExtensionPreferences {
         idxSpin.connect('value-changed', () => {
             settings.setPositionIndex(Math.round(idxSpin.value));
         });
-        settings.onChange((key) => {
+        unsubs.push(settings.onChange((key) => {
             if (key === 'position-index') idxSpin.value = settings.positionIndex();
-        });
+        }));
         posBox.append(idxSpin);
 
-        return group;
+        return { group, unsubs };
     }
 
     // =========================================================================
     // 5. Behavior
     // =========================================================================
 
-    private _buildBehaviorGroup(settings: IndicatorSettings): Adw.PreferencesGroup {
+    private _buildBehaviorGroup(settings: IndicatorSettings): { group: Adw.PreferencesGroup; unsubs: Array<() => void> } {
         const group = new Adw.PreferencesGroup({ title: 'Behavior' });
+        const unsubs: Array<() => void> = [];
 
         // ---- On-click combo ----
         const clickModel = new Gtk.StringList();
@@ -851,14 +870,14 @@ export default class JuhRadialIndicatorPrefs extends ExtensionPreferences {
                 settings.setClickBehavior(CLICK_BEHAVIOR_VALUES[idx]);
             }
         });
-        settings.onChange((key) => {
+        unsubs.push(settings.onChange((key) => {
             if (key === 'click-behavior') {
                 _suppressClickSignal = true;
                 const idx = CLICK_BEHAVIOR_VALUES.indexOf(settings.clickBehavior());
                 clickRow.selected = idx >= 0 ? idx : 0;
                 _suppressClickSignal = false;
             }
-        });
+        }));
         group.add(clickRow);
 
         // ---- Poll interval SpinRow + "s" suffix label ----
@@ -885,12 +904,12 @@ export default class JuhRadialIndicatorPrefs extends ExtensionPreferences {
         intervalRow.connect('notify::value', () => {
             settings.setRefreshInterval(Math.round(intervalRow.value));
         });
-        settings.onChange((key) => {
+        unsubs.push(settings.onChange((key) => {
             if (key === 'refresh-interval') intervalRow.value = settings.refreshInterval();
-        });
+        }));
         group.add(intervalRow);
 
-        return group;
+        return { group, unsubs };
     }
 
     // =========================================================================
