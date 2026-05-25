@@ -10,12 +10,12 @@
   },
   "devDependencies": {
     "typescript": "^5.4.0",
-    "@girs/gjs": "^4.0.0",
-    "@girs/gnome-shell": "^48.0.0",
-    "@girs/meta-15": "^15.0.0",
-    "@girs/gio-2.0": "^2.80.0",
-    "@girs/glib-2.0": "^2.80.0",
-    "@girs/gtk-4.0": "^4.0.0",
-    "@girs/adw-1": "^1.0.0"
+    "@girs/gjs": "latest",
+    "@girs/gnome-shell": "latest",
+    "@girs/meta-15": "latest",
+    "@girs/gio-2.0": "latest",
+    "@girs/glib-2.0": "latest",
+    "@girs/gtk-4.0": "latest",
+    "@girs/adw-1": "latest"
   }
 }
