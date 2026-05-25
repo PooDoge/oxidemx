@@ -470,17 +470,16 @@ install_deps_fedora_atomic() {
     done
 
     # Build toolchain — only needed if we're going to compile here.
-    # When binaries already exist in target/release/, we skip the
-    # toolchain probe entirely (build-once, install-many workflow).
-    local need_build=true
-    if [ -x target/release/juhradiald ] || [ -x daemon/target/release/juhradiald ]; then
-        need_build=false
-    fi
+    # build_project() will use any of three sources, in order:
+    #   1. host cargo (traditional install)
+    #   2. distrobox container with cargo (the atomic-Fedora default)
+    #   3. pre-built binaries in target/release/ (skip-build path)
+    # So we only flag "cargo missing" if NONE of those is satisfiable.
     local missing_build_tools=()
-    if [ "$need_build" = true ]; then
-        if ! command -v cargo &> /dev/null; then
-            missing_build_tools+=("cargo (rust toolchain)")
-        fi
+    if ! command -v cargo &> /dev/null \
+       && ! find_distrobox_container &> /dev/null \
+       && ! { [ -x target/release/juhradiald ] || [ -x daemon/target/release/juhradiald ]; }; then
+        missing_build_tools+=("cargo (rust toolchain — host OR distrobox container)")
     fi
 
     local total_missing=$((${#missing_runtime_libs[@]} + ${#missing_runtime_cmds[@]} + ${#missing_build_tools[@]}))
@@ -490,10 +489,12 @@ install_deps_fedora_atomic() {
         log_success "All runtime dependencies present — no layering needed"
         log_dim "  Runtime libs: libdbus, libudev, libsystemd, libevdev, libhidapi — all in base image"
         log_dim "  Runtime cmds: ydotool present"
-        if [ "$need_build" = false ]; then
+        if have_all_release_binaries; then
             log_dim "  Build: skipped — release binaries already in target/release/"
-        else
-            log_dim "  Build: cargo on PATH (or distrobox-managed via dev.sh build all)"
+        elif command -v cargo &> /dev/null; then
+            log_dim "  Build: cargo on host PATH"
+        elif c="$(find_distrobox_container)"; then
+            log_dim "  Build: will use distrobox container '$c' (no host cargo needed)"
         fi
         return 0
     fi
@@ -801,14 +802,118 @@ clone_repo() {
 }
 
 # ── Build ────────────────────────────────────────────────────────────
+
+# Check whether all 4 release binaries are already on disk. Used to
+# decide whether to skip the build step entirely.
+have_all_release_binaries() {
+    [ -x target/release/juhradiald ] || [ -x daemon/target/release/juhradiald ] || return 1
+    # popup/overlay/settings are optional in the strict sense, but if
+    # any of them ARE missing on an atomic system and we don't have
+    # cargo, the user is going to hit pick_binary warnings later — so
+    # require all-four-present here for the skip-build path.
+    [ -x target/release/juhradial-popup ]      || [ -x popup-rs/target/release/juhradial-popup ]      || return 1
+    [ -x target/release/juhradial-overlay-rs ] || [ -x overlay-rs/target/release/juhradial-overlay-rs ] || return 1
+    [ -x target/release/juhradial-settings ]   || [ -x settings-rs/target/release/juhradial-settings ] || return 1
+    return 0
+}
+
+# Find an available distrobox container that can run cargo. Honors
+# $JUHRADIAL_DISTROBOX, then probes common names. Returns the name on
+# stdout + exit 0, or exit 1 if no usable container found.
+find_distrobox_container() {
+    if ! command -v distrobox &> /dev/null; then
+        return 1
+    fi
+    local candidates=("${JUHRADIAL_DISTROBOX:-}" claude_development juhradial-dev dev rust fedora-toolbox)
+    for name in "${candidates[@]}"; do
+        [ -z "$name" ] && continue
+        if distrobox list 2>/dev/null | awk '{print $3}' | grep -qx "$name"; then
+            echo "$name"
+            return 0
+        fi
+    done
+    return 1
+}
+
 build_project() {
     step "Building Rust workspace"
-    log_info "Compiling daemon + overlay + popup + settings (cargo workspace)..."
     cd "$INSTALL_DIR"
 
-    # Workspace build picks up all binary crates in one cargo invocation:
-    # juhradiald, juhradial-overlay-rs, juhradial-popup, juhradial-settings.
-    # Falls back to per-crate builds for partial-checkout / pre-workspace trees.
+    # Escape hatch: user already has pre-built binaries (e.g., copied from
+    # a release tarball or a CI artifact). Skip the build entirely.
+    if [ "${JUHRADIAL_SKIP_BUILD:-}" = "1" ]; then
+        if have_all_release_binaries; then
+            log_success "JUHRADIAL_SKIP_BUILD=1 — using existing release binaries"
+            return 0
+        else
+            log_error "JUHRADIAL_SKIP_BUILD=1 but not all release binaries present"
+            log_dim "  Need: target/release/{juhradiald,juhradial-popup,juhradial-overlay-rs,juhradial-settings}"
+            log_dim "  Or per-crate: <crate>/target/release/<bin>"
+            exit 1
+        fi
+    fi
+
+    # Build strategy: prefer host cargo if available; fall back to
+    # distrobox-managed cargo (the atomic-Fedora default); fall back to
+    # "binaries already present, skip" if all four exist.
+    local build_mode=""
+    if command -v cargo &> /dev/null; then
+        build_mode="host"
+    elif container="$(find_distrobox_container)"; then
+        build_mode="distrobox:$container"
+    elif have_all_release_binaries; then
+        build_mode="skip"
+    fi
+
+    case "$build_mode" in
+        host)
+            log_info "Compiling on host with cargo: $(command -v cargo)"
+            do_workspace_build_host
+            ;;
+        distrobox:*)
+            local container="${build_mode#distrobox:}"
+            log_info "Compiling inside distrobox container: ${BOLD}${container}${RESET}"
+            log_dim "  (cargo not on host PATH — this avoids layering rust via rpm-ostree)"
+            distrobox enter "$container" -- bash -c \
+                "cd '$INSTALL_DIR' && cargo build --release \
+                 -p juhradiald -p juhradial-overlay-rs \
+                 -p juhradial-popup-rs -p juhradial-settings-rs" || {
+                log_error "distrobox build failed."
+                log_dim "  If '$container' is missing the rust/devel deps, install them inside it:"
+                log_dim "    distrobox enter $container -- sudo dnf install -y rust cargo \\"
+                log_dim "         dbus-devel systemd-devel libevdev-devel hidapi-devel git"
+                exit 1
+            }
+            ;;
+        skip)
+            log_warning "cargo not on host AND no distrobox found — but release binaries"
+            log_warning "are already on disk. Skipping build."
+            ;;
+        *)
+            log_error "No way to build: cargo not on host PATH, no distrobox container available."
+            log_dim ""
+            log_dim "  Options:"
+            log_dim "    1. Set up a distrobox with rust:"
+            log_dim "         distrobox-create --name juhradial-dev --image registry.fedoraproject.org/fedora-toolbox:latest"
+            log_dim "         distrobox enter juhradial-dev -- sudo dnf install -y rust cargo \\"
+            log_dim "              dbus-devel systemd-devel libevdev-devel hidapi-devel git"
+            log_dim "         ./install.sh"
+            log_dim ""
+            log_dim "    2. Build elsewhere and copy target/release/* in, then re-run with:"
+            log_dim "         JUHRADIAL_SKIP_BUILD=1 ./install.sh"
+            log_dim ""
+            log_dim "    3. (Last resort) layer rust via rpm-ostree:"
+            log_dim "         JUHRADIAL_USE_RPM_OSTREE=1 ./install.sh"
+            exit 1
+            ;;
+    esac
+
+    log_success "Build complete"
+}
+
+# Host-cargo build, factored out for clarity. Same workspace-aware
+# fallback as before.
+do_workspace_build_host() {
     if [ -f Cargo.toml ] && grep -q '^\[workspace\]' Cargo.toml; then
         cargo build --release \
             -p juhradiald \
@@ -822,8 +927,6 @@ build_project() {
         [ -d overlay-rs ]  && ( cd overlay-rs  && cargo build --release )
         [ -d settings-rs ] && ( cd settings-rs && cargo build --release )
     fi
-
-    log_success "Build complete"
 }
 
 # ── Install files ────────────────────────────────────────────────────
