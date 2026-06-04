@@ -50,7 +50,7 @@ async fn main() {
         mode: HapticRedirectMode::Standalone,
         ..Default::default()
     };
-    let service = GamepadHapticsService::start(config, haptics);
+    let service = GamepadHapticsService::start(config, haptics, tokio::runtime::Handle::current());
 
     println!();
     println!("  +- gamepad-rumble -> MX Master 4 haptic bridge ------------+");

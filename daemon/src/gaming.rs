@@ -44,6 +44,9 @@ pub struct GamingMode {
     /// Dropping it tears the virtual gamepad down — that's all
     /// `disable()` has to do.
     haptic_redirect: Option<GamepadHapticsService>,
+
+    /// A handle to the Tokio runtime to spawn tasks on.
+    tokio_handle: Option<tokio::runtime::Handle>,
 }
 
 impl GamingMode {
@@ -55,6 +58,7 @@ impl GamingMode {
             dpi_manager: DpiManager::new(),
             haptic_manager,
             haptic_redirect: None,
+            tokio_handle: tokio::runtime::Handle::try_current().ok(),
         }
     }
 
@@ -91,10 +95,15 @@ impl GamingMode {
         // translated pulses through the same shared HapticManager.
         if redirect_cfg.enabled {
             tracing::info!("Gaming mode: starting gamepad-rumble → haptic bridge");
-            self.haptic_redirect = Some(GamepadHapticsService::start(
-                redirect_cfg.clone(),
-                self.haptic_manager.clone(),
-            ));
+            if let Some(ref handle) = self.tokio_handle {
+                self.haptic_redirect = Some(GamepadHapticsService::start(
+                    redirect_cfg.clone(),
+                    self.haptic_manager.clone(),
+                    handle.clone(),
+                ));
+            } else {
+                tracing::error!("Gaming mode: cannot start haptic redirect, no tokio runtime handle available");
+            }
         }
 
         self.enabled = true;

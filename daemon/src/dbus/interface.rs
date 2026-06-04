@@ -701,7 +701,7 @@ impl JuhRadialService {
     ) -> fdo::Result<()> {
         let rect = format!("{panel_x},{panel_y},{panel_w},{panel_h}");
         tracing::info!(rect = %rect, "ShowPopup spawning juhradial-popup");
-        match tokio::process::Command::new("juhradial-popup")
+        match std::process::Command::new("juhradial-popup")
             .args(["--panel-rect", &rect])
             .spawn()
         {
@@ -709,8 +709,8 @@ impl JuhRadialService {
                 // Detach: reap the popup's exit asynchronously so it doesn't
                 // linger as a zombie until the daemon exits. The popup is
                 // genuinely fire-and-forget from this method's perspective.
-                tokio::spawn(async move {
-                    let _ = child.wait().await;
+                std::thread::spawn(move || {
+                    let _ = child.wait();
                 });
                 Ok(())
             }

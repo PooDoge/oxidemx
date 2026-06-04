@@ -59,9 +59,13 @@ impl GamepadHapticsService {
     ///
     /// Must be called from within a Tokio runtime (it is — the only
     /// caller is the async `SetGamingMode` D-Bus handler).
-    pub fn start(config: HapticRedirectConfig, haptics: SharedHapticManager) -> Self {
+    pub fn start(
+        config: HapticRedirectConfig,
+        haptics: SharedHapticManager,
+        handle: tokio::runtime::Handle,
+    ) -> Self {
         let (shutdown_tx, shutdown_rx) = oneshot::channel();
-        tokio::spawn(run(config, haptics, shutdown_rx));
+        handle.spawn(run(config, haptics, shutdown_rx));
         Self {
             _shutdown: shutdown_tx,
         }
