@@ -20,6 +20,14 @@ Description=JuhRadial MX Daemon - Radial menu for Logitech MX Master 4
 Documentation=https://github.com/juhhally/juhradial-mx
 After=graphical-session.target
 PartOf=graphical-session.target
+
+# Limit restart attempts to prevent infinite restart loops, but raise the
+# burst from 5 → 20 so a brief storm of HID++ reconnects (caused by Bolt
+# receiver hand-off during USB suspend/resume) doesn't permanently disable
+# the service.
+StartLimitIntervalSec=60
+StartLimitBurst=20
+
 # IMPORTANT: do NOT add `Wants=graphical-session.target` here, and keep the
 # [Install] WantedBy at `graphical-session.target` (NOT default.target).
 #
@@ -59,13 +67,6 @@ ExecStart=/usr/local/bin/juhradiald
 # is always alive on the bus.
 Restart=always
 RestartSec=5s
-
-# Limit restart attempts to prevent infinite restart loops, but raise the
-# burst from 5 → 20 so a brief storm of HID++ reconnects (caused by Bolt
-# receiver hand-off during USB suspend/resume) doesn't permanently disable
-# the service.
-StartLimitIntervalSec=60
-StartLimitBurst=20
 
 # Disable watchdog to prevent systemd drop-ins (e.g. 10-timeout-abort.conf
 # on Fedora) from killing the daemon when it doesn't send sd_notify heartbeats.

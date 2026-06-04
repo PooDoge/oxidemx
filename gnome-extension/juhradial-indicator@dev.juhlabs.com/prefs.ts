@@ -23,13 +23,8 @@ import Gio from 'gi://Gio';
 // non-existent module URI) tsc will fail.
 import Cairo from 'cairo';
 
-// ExtensionPreferences is imported from the @girs package path rather than the
-// resource:// URL because the tsconfig's path mapping for prefs.js points to the
-// prefs-ambient.d.ts file, which declares the capital-S variant of the module
-// path (a @girs quirk) and is therefore not a module from tsc's perspective.
-// At runtime GJS resolves the resource:// URL normally; the import below is
-// only for type-checking.
-import { ExtensionPreferences } from '@girs/gnome-shell/extensions/prefs';
+// ExtensionPreferences is imported from the resource:// URL mapped in tsconfig.json
+import { ExtensionPreferences } from 'resource:///org/gnome/Shell/Extensions/js/extensions/prefs.js';
 
 import {
     IndicatorSettings,
