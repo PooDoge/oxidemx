@@ -30,6 +30,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **D-Bus name flag-day rename** — `org.kde.juhradialmx` → `org.juhradial.Daemon`. Path `/org/kde/juhradialmx/Daemon` → `/org/juhradial/Daemon`. Touches daemon (5 files), overlay-rs (4 files), settings-rs/src/daemon.rs, packaging desktop file (renamed to `org.juhradial.settings.desktop`), `install.sh`, `local-test-install.sh`, `dev-test.sh`, and two root design-doc references. No behaviour change.
 - **Overlay app_id** — `org.kde.juhradialmx.overlay` → `org.juhradial.overlay`. Popup app_id is `org.juhradial.popup`. Cursor-helper extension service stays `org.juhradial.CursorHelper` (already in the new namespace).
 
+### Fixed
+
+- **GDM/GNOME login loop on systems with user lingering** — `juhradialmx-daemon.service` was wired with `Wants=graphical-session.target` + `WantedBy=default.target`. With `loginctl enable-linger` on (common alongside rootless Podman/Quadlet), the daemon started headless at boot and force-activated `graphical-session.target`, so `gnome-session` saw "A graphical session is already running!", core-dumped, and bounced every login back to the user picker — surviving reboots while TTY login still worked. Re-wired to `After=`/`PartOf=` in `[Unit]` and `WantedBy=graphical-session.target` in `[Install]` so the daemon is pulled up by a real session instead of forcing the target on. New [`packaging/systemd/TROUBLESHOOTING.md`](packaging/systemd/TROUBLESHOOTING.md) documents diagnosis, the fix, and emergency TTY recovery.
+
 ### Notes
 
 - Original UI spec preserved as [`design/juhradial-indicator/CLAUDE_CODE_PROMPT.md`](design/juhradial-indicator/CLAUDE_CODE_PROMPT.md).
