@@ -205,6 +205,7 @@ function monitorGeometry(idx: number): MonitorGeometry | null {
 export default class JuhRadialCursorExtension extends Extension {
     private _dbusId: number | null = null;
     private _registrationId: number | null = null;
+    private _connection: Gio.DBusConnection | null = null;
 
     override enable(): void {
         const nodeInfo: Gio.DBusNodeInfo = Gio.DBusNodeInfo.new_for_xml(DBUS_IFACE);
@@ -214,6 +215,7 @@ export default class JuhRadialCursorExtension extends Extension {
             'org.juhradial.CursorHelper',
             Gio.BusNameOwnerFlags.NONE,
             (connection: Gio.DBusConnection) => {
+                this._connection = connection;
                 this._registrationId = connection.register_object(
                     '/org/juhradial/CursorHelper',
                     nodeInfo.interfaces[0],
@@ -434,10 +436,18 @@ export default class JuhRadialCursorExtension extends Extension {
     }
 
     override disable(): void {
+        if (this._connection !== null && this._registrationId !== null) {
+            try {
+                this._connection.unregister_object(this._registrationId);
+            } catch (e) {
+                log(`[juhradial-cursor] failed to unregister: ${e}`);
+            }
+            this._registrationId = null;
+            this._connection = null;
+        }
         if (this._dbusId !== null) {
             Gio.bus_unown_name(this._dbusId);
             this._dbusId = null;
         }
-        this._registrationId = null;
     }
 }
