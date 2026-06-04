@@ -835,6 +835,67 @@ find_distrobox_container() {
     return 1
 }
 
+download_release_binaries() {
+    local tag="$1"
+    local arch
+    arch="$(uname -m)"
+
+    if [ "$arch" != "x86_64" ]; then
+        log_error "Pre-built binaries are only available for x86_64 (detected: $arch)"
+        exit 1
+    fi
+
+    step "Downloading pre-built binaries ($tag)"
+
+    local repo="${JUHRADIAL_RELEASE_REPO:-JuhLabs/juhradial-mx}"
+
+    if [ "$tag" = "latest" ]; then
+        log_info "Querying latest release tag..."
+        local api_url="https://api.github.com/repos/${repo}/releases/latest"
+        tag=$(curl -fsSL "$api_url" | grep -oP '"tag_name":\s*"\K[^"]+' || echo "")
+        if [ -z "$tag" ]; then
+            log_error "Failed to resolve latest release tag from GitHub API."
+            exit 1
+        fi
+        log_info "Latest release is $tag"
+    fi
+
+    local archive="juhradial-mx-${tag}-${arch}-linux.tar.gz"
+    local base_url="https://github.com/${repo}/releases/download/${tag}"
+
+    log_info "Downloading $archive..."
+    if ! curl -fL --progress-bar -o "/tmp/$archive" "$base_url/$archive"; then
+        log_error "Failed to download release archive."
+        exit 1
+    fi
+
+    log_info "Downloading $archive.sha256..."
+    if ! curl -fL -s -o "/tmp/$archive.sha256" "$base_url/$archive.sha256"; then
+        log_error "Failed to download checksum file."
+        rm -f "/tmp/$archive"
+        exit 1
+    fi
+
+    log_info "Verifying checksum..."
+    ( cd /tmp && sha256sum -c "$archive.sha256" ) || {
+        log_error "Checksum verification failed — refusing to install."
+        rm -f "/tmp/$archive" "/tmp/$archive.sha256"
+        exit 1
+    }
+
+    log_info "Extracting binaries..."
+    mkdir -p "$INSTALL_DIR/target/release"
+    if ! tar -xzf "/tmp/$archive" -C "$INSTALL_DIR/target/release"; then
+        log_error "Extraction failed."
+        rm -f "/tmp/$archive" "/tmp/$archive.sha256"
+        exit 1
+    fi
+
+    rm -f "/tmp/$archive" "/tmp/$archive.sha256"
+    log_success "Release $tag binaries downloaded and verified successfully"
+    JUHRADIAL_SKIP_BUILD=1
+}
+
 build_project() {
     step "Building Rust workspace"
     cd "$INSTALL_DIR"
@@ -1315,8 +1376,43 @@ print_success() {
     fi
 }
 
+print_help() {
+    print_banner
+    echo "Usage: $0 [options]"
+    echo ""
+    echo "Options:"
+    echo "  --from-release [version]  Download pre-built release binaries from GitHub"
+    echo "                            (defaults to 'latest' if version is omitted)"
+    echo "  -h, --help                Show this help message"
+    echo ""
+}
+
 # ── Main ─────────────────────────────────────────────────────────────
 main() {
+    local from_release=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --from-release)
+                if [[ "${2:-}" =~ ^v[0-9] ]] || [[ "${2:-}" == "latest" ]]; then
+                    from_release="$2"
+                    shift 2
+                else
+                    from_release="latest"
+                    shift 1
+                fi
+                ;;
+            -h|--help)
+                print_help
+                exit 0
+                ;;
+            *)
+                echo "Unknown option: $1" >&2
+                print_help >&2
+                exit 1
+                ;;
+        esac
+    done
+
     print_banner
     check_root
     detect_distro
@@ -1343,6 +1439,9 @@ main() {
 
     install_dependencies
     clone_repo
+    if [ -n "$from_release" ]; then
+        download_release_binaries "$from_release"
+    fi
     build_project
     install_files
     configure_desktop

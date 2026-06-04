@@ -1,0 +1,60 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: Build Release Binaries
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libdbus-1-dev \
+            libsystemd-dev \
+            libevdev-dev \
+            libhidapi-dev \
+            pkg-config \
+            build-essential
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build Rust workspace in release mode
+        run: |
+          cargo build --release \
+            -p juhradiald \
+            -p juhradial-overlay-rs \
+            -p juhradial-popup-rs \
+            -p juhradial-settings-rs
+
+      - name: Package release binaries
+        run: |
+          mkdir -p dist
+          tar -czf dist/juhradial-mx-${{ github.ref_name }}-x86_64-linux.tar.gz \
+              -C target/release \
+              juhradiald juhradial-popup juhradial-overlay-rs juhradial-settings
+          cd dist
+          sha256sum juhradial-mx-${{ github.ref_name }}-x86_64-linux.tar.gz > juhradial-mx-${{ github.ref_name }}-x86_64-linux.tar.gz.sha256
+
+      - name: Create Release and Upload Assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/juhradial-mx-${{ github.ref_name }}-x86_64-linux.tar.gz
+            dist/juhradial-mx-${{ github.ref_name }}-x86_64-linux.tar.gz.sha256
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
