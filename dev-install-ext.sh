@@ -140,6 +140,36 @@ copy_indicator_files() {
   say "extension.js: $(wc -c < "$IND_DEST/extension.js") bytes"
 }
 
+hot_reload_one() {
+  local uuid="$1"
+  local state
+  state=$(gnome-extensions info "$uuid" 2>/dev/null | grep -oP '(?<=State: )\S+' || echo "")
+  case "$state" in
+    "")
+      say "Extension $uuid is not yet known to GNOME Shell. Enabling for the first time…"
+      gnome-extensions enable "$uuid" 2>/dev/null || {
+        warn "Initial enable of $uuid failed. Log out and back in, then re-run."
+        return 0
+      }
+      ok "Enabled $uuid (first activation)."
+      ;;
+    ACTIVE|ENABLED)
+      say "Hot-reloading $uuid: disable → enable cycle…"
+      gnome-extensions disable "$uuid" 2>/dev/null || true
+      sleep 0.3
+      gnome-extensions enable "$uuid" 2>/dev/null || {
+        warn "Re-enable of $uuid failed; check journalctl logs."
+        return 0
+      }
+      ok "Disable/enable cycle for $uuid complete."
+      ;;
+    *)
+      say "Extension $uuid state: $state — enabling…"
+      gnome-extensions enable "$uuid" 2>/dev/null || true
+      ;;
+  esac
+}
+
 # Disable + enable cycle. Quiet about failures because the user might
 # be running this before the extension was ever installed (first run).
 hot_reload() {
@@ -149,32 +179,8 @@ hot_reload() {
     return 0
   fi
 
-  local state
-  state=$(gnome-extensions info "$EXT_UUID" 2>/dev/null | grep -oP '(?<=State: )\S+' || echo "")
-  case "$state" in
-    "")
-      say "Extension is not yet known to GNOME Shell. Enabling for the first time…"
-      gnome-extensions enable "$EXT_UUID" 2>/dev/null || {
-        warn "Initial enable failed. Log out and back in, then re-run."
-        return 0
-      }
-      ok "Enabled (first activation)."
-      ;;
-    ACTIVE|ENABLED)
-      say "Hot-reloading: disable → enable cycle…"
-      gnome-extensions disable "$EXT_UUID" 2>/dev/null || true
-      sleep 0.3
-      gnome-extensions enable "$EXT_UUID" 2>/dev/null || {
-        warn "Re-enable failed; check 'journalctl --user -t gnome-shell'."
-        return 0
-      }
-      ok "Disable/enable cycle complete."
-      ;;
-    *)
-      say "Extension state: $state — enabling…"
-      gnome-extensions enable "$EXT_UUID" 2>/dev/null || true
-      ;;
-  esac
+  hot_reload_one "$EXT_UUID"
+  hot_reload_one "$IND_UUID"
 }
 
 # Probe the GetFocusedWindowClass method via D-Bus. If the method is

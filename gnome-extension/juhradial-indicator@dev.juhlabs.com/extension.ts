@@ -59,11 +59,12 @@ const PanelButton = GObject.registerClass(
         private _label!: St.Label;
 
         /** Most-recently applied settings snapshot — used by applySettings(). */
-        private _lastSettings: IndicatorSettings | null = null;
+        private _lastSettings!: IndicatorSettings | null;
 
         _init(): void {
             // menuAlignment=0.5 centres the popup menu under the button.
             super._init(0.5, 'JuhRadial Indicator', false);
+            this._lastSettings = null;
 
             this._box = new St.BoxLayout({
                 style_class: 'panel-status-indicators-box',
