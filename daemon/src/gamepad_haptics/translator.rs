@@ -19,7 +19,7 @@
 use std::time::{Duration, Instant};
 
 use evdev::{FFEffectData, FFEffectKind, FFReplay, FFTrigger};
-use juhradial_shared::{HapticEventMode, HapticRedirectConfig, HapticRedirectCurve};
+use oxidemx_shared::{HapticEventMode, HapticRedirectConfig, HapticRedirectCurve};
 
 use crate::hidpp::{Mx4HapticPattern, SharedHapticManager};
 

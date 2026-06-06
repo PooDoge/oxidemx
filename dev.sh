@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Dev convenience runner for the juhradial-mx Rust workspace.
+# Dev convenience runner for the oxidemx Rust workspace.
 #
 # Build steps re-exec inside the distrobox container so we have the
 # Rust toolchain + system libs without polluting the host (Bazzite
@@ -22,28 +22,28 @@
 # input $USER' + log out / back in. dev-test.sh checks this for you.
 #
 # Env overrides:
-#   JUHRADIAL_DISTROBOX  distrobox container name (default: claude_development)
-#   JUHRADIAL_LOG        RUST_LOG value (default: info + debug for our crates)
+#   OXIDEMX_DISTROBOX  distrobox container name (default: claude_development)
+#   OXIDEMX_LOG        RUST_LOG value (default: info + debug for our crates)
 
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TARGET="$ROOT/target/release"
-RUNDIR="${XDG_RUNTIME_DIR:-/tmp}/juhradial-dev"
-DISTROBOX="${JUHRADIAL_DISTROBOX:-claude_development}"
-LOG_LEVEL="${JUHRADIAL_LOG:-info,juhradial_overlay_rs=debug,juhradial_settings=debug,usvg=error}"
+RUNDIR="${XDG_RUNTIME_DIR:-/tmp}/oxidemx-dev"
+DISTROBOX="${OXIDEMX_DISTROBOX:-claude_development}"
+LOG_LEVEL="${OXIDEMX_LOG:-info,oxidemx_overlay_rs=debug,oxidemx_settings=debug,usvg=error}"
 
 mkdir -p "$RUNDIR"
 
 # Component → binary path
-overlay_bin="$TARGET/juhradial-overlay-rs"
-settings_bin="$TARGET/juhradial-settings"
-daemon_bin="$TARGET/juhradiald"
+overlay_bin="$TARGET/oxidemx-overlay"
+settings_bin="$TARGET/oxidemx-settings"
+daemon_bin="$TARGET/oxidemxd"
 
 # Component → cargo crate name (-p flag)
-overlay_crate="juhradial-overlay-rs"
-settings_crate="juhradial-settings-rs"
-daemon_crate="juhradiald"
+overlay_crate="oxidemx-overlay"
+settings_crate="oxidemx-settings"
+daemon_crate="oxidemxd"
 
 bin_for() {
   case "$1" in
@@ -250,7 +250,7 @@ cmd_logs() {
 
 cmd_help() {
   cat <<USAGE
-juhradial-mx dev runner
+oxidemx dev runner
 
   $0 build    [overlay|settings|daemon|all]   build inside distrobox=$DISTROBOX
   $0 start    [overlay|settings|daemon|all]   run on host  (default: overlay)
@@ -264,12 +264,12 @@ Files:
   Logs   $RUNDIR/{daemon,overlay,settings}.log
 
 Env:
-  JUHRADIAL_DISTROBOX=$DISTROBOX
-  JUHRADIAL_LOG=$LOG_LEVEL
+  OXIDEMX_DISTROBOX=$DISTROBOX
+  OXIDEMX_LOG=$LOG_LEVEL
 
 Daemon prerequisites:
   - User must be in 'input' group (sudo usermod -aG input \$USER + relogin)
-  - udev rules at /etc/udev/rules.d/99-juhradialmx.rules (from install.sh)
+  - udev rules at /etc/udev/rules.d/99-oxidemx.rules (from install.sh)
 USAGE
 }
 

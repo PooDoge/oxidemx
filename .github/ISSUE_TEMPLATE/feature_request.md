@@ -1,6 +1,6 @@
 ---
 name: Feature Request
-about: Suggest a new feature or enhancement for JuhRadial MX
+about: Suggest a new feature or enhancement for OxideMX MX
 title: '[FEATURE] '
 labels: enhancement
 assignees: ''

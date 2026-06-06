@@ -1,4 +1,4 @@
-//! Latency benchmarks for JuhRadial MX
+//! Latency benchmarks for OxideMX MX
 //!
 //! Validates NFR-001: <50ms menu appearance, <10ms action execution
 

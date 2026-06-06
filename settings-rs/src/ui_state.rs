@@ -1,6 +1,6 @@
 //! Tiny per-user UI-only state — currently just the last-visited
 //! settings tab. Lives in a single text file
-//! `~/.config/juhradial/ui-state` so it doesn't intermingle with
+//! `~/.config/oxidemx/ui-state` so it doesn't intermingle with
 //! the user's actual JSON config and stays trivially debuggable
 //! (one line per knob).
 //!
@@ -11,11 +11,11 @@
 use std::path::PathBuf;
 
 /// Where the UI-state file lives. Co-located with the JSON config
-/// dir so a `juhradial-config-export` style tool could pick it up
+/// dir so a `oxidemx-config-export` style tool could pick it up
 /// alongside the rest, but stored as a plain text file so anyone
 /// can `cat` / `echo >` it without thinking.
 fn ui_state_path() -> Option<PathBuf> {
-    juhradial_shared::config::default_config_path()
+    oxidemx_shared::config::default_config_path()
         .and_then(|p| p.parent().map(|dir| dir.join("ui-state")))
 }
 

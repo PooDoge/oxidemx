@@ -3,7 +3,7 @@
 //! iced's `Task::perform` wants a future; the actual IO is `std::fs`
 //! since the file is small (~2 KB) and writes are infrequent.
 
-use juhradial_shared::AppConfig;
+use oxidemx_shared::AppConfig;
 use std::path::PathBuf;
 
 pub async fn save(path: PathBuf, cfg: AppConfig) -> Result<(), String> {

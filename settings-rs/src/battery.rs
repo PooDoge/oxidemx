@@ -10,7 +10,7 @@
 //!   and color thresholds (green > 30 %, yellow 15-30 %, red ≤ 15 %).
 //!   Strokes flip to white on dark themes / black on light themes.
 
-use juhradial_widgets::palette::Palette;
+use oxidemx_widgets::palette::Palette;
 use iced::widget::canvas::{self, path::Builder, Frame, Geometry, Path, Stroke};
 use iced::{mouse, Color, Length, Point, Rectangle, Renderer, Theme};
 

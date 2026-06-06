@@ -3,7 +3,7 @@
 //! Keeps a small ordered list of icon names the user has picked
 //! through the icon picker. Surfaces at the top of the grid so
 //! frequently-reached icons are one click away. Persisted to a
-//! tiny JSON file (`~/.config/juhradial/recent-icons.json`) so
+//! tiny JSON file (`~/.config/oxidemx/recent-icons.json`) so
 //! the list survives across settings restarts.
 //!
 //! Why a separate file: the main config is hot-reloaded by the
@@ -29,7 +29,7 @@ struct OnDisk {
 /// the runtime can't locate `$XDG_CONFIG_HOME` or `$HOME` — both
 /// vanishingly unlikely in a normal session.
 pub fn path() -> Option<PathBuf> {
-    juhradial_shared::config::default_config_path()
+    oxidemx_shared::config::default_config_path()
         .and_then(|p| p.parent().map(|p| p.join("recent-icons.json")))
 }
 

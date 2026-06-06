@@ -2,10 +2,10 @@
 //! the legacy device-config sections. Hosts the Theme picker,
 //! Visuals, and Animation sub-panels stacked.
 
-use juhradial_widgets::palette::theme_catalogue;
-use juhradial_widgets::widgets::section_header;
+use oxidemx_widgets::palette::theme_catalogue;
+use oxidemx_widgets::widgets::section_header;
 use crate::{tabs, Message, State};
-use juhradial_widgets::style;
+use oxidemx_widgets::style;
 use iced::widget::{button, column, container, pick_list, row, rule, text, text_input, Space};
 use iced::{Alignment, Element, Length};
 
@@ -101,7 +101,7 @@ fn app_bindings(state: &State) -> Element<'_, Message> {
     let intro = text(
         "Map a focused-window class (matched against WM_CLASS / \
          xdg-toplevel app_id) to a radial-menu profile. The daemon \
-         loads ~/.config/juhradial/profiles/<name>.json when that \
+         loads ~/.config/oxidemx/profiles/<name>.json when that \
          class focuses; falls back to the main config otherwise. \
          Edit the per-profile slices by hand for now — the \
          in-app profile editor is on the roadmap.",
@@ -201,7 +201,7 @@ fn about_panel(state: &State) -> Element<'_, Message> {
 
     let about_col = column![
         row![
-            text("JuhRadial MX").size(15),
+            text("OxideMX MX").size(15),
             text(format!("v{version}"))
                 .size(11)
                 .style(style::text_dim(pal)),
@@ -242,16 +242,16 @@ fn about_panel(state: &State) -> Element<'_, Message> {
 
     let links_col = column![
         text("Resources").size(13),
-        text("• Project repo: https://github.com/juhlabs/juhradial-mx")
+        text("• Project repo: https://github.com/juhlabs/oxidemx")
             .size(11)
             .style(style::text_dim(pal)),
-        text("• Daemon logs: journalctl --user -u juhradiald -f")
+        text("• Daemon logs: journalctl --user -u oxidemxd -f")
             .size(11)
             .style(style::text_dim(pal)),
-        text("• Config: ~/.config/juhradial/config.json")
+        text("• Config: ~/.config/oxidemx/config.json")
             .size(11)
             .style(style::text_dim(pal)),
-        text("• User themes: ~/.local/share/juhradial/themes/")
+        text("• User themes: ~/.local/share/oxidemx/themes/")
             .size(11)
             .style(style::text_dim(pal)),
     ]
@@ -379,7 +379,7 @@ fn theme_picker(state: &State) -> Element<'_, Message> {
     // Always render the saved-themes panel — even when the user
     // has no themes yet, the Import button gives them somewhere
     // to drop a downloaded community theme.
-    let user_slugs = juhradial_shared::theme::list_user_theme_slugs();
+    let user_slugs = oxidemx_shared::theme::list_user_theme_slugs();
     col = col.push(saved_themes_panel(state, user_slugs));
 
     // The full-panel customiser takes over the entire content area
@@ -410,7 +410,7 @@ fn saved_themes_panel<'a>(state: &'a State, slugs: Vec<String>) -> Element<'a, M
         header_row,
         text(
             "Themes saved from the customiser live in \
-             ~/.local/share/juhradial/themes/. Delete to remove the \
+             ~/.local/share/oxidemx/themes/. Delete to remove the \
              file from disk; bundled themes can't be deleted. \
              \"Import theme JSON…\" loads any saved Theme file from \
              disk into your themes folder + switches to it."
@@ -453,8 +453,8 @@ fn saved_themes_panel<'a>(state: &'a State, slugs: Vec<String>) -> Element<'a, M
             .align_y(Alignment::Center)
             .spacing(6)
         } else {
-            let display_name = juhradial_shared::theme::Theme::load(
-                &juhradial_shared::theme::ThemeName::from(slug.as_str()),
+            let display_name = oxidemx_shared::theme::Theme::load(
+                &oxidemx_shared::theme::ThemeName::from(slug.as_str()),
             )
             .map(|t| t.name)
             .unwrap_or_else(|| slug.clone());
@@ -495,7 +495,7 @@ fn saved_themes_panel<'a>(state: &'a State, slugs: Vec<String>) -> Element<'a, M
 }
 
 
-fn swatch_row(pal: &juhradial_widgets::palette::Palette) -> Element<'static, Message> {
+fn swatch_row(pal: &oxidemx_widgets::palette::Palette) -> Element<'static, Message> {
     let swatches = [
         pal.accent,
         pal.green,

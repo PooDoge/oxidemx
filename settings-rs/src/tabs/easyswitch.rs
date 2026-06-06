@@ -7,9 +7,9 @@
 //! the daemon, which fires the HID++ command to bond the device
 //! to that host.
 
-use juhradial_widgets::widgets::section_header;
+use oxidemx_widgets::widgets::section_header;
 use crate::{Message, State};
-use juhradial_widgets::style;
+use oxidemx_widgets::style;
 use iced::widget::{button, column, container, row, rule, text, Space};
 use iced::{Alignment, Element, Length};
 

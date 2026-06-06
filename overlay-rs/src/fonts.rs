@@ -2,7 +2,7 @@
 //! intern-cache trick as settings-rs/src/fonts.rs (kept duplicated
 //! intentionally — both crates only need a few lines and pulling
 //! it into a shared crate would require lifting iced out of
-//! juhradial-shared).
+//! oxidemx-shared).
 
 use iced::Font;
 use std::collections::HashSet;

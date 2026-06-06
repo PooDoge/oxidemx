@@ -175,7 +175,7 @@ impl EvdevHandler {
             Ok(h) => h,
             Err(_) => return,
         };
-        let path = std::path::PathBuf::from(home).join(".config/juhradial/config.json");
+        let path = std::path::PathBuf::from(home).join(".config/oxidemx/config.json");
         let data = match std::fs::read_to_string(&path) {
             Ok(d) => d,
             Err(_) => return,
@@ -288,7 +288,7 @@ impl EvdevHandler {
         if perm_denied > 0 && perm_denied >= total_event_devices.saturating_sub(2) {
             tracing::warn!(
                 "Permission denied on {} of {} /dev/input/event* devices. \
-                 The user running juhradiald likely isn't in the `input` \
+                 The user running oxidemxd likely isn't in the `input` \
                  group. Run `sudo usermod -aG input $USER` then restart \
                  the daemon (or log out + back in).",
                 perm_denied,
@@ -570,7 +570,7 @@ impl EvdevHandler {
         let mut virtual_device = None;
         if !self.suppressed_keys.is_empty() {
             let vdev_result = (|| -> Result<_, std::io::Error> {
-                let mut builder = UinputDevice::builder()?.name("JuhRadial Virtual Mouse");
+                let mut builder = UinputDevice::builder()?.name("OxideMX Virtual Mouse");
                 if let Some(keys) = device.supported_keys() {
                     builder = builder.with_keys(keys)?;
                 }
@@ -836,8 +836,8 @@ impl EvdevHandler {
         // Create KWin script that calls ShowMenuAtCursor with true cursor position
         let script = r#"
 var pos = workspace.cursorPos;
-callDBus("org.juhradial.Daemon", "/org/juhradial/Daemon",
-         "org.juhradial.Daemon", "ShowMenuAtCursor",
+callDBus("org.oxidemx.Daemon", "/org/oxidemx/Daemon",
+         "org.oxidemx.Daemon", "ShowMenuAtCursor",
          pos.x, pos.y);
 "#;
 

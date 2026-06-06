@@ -45,43 +45,43 @@ fi
 
 step 2 "Daemon (systemd + D-Bus)"
 
-if systemctl --user is-active --quiet juhradialmx-daemon.service; then
-  ok "juhradialmx-daemon.service active"
+if systemctl --user is-active --quiet oxidemx-daemon.service; then
+  ok "oxidemx-daemon.service active"
 else
-  fail "juhradialmx-daemon.service not active: $(systemctl --user is-active juhradialmx-daemon.service)"
+  fail "oxidemx-daemon.service not active: $(systemctl --user is-active oxidemx-daemon.service)"
 fi
 
-if busctl --user list 2>/dev/null | awk '{print $1}' | grep -qx 'org.juhradial.Daemon'; then
-  ok "org.juhradial.Daemon claims session bus"
+if busctl --user list 2>/dev/null | awk '{print $1}' | grep -qx 'org.oxidemx.Daemon'; then
+  ok "org.oxidemx.Daemon claims session bus"
 else
-  fail "org.juhradial.Daemon NOT on session bus"
+  fail "org.oxidemx.Daemon NOT on session bus"
 fi
 
-if busctl --user introspect org.juhradial.Daemon /org/juhradial/Daemon 2>/dev/null | grep -q 'GetActiveDeviceState'; then
+if busctl --user introspect org.oxidemx.Daemon /org/oxidemx/Daemon 2>/dev/null | grep -q 'GetActiveDeviceState'; then
   ok "GetActiveDeviceState method registered"
 else
   fail "GetActiveDeviceState method MISSING from interface"
 fi
 
-if busctl --user introspect org.juhradial.Daemon /org/juhradial/Daemon 2>/dev/null | grep -q 'ShowPopup'; then
+if busctl --user introspect org.oxidemx.Daemon /org/oxidemx/Daemon 2>/dev/null | grep -q 'ShowPopup'; then
   ok "ShowPopup method registered"
 else
   fail "ShowPopup method MISSING from interface"
 fi
 
-if busctl --user introspect org.juhradial.Daemon /org/juhradial/Daemon 2>/dev/null | grep -q 'EnsureOverlayRunning'; then
+if busctl --user introspect org.oxidemx.Daemon /org/oxidemx/Daemon 2>/dev/null | grep -q 'EnsureOverlayRunning'; then
   ok "EnsureOverlayRunning method registered"
 else
   fail "EnsureOverlayRunning method MISSING from interface"
 fi
 
-if busctl --user introspect org.juhradial.Daemon /org/juhradial/Daemon 2>/dev/null | grep -q 'DeviceStateChanged'; then
+if busctl --user introspect org.oxidemx.Daemon /org/oxidemx/Daemon 2>/dev/null | grep -q 'DeviceStateChanged'; then
   ok "DeviceStateChanged signal registered"
 else
   fail "DeviceStateChanged signal MISSING from interface"
 fi
 
-if busctl --user introspect org.juhradial.Daemon /org/juhradial/Daemon 2>/dev/null | grep -q 'SetHapticsEnabled'; then
+if busctl --user introspect org.oxidemx.Daemon /org/oxidemx/Daemon 2>/dev/null | grep -q 'SetHapticsEnabled'; then
   ok "SetHapticsEnabled method registered (P2.2 follow-up wiring)"
 else
   warn "SetHapticsEnabled MISSING — daemon may be a pre-followups build"
@@ -89,7 +89,7 @@ fi
 
 step 3 "Device state snapshot"
 
-if reply=$(busctl --user call org.juhradial.Daemon /org/juhradial/Daemon org.juhradial.Daemon GetActiveDeviceState 2>&1); then
+if reply=$(busctl --user call org.oxidemx.Daemon /org/oxidemx/Daemon org.oxidemx.Daemon GetActiveDeviceState 2>&1); then
   info "$reply"
   ok "GetActiveDeviceState succeeded"
 else
@@ -98,62 +98,62 @@ fi
 
 step 4 "GNOME extensions"
 
-cursor_state=$(gnome-extensions show juhradial-cursor@dev.juhlabs.com 2>/dev/null | awk '/State:/ {print $2}')
+cursor_state=$(gnome-extensions show oxidemx-cursor@dev.juhlabs.com 2>/dev/null | awk '/State:/ {print $2}')
 if [[ "$cursor_state" == "ENABLED" ]]; then
-  ok "juhradial-cursor extension ENABLED"
+  ok "oxidemx-cursor extension ENABLED"
 else
-  fail "juhradial-cursor extension state = ${cursor_state:-MISSING}"
+  fail "oxidemx-cursor extension state = ${cursor_state:-MISSING}"
 fi
 
-indicator_state=$(gnome-extensions show juhradial-indicator@dev.juhlabs.com 2>/dev/null | awk '/State:/ {print $2}')
+indicator_state=$(gnome-extensions show oxidemx-indicator@dev.juhlabs.com 2>/dev/null | awk '/State:/ {print $2}')
 if [[ "$indicator_state" == "ENABLED" ]]; then
-  ok "juhradial-indicator extension ENABLED"
+  ok "oxidemx-indicator extension ENABLED"
 else
-  fail "juhradial-indicator extension state = ${indicator_state:-MISSING}  (try: gnome-extensions enable juhradial-indicator@dev.juhlabs.com; if that fails, re-login)"
+  fail "oxidemx-indicator extension state = ${indicator_state:-MISSING}  (try: gnome-extensions enable oxidemx-indicator@dev.juhlabs.com; if that fails, re-login)"
 fi
 
 # Cursor extension service must also be on the bus
-if busctl --user list 2>/dev/null | awk '{print $1}' | grep -qx 'org.juhradial.CursorHelper'; then
-  ok "org.juhradial.CursorHelper on session bus"
+if busctl --user list 2>/dev/null | awk '{print $1}' | grep -qx 'org.oxidemx.CursorHelper'; then
+  ok "org.oxidemx.CursorHelper on session bus"
 else
-  fail "org.juhradial.CursorHelper NOT on bus (cursor extension disabled or stale)"
+  fail "org.oxidemx.CursorHelper NOT on bus (cursor extension disabled or stale)"
 fi
 
 step 5 "Popup binary on PATH"
 
-if command -v juhradial-popup >/dev/null 2>&1; then
-  ok "juhradial-popup at $(command -v juhradial-popup)"
+if command -v oxidemx-popup >/dev/null 2>&1; then
+  ok "oxidemx-popup at $(command -v oxidemx-popup)"
 else
-  fail "juhradial-popup NOT on PATH — daemon ShowPopup will fail to spawn"
+  fail "oxidemx-popup NOT on PATH — daemon ShowPopup will fail to spawn"
 fi
 
-if command -v juhradial-settings >/dev/null 2>&1; then
-  ok "juhradial-settings at $(command -v juhradial-settings)"
+if command -v oxidemx-settings >/dev/null 2>&1; then
+  ok "oxidemx-settings at $(command -v oxidemx-settings)"
 else
-  fail "juhradial-settings NOT on PATH — right-click → Open Settings will fail"
+  fail "oxidemx-settings NOT on PATH — right-click → Open Settings will fail"
 fi
 
 step 6 "GSettings schema"
 
-if gsettings list-schemas 2>/dev/null | grep -qx 'org.gnome.shell.extensions.juhradial-indicator'; then
-  ok "org.gnome.shell.extensions.juhradial-indicator schema discoverable"
+if gsettings list-schemas 2>/dev/null | grep -qx 'org.gnome.shell.extensions.oxidemx-indicator'; then
+  ok "org.gnome.shell.extensions.oxidemx-indicator schema discoverable"
 else
   fail "GSettings schema NOT compiled. Re-run dev-install-ext.sh."
 fi
 
 step 7 "Config + popup config"
 
-if [[ -f "$HOME/.config/juhradial/config.json" ]]; then
+if [[ -f "$HOME/.config/oxidemx/config.json" ]]; then
   ok "config.json exists"
   if command -v jq >/dev/null 2>&1; then
-    if jq -e '.popup' "$HOME/.config/juhradial/config.json" >/dev/null 2>&1; then
+    if jq -e '.popup' "$HOME/.config/oxidemx/config.json" >/dev/null 2>&1; then
       ok "config.popup block present"
-      info "$(jq -c '.popup' "$HOME/.config/juhradial/config.json")"
+      info "$(jq -c '.popup' "$HOME/.config/oxidemx/config.json")"
     else
       warn "config.popup block missing — daemon will use defaults"
     fi
-    if jq -e '.haptics.enabled' "$HOME/.config/juhradial/config.json" >/dev/null 2>&1; then
-      ok "config.haptics.enabled = $(jq '.haptics.enabled' "$HOME/.config/juhradial/config.json")"
+    if jq -e '.haptics.enabled' "$HOME/.config/oxidemx/config.json" >/dev/null 2>&1; then
+      ok "config.haptics.enabled = $(jq '.haptics.enabled' "$HOME/.config/oxidemx/config.json")"
     fi
   else
     warn "jq not installed — skipping config-content checks"
@@ -167,8 +167,8 @@ if [[ $FAILED -eq 0 ]]; then
   echo -e "  ${GREEN}${BOLD}✓ All probes passed.${RESET}"
   echo
   echo -e "  ${DIM}Next: open the popup by clicking the panel icon, or:${RESET}"
-  echo -e "  ${DIM}  busctl --user call org.juhradial.Daemon /org/juhradial/Daemon \\${RESET}"
-  echo -e "  ${DIM}         org.juhradial.Daemon ShowPopup iiii 1800 32 32 32${RESET}"
+  echo -e "  ${DIM}  busctl --user call org.oxidemx.Daemon /org/oxidemx/Daemon \\${RESET}"
+  echo -e "  ${DIM}         org.oxidemx.Daemon ShowPopup iiii 1800 32 32 32${RESET}"
   echo
   exit 0
 else

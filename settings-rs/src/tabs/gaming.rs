@@ -15,15 +15,15 @@
 //!     reads the block and ignores it; users can pre-tune their
 //!     defaults from the UI.
 //!
-//! See `juhradial-mx/HAPTIC_GAMEPAD_BRIDGE_DESIGN.md` §11 for the
+//! See `oxidemx/HAPTIC_GAMEPAD_BRIDGE_DESIGN.md` §11 for the
 //! design of the redirect card.
 
 use crate::{Message, State};
-use juhradial_widgets::style;
-use juhradial_widgets::widgets::{labeled_int_slider, labeled_slider, section_header};
+use oxidemx_widgets::style;
+use oxidemx_widgets::widgets::{labeled_int_slider, labeled_slider, section_header};
 use iced::widget::{button, column, container, pick_list, row, rule, text, toggler, Space};
 use iced::{Alignment, Element, Length};
-use juhradial_shared::{HapticEventMode, HapticRedirectCurve, HapticRedirectMode};
+use oxidemx_shared::{HapticEventMode, HapticRedirectCurve, HapticRedirectMode};
 
 pub fn view(state: &State) -> Element<'_, Message> {
     let pal = &state.palette;

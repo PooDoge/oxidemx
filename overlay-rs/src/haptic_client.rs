@@ -15,13 +15,13 @@
 use tracing::warn;
 use zbus::{proxy, Connection};
 
-const DAEMON_SERVICE: &str = "org.juhradial.Daemon";
-const DAEMON_PATH: &str = "/org/juhradial/Daemon";
+const DAEMON_SERVICE: &str = "org.oxidemx.Daemon";
+const DAEMON_PATH: &str = "/org/oxidemx/Daemon";
 
 #[proxy(
-    interface = "org.juhradial.Daemon",
-    default_service = "org.juhradial.Daemon",
-    default_path = "/org/juhradial/Daemon"
+    interface = "org.oxidemx.Daemon",
+    default_service = "org.oxidemx.Daemon",
+    default_path = "/org/oxidemx/Daemon"
 )]
 trait Haptic {
     fn notify_slice_hover(&self, index: u8) -> zbus::Result<()>;

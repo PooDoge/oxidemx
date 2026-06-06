@@ -15,8 +15,8 @@
 
 use iced::widget::canvas::{self, Frame, Path, Stroke};
 use iced::{Color, Point, Radians, Vector};
-use juhradial_shared::theme::{parse_hex_rgba, ThemeColors};
-use juhradial_shared::{ComposedTransform, ElementAnimation, Slice};
+use oxidemx_shared::theme::{parse_hex_rgba, ThemeColors};
+use oxidemx_shared::{ComposedTransform, ElementAnimation, Slice};
 
 use crate::anim;
 use crate::radial::{

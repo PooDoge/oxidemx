@@ -1,14 +1,14 @@
-//! Thin wrapper around `juhradial_shared::AppConfig` with first-run
+//! Thin wrapper around `oxidemx_shared::AppConfig` with first-run
 //! bootstrap. Keeps the single-source-of-truth contract: the daemon
 //! and the overlay both deserialize the same JSON via the same Rust
 //! structs.
 
-use juhradial_shared::config::seed_default_config_if_missing;
-use juhradial_shared::AppConfig;
+use oxidemx_shared::config::seed_default_config_if_missing;
+use oxidemx_shared::AppConfig;
 use tracing::info;
 
-pub fn load() -> Result<AppConfig, juhradial_shared::config::ConfigError> {
-    let path = match juhradial_shared::config::default_config_path() {
+pub fn load() -> Result<AppConfig, oxidemx_shared::config::ConfigError> {
+    let path = match oxidemx_shared::config::default_config_path() {
         Some(p) => p,
         None => return Ok(AppConfig::default()),
     };
@@ -26,7 +26,7 @@ pub fn load() -> Result<AppConfig, juhradial_shared::config::ConfigError> {
     AppConfig::load_from(&path)
 }
 
-/// Watch `~/.config/juhradial/config.json` for changes and yield a
+/// Watch `~/.config/oxidemx/config.json` for changes and yield a
 /// fresh `AppConfig` each time it's written. Dropped events are
 /// debounced — saves from text editors typically produce a flurry
 /// (write + chmod + rename), and we only want one reload per
@@ -40,13 +40,13 @@ pub fn load() -> Result<AppConfig, juhradial_shared::config::ConfigError> {
 /// The watcher background task is spawned on tokio (already a
 /// dep for `iced::time::every`); the channel between watcher and
 /// stream is async-channel for executor independence.
-pub fn watch_stream() -> impl futures_util::stream::Stream<Item = juhradial_shared::AppConfig> {
+pub fn watch_stream() -> impl futures_util::stream::Stream<Item = oxidemx_shared::AppConfig> {
     use futures_util::StreamExt;
     use notify::{RecommendedWatcher, RecursiveMode, Watcher};
     use std::time::{Duration, Instant};
 
-    let (tx, rx) = async_channel::unbounded::<juhradial_shared::AppConfig>();
-    let path = match juhradial_shared::config::default_config_path() {
+    let (tx, rx) = async_channel::unbounded::<oxidemx_shared::AppConfig>();
+    let path = match oxidemx_shared::config::default_config_path() {
         Some(p) => p,
         None => {
             // No HOME / no XDG_CONFIG_HOME — emit nothing forever.
@@ -112,8 +112,11 @@ pub fn watch_stream() -> impl futures_util::stream::Stream<Item = juhradial_shar
         let mut last_emit = Instant::now() - Duration::from_secs(60);
         let mut pending = false;
         loop {
+            if tx.is_closed() {
+                return;
+            }
             // Block until at least one event arrives.
-            let recv = raw_rx.recv_timeout(if pending { debounce } else { Duration::from_secs(60) });
+            let recv = raw_rx.recv_timeout(if pending { debounce } else { Duration::from_millis(250) });
             match recv {
                 Ok(()) => {
                     pending = true;
@@ -122,7 +125,7 @@ pub fn watch_stream() -> impl futures_util::stream::Stream<Item = juhradial_shar
                 Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
                     if pending && last_emit.elapsed() >= debounce {
                         // Settled — load + emit.
-                        match juhradial_shared::AppConfig::load_from(&path_for_loader) {
+                        match oxidemx_shared::AppConfig::load_from(&path_for_loader) {
                             Ok(cfg) => {
                                 if tx.send_blocking(cfg).is_err() {
                                     return;

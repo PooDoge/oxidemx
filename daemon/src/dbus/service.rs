@@ -1,4 +1,4 @@
-//! JuhRadial MX D-Bus service struct and constructors
+//! OxideMX MX D-Bus service struct and constructors
 
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::Instant;
@@ -28,10 +28,10 @@ pub(crate) struct EasySwitchCache {
 pub(crate) const EASY_SWITCH_TTL: std::time::Duration =
     std::time::Duration::from_secs(30);
 
-/// JuhRadial MX D-Bus service
+/// OxideMX MX D-Bus service
 ///
 /// Implements the D-Bus interface for IPC between daemon, KWin overlay, and Plasma widget.
-pub struct JuhRadialService {
+pub struct OxideMXService {
     /// Current profile name
     pub(crate) current_profile: String,
     /// Daemon version
@@ -68,9 +68,11 @@ pub struct JuhRadialService {
     /// hidraw loop at startup; the D-Bus side mutates it when the
     /// user toggles the invert setting.
     pub(crate) thumb_wheel_state: SharedThumbWheelState,
+    /// Active popup child process handle for single-instance tracking.
+    pub(crate) popup_child: Mutex<Option<std::process::Child>>,
 }
 
-impl JuhRadialService {
+impl OxideMXService {
     /// Create a new D-Bus service instance with battery state, config, and haptic manager
     pub fn new(
         battery_state: SharedBatteryState,
@@ -93,6 +95,7 @@ impl JuhRadialService {
             overlay_spawner: Arc::new(OverlaySpawner::new()),
             easy_switch_cache: Arc::new(RwLock::new(EasySwitchCache::default())),
             thumb_wheel_state: new_thumb_wheel_state(),
+            popup_child: Mutex::new(None),
         }
     }
 
@@ -131,6 +134,7 @@ impl JuhRadialService {
             overlay_spawner,
             easy_switch_cache: Arc::new(RwLock::new(EasySwitchCache::default())),
             thumb_wheel_state,
+            popup_child: Mutex::new(None),
         }
     }
 }
@@ -149,7 +153,7 @@ mod tests {
         let config = new_shared_config();
         let haptic_config = config.read().unwrap().haptics.clone();
         let haptic_manager = new_shared_haptic_manager(&haptic_config);
-        let service = JuhRadialService::new(battery_state, config, haptic_manager);
+        let service = OxideMXService::new(battery_state, config, haptic_manager);
         assert_eq!(service.current_profile, "default");
         assert_eq!(service.device_mode, "logitech");
         assert_eq!(service.device_name, "Unknown");
@@ -169,7 +173,7 @@ mod tests {
         let macro_recorder = Arc::new(Mutex::new(MacroRecorder::new()));
         let trigger_map = Arc::new(std::sync::RwLock::new(TriggerMap::default()));
         let overlay_spawner = Arc::new(crate::overlay_spawner::OverlaySpawner::new());
-        let service = JuhRadialService::new_with_device(
+        let service = OxideMXService::new_with_device(
             battery_state,
             config,
             haptic_manager,

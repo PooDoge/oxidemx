@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to JuhRadial MX will be documented in this file.
+All notable changes to OxideMX MX will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
@@ -14,30 +14,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **GNOME Shell indicator** — new `juhradial-indicator@dev.juhlabs.com` extension. Top-bar battery + mouse glyph with user-editable thresholds and colors, libadwaita single-page prefs, mode/icon/percent display, Dash-to-Panel auto-detect. Critical-band one-shot desktop notification.
-- **Quick-action popup** — new `juhradial-popup` binary (Rust + Iced 0.14), spawned on demand by the daemon when the indicator is clicked. Easy-Switch host buttons, quick toggles, quick sliders (Power User mode), volume-on-scroll via `wpctl`.
-- **Indicator Popup settings tab** — new tab in `juhradial-settings` between *Point & Scroll* and *Haptic Feedback*. Mode picker, host-button options, reorderable quick toggles + sliders, interaction toggles. Persists to `~/.config/juhradial/config.json` (new `popup` block on `AppConfig`).
+- **GNOME Shell indicator** — new `oxidemx-indicator@dev.juhlabs.com` extension. Top-bar battery + mouse glyph with user-editable thresholds and colors, libadwaita single-page prefs, mode/icon/percent display, Dash-to-Panel auto-detect. Critical-band one-shot desktop notification.
+- **Quick-action popup** — new `oxidemx-popup` binary (Rust + Iced 0.14), spawned on demand by the daemon when the indicator is clicked. Easy-Switch host buttons, quick toggles, quick sliders (Power User mode), volume-on-scroll via `wpctl`.
+- **Indicator Popup settings tab** — new tab in `oxidemx-settings` between *Point & Scroll* and *Haptic Feedback*. Mode picker, host-button options, reorderable quick toggles + sliders, interaction toggles. Persists to `~/.config/oxidemx/config.json` (new `popup` block on `AppConfig`).
 - **Stack supervisor responsibility on the indicator** — health probes for the daemon process (`systemctl --user is-active`), device link, radial overlay process, gaming-mode bridges, cursor-helper extension. Unified health surface in the panel icon color, popup header line, and right-click menu. New daemon D-Bus method `EnsureOverlayRunning()` keeps long-lived process spawns inside the daemon.
-- **New D-Bus surface on `org.juhradial.Daemon`** — `GetActiveDeviceState() -> (battery, charging, connection, deviceName, deviceId)`, `ShowPopup(panel_rect)`, `EnsureOverlayRunning()`, `DeviceStateChanged(...)` push signal.
+- **New D-Bus surface on `org.oxidemx.Daemon`** — `GetActiveDeviceState() -> (battery, charging, connection, deviceName, deviceId)`, `ShowPopup(panel_rect)`, `EnsureOverlayRunning()`, `DeviceStateChanged(...)` push signal.
 - **New workspace crates**:
-  - `juhradial-widgets/` — extracted from `settings-rs/src/{widgets,style,palette}.rs`. Shared by `settings-rs` and the new `popup-rs`.
-  - `juhradial-window/` — frameless-topmost iced window helper + cursor-helper D-Bus client extracted from `overlay-rs/src/ext_positioner.rs`. Shared by `overlay-rs` and `popup-rs`.
+  - `oxidemx-widgets/` — extracted from `settings-rs/src/{widgets,style,palette}.rs`. Shared by `settings-rs` and the new `popup-rs`.
+  - `oxidemx-window/` — frameless-topmost iced window helper + cursor-helper D-Bus client extracted from `overlay-rs/src/ext_positioner.rs`. Shared by `overlay-rs` and `popup-rs`.
   - `popup-rs/` — the daemon-spawned popup binary itself.
-- **TypeScript GNOME extensions** — shared `gnome-extension/tsconfig.json` and `package.json`. New indicator is TS from day one; existing `juhradial-cursor` extension migrates from plain JS to TS in the same PR.
+- **TypeScript GNOME extensions** — shared `gnome-extension/tsconfig.json` and `package.json`. New indicator is TS from day one; existing `oxidemx-cursor` extension migrates from plain JS to TS in the same PR.
 
 ### Changed
 
-- **D-Bus name flag-day rename** — `org.kde.juhradialmx` → `org.juhradial.Daemon`. Path `/org/kde/juhradialmx/Daemon` → `/org/juhradial/Daemon`. Touches daemon (5 files), overlay-rs (4 files), settings-rs/src/daemon.rs, packaging desktop file (renamed to `org.juhradial.settings.desktop`), `install.sh`, `local-test-install.sh`, `dev-test.sh`, and two root design-doc references. No behaviour change.
-- **Overlay app_id** — `org.kde.juhradialmx.overlay` → `org.juhradial.overlay`. Popup app_id is `org.juhradial.popup`. Cursor-helper extension service stays `org.juhradial.CursorHelper` (already in the new namespace).
+- **D-Bus name flag-day rename** — `org.kde.oxidemx` → `org.oxidemx.Daemon`. Path `/org/kde/oxidemx/Daemon` → `/org/oxidemx/Daemon`. Touches daemon (5 files), overlay-rs (4 files), settings-rs/src/daemon.rs, packaging desktop file (renamed to `org.oxidemx.settings.desktop`), `install.sh`, `local-test-install.sh`, `dev-test.sh`, and two root design-doc references. No behaviour change.
+- **Overlay app_id** — `org.kde.oxidemx.overlay` → `org.oxidemx.overlay`. Popup app_id is `org.oxidemx.popup`. Cursor-helper extension service stays `org.oxidemx.CursorHelper` (already in the new namespace).
 
 ### Fixed
 
-- **GDM/GNOME login loop on systems with user lingering** — `juhradialmx-daemon.service` was wired with `Wants=graphical-session.target` + `WantedBy=default.target`. With `loginctl enable-linger` on (common alongside rootless Podman/Quadlet), the daemon started headless at boot and force-activated `graphical-session.target`, so `gnome-session` saw "A graphical session is already running!", core-dumped, and bounced every login back to the user picker — surviving reboots while TTY login still worked. Re-wired to `After=`/`PartOf=` in `[Unit]` and `WantedBy=graphical-session.target` in `[Install]` so the daemon is pulled up by a real session instead of forcing the target on. New [`packaging/systemd/TROUBLESHOOTING.md`](packaging/systemd/TROUBLESHOOTING.md) documents diagnosis, the fix, and emergency TTY recovery.
+- **GDM/GNOME login loop on systems with user lingering** — `oxidemx-daemon.service` was wired with `Wants=graphical-session.target` + `WantedBy=default.target`. With `loginctl enable-linger` on (common alongside rootless Podman/Quadlet), the daemon started headless at boot and force-activated `graphical-session.target`, so `gnome-session` saw "A graphical session is already running!", core-dumped, and bounced every login back to the user picker — surviving reboots while TTY login still worked. Re-wired to `After=`/`PartOf=` in `[Unit]` and `WantedBy=graphical-session.target` in `[Install]` so the daemon is pulled up by a real session instead of forcing the target on. New [`packaging/systemd/TROUBLESHOOTING.md`](packaging/systemd/TROUBLESHOOTING.md) documents diagnosis, the fix, and emergency TTY recovery.
 
 ### Notes
 
-- Original UI spec preserved as [`design/juhradial-indicator/CLAUDE_CODE_PROMPT.md`](design/juhradial-indicator/CLAUDE_CODE_PROMPT.md).
-- Deltas between the original prompt and what we're actually building: [`design/juhradial-indicator/SPEC_ADDENDUM.md`](design/juhradial-indicator/SPEC_ADDENDUM.md).
+- Original UI spec preserved as [`design/oxidemx-indicator/CLAUDE_CODE_PROMPT.md`](design/oxidemx-indicator/CLAUDE_CODE_PROMPT.md).
+- Deltas between the original prompt and what we're actually building: [`design/oxidemx-indicator/SPEC_ADDENDUM.md`](design/oxidemx-indicator/SPEC_ADDENDUM.md).
 - Phased rollout: Phase 0 (rename + new D-Bus surface + GSettings schema), Phase A (sibling crate extractions), Phase 1 (GNOME extensions), Phase 2 (settings tab), Phase 3 (popup binary).
 
 ## [0.3.2] - 2026-04-27
@@ -58,7 +58,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **Daemon now respects button config** - Gesture and thumb buttons dispatch their configured action instead of always opening the radial menu. Fixes [#14](https://github.com/JuhLabs/juhradial-mx/issues/14).
+- **Daemon now respects button config** - Gesture and thumb buttons dispatch their configured action instead of always opening the radial menu. Fixes [#14](https://github.com/JuhLabs/oxidemx/issues/14).
 - **Button config dialog redesigned** - Actions grouped into categories (Common, Navigation, Clipboard, Media, System, Mouse) with GNOME HIG checkmark selection pattern.
 
 ### Added
@@ -85,9 +85,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **Removed logid/LogiOps dependency** - Daemon handles HID++ communication directly. No more external logid process, no more logid.cfg. One less thing to install and configure. Fixes device detection issues on many distros.
-- **Device name shows actual mouse name** - HID++ device name query returns "MX Master 4" instead of "Logitech USB Receiver Mouse". Fixes [#13](https://github.com/JuhLabs/juhradial-mx/issues/13).
-- **DPI controls work reliably** - Proper device matching by HID++ feature detection instead of string name matching. Fixes [#13](https://github.com/JuhLabs/juhradial-mx/issues/13).
-- **Settings window fits on screen** - Window sizing respects display bounds. Fixes [#13](https://github.com/JuhLabs/juhradial-mx/issues/13).
+- **Device name shows actual mouse name** - HID++ device name query returns "MX Master 4" instead of "Logitech USB Receiver Mouse". Fixes [#13](https://github.com/JuhLabs/oxidemx/issues/13).
+- **DPI controls work reliably** - Proper device matching by HID++ feature detection instead of string name matching. Fixes [#13](https://github.com/JuhLabs/oxidemx/issues/13).
+- **Settings window fits on screen** - Window sizing respects display bounds. Fixes [#13](https://github.com/JuhLabs/oxidemx/issues/13).
 - **Gesture button no longer leaks to OS** - BTN_BACK (MX gesture button) is suppressed from reaching applications even with no macro bound.
 - **Radial wheel stays open on GNOME** - Uses Tool window type instead of Popup to prevent Mutter from auto-dismissing on focus change.
 - **Flow indicator crash on GNOME** - Fixed undefined `_()` call in indicator.py that prevented the Flow edge indicator from ever showing.
@@ -100,7 +100,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **Flow edge detection tuned** - Dwell time 100ms to 350ms, velocity threshold 3000 to 8000 px/s, cooldown 1000 to 1500ms, indicator zone 500 to 350px. Prevents accidental triggers and clipboard overwrites.
-- **Process names** - Overlay shows as `juhradial-overlay` and settings as `juhradial-settings` in system monitors (via prctl).
+- **Process names** - Overlay shows as `oxidemx-overlay` and settings as `oxidemx-settings` in system monitors (via prctl).
 - **Host switch cooldown removed** - Easy-Switch host switching is now instant (0ms cooldown).
 - **CodeQL upgraded to v4** - CI workflow uses latest CodeQL action.
 
@@ -113,7 +113,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **JuhFlow cross-computer control** - Move your cursor seamlessly between Linux and Mac. Encrypted peer-to-peer (X25519 + AES-256-GCM), auto-discovery on local network, no cloud required. Signed & notarized macOS companion app included.
-- **Generic mouse support** - JuhRadial now works with any mouse, not just Logitech MX Master. Bind any mouse button via a "press your button" capture dialog in Settings. SteelSeries, Razer, Corsair, and any other mouse with extra buttons are supported via evdev.
+- **Generic mouse support** - OxideMX now works with any mouse, not just Logitech MX Master. Bind any mouse button via a "press your button" capture dialog in Settings. SteelSeries, Razer, Corsair, and any other mouse with extra buttons are supported via evdev.
 - **Clickable DPI value** - Click the DPI number on Point & Scroll to type an exact value (400-8000) instead of dragging the slider.
 - **Clickable sensitivity %** - Click the SmartShift sensitivity percentage to type an exact value (1-100%).
 - **Interactive generic mouse visualization** - Labeled button positions with hover highlights and click-to-configure on the generic mouse image.
@@ -167,14 +167,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **MX Master 4 for Business not triggering radial menu** — logid matches devices by exact name; the consumer model is `"MX Master 4"` while the B2B variant reports itself as `"MX Master 4 for Business"`. The logid.cfg only had the consumer name, so the CID `0x1a0` button was never diverted to `KEY_F19` on the Business variant. Added `"MX Master 4 for Business"` as a separate device entry with the identical CID mapping. Fixes [#7](https://github.com/JuhLabs/juhradial-mx/issues/7).
+- **MX Master 4 for Business not triggering radial menu** — logid matches devices by exact name; the consumer model is `"MX Master 4"` while the B2B variant reports itself as `"MX Master 4 for Business"`. The logid.cfg only had the consumer name, so the CID `0x1a0` button was never diverted to `KEY_F19` on the Business variant. Added `"MX Master 4 for Business"` as a separate device entry with the identical CID mapping. Fixes [#7](https://github.com/JuhLabs/oxidemx/issues/7).
 
 ## [0.2.10] - 2026-02-19
 
 ### Fixed
 
-- **Multi-monitor menu positioning on KDE Plasma Wayland** — Menu now appears at the correct cursor position on secondary monitors. KWin's `workspace.cursorPos` returns logical coordinates (accounting for per-monitor DPI scaling) while `QWidget.move()` uses XWayland physical pixel coordinates; these diverge on setups with different per-monitor scale factors. On non-Hyprland/GNOME/COSMIC Wayland compositors with XWayland, the overlay now re-queries cursor position via `XQueryPointer` (which is always in XWayland's coordinate space) immediately before positioning the window. Fixes [#8](https://github.com/JuhLabs/juhradial-mx/issues/8).
-- **Daemon killed after ~10 seconds on Fedora 43 / KDE** — Two root causes: (1) Fedora's systemd drop-in `10-timeout-abort.conf` activates a watchdog that kills daemons not implementing `sd_notify` heartbeats — fixed by adding `WatchdogSec=0` to explicitly disable watchdog for this service. (2) `PrivateTmp=yes` was set, placing the daemon's `/tmp` in a private namespace invisible to KWin — the daemon creates temporary `.js` script files and passes their paths to KWin via D-Bus, so KWin could not find those files, causing the cursor-position query to silently fail and the menu to never appear; fixed by removing `PrivateTmp`. Fixes [#7](https://github.com/JuhLabs/juhradial-mx/issues/7).
+- **Multi-monitor menu positioning on KDE Plasma Wayland** — Menu now appears at the correct cursor position on secondary monitors. KWin's `workspace.cursorPos` returns logical coordinates (accounting for per-monitor DPI scaling) while `QWidget.move()` uses XWayland physical pixel coordinates; these diverge on setups with different per-monitor scale factors. On non-Hyprland/GNOME/COSMIC Wayland compositors with XWayland, the overlay now re-queries cursor position via `XQueryPointer` (which is always in XWayland's coordinate space) immediately before positioning the window. Fixes [#8](https://github.com/JuhLabs/oxidemx/issues/8).
+- **Daemon killed after ~10 seconds on Fedora 43 / KDE** — Two root causes: (1) Fedora's systemd drop-in `10-timeout-abort.conf` activates a watchdog that kills daemons not implementing `sd_notify` heartbeats — fixed by adding `WatchdogSec=0` to explicitly disable watchdog for this service. (2) `PrivateTmp=yes` was set, placing the daemon's `/tmp` in a private namespace invisible to KWin — the daemon creates temporary `.js` script files and passes their paths to KWin via D-Bus, so KWin could not find those files, causing the cursor-position query to silently fail and the menu to never appear; fixed by removing `PrivateTmp`. Fixes [#7](https://github.com/JuhLabs/oxidemx/issues/7).
 
 ### Changed
 
@@ -185,22 +185,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **GNOME Wayland support** — Bundled GNOME Shell extension (`juhradial-cursor@dev.juhlabs.com`) exposes cursor position via D-Bus using `global.get_pointer()`. The radial menu now works natively on GNOME Wayland (Ubuntu, Fedora GNOME, Pop!_OS, etc.). Fixes [#6](https://github.com/JuhLabs/juhradial-mx/issues/6).
+- **GNOME Wayland support** — Bundled GNOME Shell extension (`oxidemx-cursor@dev.juhlabs.com`) exposes cursor position via D-Bus using `global.get_pointer()`. The radial menu now works natively on GNOME Wayland (Ubuntu, Fedora GNOME, Pop!_OS, etc.). Fixes [#6](https://github.com/JuhLabs/oxidemx/issues/6).
 - **COSMIC desktop support** — XWayland cursor sync with change-detection polling for accurate cursor tracking on COSMIC compositor.
 - **XWayland cursor fallback** — Dynamic `libX11.so.6` loading via `dlopen`/`XQueryPointer` works on any Wayland compositor with XWayland (Sway, River, etc.).
 - **COSMIC desktop commands** in Settings — Screenshot, Files, Note Editor mapped to `cosmic-screenshot`, `cosmic-files`, `cosmic-edit`.
 
 ### Fixed
 
-- **Radial menu appearing at top-left corner on GNOME Wayland** — Cursor detection now has a 7-level fallback chain: Hyprland IPC → KWin script → KWin D-Bus → GNOME extension → XWayland → xdotool → screen center. The menu is always visible. Fixes [#6](https://github.com/JuhLabs/juhradial-mx/issues/6).
+- **Radial menu appearing at top-left corner on GNOME Wayland** — Cursor detection now has a 7-level fallback chain: Hyprland IPC → KWin script → KWin D-Bus → GNOME extension → XWayland → xdotool → screen center. The menu is always visible. Fixes [#6](https://github.com/JuhLabs/oxidemx/issues/6).
 - **Hyprland multi-monitor screen bounds with HiDPI scaling** — Screen bounds calculation now divides physical pixel dimensions by the monitor's scale factor to match the logical cursor coordinate space. Previously, a 4K monitor at 2x scale would report bounds of 3840px instead of the correct 1920px logical width.
 - **Hyprland screen bounds failing on unusual monitor configs** — One monitor with missing JSON fields no longer aborts the entire bounds query; that monitor is skipped and the rest are still used.
 - **XWayland `dlsym` safety** — Added null pointer checks before `transmute` on all dynamically resolved X11 symbols to prevent undefined behavior.
-- **CodeQL unused variable warnings** ([#90](https://github.com/JuhLabs/juhradial-mx/security/code-scanning), [#91](https://github.com/JuhLabs/juhradial-mx/security/code-scanning), [#92](https://github.com/JuhLabs/juhradial-mx/security/code-scanning)) — Removed dead assignments in exception handlers across overlay cursor detection code.
+- **CodeQL unused variable warnings** ([#90](https://github.com/JuhLabs/oxidemx/security/code-scanning), [#91](https://github.com/JuhLabs/oxidemx/security/code-scanning), [#92](https://github.com/JuhLabs/oxidemx/security/code-scanning)) — Removed dead assignments in exception handlers across overlay cursor detection code.
 
 ### Changed
 
-- **Overlay refactored into modules** — Split `juhradial-overlay.py` into `overlay_cursor.py`, `overlay_actions.py`, `overlay_painting.py`, and `overlay_constants.py` for better maintainability.
+- **Overlay refactored into modules** — Split `oxidemx-overlay.py` into `overlay_cursor.py`, `overlay_actions.py`, `overlay_painting.py`, and `overlay_constants.py` for better maintainability.
 - **Installer auto-installs GNOME extension** on GNOME desktops and enables it via `gnome-extensions enable`.
 - **Screen center fallback** replaces the broken `(0, 0)` default — if all cursor detection methods fail, the menu appears at screen center instead of the top-left corner.
 
@@ -212,7 +212,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Installer now deploys `juhradialmx-logid-restart.service` to `/etc/systemd/system/` for automatic logid restarts on device hotplug.
+- Installer now deploys `oxidemx-logid-restart.service` to `/etc/systemd/system/` for automatic logid restarts on device hotplug.
 
 ## [0.2.7] - 2026-02-13
 
@@ -224,9 +224,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **Radial menu labels now follow selected language** when changing language in Settings (not only center text).
-- **Settings theme consistency in new dialogs** by applying JuhRadial themed button/card classes.
+- **Settings theme consistency in new dialogs** by applying OxideMX themed button/card classes.
 - **Tray/menu icon loading reliability** with theme lookup + direct icon path fallbacks.
-- **Launcher path preference** now prioritizes `/usr/share/juhradial` over legacy `/opt/juhradial-mx` to avoid stale code.
+- **Launcher path preference** now prioritizes `/usr/share/oxidemx` over legacy `/opt/oxidemx` to avoid stale code.
 - **Installed asset paths** for mouse/device visuals and AI icons in installer + settings image loader.
 - **Hyprland menu positioning/runtime behavior** refreshes monitor and cursor data on show for stable popup at cursor.
 - **CodeQL regressions fixed** for uninitialized local translation symbol and empty `except` handlers in overlay cursor fallback logic.
@@ -235,7 +235,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **Fixed settings window crash on startup** — missing `GLib` import in Easy-Switch page caused a `NameError` on launch. Fixes [#5](https://github.com/JuhLabs/juhradial-mx/issues/5). Thanks to [@senkiv-n](https://github.com/senkiv-n) for the report.
+- **Fixed settings window crash on startup** — missing `GLib` import in Easy-Switch page caused a `NameError` on launch. Fixes [#5](https://github.com/JuhLabs/oxidemx/issues/5). Thanks to [@senkiv-n](https://github.com/senkiv-n) for the report.
 - **Resolved remaining CodeQL warnings** — unused imports and mixed import styles cleaned up across overlay files.
 
 ## [0.2.5] - 2026-02-11
@@ -261,7 +261,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **Fixed high CPU usage when settings window is open**. Zeroconf (mDNS) instance was never closed after network discovery, leaving background threads running indefinitely. Fixes [#3](https://github.com/JuhLabs/juhradial-mx/issues/3).
+- **Fixed high CPU usage when settings window is open**. Zeroconf (mDNS) instance was never closed after network discovery, leaving background threads running indefinitely. Fixes [#3](https://github.com/JuhLabs/oxidemx/issues/3).
 - **Fixed settings process not exiting after window close**. Added proper cleanup handlers (`close-request`, `do_shutdown`) to stop battery polling timer, clean up Zeroconf resources, and ensure the process terminates cleanly.
 - **FlowPage now lazy-loaded**. Network discovery only starts when the user navigates to the Flow tab, not on every settings window open.
 
@@ -274,13 +274,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **Critical: Fixed gesture button not working**. Corrected logid button CID from `0xd4` to `0x1a0` for MX Master 4, and added required `divert: true` flag for all MX Master mice. This fix is essential for the radial menu to appear when pressing the gesture button.
-- **Fixed systemd service path mismatch**. Service now correctly points to `/usr/local/bin/juhradiald` matching the install location.
+- **Fixed systemd service path mismatch**. Service now correctly points to `/usr/local/bin/oxidemxd` matching the install location.
 
 ## [0.2.2] - 2026-01-06
 
 ### Fixed
 
-- **Fixed install script for Fedora 43 and Arch Linux**. Corrected PyQt6 SVG package names: `python3-pyqt6-svg` → `qt6-qtsvg` (Fedora), `python-pyqt6-svg` → `qt6-svg` (Arch). Fixes [#1](https://github.com/JuhLabs/juhradial-mx/issues/1).
+- **Fixed install script for Fedora 43 and Arch Linux**. Corrected PyQt6 SVG package names: `python3-pyqt6-svg` → `qt6-qtsvg` (Fedora), `python-pyqt6-svg` → `qt6-svg` (Arch). Fixes [#1](https://github.com/JuhLabs/oxidemx/issues/1).
 
 ## [0.2.1] - 2026-01-03
 
@@ -330,24 +330,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Initial release
 - **Radial Menu** - Beautiful overlay triggered by gesture button (hold or tap)
 - **AI Quick Access** - Submenu with Claude, ChatGPT, Gemini, and Perplexity
-- **Multiple Themes** - JuhRadial MX, Catppuccin, Nord, Dracula, and light themes
+- **Multiple Themes** - OxideMX MX, Catppuccin, Nord, Dracula, and light themes
 - **Settings Dashboard** - Modern GTK4/Adwaita settings app with Actions Ring configuration
 - **DPI Control** - Visual DPI adjustment (400-8000 DPI)
 - **Native Wayland** - Full support for KDE Plasma 6 and Hyprland
 - Support for MX Master 4, MX Master 3S, and MX Master 3
 
-[0.3.2]: https://github.com/JuhLabs/juhradial-mx/compare/v0.3.2-beta...v0.3.2
-[0.3.2-beta]: https://github.com/JuhLabs/juhradial-mx/compare/v0.3.1-beta...v0.3.2-beta
-[0.3.1-beta]: https://github.com/JuhLabs/juhradial-mx/compare/v0.3.0-beta...v0.3.1-beta
-[0.3.0-beta]: https://github.com/JuhLabs/juhradial-mx/compare/v0.2.9...v0.3.0-beta
-[0.2.6]: https://github.com/JuhLabs/juhradial-mx/compare/v0.2.5...v0.2.6
-[0.2.7]: https://github.com/JuhLabs/juhradial-mx/compare/v0.2.6...v0.2.7
-[0.2.9]: https://github.com/JuhLabs/juhradial-mx/compare/v0.2.8...v0.2.9
-[0.2.8]: https://github.com/JuhLabs/juhradial-mx/compare/v0.2.7...v0.2.8
-[0.2.5]: https://github.com/JuhLabs/juhradial-mx/compare/v0.2.4...v0.2.5
-[0.2.4]: https://github.com/JuhLabs/juhradial-mx/compare/v0.2.3...v0.2.4
-[0.2.3]: https://github.com/JuhLabs/juhradial-mx/compare/v0.2.2...v0.2.3
-[0.2.2]: https://github.com/JuhLabs/juhradial-mx/compare/v0.2.1...v0.2.2
-[0.2.1]: https://github.com/JuhLabs/juhradial-mx/compare/v0.2.0...v0.2.1
-[0.2.0]: https://github.com/JuhLabs/juhradial-mx/compare/v0.1.0...v0.2.0
-[0.1.0]: https://github.com/JuhLabs/juhradial-mx/releases/tag/v0.1.0
+[0.3.2]: https://github.com/JuhLabs/oxidemx/compare/v0.3.2-beta...v0.3.2
+[0.3.2-beta]: https://github.com/JuhLabs/oxidemx/compare/v0.3.1-beta...v0.3.2-beta
+[0.3.1-beta]: https://github.com/JuhLabs/oxidemx/compare/v0.3.0-beta...v0.3.1-beta
+[0.3.0-beta]: https://github.com/JuhLabs/oxidemx/compare/v0.2.9...v0.3.0-beta
+[0.2.6]: https://github.com/JuhLabs/oxidemx/compare/v0.2.5...v0.2.6
+[0.2.7]: https://github.com/JuhLabs/oxidemx/compare/v0.2.6...v0.2.7
+[0.2.9]: https://github.com/JuhLabs/oxidemx/compare/v0.2.8...v0.2.9
+[0.2.8]: https://github.com/JuhLabs/oxidemx/compare/v0.2.7...v0.2.8
+[0.2.5]: https://github.com/JuhLabs/oxidemx/compare/v0.2.4...v0.2.5
+[0.2.4]: https://github.com/JuhLabs/oxidemx/compare/v0.2.3...v0.2.4
+[0.2.3]: https://github.com/JuhLabs/oxidemx/compare/v0.2.2...v0.2.3
+[0.2.2]: https://github.com/JuhLabs/oxidemx/compare/v0.2.1...v0.2.2
+[0.2.1]: https://github.com/JuhLabs/oxidemx/compare/v0.2.0...v0.2.1
+[0.2.0]: https://github.com/JuhLabs/oxidemx/compare/v0.1.0...v0.2.0
+[0.1.0]: https://github.com/JuhLabs/oxidemx/releases/tag/v0.1.0

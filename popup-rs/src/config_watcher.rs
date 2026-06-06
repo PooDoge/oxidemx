@@ -1,18 +1,18 @@
-//! Config loading and inotify-based live-reload for `~/.config/juhradial/config.json`.
+//! Config loading and inotify-based live-reload for `~/.config/oxidemx/config.json`.
 //!
 //! Pattern mirrors `overlay-rs/src/config.rs`: a background tokio task
 //! watches the config directory for changes, debounces editor write bursts,
 //! and forwards fresh `AppConfig` values through an `async_channel` that
 //! iced's `Subscription::run` consumes.
 
-use juhradial_shared::config::seed_default_config_if_missing;
-use juhradial_shared::AppConfig;
+use oxidemx_shared::config::seed_default_config_if_missing;
+use oxidemx_shared::AppConfig;
 use tracing::info;
 
-/// Load the current config from `~/.config/juhradial/config.json`.
+/// Load the current config from `~/.config/oxidemx/config.json`.
 /// Seeds the file with defaults on first run (non-fatal if it fails).
-pub fn load() -> Result<AppConfig, juhradial_shared::config::ConfigError> {
-    let path = match juhradial_shared::config::default_config_path() {
+pub fn load() -> Result<AppConfig, oxidemx_shared::config::ConfigError> {
+    let path = match oxidemx_shared::config::default_config_path() {
         Some(p) => p,
         None => return Ok(AppConfig::default()),
     };
@@ -26,18 +26,18 @@ pub fn load() -> Result<AppConfig, juhradial_shared::config::ConfigError> {
     AppConfig::load_from(&path)
 }
 
-/// Watch `~/.config/juhradial/config.json` for changes and yield a
+/// Watch `~/.config/oxidemx/config.json` for changes and yield a
 /// fresh `AppConfig` each time it's written. Debounced to coalesce
 /// the write+rename burst that most text editors produce.
 ///
 /// Returns a `Stream<AppConfig>` for `iced::Subscription::run`.
-pub fn watch_stream() -> impl futures_util::stream::Stream<Item = juhradial_shared::AppConfig> {
+pub fn watch_stream() -> impl futures_util::stream::Stream<Item = oxidemx_shared::AppConfig> {
     use futures_util::StreamExt;
     use notify::{RecommendedWatcher, RecursiveMode, Watcher};
     use std::time::{Duration, Instant};
 
-    let (tx, rx) = async_channel::unbounded::<juhradial_shared::AppConfig>();
-    let path = match juhradial_shared::config::default_config_path() {
+    let (tx, rx) = async_channel::unbounded::<oxidemx_shared::AppConfig>();
+    let path = match oxidemx_shared::config::default_config_path() {
         Some(p) => p,
         None => return rx.boxed(),
     };
@@ -105,8 +105,11 @@ pub fn watch_stream() -> impl futures_util::stream::Stream<Item = juhradial_shar
         let mut last_emit = Instant::now() - Duration::from_secs(60);
         let mut pending = false;
         loop {
+            if tx.is_closed() {
+                return;
+            }
             let recv =
-                raw_rx.recv_timeout(if pending { debounce } else { Duration::from_secs(60) });
+                raw_rx.recv_timeout(if pending { debounce } else { Duration::from_millis(250) });
             match recv {
                 Ok(()) => {
                     pending = true;
@@ -114,7 +117,7 @@ pub fn watch_stream() -> impl futures_util::stream::Stream<Item = juhradial_shar
                 }
                 Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
                     if pending && last_emit.elapsed() >= debounce {
-                        match juhradial_shared::AppConfig::load_from(&path_for_loader) {
+                        match oxidemx_shared::AppConfig::load_from(&path_for_loader) {
                             Ok(cfg) => {
                                 if tx.send_blocking(cfg).is_err() {
                                     return;

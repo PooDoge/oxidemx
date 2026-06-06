@@ -36,7 +36,7 @@ use evdev::{
 
 /// Device name announced on /dev/input. The same string is used by
 /// the diagnostics scan to recognise our forwarder.
-pub const DEVICE_NAME: &str = "juhradial thumb-wheel forwarder";
+pub const DEVICE_NAME: &str = "oxidemx thumb-wheel forwarder";
 
 /// Logitech VID — keeps compositor heuristics that distinguish "mouse
 /// horizontal scroll" from "trackpad horizontal scroll" on the side

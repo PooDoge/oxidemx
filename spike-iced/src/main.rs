@@ -1,6 +1,6 @@
 //! Iced canvas spike for the radial menu.
 //!
-//! Loads the user's real config via juhradial-shared, then renders a
+//! Loads the user's real config via oxidemx-shared, then renders a
 //! radial of 8 wedges using iced's Canvas widget. Each wedge:
 //!
 //!   * filled donut arc using `Path` builder (`move_to`, `line_to`,
@@ -15,8 +15,8 @@ use iced::widget::canvas::{self, Canvas, Frame, Geometry, Path, Stroke};
 use iced::window;
 use iced::{Color, Element, Length, Point, Rectangle, Renderer, Size, Theme};
 
-use juhradial_shared::theme::{parse_hex_rgba, BUNDLED_THEME_JSON};
-use juhradial_shared::{config, AppConfig, RadialMenuConfig, Theme as PaletteTheme};
+use oxidemx_shared::theme::{parse_hex_rgba, BUNDLED_THEME_JSON};
+use oxidemx_shared::{config, AppConfig, RadialMenuConfig, Theme as PaletteTheme};
 
 const WINDOW_PX: f32 = 484.0;
 const MENU_RADIUS: f32 = 150.0;
@@ -231,7 +231,7 @@ fn lerp_color(a: Color, b: Color, t: f32) -> Color {
 
 fn main() -> iced::Result {
     iced::application(Spike::default, update, view)
-        .title("JuhRadial — iced spike")
+        .title("OxideMX — iced spike")
         .window_size(Size::new(WINDOW_PX, WINDOW_PX))
         // Decorations off + transparent surface + transparent root
         // style so we get just the radial wheel on screen, no

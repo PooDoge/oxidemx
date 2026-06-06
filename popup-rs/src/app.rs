@@ -12,8 +12,8 @@
 //! Volume-on-scroll and click-outside-to-dismiss are handled here.
 
 use iced::{Element, Subscription, Task};
-use juhradial_shared::AppConfig;
-use juhradial_widgets::palette::Palette;
+use oxidemx_shared::AppConfig;
+use oxidemx_widgets::palette::Palette;
 use std::collections::HashMap;
 use tracing::{info, warn};
 
@@ -54,6 +54,8 @@ pub struct State {
     pub focused: bool,
     /// True after the first `Positioned` response — suppresses duplicate moves.
     positioned: bool,
+    position_attempts: u8,
+    pub window_id: Option<iced::window::Id>,
 }
 
 // ---------------------------------------------------------------------------
@@ -97,6 +99,7 @@ pub enum Message {
     Dismiss,
     /// Fire-and-forget Task sentinel.
     Noop,
+    WindowOpened(iced::window::Id),
 }
 
 // ---------------------------------------------------------------------------
@@ -127,19 +130,18 @@ pub fn boot(args: Args) -> (State, Task<Message>) {
         pointer_accel: 0.0,
         focused: false,
         positioned: false,
+        position_attempts: 0,
         config,
+        window_id: None,
     };
 
     // Kick off an async device-state fetch immediately.
     let fetch_task = Task::perform(actions::fetch_device_state(), Message::DeviceFetched);
 
-    // Position the popup below the indicator on the very next frame.
-    let position_task = make_position_task(&args);
-
-    (state, Task::batch([fetch_task, position_task]))
+    (state, fetch_task)
 }
 
-fn make_position_task(args: &Args) -> Task<Message> {
+fn make_position_task(args: &Args, id: iced::window::Id) -> Task<Message> {
     let (anchor_x, anchor_y) = match args.panel_rect {
         Some(r) => {
             let x = (r.x + r.w / 2 - (POPUP_W as i32) / 2).max(0);
@@ -149,15 +151,18 @@ fn make_position_task(args: &Args) -> Task<Message> {
         None => (0, 0),
     };
 
-    Task::perform(
-        juhradial_window::cursor_helper::move_overlay(
-            APP_ID.to_string(),
-            anchor_x,
-            anchor_y,
-            -1,
-        ),
-        Message::Positioned,
-    )
+    Task::batch([
+        iced::window::move_to(id, iced::Point::new(anchor_x as f32, anchor_y as f32)),
+        Task::perform(
+            oxidemx_window::cursor_helper::move_overlay(
+                APP_ID.to_string(),
+                anchor_x,
+                anchor_y,
+                -1,
+            ),
+            Message::Positioned,
+        )
+    ])
 }
 
 // ---------------------------------------------------------------------------
@@ -194,14 +199,41 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         }
 
         Message::Positioned(ok) => {
-            if !ok && !state.positioned {
+            if ok {
+                state.positioned = true;
+                Task::none()
+            } else if !state.positioned && state.position_attempts < 10 {
+                state.position_attempts += 1;
+                let args = state.args.clone();
+                Task::perform(
+                    async move {
+                        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                        let (anchor_x, anchor_y) = match args.panel_rect {
+                            Some(r) => {
+                                let x = (r.x + r.w / 2 - (360 / 2)).max(0);
+                                let y = r.y + r.h;
+                                (x, y)
+                            }
+                            None => (0, 0),
+                        };
+                        oxidemx_window::cursor_helper::move_overlay(
+                            "org.oxidemx.popup".to_string(),
+                            anchor_x,
+                            anchor_y,
+                            -1,
+                        ).await
+                    },
+                    Message::Positioned,
+                )
+            } else {
                 warn!(
-                    "MoveOverlay failed — extension not running? \
-                     Popup will open wherever Mutter placed it."
+                    "MoveOverlay failed after {} attempts — extension not running? \
+                     Popup will open wherever Mutter placed it.",
+                    state.position_attempts
                 );
+                state.positioned = true;
+                Task::none()
             }
-            state.positioned = true;
-            Task::none()
         }
 
         Message::ToggleAction(id, value) => {
@@ -287,7 +319,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
 
         Message::OpenSettings => {
             // Spawn the settings binary as a sibling or from PATH.
-            let settings_bin = sibling_or_path("juhradial-settings");
+            let settings_bin = sibling_or_path("oxidemx-settings");
             Task::batch([
                 Task::perform(
                     async move {
@@ -330,6 +362,11 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         }
 
         Message::Dismiss => iced::exit(),
+
+        Message::WindowOpened(id) => {
+            state.window_id = Some(id);
+            make_position_task(&state.args, id)
+        }
 
         Message::Noop => Task::none(),
     }
@@ -405,9 +442,10 @@ pub fn subscription(_state: &State) -> Subscription<Message> {
         // Refresh device state every 30 s.
         time::every(std::time::Duration::from_secs(30)).map(|_| Message::DeviceRefreshTick),
         // Window focus events for volume-on-scroll gating and auto-dismiss.
-        iced::window::events().map(|(_id, event)| match event {
+        iced::window::events().map(|(id, event)| match event {
             iced::window::Event::Focused => Message::WindowFocused,
             iced::window::Event::Unfocused => Message::WindowUnfocused,
+            iced::window::Event::Opened { .. } => Message::WindowOpened(id),
             _ => Message::Noop,
         }),
         // Mouse-wheel → WheelScroll (volume-on-scroll while popup is focused).

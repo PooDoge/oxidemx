@@ -1,4 +1,4 @@
-//! Best-effort window-raise bridge to the juhradial-cursor GNOME
+//! Best-effort window-raise bridge to the oxidemx-cursor GNOME
 //! extension.
 //!
 //! Wayland's compositor blocks app-side focus requests
@@ -6,7 +6,7 @@
 //! xdg-activation token from the requesting process). Since our
 //! Focus message arrives via D-Bus from a separate process, we
 //! have no token. The cleanest workaround is to ask the
-//! juhradial-cursor GNOME extension to raise + activate the
+//! oxidemx-cursor GNOME extension to raise + activate the
 //! window — the extension runs *inside* Mutter and uses
 //! `Meta.Window.activate()` which the compositor respects.
 //!
@@ -21,12 +21,12 @@
 use tracing::{debug, warn};
 use zbus::{proxy, Connection};
 
-const APP_ID: &str = "org.juhradial.settings";
+const APP_ID: &str = "org.oxidemx.settings";
 
 #[proxy(
-    interface = "org.juhradial.CursorHelper",
-    default_service = "org.juhradial.CursorHelper",
-    default_path = "/org/juhradial/CursorHelper"
+    interface = "org.oxidemx.CursorHelper",
+    default_service = "org.oxidemx.CursorHelper",
+    default_path = "/org/oxidemx/CursorHelper"
 )]
 trait CursorHelper {
     fn raise_overlay(&self, app_id: &str) -> zbus::Result<bool>;

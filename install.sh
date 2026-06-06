@@ -1,14 +1,14 @@
 #!/bin/bash
 #
-# JuhRadial MX Universal Installer
-# https://github.com/JuhLabs/juhradial-mx
+# OxideMX MX Universal Installer
+# https://github.com/JuhLabs/oxidemx
 #
-# Usage: curl -fsSL https://raw.githubusercontent.com/JuhLabs/juhradial-mx/master/install.sh | bash
+# Usage: curl -fsSL https://raw.githubusercontent.com/JuhLabs/oxidemx/master/install.sh | bash
 #
 # This script will:
 # 1. Detect your Linux distribution
 # 2. Install required dependencies
-# 3. Clone and build JuhRadial MX
+# 3. Clone and build OxideMX MX
 # 4. Install and enable the systemd service
 #
 
@@ -27,16 +27,16 @@ WHITE='\033[1;37m'
 GRAY='\033[0;90m'
 
 # ── Configuration ────────────────────────────────────────────────────
-REPO_URL="https://github.com/JuhLabs/juhradial-mx"
-INSTALL_DIR="/opt/juhradial-mx"
+REPO_URL="https://github.com/JuhLabs/oxidemx"
+INSTALL_DIR="/opt/oxidemx"
 BIN_DIR="/usr/local/bin"
 SYSTEMD_USER_DIR="$HOME/.config/systemd/user"
-CONFIG_DIR="$HOME/.config/juhradial"
+CONFIG_DIR="$HOME/.config/oxidemx"
 DISTRO_FAMILY=""
 IS_ATOMIC=false
 # Paths for shared data — overridden to /usr/local/share on atomic/immutable
 # systems where /usr is read-only (Bazzite, Silverblue, Kinoite, Bluefin…).
-SHARE_DIR="/usr/share/juhradial"
+SHARE_DIR="/usr/share/oxidemx"
 APP_DIR="/usr/share/applications"
 ICON_DIR="/usr/share/icons/hicolor/scalable/apps"
 TOTAL_STEPS=6
@@ -199,7 +199,7 @@ check_atomic() {
         # writable overlay path on every flavor we support (rpm-ostree
         # symlinks it to /var/usrlocal; MicroOS keeps it native-writable;
         # NixOS puts everything under /run/current-system).
-        SHARE_DIR="/usr/local/share/juhradial"
+        SHARE_DIR="/usr/local/share/oxidemx"
         APP_DIR="/usr/local/share/applications"
         ICON_DIR="/usr/local/share/icons/hicolor/scalable/apps"
     fi
@@ -381,17 +381,17 @@ configure_hyprland() {
 
     HYPR_CONFIG_DIR="$HOME/.config/hypr"
     RULES_CONTENT='
-# ######## JuhRadial MX - Radial Menu Overlay ########
+# ######## OxideMX MX - Radial Menu Overlay ########
 # These rules ensure the radial menu appears correctly as an overlay
-windowrulev2 = float, title:^(JuhRadial MX)$
-windowrulev2 = noblur, title:^(JuhRadial MX)$
-windowrulev2 = noborder, title:^(JuhRadial MX)$
-windowrulev2 = noshadow, title:^(JuhRadial MX)$
-windowrulev2 = pin, title:^(JuhRadial MX)$
-windowrulev2 = noanim, title:^(JuhRadial MX)$'
+windowrulev2 = float, title:^(OxideMX MX)$
+windowrulev2 = noblur, title:^(OxideMX MX)$
+windowrulev2 = noborder, title:^(OxideMX MX)$
+windowrulev2 = noshadow, title:^(OxideMX MX)$
+windowrulev2 = pin, title:^(OxideMX MX)$
+windowrulev2 = noanim, title:^(OxideMX MX)$'
 
     # Check if rules already exist
-    if grep -q "JuhRadial MX" "$HYPR_CONFIG_DIR"/*.conf "$HYPR_CONFIG_DIR"/**/*.conf 2>/dev/null; then
+    if grep -q "OxideMX MX" "$HYPR_CONFIG_DIR"/*.conf "$HYPR_CONFIG_DIR"/**/*.conf 2>/dev/null; then
         log_dim "Hyprland rules already configured"
         return 0
     fi
@@ -407,12 +407,12 @@ windowrulev2 = noanim, title:^(JuhRadial MX)$'
     # Create a new rules file and source it
     else
         mkdir -p "$HYPR_CONFIG_DIR"
-        echo "$RULES_CONTENT" > "$HYPR_CONFIG_DIR/juhradial-rules.conf"
+        echo "$RULES_CONTENT" > "$HYPR_CONFIG_DIR/oxidemx-rules.conf"
 
         if [ -f "$HYPR_CONFIG_DIR/hyprland.conf" ]; then
-            echo "source=juhradial-rules.conf" >> "$HYPR_CONFIG_DIR/hyprland.conf"
+            echo "source=oxidemx-rules.conf" >> "$HYPR_CONFIG_DIR/hyprland.conf"
         fi
-        log_success "Created juhradial-rules.conf"
+        log_success "Created oxidemx-rules.conf"
     fi
 
     # Reload Hyprland config if possible
@@ -427,7 +427,7 @@ windowrulev2 = noanim, title:^(JuhRadial MX)$'
 # Kinoite, Bluefin, Aurora, Universal Blue family).
 #
 # DEFAULT BEHAVIOUR: do NOT layer packages. The base image already ships
-# every runtime shared library juhradiald links against (libdbus, libudev,
+# every runtime shared library oxidemxd links against (libdbus, libudev,
 # libsystemd, libevdev, libhidapi) plus ydotool, python3, gtk4, libadwaita,
 # python3-gobject — which is everything the running stack needs. Build deps
 # (rust + *-devel headers) live in the user's distrobox / toolbox; they
@@ -443,7 +443,7 @@ windowrulev2 = noanim, title:^(JuhRadial MX)$'
 # This function detects what's actually missing on the host. If nothing's
 # missing → skip layering entirely (the Bazzite default). If something IS
 # missing → suggest Flatpak/Homebrew/distrobox alternatives FIRST, with
-# rpm-ostree as the explicit opt-in path via JUHRADIAL_USE_RPM_OSTREE=1.
+# rpm-ostree as the explicit opt-in path via OXIDEMX_USE_RPM_OSTREE=1.
 install_deps_fedora_atomic() {
     log_info "Atomic image detected — probing host for runtime libraries"
 
@@ -478,7 +478,7 @@ install_deps_fedora_atomic() {
     local missing_build_tools=()
     if ! command -v cargo &> /dev/null \
        && ! find_distrobox_container &> /dev/null \
-       && ! { [ -x target/release/juhradiald ] || [ -x daemon/target/release/juhradiald ]; }; then
+       && ! { [ -x target/release/oxidemxd ] || [ -x daemon/target/release/oxidemxd ]; }; then
         missing_build_tools+=("cargo (rust toolchain — host OR distrobox container)")
     fi
 
@@ -536,20 +536,20 @@ install_deps_fedora_atomic() {
         log_dim ""
     fi
     log_dim "  ${BOLD}rpm-ostree layering${RESET} (last resort — delays image updates):"
-    log_dim "      JUHRADIAL_USE_RPM_OSTREE=1 ./install.sh"
+    log_dim "      OXIDEMX_USE_RPM_OSTREE=1 ./install.sh"
     echo ""
 
-    if [ "${JUHRADIAL_USE_RPM_OSTREE:-}" = "1" ]; then
-        log_warning "JUHRADIAL_USE_RPM_OSTREE=1 set — falling through to rpm-ostree layering"
+    if [ "${OXIDEMX_USE_RPM_OSTREE:-}" = "1" ]; then
+        log_warning "OXIDEMX_USE_RPM_OSTREE=1 set — falling through to rpm-ostree layering"
         install_deps_fedora_atomic_rpm_ostree
     else
         log_error "Stopping. Install the missing dependencies via the suggested paths and re-run."
-        log_dim "Or set JUHRADIAL_USE_RPM_OSTREE=1 to layer with rpm-ostree anyway."
+        log_dim "Or set OXIDEMX_USE_RPM_OSTREE=1 to layer with rpm-ostree anyway."
         exit 1
     fi
 }
 
-# Opt-in legacy path. Only reachable when JUHRADIAL_USE_RPM_OSTREE=1.
+# Opt-in legacy path. Only reachable when OXIDEMX_USE_RPM_OSTREE=1.
 # Layers the FULL dependency set (build + runtime + python overlay deps)
 # via rpm-ostree, prompts for the required reboot.
 install_deps_fedora_atomic_rpm_ostree() {
@@ -704,22 +704,22 @@ install_dependencies() {
             log_dim "  sudo transactional-update pkg install rust cargo python3 python3-qt6 \\"
             log_dim "       python3-gobject gtk4 libadwaita-devel python3-cryptography \\"
             log_dim "       libevdev-devel libhidapi-devel ydotool git make"
-            log_dim "Then reboot and re-run this installer with JUHRADIAL_SKIP_DEPS=1."
+            log_dim "Then reboot and re-run this installer with OXIDEMX_SKIP_DEPS=1."
             exit 1
             ;;
         nixos)
             log_error "NixOS detected. Imperative package install doesn't fit NixOS's model."
-            log_dim "Add a juhradial-mx derivation to your configuration.nix / flake instead."
+            log_dim "Add a oxidemx derivation to your configuration.nix / flake instead."
             log_dim "Hand-roll a derivation from packaging/arch/PKGBUILD as a template."
-            log_dim "Then re-run with JUHRADIAL_SKIP_DEPS=1 to run only build + install steps."
+            log_dim "Then re-run with OXIDEMX_SKIP_DEPS=1 to run only build + install steps."
             exit 1
             ;;
     esac
 
-    # JUHRADIAL_SKIP_DEPS=1 short-circuits the package install — useful
+    # OXIDEMX_SKIP_DEPS=1 short-circuits the package install — useful
     # when the user manages deps via Nix / Guix / hand-built tooling.
-    if [ "${JUHRADIAL_SKIP_DEPS:-}" = "1" ]; then
-        log_warning "JUHRADIAL_SKIP_DEPS=1 set — assuming dependencies are already present"
+    if [ "${OXIDEMX_SKIP_DEPS:-}" = "1" ]; then
+        log_warning "OXIDEMX_SKIP_DEPS=1 set — assuming dependencies are already present"
         return 0
     fi
 
@@ -743,7 +743,7 @@ install_dependencies() {
         *)
             log_error "Unsupported distribution: $DISTRO"
             log_dim "Please install dependencies manually. See CONTRIBUTING.md"
-            log_dim "Or run with JUHRADIAL_SKIP_DEPS=1 to skip this step."
+            log_dim "Or run with OXIDEMX_SKIP_DEPS=1 to skip this step."
             exit 1
             ;;
     esac
@@ -755,11 +755,11 @@ install_dependencies() {
 # Detect "the script is being executed from inside an existing checkout"
 # vs "user downloaded install.sh into /tmp and wants us to clone for them".
 # Marker: a sibling Cargo.toml + .git/ at the script's directory.
-script_dir_is_a_juhradial_clone() {
+script_dir_is_a_oxidemx_clone() {
     local d
     d="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
     [ -f "$d/Cargo.toml" ] && [ -d "$d/.git" ] && \
-        grep -q "juhradial" "$d/Cargo.toml" 2>/dev/null
+        grep -q "oxidemx" "$d/Cargo.toml" 2>/dev/null
 }
 
 clone_repo() {
@@ -767,11 +767,11 @@ clone_repo() {
 
     # If the user ran ./install.sh from inside their own clone, prefer
     # that — don't clobber their working tree with a fresh remote
-    # clone to /opt/. Honors $JUHRADIAL_INSTALL_DIR for explicit overrides.
-    if [ -n "${JUHRADIAL_INSTALL_DIR:-}" ]; then
-        INSTALL_DIR="$JUHRADIAL_INSTALL_DIR"
-        log_info "Using \$JUHRADIAL_INSTALL_DIR override: $INSTALL_DIR"
-    elif script_dir_is_a_juhradial_clone; then
+    # clone to /opt/. Honors $OXIDEMX_INSTALL_DIR for explicit overrides.
+    if [ -n "${OXIDEMX_INSTALL_DIR:-}" ]; then
+        INSTALL_DIR="$OXIDEMX_INSTALL_DIR"
+        log_info "Using \$OXIDEMX_INSTALL_DIR override: $INSTALL_DIR"
+    elif script_dir_is_a_oxidemx_clone; then
         INSTALL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
         log_info "Running from inside a clone — using $INSTALL_DIR (no remote clone)"
     fi
@@ -806,25 +806,25 @@ clone_repo() {
 # Check whether all 4 release binaries are already on disk. Used to
 # decide whether to skip the build step entirely.
 have_all_release_binaries() {
-    [ -x target/release/juhradiald ] || [ -x daemon/target/release/juhradiald ] || return 1
+    [ -x target/release/oxidemxd ] || [ -x daemon/target/release/oxidemxd ] || return 1
     # popup/overlay/settings are optional in the strict sense, but if
     # any of them ARE missing on an atomic system and we don't have
     # cargo, the user is going to hit pick_binary warnings later — so
     # require all-four-present here for the skip-build path.
-    [ -x target/release/juhradial-popup ]      || [ -x popup-rs/target/release/juhradial-popup ]      || return 1
-    [ -x target/release/juhradial-overlay-rs ] || [ -x overlay-rs/target/release/juhradial-overlay-rs ] || return 1
-    [ -x target/release/juhradial-settings ]   || [ -x settings-rs/target/release/juhradial-settings ] || return 1
+    [ -x target/release/oxidemx-popup ]      || [ -x popup-rs/target/release/oxidemx-popup ]      || return 1
+    [ -x target/release/oxidemx-overlay ] || [ -x overlay-rs/target/release/oxidemx-overlay ] || return 1
+    [ -x target/release/oxidemx-settings ]   || [ -x settings-rs/target/release/oxidemx-settings ] || return 1
     return 0
 }
 
 # Find an available distrobox container that can run cargo. Honors
-# $JUHRADIAL_DISTROBOX, then probes common names. Returns the name on
+# $OXIDEMX_DISTROBOX, then probes common names. Returns the name on
 # stdout + exit 0, or exit 1 if no usable container found.
 find_distrobox_container() {
     if ! command -v distrobox &> /dev/null; then
         return 1
     fi
-    local candidates=("${JUHRADIAL_DISTROBOX:-}" claude_development juhradial-dev dev rust fedora-toolbox)
+    local candidates=("${OXIDEMX_DISTROBOX:-}" claude_development oxidemx-dev dev rust fedora-toolbox)
     for name in "${candidates[@]}"; do
         [ -z "$name" ] && continue
         if distrobox list 2>/dev/null | awk '{print $3}' | grep -qx "$name"; then
@@ -847,7 +847,7 @@ download_release_binaries() {
 
     step "Downloading pre-built binaries ($tag)"
 
-    local repo="${JUHRADIAL_RELEASE_REPO:-JuhLabs/juhradial-mx}"
+    local repo="${OXIDEMX_RELEASE_REPO:-JuhLabs/oxidemx}"
 
     if [ "$tag" = "latest" ]; then
         log_info "Querying latest release tag..."
@@ -860,7 +860,7 @@ download_release_binaries() {
         log_info "Latest release is $tag"
     fi
 
-    local archive="juhradial-mx-${tag}-${arch}-linux.tar.gz"
+    local archive="oxidemx-${tag}-${arch}-linux.tar.gz"
     local base_url="https://github.com/${repo}/releases/download/${tag}"
 
     log_info "Downloading $archive..."
@@ -893,7 +893,7 @@ download_release_binaries() {
 
     rm -f "/tmp/$archive" "/tmp/$archive.sha256"
     log_success "Release $tag binaries downloaded and verified successfully"
-    JUHRADIAL_SKIP_BUILD=1
+    OXIDEMX_SKIP_BUILD=1
 }
 
 build_project() {
@@ -902,13 +902,13 @@ build_project() {
 
     # Escape hatch: user already has pre-built binaries (e.g., copied from
     # a release tarball or a CI artifact). Skip the build entirely.
-    if [ "${JUHRADIAL_SKIP_BUILD:-}" = "1" ]; then
+    if [ "${OXIDEMX_SKIP_BUILD:-}" = "1" ]; then
         if have_all_release_binaries; then
-            log_success "JUHRADIAL_SKIP_BUILD=1 — using existing release binaries"
+            log_success "OXIDEMX_SKIP_BUILD=1 — using existing release binaries"
             return 0
         else
-            log_error "JUHRADIAL_SKIP_BUILD=1 but not all release binaries present"
-            log_dim "  Need: target/release/{juhradiald,juhradial-popup,juhradial-overlay-rs,juhradial-settings}"
+            log_error "OXIDEMX_SKIP_BUILD=1 but not all release binaries present"
+            log_dim "  Need: target/release/{oxidemxd,oxidemx-popup,oxidemx-overlay,oxidemx-settings}"
             log_dim "  Or per-crate: <crate>/target/release/<bin>"
             exit 1
         fi
@@ -937,8 +937,8 @@ build_project() {
             log_dim "  (cargo not on host PATH — this avoids layering rust via rpm-ostree)"
             distrobox enter "$container" -- bash -c \
                 "cd '$INSTALL_DIR' && cargo build --release \
-                 -p juhradiald -p juhradial-overlay-rs \
-                 -p juhradial-popup-rs -p juhradial-settings-rs" || {
+                 -p oxidemxd -p oxidemx-overlay \
+                 -p oxidemx-popup -p oxidemx-settings" || {
                 log_error "distrobox build failed."
                 log_dim "  If '$container' is missing the rust/devel deps, install them inside it:"
                 log_dim "    distrobox enter $container -- sudo dnf install -y rust cargo \\"
@@ -955,16 +955,16 @@ build_project() {
             log_dim ""
             log_dim "  Options:"
             log_dim "    1. Set up a distrobox with rust:"
-            log_dim "         distrobox-create --name juhradial-dev --image registry.fedoraproject.org/fedora-toolbox:latest"
-            log_dim "         distrobox enter juhradial-dev -- sudo dnf install -y rust cargo \\"
+            log_dim "         distrobox-create --name oxidemx-dev --image registry.fedoraproject.org/fedora-toolbox:latest"
+            log_dim "         distrobox enter oxidemx-dev -- sudo dnf install -y rust cargo \\"
             log_dim "              dbus-devel systemd-devel libevdev-devel hidapi-devel git"
             log_dim "         ./install.sh"
             log_dim ""
             log_dim "    2. Build elsewhere and copy target/release/* in, then re-run with:"
-            log_dim "         JUHRADIAL_SKIP_BUILD=1 ./install.sh"
+            log_dim "         OXIDEMX_SKIP_BUILD=1 ./install.sh"
             log_dim ""
             log_dim "    3. (Last resort) layer rust via rpm-ostree:"
-            log_dim "         JUHRADIAL_USE_RPM_OSTREE=1 ./install.sh"
+            log_dim "         OXIDEMX_USE_RPM_OSTREE=1 ./install.sh"
             exit 1
             ;;
     esac
@@ -977,10 +977,10 @@ build_project() {
 do_workspace_build_host() {
     if [ -f Cargo.toml ] && grep -q '^\[workspace\]' Cargo.toml; then
         cargo build --release \
-            -p juhradiald \
-            -p juhradial-overlay-rs \
-            -p juhradial-popup-rs \
-            -p juhradial-settings-rs
+            -p oxidemxd \
+            -p oxidemx-overlay \
+            -p oxidemx-popup \
+            -p oxidemx-settings
     else
         log_warning "Workspace Cargo.toml not detected; building per-crate"
         ( cd daemon && cargo build --release )
@@ -1012,28 +1012,28 @@ install_files() {
     }
 
     # Install daemon binary (required)
-    daemon_bin="$(pick_binary juhradiald target/release/juhradiald daemon/target/release/juhradiald)" || {
-        log_error "juhradiald not built — run ./dev.sh build daemon or cargo build --release -p juhradiald"
+    daemon_bin="$(pick_binary oxidemxd target/release/oxidemxd daemon/target/release/oxidemxd)" || {
+        log_error "oxidemxd not built — run ./dev.sh build daemon or cargo build --release -p oxidemxd"
         exit 1
     }
-    sudo install -Dm755 "$daemon_bin" "$BIN_DIR/juhradiald"
+    sudo install -Dm755 "$daemon_bin" "$BIN_DIR/oxidemxd"
     log_success "Daemon binary ($daemon_bin)"
 
     # Install indicator popup binary (popup-rs) — optional, skip on partial builds
-    if popup_bin="$(pick_binary juhradial-popup target/release/juhradial-popup popup-rs/target/release/juhradial-popup)"; then
-        sudo install -Dm755 "$popup_bin" "$BIN_DIR/juhradial-popup"
+    if popup_bin="$(pick_binary oxidemx-popup target/release/oxidemx-popup popup-rs/target/release/oxidemx-popup)"; then
+        sudo install -Dm755 "$popup_bin" "$BIN_DIR/oxidemx-popup"
         log_success "Indicator popup binary"
     fi
 
     # Install overlay binary (overlay-rs) — optional
-    if overlay_bin="$(pick_binary juhradial-overlay-rs target/release/juhradial-overlay-rs overlay-rs/target/release/juhradial-overlay-rs)"; then
-        sudo install -Dm755 "$overlay_bin" "$BIN_DIR/juhradial-overlay-rs"
+    if overlay_bin="$(pick_binary oxidemx-overlay target/release/oxidemx-overlay overlay-rs/target/release/oxidemx-overlay)"; then
+        sudo install -Dm755 "$overlay_bin" "$BIN_DIR/oxidemx-overlay"
         log_success "Overlay binary"
     fi
 
     # Install settings binary (settings-rs) — optional
-    if settings_bin="$(pick_binary juhradial-settings target/release/juhradial-settings settings-rs/target/release/juhradial-settings)"; then
-        sudo install -Dm755 "$settings_bin" "$BIN_DIR/juhradial-settings"
+    if settings_bin="$(pick_binary oxidemx-settings target/release/oxidemx-settings settings-rs/target/release/oxidemx-settings)"; then
+        sudo install -Dm755 "$settings_bin" "$BIN_DIR/oxidemx-settings"
         log_success "Settings binary"
     fi
 
@@ -1043,26 +1043,11 @@ install_files() {
         log_dim "Installing shared files to ${SHARE_DIR} (atomic image)"
     fi
 
-    # Install overlay scripts
-    sudo mkdir -p "$SHARE_DIR"
-    sudo cp -r overlay/*.py "$SHARE_DIR/"
-    log_success "Overlay scripts"
-
-    # Install flow module (subdirectory)
-    sudo rm -rf "$SHARE_DIR/flow"
-    sudo cp -r overlay/flow "$SHARE_DIR/flow"
-    log_success "Flow module"
-
-    # Install locale files
-    if [ -d overlay/locales ]; then
-        sudo mkdir -p "$SHARE_DIR/locales"
-        sudo cp -r overlay/locales/* "$SHARE_DIR/locales/"
-    fi
-
     # Install 3D radial wheel images
     sudo mkdir -p "$SHARE_DIR/assets/radial-wheels"
     sudo cp -r assets/radial-wheels/*.png "$SHARE_DIR/assets/radial-wheels/"
     log_success "Theme assets"
+
 
     # Install device images (mouse illustrations for settings)
     if [ -d assets/devices ]; then
@@ -1093,26 +1078,26 @@ install_files() {
         sudo cp assets/settings-generated/haptics.png "$SHARE_DIR/assets/settings-generated/" 2>/dev/null || true
     fi
 
-    # Install launcher scripts. NOTE: the Rust juhradial-settings binary
+    # Install launcher scripts. NOTE: the Rust oxidemx-settings binary
     # installed above (when present) wins on $PATH; the shell launcher
     # remains as a fallback for installs that built only the Python
     # overlay tree.
-    sudo install -Dm755 scripts/juhradial-mx.sh "$BIN_DIR/juhradial-mx"
+    sudo install -Dm755 scripts/oxidemx.sh "$BIN_DIR/oxidemx"
     if [ -z "${settings_bin:-}" ]; then
-        sudo install -Dm755 scripts/juhradial-settings.sh "$BIN_DIR/juhradial-settings"
+        sudo install -Dm755 scripts/oxidemx-settings.sh "$BIN_DIR/oxidemx-settings"
     fi
 
     # Install desktop files
-    sudo install -Dm644 packaging/juhradial-mx.desktop "$APP_DIR/juhradial-mx.desktop"
-    sudo install -Dm644 packaging/org.juhradial.settings.desktop "$APP_DIR/org.juhradial.settings.desktop"
+    sudo install -Dm644 packaging/oxidemx.desktop "$APP_DIR/oxidemx.desktop"
+    sudo install -Dm644 packaging/org.oxidemx.settings.desktop "$APP_DIR/org.oxidemx.settings.desktop"
 
     # Install icons
-    sudo install -Dm644 assets/juhradial-mx.svg "$ICON_DIR/juhradial-mx.svg"
+    sudo install -Dm644 assets/oxidemx.svg "$ICON_DIR/oxidemx.svg"
     log_success "Desktop integration"
 
     # Install systemd service
     mkdir -p "$SYSTEMD_USER_DIR"
-    cp packaging/systemd/juhradialmx-daemon.service "$SYSTEMD_USER_DIR/"
+    cp packaging/systemd/oxidemx-daemon.service "$SYSTEMD_USER_DIR/"
 
     # Autostart the overlay at login. The systemd service runs the daemon,
     # but the overlay is a per-session GUI process that needs the user's
@@ -1122,13 +1107,13 @@ install_files() {
     # users have to manually launch the app every login.
     AUTOSTART_DIR="$HOME/.config/autostart"
     mkdir -p "$AUTOSTART_DIR"
-    cat > "$AUTOSTART_DIR/juhradial-overlay.desktop" <<EOF
+    cat > "$AUTOSTART_DIR/oxidemx-overlay.desktop" <<EOF
 [Desktop Entry]
 Type=Application
-Name=JuhRadial MX Overlay
+Name=OxideMX MX Overlay
 Comment=Radial menu overlay for Logitech MX Master mice
-Exec=python3 $SHARE_DIR/juhradial-overlay.py
-Icon=juhradial-mx
+Exec=$BIN_DIR/oxidemx-overlay
+Icon=oxidemx
 Terminal=false
 NoDisplay=true
 X-GNOME-Autostart-enabled=true
@@ -1136,8 +1121,8 @@ EOF
     log_success "Overlay autostart configured"
 
     # Install/update udev rules (always update to fix security issues in older versions)
-    if [ -f packaging/udev/99-juhradialmx.rules ]; then
-        sudo install -Dm644 packaging/udev/99-juhradialmx.rules /etc/udev/rules.d/
+    if [ -f packaging/udev/99-oxidemx.rules ]; then
+        sudo install -Dm644 packaging/udev/99-oxidemx.rules /etc/udev/rules.d/
         [ -f /etc/udev/rules.d/99-logitech-hidpp.rules ] && sudo rm -f /etc/udev/rules.d/99-logitech-hidpp.rules
         sudo udevadm control --reload-rules
         sudo udevadm trigger
@@ -1168,14 +1153,14 @@ enable_service() {
     fi
 
     systemctl --user daemon-reload || log_warning "Failed to reload user systemd"
-    systemctl --user enable juhradialmx-daemon || log_warning "Failed to enable service"
+    systemctl --user enable oxidemx-daemon || log_warning "Failed to enable service"
 
     # Restart on upgrade, start on fresh install
     if [ "$INSTALL_MODE" = "upgrade" ]; then
-        systemctl --user restart juhradialmx-daemon || log_warning "Failed to restart service"
+        systemctl --user restart oxidemx-daemon || log_warning "Failed to restart service"
         log_success "Service restarted"
     else
-        systemctl --user start juhradialmx-daemon || log_warning "Failed to start service"
+        systemctl --user start oxidemx-daemon || log_warning "Failed to start service"
         log_success "Service enabled and started"
     fi
 }
@@ -1279,24 +1264,21 @@ configure_gnome() {
     log_info "Installing GNOME Shell extensions..."
 
     compile_gnome_extensions_ts
-    install_gnome_extension "juhradial-cursor@dev.juhlabs.com"
-    install_gnome_extension "juhradial-indicator@dev.juhlabs.com"
+    install_gnome_extension "oxidemx-indicator@dev.juhlabs.com"
 
-    # Per-extension state check — report the WORSE of the two states so
-    # the user knows whether they need to log out.
+    # Per-extension state check
     local needs_restart=false
-    for uuid in "juhradial-cursor@dev.juhlabs.com" "juhradial-indicator@dev.juhlabs.com"; do
-        local ext_state
-        ext_state=$(gnome-extensions info "$uuid" 2>/dev/null | grep -oP '(?<=State: )\S+' || true)
-        if [ "$ext_state" != "ACTIVE" ] && [ "$ext_state" != "ENABLED" ]; then
-            needs_restart=true
-        fi
-    done
+    local uuid="oxidemx-indicator@dev.juhlabs.com"
+    local ext_state
+    ext_state=$(gnome-extensions info "$uuid" 2>/dev/null | grep -oP '(?<=State: )\S+' || true)
+    if [ "$ext_state" != "ACTIVE" ] && [ "$ext_state" != "ENABLED" ]; then
+        needs_restart=true
+    fi
 
     if [ "$needs_restart" = true ]; then
-        log_warning "Log out and back in for the extensions to load (Wayland requires session restart)."
+        log_warning "Log out and back in for the extension to load (Wayland requires session restart)."
     else
-        log_success "Both extensions active — no restart needed."
+        log_success "Extension active — no restart needed."
     fi
 }
 
@@ -1341,9 +1323,9 @@ print_success() {
     echo -e "  ${GREEN}${BOLD}╭──────────────────────────────────────────╮${RESET}"
     echo -e "  ${GREEN}${BOLD}│                                          │${RESET}"
     if [ "$INSTALL_MODE" = "upgrade" ]; then
-        echo -e "  ${GREEN}${BOLD}│   ✓  JuhRadial MX updated!               │${RESET}"
+        echo -e "  ${GREEN}${BOLD}│   ✓  OxideMX MX updated!               │${RESET}"
     else
-        echo -e "  ${GREEN}${BOLD}│   ✓  JuhRadial MX installed!             │${RESET}"
+        echo -e "  ${GREEN}${BOLD}│   ✓  OxideMX MX installed!             │${RESET}"
     fi
     echo -e "  ${GREEN}${BOLD}│                                          │${RESET}"
     echo -e "  ${GREEN}${BOLD}╰──────────────────────────────────────────╯${RESET}"
@@ -1351,18 +1333,18 @@ print_success() {
     echo ""
     echo -e "  ${BOLD}Getting started${RESET}"
     echo -e "  ${GRAY}$(printf '%.0s─' {1..48})${RESET}"
-    echo -e "  ${WHITE}1.${RESET}  Run ${CYAN}juhradial-mx${RESET} or find it in your app menu"
+    echo -e "  ${WHITE}1.${RESET}  Run ${CYAN}oxidemx${RESET} or find it in your app menu"
     echo -e "  ${WHITE}2.${RESET}  Hold the ${BOLD}thumb button${RESET} on your MX Master"
     echo -e "  ${WHITE}3.${RESET}  Right-click the tray icon for ${BOLD}Settings${RESET}"
     echo ""
     echo -e "  ${BOLD}Useful commands${RESET}"
     echo -e "  ${GRAY}$(printf '%.0s─' {1..48})${RESET}"
-    echo -e "  ${DIM}Status${RESET}   systemctl --user status juhradialmx-daemon"
-    echo -e "  ${DIM}Logs${RESET}     journalctl --user -u juhradialmx-daemon -f"
+    echo -e "  ${DIM}Status${RESET}   systemctl --user status oxidemx-daemon"
+    echo -e "  ${DIM}Logs${RESET}     journalctl --user -u oxidemx-daemon -f"
     echo ""
-    echo -e "  ${GRAY}github.com/JuhLabs/juhradial-mx${RESET}"
+    echo -e "  ${GRAY}github.com/JuhLabs/oxidemx${RESET}"
     echo ""
-    echo -e "  ${CYAN}Enjoying JuhRadial MX?${RESET} Leave a ${YELLOW}★${RESET} on GitHub!"
+    echo -e "  ${CYAN}Enjoying OxideMX MX?${RESET} Leave a ${YELLOW}★${RESET} on GitHub!"
     echo -e "  ${DIM}Found a bug? Open an issue - we'd love to hear from you.${RESET}"
     echo ""
 

@@ -2,8 +2,8 @@
 //! highlight intensity).
 
 use crate::{FontChoice, Message, State, VisualField};
-use juhradial_widgets::style;
-use juhradial_widgets::widgets::{labeled_int_slider, labeled_slider};
+use oxidemx_widgets::style;
+use oxidemx_widgets::widgets::{labeled_int_slider, labeled_slider};
 use iced::widget::{
     button, column, combo_box, container, pick_list, row, text, text_input, toggler, Space,
 };
@@ -283,8 +283,8 @@ fn gpu_shaders_card(state: &State) -> Element<'_, Message> {
 /// it gets its own row builder rather than the generic
 /// `shader_slider_row` helper used by single-knob effects.
 fn dispatch_burst_row<'a>(
-    pal: &'a juhradial_widgets::palette::Palette,
-    v: &'a juhradial_shared::VisualSettings,
+    pal: &'a oxidemx_widgets::palette::Palette,
+    v: &'a oxidemx_shared::VisualSettings,
 ) -> Element<'a, Message> {
     let intensity = labeled_slider(
         "Intensity",
@@ -337,8 +337,8 @@ fn dispatch_burst_row<'a>(
 /// sheen?" and "how often does it pass?" — combining them into one
 /// slider would conflate two perceptually independent dimensions.
 fn specular_sweep_row<'a>(
-    pal: &'a juhradial_widgets::palette::Palette,
-    v: &'a juhradial_shared::VisualSettings,
+    pal: &'a oxidemx_widgets::palette::Palette,
+    v: &'a oxidemx_shared::VisualSettings,
 ) -> Element<'a, Message> {
     let intensity = labeled_slider(
         "Intensity",
@@ -408,8 +408,8 @@ fn light_angle_label(rad: f32) -> &'static str {
 /// specular-sharpness knobs. Pure presentation; the apply path is
 /// shared with every other shader in the card via `SetVisual`.
 fn hover_tilt_row<'a>(
-    pal: &'a juhradial_widgets::palette::Palette,
-    v: &'a juhradial_shared::VisualSettings,
+    pal: &'a oxidemx_widgets::palette::Palette,
+    v: &'a oxidemx_shared::VisualSettings,
 ) -> Element<'a, Message> {
     let intensity = labeled_slider(
         "Intensity",
@@ -459,11 +459,11 @@ fn hover_tilt_row<'a>(
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct DispatchBurstStyleOption(juhradial_shared::DispatchBurstStyle);
+struct DispatchBurstStyleOption(oxidemx_shared::DispatchBurstStyle);
 
 impl std::fmt::Display for DispatchBurstStyleOption {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        use juhradial_shared::DispatchBurstStyle as S;
+        use oxidemx_shared::DispatchBurstStyle as S;
         f.write_str(match self.0 {
             S::Sparks => "Sparks (fan outward)",
             S::Shockwave => "Shockwave (rings cascade)",
@@ -473,9 +473,9 @@ impl std::fmt::Display for DispatchBurstStyleOption {
 }
 
 const DISPATCH_BURST_STYLE_OPTIONS: [DispatchBurstStyleOption; 3] = [
-    DispatchBurstStyleOption(juhradial_shared::DispatchBurstStyle::Sparks),
-    DispatchBurstStyleOption(juhradial_shared::DispatchBurstStyle::Shockwave),
-    DispatchBurstStyleOption(juhradial_shared::DispatchBurstStyle::Glow),
+    DispatchBurstStyleOption(oxidemx_shared::DispatchBurstStyle::Sparks),
+    DispatchBurstStyleOption(oxidemx_shared::DispatchBurstStyle::Shockwave),
+    DispatchBurstStyleOption(oxidemx_shared::DispatchBurstStyle::Glow),
 ];
 
 /// Generic 0..=1 intensity row for one shader effect. Combines
@@ -483,7 +483,7 @@ const DISPATCH_BURST_STYLE_OPTIONS: [DispatchBurstStyleOption; 3] = [
 /// percentage above. Reduces boilerplate in the GPU-shaders
 /// card and keeps the visual rhythm consistent across effects.
 fn shader_slider_row<'a>(
-    pal: &'a juhradial_widgets::palette::Palette,
+    pal: &'a oxidemx_widgets::palette::Palette,
     title: &'a str,
     description: &'a str,
     value: f32,
@@ -818,7 +818,7 @@ impl std::fmt::Display for PaletteKeyOption {
 }
 
 fn palette_color_picker<'a>(
-    pal: &'a juhradial_widgets::palette::Palette,
+    pal: &'a oxidemx_widgets::palette::Palette,
     label: &'a str,
     current: &str,
     keys: &'static [&'static str],

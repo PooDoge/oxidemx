@@ -14,7 +14,7 @@
 //! lives on `Tab::Menu`.
 
 use crate::mouse_callouts::mouse_widget;
-use juhradial_widgets::widgets::section_header;
+use oxidemx_widgets::widgets::section_header;
 use crate::{style, Message, State};
 use iced::widget::{column, container, pick_list, row, text, Space};
 use iced::{Alignment, Element, Length};
@@ -26,7 +26,7 @@ pub fn view(state: &State) -> Element<'_, Message> {
     let pal = &state.palette;
 
     let mut button_col = column![].spacing(4);
-    for mb in juhradial_shared::MouseButton::all() {
+    for mb in oxidemx_shared::MouseButton::all() {
         button_col = button_col.push(button_assignment_row(state, *mb));
     }
 
@@ -80,12 +80,12 @@ fn locate_mouse_image() -> PathBuf {
 
 fn button_assignment_row(
     state: &State,
-    mb: juhradial_shared::MouseButton,
+    mb: oxidemx_shared::MouseButton,
 ) -> Element<'_, Message> {
     let pal = &state.palette;
     let current = mb.get(&state.config.buttons);
 
-    let options: Vec<ActionOption> = juhradial_shared::ButtonAction::all()
+    let options: Vec<ActionOption> = oxidemx_shared::ButtonAction::all()
         .iter()
         .map(|a| ActionOption(*a))
         .collect();
@@ -114,7 +114,7 @@ fn button_assignment_row(
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct ActionOption(juhradial_shared::ButtonAction);
+struct ActionOption(oxidemx_shared::ButtonAction);
 
 impl std::fmt::Display for ActionOption {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

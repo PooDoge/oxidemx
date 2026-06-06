@@ -200,8 +200,8 @@ fn get_cursor_via_kwin_script() -> Option<CursorPosition> {
     // Create KWin script that calls our D-Bus method with cursor position
     let script = r#"
 var pos = workspace.cursorPos;
-callDBus("org.juhradial.Daemon", "/org/juhradial/Daemon",
-         "org.juhradial.Daemon", "ReportCursorPosition",
+callDBus("org.oxidemx.Daemon", "/org/oxidemx/Daemon",
+         "org.oxidemx.Daemon", "ReportCursorPosition",
          pos.x, pos.y);
 "#;
 
@@ -288,7 +288,7 @@ fn get_cursor_via_kwin_dbus() -> Option<CursorPosition> {
 
 /// Query cursor position via GNOME Shell extension D-Bus
 ///
-/// Uses the JuhRadial Cursor Helper GNOME Shell extension which exposes
+/// Uses the OxideMX Cursor Helper GNOME Shell extension which exposes
 /// `global.get_pointer()` over D-Bus. Only attempted when running on GNOME.
 fn get_cursor_via_gnome_shell() -> Option<CursorPosition> {
     // Only try on GNOME desktops
@@ -301,9 +301,9 @@ fn get_cursor_via_gnome_shell() -> Option<CursorPosition> {
         .args([
             "--session",
             "--print-reply",
-            "--dest=org.juhradial.CursorHelper",
-            "/org/juhradial/CursorHelper",
-            "org.juhradial.CursorHelper.GetCursorPosition",
+            "--dest=org.oxidemx.CursorHelper",
+            "/org/oxidemx/CursorHelper",
+            "org.oxidemx.CursorHelper.GetCursorPosition",
         ])
         .output()
         .ok()?;

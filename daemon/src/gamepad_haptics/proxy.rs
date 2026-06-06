@@ -20,7 +20,7 @@
 //! passthrough, and the hard-hide udev rule are later refinements.
 
 use evdev::{AbsoluteAxisCode, Device, KeyCode};
-use juhradial_shared::HapticRedirectConfig;
+use oxidemx_shared::HapticRedirectConfig;
 
 /// Discover a real gamepad to proxy, open it, and grab it
 /// exclusively with `EVIOCGRAB`.
@@ -112,13 +112,13 @@ mod tests {
     /// briefly steals it from the desktop. Run with:
     ///
     /// ```text
-    /// cargo test -p juhradiald --lib -- --ignored --nocapture proxy_discovery
+    /// cargo test -p oxidemxd --lib -- --ignored --nocapture proxy_discovery
     /// ```
     #[test]
     #[ignore = "scans /dev/input and briefly grabs any real controller"]
     fn proxy_discovery_smoke() {
         use super::discover_controller;
-        use juhradial_shared::HapticRedirectConfig;
+        use oxidemx_shared::HapticRedirectConfig;
 
         match discover_controller(&HapticRedirectConfig::default()) {
             Some(device) => {

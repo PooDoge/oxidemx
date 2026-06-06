@@ -10,7 +10,7 @@ Place device images here for the settings dashboard.
 
 ### Installation Path
 When installed, these files should be placed at:
-- `/usr/share/juhradialmx/devices/mx_master_4.png`
+- `/usr/share/oxidemx/devices/mx_master_4.png`
 
 ### Image Requirements
 - Format: PNG with transparency

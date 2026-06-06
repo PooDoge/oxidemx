@@ -20,11 +20,11 @@
 //! See memory entry `project_track_animation_system` for the data
 //! model and what's wired in the renderer.
 
-use juhradial_widgets::widgets::{labeled_int_slider, labeled_slider};
+use oxidemx_widgets::widgets::{labeled_int_slider, labeled_slider};
 use crate::{style, Message, State};
 use iced::widget::{button, column, container, pick_list, row, rule, text, Space};
 use iced::{Alignment, Element, Length};
-use juhradial_shared::{
+use oxidemx_shared::{
     AnimationTrack, Axis, Easing, ElementAnimation, TrackKind,
 };
 

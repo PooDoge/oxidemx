@@ -13,3 +13,4 @@ __pycache__/
 # Bazzite-PR-branch-only working-tree files (carried by stash, not for rewrite branch)
 /CONTRIBUTING-BAZZITE-PR.md
 /local-test-install.sh
+docs/iced-reference/

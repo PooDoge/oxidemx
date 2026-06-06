@@ -1,6 +1,6 @@
 ---
 name: Bug Report
-about: Report a bug to help us improve JuhRadial MX
+about: Report a bug to help us improve OxideMX MX
 title: '[BUG] '
 labels: bug
 assignees: ''
@@ -28,7 +28,7 @@ If applicable, add screenshots or log output to help explain your problem.
 <summary>Daemon logs (click to expand)</summary>
 
 ```
-Paste output of: journalctl --user -u juhradialmx-daemon -n 50
+Paste output of: journalctl --user -u oxidemx-daemon -n 50
 ```
 
 </details>
@@ -39,7 +39,7 @@ Paste output of: journalctl --user -u juhradialmx-daemon -n 50
 - **Desktop Environment**: [e.g., KDE Plasma 6.2]
 - **Display Server**: [Wayland / X11]
 - **Mouse Model**: [e.g., MX Master 4, MX Master 3S]
-- **JuhRadial MX Version**: [e.g., 1.0.0]
+- **OxideMX MX Version**: [e.g., 1.0.0]
 - **Installation Method**: [Flatpak / RPM / AUR / Source]
 
 ## Additional Context

@@ -198,10 +198,10 @@ mod tests {
     /// End-to-end check: actually create the kernel device and read
     /// its capabilities back. Ignored by default because it needs
     /// write access to `/dev/uinput` — run as root, or after
-    /// installing `packaging/udev/70-juhradial-haptic-pad.rules`:
+    /// installing `packaging/udev/70-oxidemx-haptic-pad.rules`:
     ///
     /// ```text
-    /// cargo test -p juhradiald --lib -- --ignored virtual_pad
+    /// cargo test -p oxidemxd --lib -- --ignored virtual_pad
     /// ```
     ///
     /// This is the programmatic form of the Phase 3 gate ("evtest
@@ -245,7 +245,7 @@ mod tests {
                 eprintln!(
                     "virtual pad created at {} — skipping capability read-back: \
                      no access to the node. Install \
-                     packaging/udev/70-juhradial-haptic-pad.rules to grant it.\n\
+                     packaging/udev/70-oxidemx-haptic-pad.rules to grant it.\n\
                      node ACL:\n{facl}",
                     node.display()
                 );

@@ -1,11 +1,11 @@
-//! JuhRadial MX settings GUI.
+//! OxideMX MX settings GUI.
 //!
-//! Layout mirrors the legacy juhradial settings dialog: a left
+//! Layout mirrors the legacy oxidemx settings dialog: a left
 //! sidebar with the 9 top-level sections (Buttons by default), a
 //! header, the section's main + side content in the middle, and a
 //! footer with credits + exit. The on-disk channel to the live
 //! overlay is unchanged — every edit is debounced + atomic-written
-//! back to `~/.config/juhradial/config.json` and the overlay's
+//! back to `~/.config/oxidemx/config.json` and the overlay's
 //! existing inotify watcher previews changes within ~150 ms.
 
 mod tabs {
@@ -43,11 +43,11 @@ mod singleton;
 
 use iced::widget::{button, column, container, row, rule, scrollable, text, Space};
 use iced::{Element, Length, Subscription, Task};
-use juhradial_shared::{
+use oxidemx_shared::{
     AnimationConfig, AppConfig, ElementAnimation, HapticEventMode, HapticRedirectCurve,
     HapticRedirectMode, TransitionConfig, VisualSettings,
 };
-use juhradial_widgets::{palette, style};
+use oxidemx_widgets::{palette, style};
 use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 use tracing::{info, warn};
@@ -272,9 +272,9 @@ pub enum Message {
     /// Replace the page-cycle transition config (Animation tab,
     /// Page-transition card). Carries the full block so the picker
     /// + sliders can each just clone-mutate-emit.
-    SetPageTransition(juhradial_shared::PageTransitionConfig),
+    SetPageTransition(oxidemx_shared::PageTransitionConfig),
     /// Pick the dispatch-burst shader style (Sparks / Shockwave / Glow).
-    SetDispatchBurstStyle(juhradial_shared::DispatchBurstStyle),
+    SetDispatchBurstStyle(oxidemx_shared::DispatchBurstStyle),
     /// Reset the page-cycle transition to its default (spin +
     /// crossfade, 220 ms, ease-out, 22.5° rotation).
     ResetPageTransition,
@@ -301,13 +301,13 @@ pub enum Message {
     /// if the file loaded + parsed (errors are non-fatal issues
     /// from individual macro/theme writes), `Err(message)` on
     /// read/parse failure or cancellation.
-    ConfigImported(Result<(Box<juhradial_shared::AppConfig>, Vec<String>), String>),
+    ConfigImported(Result<(Box<oxidemx_shared::AppConfig>, Vec<String>), String>),
     /// Open the config directory in the user's file manager via
     /// `xdg-open`. Spawned detached so the settings UI doesn't
     /// block on the file manager's startup.
     OpenConfigFolder,
     /// Import a theme JSON from disk. Picks a file, parses it as
-    /// `Theme`, saves under `~/.local/share/juhradial/themes/`
+    /// `Theme`, saves under `~/.local/share/oxidemx/themes/`
     /// using a slug derived from the file's stem, and switches
     /// the picker to it.
     ImportTheme,
@@ -365,7 +365,7 @@ pub enum Message {
     SetEasySwitchShortcuts(bool),
     /// Quit the settings window.
     Exit,
-    /// Another `juhradial-settings` invocation called Focus on us
+    /// Another `oxidemx-settings` invocation called Focus on us
     /// via D-Bus; raise + focus the window.
     Focus,
     /// Debounced save tick — fires every 200 ms; if there's an
@@ -388,7 +388,7 @@ pub enum Message {
     MoveSliceDown(usize),
     SetSliceLabel(usize, String),
     SetSliceCommand(usize, String),
-    SetSliceKind(usize, juhradial_shared::ActionKind),
+    SetSliceKind(usize, oxidemx_shared::ActionKind),
     SetSliceColor(usize, String),
     /// Set the icon name (freedesktop symbolic name, an absolute
     /// path to an SVG/PNG, or the legacy internal id) for a slice
@@ -403,13 +403,13 @@ pub enum Message {
     /// predicate (slice is always visible). `Some(Always)` is
     /// equivalent at runtime; we write the slimmer `None` shape on
     /// disk for that case.
-    SetSliceVisibility { slice: usize, condition: Option<juhradial_shared::Condition> },
+    SetSliceVisibility { slice: usize, condition: Option<oxidemx_shared::Condition> },
     /// Sub-item analogue of `SetSliceVisibility`. Same shape, just
     /// addressed under a parent slice's submenu.
     SetSubItemVisibility {
         parent: usize,
         idx: usize,
-        condition: Option<juhradial_shared::Condition>,
+        condition: Option<oxidemx_shared::Condition>,
     },
     /// Spawn the slice's command via `sh -c` so the user can
     /// validate shell quoting + that the command actually launches
@@ -447,7 +447,7 @@ pub enum Message {
     SetScrollMode(String),
 
     // --- Mouse-button assignments (Buttons tab) ---
-    SetButtonAssignment(juhradial_shared::MouseButton, juhradial_shared::ButtonAction),
+    SetButtonAssignment(oxidemx_shared::MouseButton, oxidemx_shared::ButtonAction),
 
     // --- Battery (UPower poll) ---
     /// Periodic tick — kicks off a UPower probe.
@@ -468,7 +468,7 @@ pub enum Message {
     MacroExported(Result<String, String>),
     /// Import one macro JSON from disk. File stem becomes the
     /// new macro id, body is written verbatim under
-    /// `~/.config/juhradial/macros/{stem}.json`. Existing macros
+    /// `~/.config/oxidemx/macros/{stem}.json`. Existing macros
     /// with the same id are overwritten.
     ImportMacro,
     /// Result of `ImportMacro` — `Ok(id)` (so we can refresh +
@@ -763,12 +763,12 @@ pub enum Message {
     /// the icon resolved, `None` when it didn't (theme miss). The
     /// handler installs every Some into the iced_handles cache,
     /// then the next render finds them all in one go.
-    IconsPrewarmed(Vec<(String, Option<juhradial_icons::RasterIcon>)>),
+    IconsPrewarmed(Vec<(String, Option<oxidemx_icons::RasterIcon>)>),
     /// Result of the untinted (apps-source) prewarm pass — same
     /// shape as `IconsPrewarmed` but the install path uses the
     /// `peek/install_icon_handle_untinted` cache key (color = 0)
     /// so app icons retain their brand colours in the picker.
-    AppIconsPrewarmed(Vec<(String, Option<juhradial_icons::RasterIcon>)>),
+    AppIconsPrewarmed(Vec<(String, Option<oxidemx_icons::RasterIcon>)>),
 
     // --- Submenu sub-items (slice editor) ---
     AddSubItem(usize),
@@ -779,16 +779,16 @@ pub enum Message {
     /// Icon name / path for a submenu sub-item.
     SetSubItemIcon(usize, usize, String),
     /// Action kind (Exec / Macro / EasySwitch / etc.) for a sub-item.
-    SetSubItemKind(usize, usize, juhradial_shared::ActionKind),
+    SetSubItemKind(usize, usize, oxidemx_shared::ActionKind),
     MoveSubItemUp(usize, usize),
     MoveSubItemDown(usize, usize),
 
     // ============================================================================
     // Indicator Popup
     // ============================================================================
-    SetPopupMode(juhradial_shared::PopupMode),
+    SetPopupMode(oxidemx_shared::PopupMode),
     SetPopupShowHostButtons(bool),
-    SetPopupHostLabelStyle(juhradial_shared::HostLabelStyle),
+    SetPopupHostLabelStyle(oxidemx_shared::HostLabelStyle),
     PopupToggleMoveUp(String),
     PopupToggleMoveDown(String),
     PopupToggleRemove(String),
@@ -990,7 +990,7 @@ pub struct State {
     /// reporting on Bluetooth/HID is often wrong, ours via
     /// HID++ is canonical).
     pub battery_daemon_at: Option<std::time::Instant>,
-    /// Cached list of macros in `~/.config/juhradial/macros/`.
+    /// Cached list of macros in `~/.config/oxidemx/macros/`.
     /// Refreshed on tab switch + user-triggered Refresh.
     pub macros: Vec<tabs::macros::MacroSummary>,
     /// Latest snapshot from the daemon — battery, device name,
@@ -1033,7 +1033,7 @@ pub struct State {
     pub icon_picker: Option<icon_picker::IconPickerState>,
     /// Most-recently-used icon names. Front of the list is the
     /// last-picked icon. Persisted to
-    /// `~/.config/juhradial/recent-icons.json` after each pick;
+    /// `~/.config/oxidemx/recent-icons.json` after each pick;
     /// surfaces as a row at the top of the icon picker so common
     /// choices are one click away.
     pub recent_icons: Vec<String>,
@@ -1042,7 +1042,7 @@ pub struct State {
     /// user can pick an icon by app rather than by symbolic name.
     /// Loaded once at startup; static enough to skip live
     /// reloading.
-    pub installed_apps: Vec<juhradial_shared::DesktopEntry>,
+    pub installed_apps: Vec<oxidemx_shared::DesktopEntry>,
     /// In-flight app picker for the slice command field. `Some`
     /// while the inline list is open; `None` when closed. Picker
     /// fills the slice's command + icon + label-if-empty + flips
@@ -1072,7 +1072,7 @@ pub struct State {
     /// at State level so it persists across re-renders and across
     /// theme changes (colours change → new cache entries; old
     /// entries stay for free).
-    pub icons: std::rc::Rc<juhradial_icons::IconCache>,
+    pub icons: std::rc::Rc<oxidemx_icons::IconCache>,
     /// Iced-Handle cache layered on top — saves the GPU-upload step
     /// every render, keyed by (source, size, colour).
     pub iced_handles: std::rc::Rc<
@@ -1086,7 +1086,7 @@ pub struct State {
 
 impl Default for State {
     fn default() -> Self {
-        let path = juhradial_shared::config::default_config_path();
+        let path = oxidemx_shared::config::default_config_path();
         let mut config = path
             .as_ref()
             .and_then(|p| AppConfig::load_from(p).ok())
@@ -1115,7 +1115,7 @@ impl Default for State {
             status_set_at: None,
             reset_armed_at: None,
             selected_slice: None,
-            icons: std::rc::Rc::new(juhradial_icons::IconCache::new()),
+            icons: std::rc::Rc::new(oxidemx_icons::IconCache::new()),
             iced_handles: std::rc::Rc::new(std::cell::RefCell::new(
                 std::collections::HashMap::new(),
             )),
@@ -1132,7 +1132,7 @@ impl Default for State {
             detect_in_flight: None,
             icon_picker: None,
             recent_icons: recents::load(),
-            installed_apps: juhradial_shared::enumerate_applications(),
+            installed_apps: oxidemx_shared::enumerate_applications(),
             app_command_picker: None,
             animation_editor: None,
             capturing_shortcut: None,
@@ -1261,13 +1261,13 @@ impl std::fmt::Display for FontChoice {
 pub struct ThemeEditor {
     /// Working palette — starts as a clone of the active theme's
     /// colours and accumulates the user's edits. Saved on click.
-    pub working: juhradial_shared::theme::ThemeColors,
+    pub working: oxidemx_shared::theme::ThemeColors,
     /// Pristine snapshot taken when the editor was opened. Used by
     /// the Revert button to restore the user's edits to where they
     /// started without having to close and re-open the customiser
     /// (which would also drop their typed slug and any other UI
     /// state). Never mutated.
-    pub original: juhradial_shared::theme::ThemeColors,
+    pub original: oxidemx_shared::theme::ThemeColors,
     /// is_dark flag for the working theme. Mirrors the theme this
     /// was forked from.
     pub is_dark: bool,
@@ -1285,7 +1285,7 @@ pub struct ThemeEditor {
 /// field on a `ThemeColors`. Unknown field name → no-op. Used by
 /// the custom-palette editor to thread one Message back into the
 /// working struct.
-fn set_theme_color_field(c: &mut juhradial_shared::theme::ThemeColors, field: &str, value: String) {
+fn set_theme_color_field(c: &mut oxidemx_shared::theme::ThemeColors, field: &str, value: String) {
     match field {
         "crust" => c.crust = value,
         "mantle" => c.mantle = value,
@@ -1318,7 +1318,7 @@ fn set_theme_color_field(c: &mut juhradial_shared::theme::ThemeColors, field: &s
 /// Read a named palette field as its current hex string. Returns
 /// the empty string for unknown fields. Used by the inline colour
 /// picker to seed its R/G/B sliders from the existing value.
-fn theme_field_value(c: &juhradial_shared::theme::ThemeColors, field: &str) -> String {
+fn theme_field_value(c: &oxidemx_shared::theme::ThemeColors, field: &str) -> String {
     match field {
         "crust" => c.crust.clone(),
         "mantle" => c.mantle.clone(),
@@ -1376,7 +1376,7 @@ where
         (nb * 255.0).round().clamp(0.0, 255.0) as u8,
     );
     set_theme_color_field(&mut editor.working, field, hex);
-    let preview = juhradial_shared::theme::Theme {
+    let preview = oxidemx_shared::theme::Theme {
         name: "(custom)".into(),
         description: String::new(),
         is_dark: editor.is_dark,
@@ -1408,8 +1408,8 @@ pub fn parse_hex_channels(s: &str) -> (u8, u8, u8) {
 /// `daemon/src/actions.rs::execute_command`) so what tests here
 /// is what the daemon will run later. Status messages surface
 /// failures; the spawn itself is non-blocking.
-fn run_test_action(state: &mut State, slice: Option<&juhradial_shared::Slice>) {
-    use juhradial_shared::ActionKind;
+fn run_test_action(state: &mut State, slice: Option<&oxidemx_shared::Slice>) {
+    use oxidemx_shared::ActionKind;
     let slice = match slice {
         Some(s) => s,
         None => {
@@ -1543,7 +1543,7 @@ fn sanitize_slug(s: &str) -> String {
 /// "wheel mode picker" from "smartshift toggle"; the daemon
 /// expects a single 3-state mode string. This helper is the
 /// merge point.
-fn effective_wheel_mode(scroll: &juhradial_shared::ScrollConfig) -> &'static str {
+fn effective_wheel_mode(scroll: &oxidemx_shared::ScrollConfig) -> &'static str {
     match scroll.mode.as_str() {
         // "free" and "freespin" both → freespin (Python used
         // "freespin", early Rust wrote "free"; daemon accepts
@@ -1679,12 +1679,12 @@ impl State {
     /// page. Guarantees `pages` is non-empty + clamps
     /// `active_page` to a valid index — defensive against state
     /// arriving from a partially-migrated config.
-    fn active_slices_mut(&mut self) -> &mut Vec<juhradial_shared::Slice> {
+    fn active_slices_mut(&mut self) -> &mut Vec<oxidemx_shared::Slice> {
         if self.config.radial_menu.pages.is_empty() {
             self.config
                 .radial_menu
                 .pages
-                .push(juhradial_shared::RadialPage::default());
+                .push(oxidemx_shared::RadialPage::default());
         }
         let max = self.config.radial_menu.pages.len() - 1;
         if self.active_page > max {
@@ -1695,7 +1695,7 @@ impl State {
 
     /// Read-only counterpart for view code. Returns an empty slice
     /// rather than panicking when the index is stale.
-    fn active_slices(&self) -> &[juhradial_shared::Slice] {
+    fn active_slices(&self) -> &[oxidemx_shared::Slice] {
         self.config
             .radial_menu
             .pages
@@ -1924,7 +1924,7 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             Task::none()
         }
         Message::ResetTooltipStyle => {
-            let defaults = juhradial_shared::VisualSettings::default();
+            let defaults = oxidemx_shared::VisualSettings::default();
             let v = &mut state.config.radial_menu.visuals;
             v.tooltip_use_monospace = defaults.tooltip_use_monospace;
             v.tooltip_font_family = defaults.tooltip_font_family;
@@ -1949,7 +1949,7 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
         }
         Message::SetChainStagger(elem, ms) => {
             let anim = elem.get_mut(&mut state.config.radial_menu.animation);
-            anim.chain = Some(juhradial_shared::ChainConfig { stagger_ms: ms });
+            anim.chain = Some(oxidemx_shared::ChainConfig { stagger_ms: ms });
             state.touch();
             Task::none()
         }
@@ -1971,7 +1971,7 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
         }
         Message::ResetPageTransition => {
             state.config.radial_menu.animation.page_transition =
-                juhradial_shared::PageTransitionConfig::default();
+                oxidemx_shared::PageTransitionConfig::default();
             state.touch();
             Task::none()
         }
@@ -2030,7 +2030,7 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                         .map_err(|e| format!("serialise: {e}"))?;
                     let chosen = rfd::AsyncFileDialog::new()
                         .set_title("Export config")
-                        .set_file_name("juhradial-bundle.json")
+                        .set_file_name("oxidemx-bundle.json")
                         .add_filter("JSON", &["json"])
                         .save_file()
                         .await;
@@ -2070,7 +2070,7 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                 // effect of the bundle path.
                 let (mut cfg, errors) = bundle::parse_and_install(&bytes)?;
                 cfg.radial_menu.normalize_pages();
-                Ok::<(Box<juhradial_shared::AppConfig>, Vec<String>), String>(
+                Ok::<(Box<oxidemx_shared::AppConfig>, Vec<String>), String>(
                     (Box::new(cfg), errors),
                 )
             },
@@ -2117,8 +2117,8 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             // don't leak in. If the theme can't load (file went
             // missing under us) surface the error rather than
             // exporting bundled defaults silently.
-            let theme = match juhradial_shared::theme::Theme::load(
-                &juhradial_shared::theme::ThemeName::from(slug.as_str()),
+            let theme = match oxidemx_shared::theme::Theme::load(
+                &oxidemx_shared::theme::ThemeName::from(slug.as_str()),
             ) {
                 Some(t) => t,
                 None => {
@@ -2189,8 +2189,8 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                 // No change — silently close.
                 return Task::none();
             }
-            let theme = match juhradial_shared::theme::Theme::load(
-                &juhradial_shared::theme::ThemeName::from(rename.original.as_str()),
+            let theme = match oxidemx_shared::theme::Theme::load(
+                &oxidemx_shared::theme::ThemeName::from(rename.original.as_str()),
             ) {
                 Some(t) => t,
                 None => {
@@ -2206,17 +2206,17 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             // Save under new slug, then delete the old file. Doing
             // it in this order means a partial failure leaves both
             // copies on disk rather than losing the theme.
-            let _ = juhradial_shared::theme::save_user_theme(&new_slug, &theme)
+            let _ = oxidemx_shared::theme::save_user_theme(&new_slug, &theme)
                 .map_err(|e| {
                     state.status = format!("Rename save failed: {e}");
                 });
-            let _ = juhradial_shared::theme::delete_user_theme(&original)
+            let _ = oxidemx_shared::theme::delete_user_theme(&original)
                 .map_err(|e| {
                     state.status = format!("Rename cleanup failed: {e}");
                 });
             if was_active {
                 state.config.theme =
-                    juhradial_shared::theme::ThemeName::from(new_slug.as_str());
+                    oxidemx_shared::theme::ThemeName::from(new_slug.as_str());
                 state.palette = palette::Palette::resolve(&state.config.theme);
                 state.touch();
             }
@@ -2248,16 +2248,16 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                 }
                 let bytes = std::fs::read(handle.path())
                     .map_err(|e| format!("read: {e}"))?;
-                let theme: juhradial_shared::theme::Theme =
+                let theme: oxidemx_shared::theme::Theme =
                     serde_json::from_slice(&bytes).map_err(|e| format!("parse: {e}"))?;
-                juhradial_shared::theme::save_user_theme(&slug, &theme)
+                oxidemx_shared::theme::save_user_theme(&slug, &theme)
                     .map_err(|e| format!("save: {e}"))?;
                 Ok::<String, String>(slug)
             },
             Message::ThemeImported,
         ),
         Message::ThemeImported(Ok(slug)) => {
-            state.config.theme = juhradial_shared::theme::ThemeName::from(slug.as_str());
+            state.config.theme = oxidemx_shared::theme::ThemeName::from(slug.as_str());
             state.palette = palette::Palette::resolve(&state.config.theme);
             state.touch();
             state.status = format!("Imported theme \"{slug}\" and switched to it");
@@ -2272,7 +2272,7 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             Task::none()
         }
         Message::OpenConfigFolder => {
-            let path = juhradial_shared::config::default_config_path()
+            let path = oxidemx_shared::config::default_config_path()
                 .and_then(|p| p.parent().map(|q| q.to_path_buf()))
                 .unwrap_or_else(|| std::path::PathBuf::from("."));
             match std::process::Command::new("xdg-open")
@@ -2327,7 +2327,7 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                 state.config.radial_menu.animation = AnimationConfig::default();
                 state.config.radial_menu.visuals = VisualSettings::default();
                 state.config.haptics =
-                    juhradial_shared::haptics::HapticsConfig::default();
+                    oxidemx_shared::haptics::HapticsConfig::default();
                 state.reset_armed_at = None;
                 state.status =
                     "Reset complete — animation + visuals + haptics back to defaults"
@@ -2394,7 +2394,7 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             // Update both the persisted config and the in-memory
             // palette so the UI re-skins immediately. Auto-save
             // catches the config change.
-            state.config.theme = juhradial_shared::theme::ThemeName::from(name.as_str());
+            state.config.theme = oxidemx_shared::theme::ThemeName::from(name.as_str());
             state.palette = palette::Palette::resolve(&state.config.theme);
             state.touch();
             Task::none()
@@ -2402,10 +2402,10 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
         // --- Slices editor handlers (operate on the active page) ---
         Message::AddSlice => {
             let slices = state.active_slices_mut();
-            slices.push(juhradial_shared::Slice {
+            slices.push(oxidemx_shared::Slice {
                 action_id: None,
                 label: "New slice".into(),
-                kind: juhradial_shared::ActionKind::Exec,
+                kind: oxidemx_shared::ActionKind::Exec,
                 command: String::new(),
                 color: "accent".into(),
                 icon: String::new(),
@@ -2522,7 +2522,7 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                 // Collapse `Always` to None so the on-disk shape is
                 // minimal (Some(Always) and None evaluate the same).
                 s.visible_if = match condition {
-                    Some(juhradial_shared::Condition::Always) | None => None,
+                    Some(oxidemx_shared::Condition::Always) | None => None,
                     other => other,
                 };
                 state.touch();
@@ -2536,7 +2536,7 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                 .and_then(|p| p.submenu.get_mut(idx))
             {
                 item.visible_if = match condition {
-                    Some(juhradial_shared::Condition::Always) | None => None,
+                    Some(oxidemx_shared::Condition::Always) | None => None,
                     other => other,
                 };
                 state.touch();
@@ -2581,10 +2581,10 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             let slices = state.active_slices_mut();
             // Pad to N_SLICES so the user can drop into an empty slot.
             while slices.len() < 8.max(from + 1).max(to + 1) {
-                slices.push(juhradial_shared::Slice {
+                slices.push(oxidemx_shared::Slice {
                     action_id: None,
                     label: "(empty)".into(),
-                    kind: juhradial_shared::ActionKind::None,
+                    kind: oxidemx_shared::ActionKind::None,
                     command: String::new(),
                     color: "accent".into(),
                     icon: String::new(),
@@ -3248,7 +3248,7 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
         }
 
         Message::DeleteUserTheme(slug) => {
-            match juhradial_shared::theme::delete_user_theme(&slug) {
+            match oxidemx_shared::theme::delete_user_theme(&slug) {
                 Ok(()) => {
                     state.status = format!("Deleted theme \"{slug}\"");
                     // If the deleted theme was active, fall back to
@@ -3257,7 +3257,7 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                     // entry on next render.
                     if state.config.theme.as_str() == slug {
                         state.config.theme =
-                            juhradial_shared::theme::ThemeName::CatppuccinMocha;
+                            oxidemx_shared::theme::ThemeName::CatppuccinMocha;
                         state.palette = palette::Palette::resolve(&state.config.theme);
                         state.touch();
                     }
@@ -3273,10 +3273,10 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             state.theme_editor = match state.theme_editor.take() {
                 Some(_) => None,
                 None => {
-                    let active = juhradial_shared::theme::Theme::load(&state.config.theme)
+                    let active = oxidemx_shared::theme::Theme::load(&state.config.theme)
                         .unwrap_or_else(|| {
-                            juhradial_shared::theme::Theme::load(
-                                &juhradial_shared::theme::ThemeName::CatppuccinMocha,
+                            oxidemx_shared::theme::Theme::load(
+                                &oxidemx_shared::theme::ThemeName::CatppuccinMocha,
                             )
                             .expect("bundled mocha")
                         });
@@ -3294,7 +3294,7 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
         Message::RevertCustomTheme => {
             if let Some(editor) = state.theme_editor.as_mut() {
                 editor.working = editor.original.clone();
-                let preview = juhradial_shared::theme::Theme {
+                let preview = oxidemx_shared::theme::Theme {
                     name: "(custom)".into(),
                     description: String::new(),
                     is_dark: editor.is_dark,
@@ -3311,7 +3311,7 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             if let Some(editor) = state.theme_editor.as_mut() {
                 set_theme_color_field(&mut editor.working, &field, value);
                 // Live-preview the WIP palette on the running UI.
-                let preview = juhradial_shared::theme::Theme {
+                let preview = oxidemx_shared::theme::Theme {
                     name: "(custom)".into(),
                     description: String::new(),
                     is_dark: editor.is_dark,
@@ -3358,7 +3358,7 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                 }
                 let hex = format!("#{r:02x}{g:02x}{b:02x}");
                 set_theme_color_field(&mut editor.working, &field, hex);
-                let preview = juhradial_shared::theme::Theme {
+                let preview = oxidemx_shared::theme::Theme {
                     name: "(custom)".into(),
                     description: String::new(),
                     is_dark: editor.is_dark,
@@ -3384,7 +3384,7 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                     state.status = "Theme name required".into();
                     return Task::none();
                 }
-                let theme = juhradial_shared::theme::Theme {
+                let theme = oxidemx_shared::theme::Theme {
                     name: editor.slug.trim().to_string(),
                     description: "User-customised theme".into(),
                     is_dark: editor.is_dark,
@@ -3392,7 +3392,7 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                     radial_params: None,
                     colors: editor.working.clone(),
                 };
-                let result = juhradial_shared::theme::save_user_theme(&slug, &theme)
+                let result = oxidemx_shared::theme::save_user_theme(&slug, &theme)
                     .map(|_| slug)
                     .map_err(|e| e.to_string());
                 return Task::perform(async move { result }, Message::CustomThemeSaved);
@@ -3400,7 +3400,7 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             Task::none()
         }
         Message::CustomThemeSaved(Ok(slug)) => {
-            state.config.theme = juhradial_shared::theme::ThemeName::from(slug.as_str());
+            state.config.theme = oxidemx_shared::theme::ThemeName::from(slug.as_str());
             state.palette = palette::Palette::resolve(&state.config.theme);
             state.theme_editor = None;
             state.status = format!("Saved custom theme \"{slug}\"");
@@ -3425,10 +3425,10 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
         // --- Submenu sub-item editor (active page) ---
         Message::AddSubItem(parent) => {
             if let Some(slice) = state.active_slices_mut().get_mut(parent) {
-                slice.submenu.push(juhradial_shared::Slice {
+                slice.submenu.push(oxidemx_shared::Slice {
                     action_id: None,
                     label: "New item".into(),
-                    kind: juhradial_shared::ActionKind::Exec,
+                    kind: oxidemx_shared::ActionKind::Exec,
                     command: String::new(),
                     color: "accent".into(),
                     icon: String::new(),
@@ -3546,7 +3546,7 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             Task::none()
         }
         Message::AddPage => {
-            state.config.radial_menu.pages.push(juhradial_shared::RadialPage {
+            state.config.radial_menu.pages.push(oxidemx_shared::RadialPage {
                 name: format!("Page {}", state.config.radial_menu.pages.len() + 1),
                 slices: Vec::new(),
                 app_classes: Vec::new(),
@@ -3633,7 +3633,7 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
         }
         Message::DuplicatePage(idx) => {
             if let Some(src) = state.config.radial_menu.pages.get(idx).cloned() {
-                let copy = juhradial_shared::RadialPage {
+                let copy = oxidemx_shared::RadialPage {
                     name: format!("{} (copy)", src.name),
                     slices: src.slices,
                     // Clear app_classes on the copy: two pages
@@ -3739,7 +3739,7 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                             .into_iter()
                             .map(|name| {
                                 let icon =
-                                    juhradial_icons::rasterize_icon_untinted(&name, size);
+                                    oxidemx_icons::rasterize_icon_untinted(&name, size);
                                 (name, icon)
                             })
                             .collect::<Vec<_>>()
@@ -3774,8 +3774,8 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                 Some(e) => e.element,
                 None => return Task::none(),
             };
-            let new_track = juhradial_shared::AnimationTrack {
-                kind: juhradial_shared::TrackKind::default_for(kind_name),
+            let new_track = oxidemx_shared::AnimationTrack {
+                kind: oxidemx_shared::TrackKind::default_for(kind_name),
                 ..Default::default()
             };
             let anim = animation_editor::element_animation_mut(state, element);
@@ -3832,7 +3832,7 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                 animation_editor::AnimEditorDirection::Exit => &mut anim.exit,
             };
             if let Some(track) = cfg.custom_tracks.get_mut(idx) {
-                track.kind = juhradial_shared::TrackKind::default_for(kind_name);
+                track.kind = oxidemx_shared::TrackKind::default_for(kind_name);
             }
             state.touch();
             Task::none()
@@ -3866,23 +3866,23 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             if let Some(track) = cfg.custom_tracks.get_mut(idx) {
                 track.easing = match opt {
                     animation_editor::EasingPickOption::Linear =>
-                        juhradial_shared::Easing::Linear,
+                        oxidemx_shared::Easing::Linear,
                     animation_editor::EasingPickOption::EaseIn =>
-                        juhradial_shared::Easing::EaseIn,
+                        oxidemx_shared::Easing::EaseIn,
                     animation_editor::EasingPickOption::EaseOut =>
-                        juhradial_shared::Easing::EaseOut,
+                        oxidemx_shared::Easing::EaseOut,
                     animation_editor::EasingPickOption::EaseInOut =>
-                        juhradial_shared::Easing::EaseInOut,
+                        oxidemx_shared::Easing::EaseInOut,
                     animation_editor::EasingPickOption::Spring => {
                         // Preserve old stiffness/damping if already
                         // a spring; otherwise use Motion.dev "gentle"
                         // defaults.
-                        if let juhradial_shared::Easing::Spring { .. } =
+                        if let oxidemx_shared::Easing::Spring { .. } =
                             track.easing
                         {
                             track.easing
                         } else {
-                            juhradial_shared::Easing::Spring {
+                            oxidemx_shared::Easing::Spring {
                                 stiffness: 180.0,
                                 damping: 14.0,
                             }
@@ -3930,7 +3930,7 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                 app_picker::AppCommandTarget::Slice(idx) => {
                     if let Some(slice) = state.active_slices_mut().get_mut(idx) {
                         slice.command = command;
-                        slice.kind = juhradial_shared::ActionKind::Exec;
+                        slice.kind = oxidemx_shared::ActionKind::Exec;
                         if slice.label.trim().is_empty() {
                             slice.label = label;
                         }
@@ -3948,7 +3948,7 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                         .and_then(|p| p.submenu.get_mut(idx))
                     {
                         item.command = command;
-                        item.kind = juhradial_shared::ActionKind::Exec;
+                        item.kind = oxidemx_shared::ActionKind::Exec;
                         if item.label.trim().is_empty() {
                             item.label = label;
                         }
@@ -4030,7 +4030,7 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                                 pending
                                     .into_iter()
                                     .map(|name| {
-                                        let icon = juhradial_icons::rasterize_icon(&name, size, color);
+                                        let icon = oxidemx_icons::rasterize_icon(&name, size, color);
                                         (name, icon)
                                     })
                                     .collect::<Vec<_>>()
@@ -4090,7 +4090,7 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                                         // fine — the picker
                                         // shouldn't have many
                                         // symbolic-only apps.
-                                        let icon = juhradial_icons::rasterize_icon_untinted(
+                                        let icon = oxidemx_icons::rasterize_icon_untinted(
                                             &name, size,
                                         );
                                         (name, icon)
@@ -4291,27 +4291,27 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             Task::none()
         }
         Message::PopupToggleMoveUp(id) => {
-            let list = if state.config.popup.mode == juhradial_shared::PopupMode::Simple {
+            let list = if state.config.popup.mode == oxidemx_shared::PopupMode::Simple {
                 &mut state.config.popup.simple_toggles
             } else {
                 &mut state.config.popup.power_toggles
             };
-            juhradial_shared::PopupConfig::move_up(list, &id);
+            oxidemx_shared::PopupConfig::move_up(list, &id);
             state.touch();
             Task::none()
         }
         Message::PopupToggleMoveDown(id) => {
-            let list = if state.config.popup.mode == juhradial_shared::PopupMode::Simple {
+            let list = if state.config.popup.mode == oxidemx_shared::PopupMode::Simple {
                 &mut state.config.popup.simple_toggles
             } else {
                 &mut state.config.popup.power_toggles
             };
-            juhradial_shared::PopupConfig::move_down(list, &id);
+            oxidemx_shared::PopupConfig::move_down(list, &id);
             state.touch();
             Task::none()
         }
         Message::PopupToggleRemove(id) => {
-            let list = if state.config.popup.mode == juhradial_shared::PopupMode::Simple {
+            let list = if state.config.popup.mode == oxidemx_shared::PopupMode::Simple {
                 &mut state.config.popup.simple_toggles
             } else {
                 &mut state.config.popup.power_toggles
@@ -4321,11 +4321,11 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             Task::none()
         }
         Message::PopupToggleAdd(id) => {
-            if !juhradial_shared::QUICK_TOGGLE_CATALOG.iter().any(|q| q.id == id) {
+            if !oxidemx_shared::QUICK_TOGGLE_CATALOG.iter().any(|q| q.id == id) {
                 warn!("PopupToggleAdd: unknown id {id:?} — not in QUICK_TOGGLE_CATALOG");
                 return Task::none();
             }
-            let list = if state.config.popup.mode == juhradial_shared::PopupMode::Simple {
+            let list = if state.config.popup.mode == oxidemx_shared::PopupMode::Simple {
                 &mut state.config.popup.simple_toggles
             } else {
                 &mut state.config.popup.power_toggles
@@ -4337,7 +4337,7 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             Task::none()
         }
         Message::PopupSliderMoveUp(id) => {
-            juhradial_shared::PopupConfig::move_up(
+            oxidemx_shared::PopupConfig::move_up(
                 &mut state.config.popup.power_sliders,
                 &id,
             );
@@ -4345,7 +4345,7 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             Task::none()
         }
         Message::PopupSliderMoveDown(id) => {
-            juhradial_shared::PopupConfig::move_down(
+            oxidemx_shared::PopupConfig::move_down(
                 &mut state.config.popup.power_sliders,
                 &id,
             );
@@ -4358,7 +4358,7 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             Task::none()
         }
         Message::PopupSliderAdd(id) => {
-            if !juhradial_shared::QUICK_SLIDER_CATALOG.iter().any(|q| q.id == id) {
+            if !oxidemx_shared::QUICK_SLIDER_CATALOG.iter().any(|q| q.id == id) {
                 warn!("PopupSliderAdd: unknown id {id:?} — not in QUICK_SLIDER_CATALOG");
                 return Task::none();
             }
@@ -4506,7 +4506,7 @@ fn header_view(state: &State) -> Element<'_, Message> {
     let pal = &state.palette;
     container(
         row![
-            text("JuhRadial").size(20),
+            text("OxideMX").size(20),
             text("MX").size(13).style(style::text_accent(pal)),
             text("MOUSE CONFIGURATION")
                 .size(10)
@@ -4730,7 +4730,7 @@ fn subscription(state: &State) -> Subscription<Message> {
     }
     if FOCUS_RX.get().is_some() {
         // The singleton handshake gave us a receiver — wire it in
-        // so subsequent `juhradial-settings` invocations call
+        // so subsequent `oxidemx-settings` invocations call
         // `Focus` on us and the running window pops to the front.
         // iced::Subscription::run takes a fn() pointer (no
         // captures), so the stream builder reads the receiver out
@@ -4877,10 +4877,10 @@ fn main() -> iced::Result {
 
     let mut window = iced::window::Settings::default();
     window.size = iced::Size::new(1280.0, 820.0);
-    window.platform_specific.application_id = "org.juhradial.settings".into();
+    window.platform_specific.application_id = "org.oxidemx.settings".into();
 
     iced::application(boot, update, view)
-        .title("JuhRadial Settings")
+        .title("OxideMX Settings")
         .window(window)
         .theme(|state: &State| {
             // Build an iced custom theme from our app palette so
@@ -4896,7 +4896,7 @@ fn main() -> iced::Result {
             // the accent and surface colour from this theme.
             let pal = &state.palette;
             iced::Theme::custom(
-                if pal.is_dark { "JuhRadial Dark" } else { "JuhRadial Light" },
+                if pal.is_dark { "OxideMX Dark" } else { "OxideMX Light" },
                 iced::theme::Palette {
                     background: pal.base,
                     text: pal.text,

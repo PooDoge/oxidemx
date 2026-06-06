@@ -20,7 +20,7 @@ The pivot:
 
 * Drop gtk4-rs + gtk4-layer-shell + cairo-rs + gdk-pixbuf + pango.
 * Adopt **iced 0.14** (MIT, pure Rust, Canvas widget, winit-backed).
-* Solve positioning by extending the existing `juhradial-cursor`
+* Solve positioning by extending the existing `oxidemx-cursor`
   GNOME shell extension with a `MoveOverlay(app_id, x, y, monitor)`
   D-Bus method. The extension runs *inside* Mutter and can call
   `Meta.Window.move_frame()` directly, bypassing the protocol-level
@@ -42,7 +42,7 @@ fully ported.
 
 What carries over unchanged from the gtk4 design:
 
-* The `juhradial-shared` crate (config, themes, profiles,
+* The `oxidemx-shared` crate (config, themes, profiles,
   conditions, app launcher) is UI-toolkit-agnostic.
 * Slice math (geometry, hit-test, easing curves) is unchanged —
   cairo's `move_to` / `line_to` / `arc` map line-by-line to
@@ -92,7 +92,7 @@ implementation details appear.
 - GTK4 is already a dependency in the daemon's package list (`gtk4`,
   `gtk4-layer-shell`, `libadwaita`), so there's no new system requirement.
 - Rust + GTK4 (`gtk4-rs`) is mature, has good async/glib integration, and lets
-  us share types with the daemon via a small `juhradial-shared` crate.
+  us share types with the daemon via a small `oxidemx-shared` crate.
 - Cairo (which GTK4 uses) is a great fit for the existing hand-drawn radial
   style — most of `overlay_painting.py` translates more or less line-by-line.
 
@@ -108,7 +108,7 @@ Alternatives considered and rejected:
 ## Architecture
 
 ```
-juhradial-mx/
+oxidemx/
 ├── daemon/                       # unchanged
 ├── overlay/                      # unchanged (kept temporarily for parity)
 ├── overlay-rs/                   # NEW — the Rust overlay
@@ -137,7 +137,7 @@ juhradial-mx/
 │   │       └── preview.rs        # live preview of edited menu
 │   └── tests/
 │       └── ...
-└── juhradial-shared/             # NEW — types shared between daemon + overlay
+└── oxidemx-shared/             # NEW — types shared between daemon + overlay
     ├── Cargo.toml
     └── src/
         ├── config.rs             # serde structs for config.json
@@ -159,7 +159,7 @@ Unchanged shape. The daemon emits `MenuRequested(x, y)` and `HideMenu()` with
 subscribes to these via `zbus`.
 
 > **Naming note (2026-05-24):** the service formerly known as
-> `org.kde.juhradialmx` is being renamed to `org.juhradial.Daemon` in Phase 0
+> `org.kde.oxidemx` is being renamed to `org.oxidemx.Daemon` in Phase 0
 > of the indicator work. See [`INDICATOR_DESIGN.md`](INDICATOR_DESIGN.md) §4
 > and [`docs/plans/indicator-implementation.md`](docs/plans/indicator-implementation.md)
 > Task 0.0. This doc still references the legacy name in historical-context
@@ -204,12 +204,12 @@ That's the entire positioning code. No multi-system coord conversions.
 ## What's the editor and why
 
 A persistent gap in the current overlay: customising the menu requires editing
-`~/.config/juhradial/config.json` by hand. The settings GUI already covers
+`~/.config/oxidemx/config.json` by hand. The settings GUI already covers
 most non-radial settings; the radial slices need a proper visual editor.
 
 ### Editor UI
 
-- Opens from the tray icon or `juhradial-settings`.
+- Opens from the tray icon or `oxidemx-settings`.
 - Live preview of the menu (same widget as the overlay, in a non-layer-shell
   window for editability).
 - Per-slice panel: label, action type (exec / submenu / macro / easy-switch),
@@ -267,7 +267,7 @@ UI:
     * If the icon isn't in any theme search path (for instance because
       the user disabled the Flatpak portal), offer "Extract icon" —
       copies the icon file from the Flatpak export tree into
-      `~/.local/share/juhradial/icons/` and rewrites the slice to
+      `~/.local/share/oxidemx/icons/` and rewrites the slice to
       reference the absolute path. Lossless and self-contained.
 
 This collapses the "find the right command-line incantation" and "find
@@ -315,7 +315,7 @@ cost. Ranked roughly by user value vs implementation effort:
    "Browser") that users can import as a starting point. Pure config files;
    ship a few in `assets/templates/`.
 9. **Theme contributions.** Currently themes are baked into the daemon. Move
-   to `~/.local/share/juhradial/themes/<name>.toml` so users can drop in
+   to `~/.local/share/oxidemx/themes/<name>.toml` so users can drop in
    community themes without rebuilding.
 
 ### Nice-to-have
@@ -332,7 +332,7 @@ cost. Ranked roughly by user value vs implementation effort:
 - Plugin / scripting system (too complex for the value).
 - AI integration beyond the existing AI submenu (keys, accounts, scope creep).
 - Settings sync across machines (already works via standard tools like
-  syncthing on `~/.config/juhradial`).
+  syncthing on `~/.config/oxidemx`).
 
 ## Migration plan
 
@@ -356,7 +356,7 @@ cost. Ranked roughly by user value vs implementation effort:
 `overlay-rs` links against the GTK4 stack. The base Bazzite image ships
 the runtime libraries but not the `*-devel` headers needed for
 `pkg-config` discovery. Layer these once before `cargo build -p
-juhradial-overlay-rs`:
+oxidemx-overlay`:
 
 ```
 sudo rpm-ostree install \
@@ -373,8 +373,8 @@ sudo systemctl reboot
 `gdk-pixbuf2` runtimes are already layered for the Python overlay's
 sake — these `*-devel` siblings just add the headers.)
 
-`juhradial-shared` has no system dependencies and compiles + tests
-cleanly without any of the above (`cargo test -p juhradial-shared`).
+`oxidemx-shared` has no system dependencies and compiles + tests
+cleanly without any of the above (`cargo test -p oxidemx-shared`).
 
 These layered packages will be folded into `install.sh`'s
 `install_deps_fedora_atomic()` once `overlay-rs` is the default
@@ -386,13 +386,13 @@ rewrite branch.
 The GTK4 dev libraries aren't layered on the dev box yet, so visual
 testing is gated on a `rpm-ostree install … && reboot`. The chunks
 below are everything that can land *without* needing that — they
-either compile + test in pure Rust (`juhradial-shared`) or are
+either compile + test in pure Rust (`oxidemx-shared`) or are
 overlay-rs code that links once the devel packages are in place.
 
 Landed (`rust-gtk4-overlay` → 65b916d):
 
-  * Workspace skeleton: daemon + juhradial-shared + overlay-rs.
-  * `juhradial-shared` (36/36 tests passing, no system deps):
+  * Workspace skeleton: daemon + oxidemx-shared + overlay-rs.
+  * `oxidemx-shared` (36/36 tests passing, no system deps):
       - AppConfig / Slice / RadialMenuConfig serde types.
       - ThemeName, all 11 themes from the Python overlay
         (vector + 3D), Theme::load / Theme::catalogue, hex →
@@ -443,7 +443,7 @@ What still needs the GTK link (queue for after the reboot):
   * Internal-id custom glyphs (legacy "play_pause", "folder",
     "easy_switch", "os_*" — direct cairo paths).
   * editor/: window + slice panel + icon picker (with the
-    Flatpak app launcher tab using `juhradial_shared::applications`)
+    Flatpak app launcher tab using `oxidemx_shared::applications`)
     + live preview.
   * tray.rs: KStatusNotifierItem.
   * Wire ProfileResolver into RadialState (one-line swap, but
@@ -454,7 +454,7 @@ What still needs the GTK link (queue for after the reboot):
 What's only blocked on the daemon side (independent of the overlay
 build):
 
-  * Daemon → juhradial-shared type migration (eliminate drift).
+  * Daemon → oxidemx-shared type migration (eliminate drift).
     Daemon's existing test suite gives us the safety net.
   * Daemon emitting a focused-class signal so the overlay can
     drive ProfileResolver::menu_for().
@@ -479,7 +479,7 @@ Build prerequisites section above and `overlay-rs/run-smoke-test.sh`.
 
 ## Open questions for the user
 
-- Daemon refactor: do we want to extract a `juhradial-shared` workspace
+- Daemon refactor: do we want to extract a `oxidemx-shared` workspace
   member now, or keep config types duplicated for the first iteration and
   unify later? (Recommendation: extract now, it's small and avoids drift.)
 - Editor: separate window vs. embedded in the existing settings UI?
@@ -487,6 +487,6 @@ Build prerequisites section above and `overlay-rs/run-smoke-test.sh`.
   button — easier to live-preview without competing with other settings
   controls.)
 - Per-app profiles: store as separate config files
-  (`~/.config/juhradial/profiles/<app>.json`) or as a nested object inside
+  (`~/.config/oxidemx/profiles/<app>.json`) or as a nested object inside
   the main config? (Recommendation: separate files — easier to share, easier
   to delete, easier to detect via inotify.)

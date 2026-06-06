@@ -33,9 +33,9 @@ pub enum DispatchBurstStyleGpu {
     Glow = 2,
 }
 
-impl From<juhradial_shared::DispatchBurstStyle> for DispatchBurstStyleGpu {
-    fn from(s: juhradial_shared::DispatchBurstStyle) -> Self {
-        use juhradial_shared::DispatchBurstStyle as S;
+impl From<oxidemx_shared::DispatchBurstStyle> for DispatchBurstStyleGpu {
+    fn from(s: oxidemx_shared::DispatchBurstStyle) -> Self {
+        use oxidemx_shared::DispatchBurstStyle as S;
         match s {
             S::Sparks => DispatchBurstStyleGpu::Sparks,
             S::Shockwave => DispatchBurstStyleGpu::Shockwave,

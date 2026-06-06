@@ -1,7 +1,7 @@
-//! Iced wrapper around the shared `juhradial_icons` resolver.
+//! Iced wrapper around the shared `oxidemx_icons` resolver.
 //!
 //! The resolver itself (XDG theme walk + SVG/PNG raster + alpha-mask
-//! tinting + cache) lives in the toolkit-free `juhradial-icons`
+//! tinting + cache) lives in the toolkit-free `oxidemx-icons`
 //! crate so the settings GUI can share it. This module's job is
 //! just to convert the resolver's `RasterIcon` into an
 //! `iced::widget::image::Handle` and provide a `Frame::draw_image`
@@ -10,7 +10,7 @@
 use iced::widget::canvas::{Frame, Image};
 use iced::widget::image::Handle;
 use iced::{Point, Rectangle, Size};
-use juhradial_icons::{IconCache as RawCache, RasterIcon};
+use oxidemx_icons::{IconCache as RawCache, RasterIcon};
 use std::cell::RefCell;
 use std::collections::HashMap;
 

@@ -1,8 +1,8 @@
 {
-  "name": "juhradial-mx-gnome-extensions",
+  "name": "oxidemx-gnome-extensions",
   "version": "0.0.1",
   "private": true,
-  "description": "Build target for the JuhRadial MX GNOME shell extensions (juhradial-cursor, juhradial-indicator).",
+  "description": "Build target for the OxideMX MX GNOME shell extensions (oxidemx-cursor, oxidemx-indicator).",
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "watch": "tsc -p tsconfig.json --watch",

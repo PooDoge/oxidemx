@@ -1,8 +1,0 @@
-{
-    "uuid": "juhradial-cursor@dev.juhlabs.com",
-    "name": "JuhRadial Cursor Helper",
-    "description": "Cursor query + window positioning helpers over D-Bus for the JuhRadial MX radial menu (GetCursorPosition, MoveOverlay, RaiseOverlay, ListMonitors).",
-    "shell-version": ["45", "46", "47", "48", "49", "50", "51"],
-    "url": "https://github.com/JuhLabs/juhradial-mx",
-    "version": 4
-}

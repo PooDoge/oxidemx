@@ -1,14 +1,14 @@
 //! "Macros" tab — list / inspect / delete the macros stored in
-//! `~/.config/juhradial/macros/*.json`. Recording new macros lives
+//! `~/.config/oxidemx/macros/*.json`. Recording new macros lives
 //! in the daemon (it captures evdev events on a separate code
 //! path); this tab is the management surface — see what's stored,
 //! tweak names / triggers via JSON, delete the ones you don't
 //! want any more. A future iteration adds in-place name editing
 //! and a "Record" launcher that talks to the daemon over D-Bus.
 
-use juhradial_widgets::widgets::section_header;
+use oxidemx_widgets::widgets::section_header;
 use crate::{MacroEditField, Message, RecordingState, State};
-use juhradial_widgets::style;
+use oxidemx_widgets::style;
 use iced::widget::{button, column, container, row, rule, text, text_input, Space};
 use iced::{Alignment, Element, Length};
 use serde::Deserialize;
@@ -54,7 +54,7 @@ pub fn write_raw(id: &str, value: &serde_json::Value) -> Result<(), String> {
     Ok(())
 }
 
-/// Walk `~/.config/juhradial/macros/*.json` and parse each into
+/// Walk `~/.config/oxidemx/macros/*.json` and parse each into
 /// `MacroSummary`. Returns sorted by name. Errors are logged and
 /// turned into an empty list — the tab handles that gracefully.
 pub fn list() -> Vec<MacroSummary> {
@@ -81,10 +81,10 @@ pub fn list() -> Vec<MacroSummary> {
     out
 }
 
-/// Macros directory: `~/.config/juhradial/macros/`. Mirrors the
+/// Macros directory: `~/.config/oxidemx/macros/`. Mirrors the
 /// daemon's `macros_dir()` so we read/write the same files.
 pub fn macros_dir() -> Option<PathBuf> {
-    juhradial_shared::config::default_config_path()
+    oxidemx_shared::config::default_config_path()
         .and_then(|p| p.parent().map(|p| p.join("macros")))
 }
 
@@ -151,7 +151,7 @@ pub fn view(state: &State) -> Element<'_, Message> {
     let intro = text(
         "Click Record, then trigger your shortcut sequence on the keyboard \
          or mouse. Click Stop and name the macro to save it. Stored as \
-         JSON in ~/.config/juhradial/macros/ — open the folder for \
+         JSON in ~/.config/oxidemx/macros/ — open the folder for \
          hand-edits, or delete the ones you don't want.",
     )
     .size(12)

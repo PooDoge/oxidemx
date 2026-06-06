@@ -11,5 +11,5 @@
 // TODO: implement KStatusNotifierItem service — register on
 //       org.kde.StatusNotifierItem-<pid>-1, expose items: "Edit menu",
 //       "Settings…", "About", "Quit". The legacy Python overlay built
-//       this on QSystemTrayIcon (overlay/juhradial-overlay.py:1208+);
+//       this on QSystemTrayIcon (overlay/oxidemx-overlay.py:1208+);
 //       the menu structure should match for muscle-memory parity.

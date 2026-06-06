@@ -1,11 +1,11 @@
 //! "Point & Scroll" tab — pointer speed/accel + scroll wheel
-//! behaviour. Schema lives in `juhradial_shared::PointerConfig` /
-//! `ScrollConfig`; values land in `~/.config/juhradial/config.json`
+//! behaviour. Schema lives in `oxidemx_shared::PointerConfig` /
+//! `ScrollConfig`; values land in `~/.config/oxidemx/config.json`
 //! under `pointer` and `scroll` keys, matching the legacy daemon.
 
-use juhradial_widgets::widgets::{labeled_int_slider, section_header};
+use oxidemx_widgets::widgets::{labeled_int_slider, section_header};
 use crate::{Message, State};
-use juhradial_widgets::style;
+use oxidemx_widgets::style;
 use iced::widget::{column, container, pick_list, row, rule, text, toggler, Space};
 use iced::{Alignment, Element, Length};
 
@@ -130,7 +130,7 @@ fn dpi_card(state: &State) -> Element<'_, Message> {
             )
             .size(11)
             .style(style::text_dim(pal)),
-            juhradial_widgets::widgets::labeled_int_slider(
+            oxidemx_widgets::widgets::labeled_int_slider(
                 "DPI",
                 dpi as u32,
                 400..=8000,
@@ -153,7 +153,7 @@ fn dpi_card(state: &State) -> Element<'_, Message> {
     } else {
         text(
             "DPI is not supported on this device, or the daemon \
-             hasn't connected yet. Make sure juhradiald is running \
+             hasn't connected yet. Make sure oxidemxd is running \
              and the mouse is paired via the Bolt receiver.",
         )
         .size(12)

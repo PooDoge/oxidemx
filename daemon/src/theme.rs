@@ -4,8 +4,8 @@
 //!
 //! Supports JSON themes with validation and directory scanning.
 //! Themes are loaded from:
-//! - System: `/usr/share/juhradial/themes/`
-//! - User: `~/.config/juhradial/themes/` (XDG compliant)
+//! - System: `/usr/share/oxidemx/themes/`
+//! - User: `~/.config/oxidemx/themes/` (XDG compliant)
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -13,10 +13,10 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 /// System themes directory
-const SYSTEM_THEMES_DIR: &str = "/usr/share/juhradial/themes";
+const SYSTEM_THEMES_DIR: &str = "/usr/share/oxidemx/themes";
 
 /// User themes directory name (under XDG_CONFIG_HOME or ~/.config/)
-const USER_THEMES_DIR_NAME: &str = "juhradial/themes";
+const USER_THEMES_DIR_NAME: &str = "oxidemx/themes";
 
 /// Theme configuration filename
 const THEME_FILENAME: &str = "theme.json";
@@ -270,7 +270,7 @@ impl Theme {
             name: "catppuccin-mocha".to_string(),
             display_name: "Catppuccin Mocha".to_string(),
             version: "1.0".to_string(),
-            author: "JuhRadial Team".to_string(),
+            author: "OxideMX Team".to_string(),
             colors: ThemeColors {
                 base: "#1e1e2e".to_string(),
                 surface: "#313244".to_string(),
@@ -637,8 +637,8 @@ impl ThemeManager {
     ///
     /// Loading order (later overrides earlier):
     /// 1. Bundled themes (always available)
-    /// 2. System themes (/usr/share/juhradial/themes/)
-    /// 3. User themes (~/.config/juhradial/themes/)
+    /// 2. System themes (/usr/share/oxidemx/themes/)
+    /// 3. User themes (~/.config/oxidemx/themes/)
     pub fn load_all() -> Result<Self, ThemeError> {
         let mut themes = HashMap::new();
 
@@ -1224,7 +1224,7 @@ mod tests {
     #[test]
     fn test_get_user_themes_dir() {
         let dir = get_user_themes_dir();
-        assert!(dir.to_string_lossy().contains("juhradial"));
+        assert!(dir.to_string_lossy().contains("oxidemx"));
         assert!(dir.to_string_lossy().contains("themes"));
     }
 

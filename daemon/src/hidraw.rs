@@ -587,8 +587,8 @@ if (screens) {
         }
     }
 }
-callDBus("org.juhradial.Daemon", "/org/juhradial/Daemon",
-         "org.juhradial.Daemon", "ShowMenuAtCursor",
+callDBus("org.oxidemx.Daemon", "/org/oxidemx/Daemon",
+         "org.oxidemx.Daemon", "ShowMenuAtCursor",
          sx + Math.round((pos.x - sx) * dpr),
          sy + Math.round((pos.y - sy) * dpr));
 "#;
@@ -738,7 +738,7 @@ mod tests {
         let (tx, _rx) = mpsc::channel(1);
         let mut handler = HidrawHandler::new(tx);
         let missing_path =
-            std::env::temp_dir().join(format!("juhradial-missing-hidraw-{}", std::process::id()));
+            std::env::temp_dir().join(format!("oxidemx-missing-hidraw-{}", std::process::id()));
 
         let result = handler.open_path(&missing_path);
 

@@ -1,4 +1,4 @@
-//! JuhRadial MX Daemon
+//! OxideMX MX Daemon
 //!
 //! A daemon for Linux that provides radial menu functionality for the
 //! Logitech MX Master 4 mouse via evdev input and KWin overlay.
@@ -11,7 +11,7 @@ use tokio::time::{Duration, sleep};
 use tracing::{Level, debug, error, info, warn};
 use tracing_subscriber::FmtSubscriber;
 
-use juhradiald::{
+use oxidemxd::{
     battery::{new_shared_state, start_battery_updater_shared_with_dbus},
     config::load_shared_config,
     dbus::{DBUS_NAME, DBUS_PATH, init_dbus_service_with_device},
@@ -140,13 +140,13 @@ fn spawn_device_hotplug_watcher() -> Arc<tokio::sync::Notify> {
     hotplug
 }
 
-/// JuhRadial MX Daemon - Radial menu for Logitech MX Master 4
+/// OxideMX MX Daemon - Radial menu for Logitech MX Master 4
 #[derive(Parser, Debug)]
-#[command(name = "juhradiald")]
+#[command(name = "oxidemxd")]
 #[command(version, about, long_about = None)]
 struct Args {
     /// Configuration file path
-    #[arg(short, long, default_value = "~/.config/juhradial/config.json")]
+    #[arg(short, long, default_value = "~/.config/oxidemx/config.json")]
     config: String,
 
     /// Enable verbose logging
@@ -171,7 +171,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let subscriber = FmtSubscriber::builder().with_max_level(level).finish();
     tracing::subscriber::set_global_default(subscriber)?;
 
-    info!("JuhRadial MX Daemon starting...");
+    info!("OxideMX MX Daemon starting...");
 
     // Handle --list-devices flag
     if args.list_devices {
@@ -192,7 +192,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         Err(e) => {
             warn!("Failed to load config, using defaults: {}", e);
-            juhradiald::config::new_shared_config()
+            oxidemxd::config::new_shared_config()
         }
     };
 
@@ -235,19 +235,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             // ButtonActionEvent through execute_button_action.
             let non_gesture_diverted: Vec<u16> = if matches!(connect_result, Ok(true)) {
                 let mut diverted = Vec::new();
-                let candidates: &[(u16, juhradiald::config::ButtonAction, juhradiald::config::ButtonAction)] = &[
-                    (juhradiald::hidraw::button_cid::MIDDLE_BUTTON,
+                let candidates: &[(u16, oxidemxd::config::ButtonAction, oxidemxd::config::ButtonAction)] = &[
+                    (oxidemxd::hidraw::button_cid::MIDDLE_BUTTON,
                      buttons_snapshot.middle,
-                     juhradiald::config::ButtonAction::MiddleClick),
-                    (juhradiald::hidraw::button_cid::BACK_BUTTON,
+                     oxidemxd::config::ButtonAction::MiddleClick),
+                    (oxidemxd::hidraw::button_cid::BACK_BUTTON,
                      buttons_snapshot.back,
-                     juhradiald::config::ButtonAction::Back),
-                    (juhradiald::hidraw::button_cid::FORWARD_BUTTON,
+                     oxidemxd::config::ButtonAction::Back),
+                    (oxidemxd::hidraw::button_cid::FORWARD_BUTTON,
                      buttons_snapshot.forward,
-                     juhradiald::config::ButtonAction::Forward),
-                    (juhradiald::hidraw::button_cid::SMART_SHIFT,
+                     oxidemxd::config::ButtonAction::Forward),
+                    (oxidemxd::hidraw::button_cid::SMART_SHIFT,
                      buttons_snapshot.shift_wheel,
-                     juhradiald::config::ButtonAction::Smartshift),
+                     oxidemxd::config::ButtonAction::Smartshift),
                 ];
                 for (cid, configured, default_for_button) in candidates {
                     if configured != default_for_button {
@@ -376,7 +376,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .evdev_codes()
                 .into_iter()
                 .filter_map(|code| {
-                    juhradiald::hidraw::evdev_keycode_to_cid(code).map(|cid| (code, cid))
+                    oxidemxd::hidraw::evdev_keycode_to_cid(code).map(|cid| (code, cid))
                 })
                 .collect();
         }
@@ -430,11 +430,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // owns activation (creating/dropping the uinput forwarder when
     // the user toggles horizontal-scroll invert); the hidraw side
     // dispatches diverted 0x2150 notifications into the forwarder.
-    let thumb_wheel_state = juhradiald::new_thumb_wheel_state();
+    let thumb_wheel_state = oxidemxd::new_thumb_wheel_state();
     let thumb_wheel_state_for_hidraw = thumb_wheel_state.clone();
 
     // Initialize D-Bus service with battery state, config, haptic manager, device info, and macro state
-    let overlay_spawner = std::sync::Arc::new(juhradiald::overlay_spawner::OverlaySpawner::new());
+    let overlay_spawner = std::sync::Arc::new(oxidemxd::overlay_spawner::OverlaySpawner::new());
     let dbus_connection = match init_dbus_service_with_device(
         battery_state.clone(),
         shared_config.clone(),
@@ -547,7 +547,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // so it doesn't leak to the OS as "browser back" / "open last file".
     // Also suppress any macro-bound buttons.
     let mut suppressed_for_mx = macro_evdev_codes.clone();
-    for &code in juhradiald::evdev::GESTURE_BUTTON_CODES {
+    for &code in oxidemxd::evdev::GESTURE_BUTTON_CODES {
         suppressed_for_mx.insert(code);
     }
     let hotplug_for_mx = hotplug_notify.clone();
@@ -584,7 +584,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // TODO: Initialize remaining components
     // 4. Initialize HID++ haptic subsystem
 
-    info!("JuhRadial MX Daemon ready");
+    info!("OxideMX MX Daemon ready");
 
     // Wait for shutdown signal
     tokio::select! {
@@ -734,10 +734,10 @@ async fn run_hidraw_loop(
     event_tx: mpsc::Sender<GestureEvent>,
     mut preferred_path: Option<PathBuf>,
     macro_cids: Vec<u16>,
-    shared_config: juhradiald::config::SharedConfig,
+    shared_config: oxidemxd::config::SharedConfig,
     hotplug: Arc<tokio::sync::Notify>,
     haptic_manager: SharedHapticManager,
-    thumb_wheel_state: juhradiald::SharedThumbWheelState,
+    thumb_wheel_state: oxidemxd::SharedThumbWheelState,
 ) {
     let mut handler = HidrawHandler::new(event_tx);
     let macro_cids_for_divert = macro_cids.clone();
@@ -859,7 +859,7 @@ async fn run_evdev_loop(
     event_tx: mpsc::Sender<GestureEvent>,
     suppressed_keys: HashSet<u16>,
     hotplug: Arc<tokio::sync::Notify>,
-    shared_config: juhradiald::config::SharedConfig,
+    shared_config: oxidemxd::config::SharedConfig,
 ) {
     let mut handler = EvdevHandler::new(event_tx.clone());
     handler.set_suppressed_keys(suppressed_keys);
@@ -922,10 +922,10 @@ async fn run_evdev_loop(
     }
 }
 
-/// Read generic_trigger_button from ~/.config/juhradial/config.json
+/// Read generic_trigger_button from ~/.config/oxidemx/config.json
 fn read_trigger_button_from_config() -> Option<u16> {
     let home = std::env::var("HOME").ok()?;
-    let path = std::path::PathBuf::from(home).join(".config/juhradial/config.json");
+    let path = std::path::PathBuf::from(home).join(".config/oxidemx/config.json");
     let data = std::fs::read_to_string(&path).ok()?;
     let json: serde_json::Value = serde_json::from_str(&data).ok()?;
     json.get("generic_trigger_button")?
@@ -933,7 +933,7 @@ fn read_trigger_button_from_config() -> Option<u16> {
         .map(|v| v as u16)
 }
 
-/// Read device_mode from ~/.config/juhradial/config.json
+/// Read device_mode from ~/.config/oxidemx/config.json
 ///
 /// Returns "generic", "logitech", or "auto" (default).
 /// When the user toggles "Generic" in settings, this is set to "generic".
@@ -942,7 +942,7 @@ fn read_device_mode_from_config() -> String {
         Ok(h) => h,
         Err(_) => return "auto".to_string(),
     };
-    let path = std::path::PathBuf::from(home).join(".config/juhradial/config.json");
+    let path = std::path::PathBuf::from(home).join(".config/oxidemx/config.json");
     let data = match std::fs::read_to_string(&path) {
         Ok(d) => d,
         Err(_) => return "auto".to_string(),
@@ -965,7 +965,7 @@ async fn run_generic_evdev_loop(
     event_tx: mpsc::Sender<GestureEvent>,
     suppressed_keys: HashSet<u16>,
     hotplug: Arc<tokio::sync::Notify>,
-    shared_config: juhradiald::config::SharedConfig,
+    shared_config: oxidemxd::config::SharedConfig,
 ) {
     let trigger = read_trigger_button_from_config();
     if let Some(code) = trigger {
@@ -1046,8 +1046,8 @@ async fn run_generic_evdev_loop(
 async fn process_gesture_events(
     event_rx: &mut mpsc::Receiver<GestureEvent>,
     dbus_connection: &zbus::Connection,
-    trigger_map: Arc<std::sync::RwLock<juhradiald::macros::TriggerMap>>,
-    macro_engine: Arc<Mutex<juhradiald::macros::MacroEngine>>,
+    trigger_map: Arc<std::sync::RwLock<oxidemxd::macros::TriggerMap>>,
+    macro_engine: Arc<Mutex<oxidemxd::macros::MacroEngine>>,
 ) {
     while let Some(event) = event_rx.recv().await {
         match event {
@@ -1092,7 +1092,7 @@ async fn process_gesture_events(
                 if let Some(id) = macro_id {
                     if pressed {
                         // Button pressed - load and execute the macro
-                        match juhradiald::macros::storage::load_macro(&id) {
+                        match oxidemxd::macros::storage::load_macro(&id) {
                             Ok(config) => {
                                 info!(
                                     macro_id = %id,
@@ -1127,7 +1127,7 @@ async fn process_gesture_events(
             GestureEvent::ButtonActionEvent { action, pressed } => {
                 if pressed {
                     info!(%action, "Button action triggered");
-                    match juhradiald::actions::execute_button_action(action).await {
+                    match oxidemxd::actions::execute_button_action(action).await {
                         Ok(true) => {
                             // Action was handled directly
                         }
@@ -1166,7 +1166,7 @@ async fn emit_menu_requested(
         connection,
         DBUS_NAME,
         DBUS_PATH,
-        "org.juhradial.Daemon",
+        "org.oxidemx.Daemon",
     )
     .await?;
 
@@ -1187,7 +1187,7 @@ async fn emit_hide_menu(
         .emit_signal(
             None::<&str>, // destination (None = broadcast)
             DBUS_PATH,
-            "org.juhradial.Daemon",
+            "org.oxidemx.Daemon",
             "HideMenu",
             &(),
         )
@@ -1211,7 +1211,7 @@ async fn emit_cursor_moved(
         .emit_signal(
             None::<&str>, // destination (None = broadcast)
             DBUS_PATH,
-            "org.juhradial.Daemon",
+            "org.oxidemx.Daemon",
             "CursorMoved",
             &(x, y),
         )
@@ -1223,7 +1223,7 @@ async fn emit_cursor_moved(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use juhradiald::cursor::{CursorPosition, EDGE_MARGIN, MENU_RADIUS, ScreenBounds};
+    use oxidemxd::cursor::{CursorPosition, EDGE_MARGIN, MENU_RADIUS, ScreenBounds};
 
     #[test]
     fn test_device_poll_interval() {
@@ -1236,21 +1236,21 @@ mod tests {
     #[test]
     fn test_args_default_config() {
         // Verify default config path
-        let args = Args::parse_from(["juhradiald"]);
-        assert_eq!(args.config, "~/.config/juhradial/config.json");
+        let args = Args::parse_from(["oxidemxd"]);
+        assert_eq!(args.config, "~/.config/oxidemx/config.json");
         assert!(!args.verbose);
         assert!(!args.list_devices);
     }
 
     #[test]
     fn test_args_verbose() {
-        let args = Args::parse_from(["juhradiald", "--verbose"]);
+        let args = Args::parse_from(["oxidemxd", "--verbose"]);
         assert!(args.verbose);
     }
 
     #[test]
     fn test_args_list_devices() {
-        let args = Args::parse_from(["juhradiald", "--list-devices"]);
+        let args = Args::parse_from(["oxidemxd", "--list-devices"]);
         assert!(args.list_devices);
     }
 

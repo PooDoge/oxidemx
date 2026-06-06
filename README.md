@@ -1,27 +1,27 @@
 <div align="center">
-  <img src="assets/juhradial-mx.svg" width="128" alt="JuhRadial MX Logo">
-  <h1>JuhRadial MX</h1>
+  <img src="assets/oxidemx.svg" width="128" alt="OxideMX MX Logo">
+  <h1>OxideMX MX</h1>
   <p><strong>The ultimate Logitech MX Master experience on Linux</strong></p>
-  <p>Radial menu, cross-computer Flow, DPI control, haptic feedback - all native on Wayland</p>
+  <p>Radial menu, DPI control, haptic feedback, AI settings - all native on Wayland</p>
 
   <p>
-    <a href="https://github.com/JuhLabs/juhradial-mx/releases">
+    <a href="https://github.com/JuhLabs/oxidemx/releases">
       <img src="https://img.shields.io/badge/version-0.3.2-cyan.svg" alt="Version 0.3.2">
     </a>
-    <a href="https://github.com/JuhLabs/juhradial-mx/actions/workflows/ci.yml">
-      <img src="https://github.com/JuhLabs/juhradial-mx/actions/workflows/ci.yml/badge.svg?branch=master" alt="Build Status">
+    <a href="https://github.com/JuhLabs/oxidemx/actions/workflows/ci.yml">
+      <img src="https://github.com/JuhLabs/oxidemx/actions/workflows/ci.yml/badge.svg?branch=master" alt="Build Status">
     </a>
-    <a href="https://github.com/JuhLabs/juhradial-mx/actions/workflows/security.yml">
-      <img src="https://github.com/JuhLabs/juhradial-mx/actions/workflows/security.yml/badge.svg?branch=master" alt="Security Scan">
+    <a href="https://github.com/JuhLabs/oxidemx/actions/workflows/security.yml">
+      <img src="https://github.com/JuhLabs/oxidemx/actions/workflows/security.yml/badge.svg?branch=master" alt="Security Scan">
     </a>
     <a href="LICENSE">
       <img src="https://img.shields.io/badge/license-GPL--3.0-blue.svg" alt="License: GPL-3.0">
     </a>
-    <a href="https://github.com/JuhLabs/juhradial-mx/stargazers">
-      <img src="https://img.shields.io/github/stars/JuhLabs/juhradial-mx?style=flat&color=yellow" alt="GitHub Stars">
+    <a href="https://github.com/JuhLabs/oxidemx/stargazers">
+      <img src="https://img.shields.io/github/stars/JuhLabs/oxidemx?style=flat&color=yellow" alt="GitHub Stars">
     </a>
-    <a href="https://github.com/JuhLabs/juhradial-mx/issues">
-      <img src="https://img.shields.io/github/issues/JuhLabs/juhradial-mx?color=green" alt="Open Issues">
+    <a href="https://github.com/JuhLabs/oxidemx/issues">
+      <img src="https://img.shields.io/github/issues/JuhLabs/oxidemx?color=green" alt="Open Issues">
     </a>
   </p>
 </div>
@@ -29,15 +29,13 @@
 <br>
 
 <div align="center">
-  <img src="assets/github/githubheader.png" width="100%" alt="JuhRadial MX Banner">
+  <img src="assets/github/githubheader.png" width="100%" alt="OxideMX MX Banner">
 </div>
 
 <br>
 
 > [!TIP]
-> **Current official release: [v0.3.2](CHANGELOG.md).** Promotes the 0.3.x beta line with config-driven button actions, JuhFlow, generic mouse mode, refreshed settings artwork, and a reconnect fix for MX Master Easy-Switch.
->
-> **Mac users:** Want to try JuhFlow cross-computer control? [Download JuhFlow.dmg](https://github.com/JuhLabs/juhradial-mx/raw/master/juhflow/JuhFlow.dmg) (signed & notarized) - install it on your Mac, then enable Flow in JuhRadial MX Settings on Linux. Both machines auto-discover each other on your local network.
+> **Current official release: [v0.3.2](CHANGELOG.md).** Promotes the 0.3.x beta line with config-driven button actions, generic mouse mode, refreshed settings artwork, and a reconnect fix for MX Master Easy-Switch.
 
 <div align="center">
   <img src="assets/github/separator.png" width="80%" alt="">
@@ -46,7 +44,7 @@
 ## Release Highlights
 
 <div align="center">
-  <img src="assets/github/hero-v3.png" width="100%" alt="JuhRadial MX control center">
+  <img src="assets/github/hero-v3.png" width="100%" alt="OxideMX MX control center">
 </div>
 
 <table>
@@ -82,7 +80,7 @@
 > **One-Line Install (Recommended)** - Detects your distro, installs dependencies, builds from source, and configures everything.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/JuhLabs/juhradial-mx/master/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/JuhLabs/oxidemx/master/install.sh | bash
 ```
 
 <details>
@@ -90,16 +88,15 @@ curl -fsSL https://raw.githubusercontent.com/JuhLabs/juhradial-mx/master/install
 
 ```bash
 # 1. Install dependencies
-sudo dnf install rust cargo python3-pyqt6 qt6-qtsvg \
-    python3-gobject gtk4 libadwaita dbus-devel hidapi-devel
+sudo dnf install rust cargo dbus-devel systemd-devel libevdev-devel hidapi-devel gtk4-devel libadwaita-devel
 
 # 2. Clone and build
-git clone https://github.com/JuhLabs/juhradial-mx.git
-cd juhradial-mx
-cd daemon && cargo build --release && cd ..
+git clone https://github.com/JuhLabs/oxidemx.git
+cd oxidemx
+cargo build --release
 
 # 3. Run
-./scripts/juhradial-mx.sh
+./scripts/oxidemx.sh
 ```
 
 </details>
@@ -109,15 +106,15 @@ cd daemon && cargo build --release && cd ..
 
 ```bash
 # 1. Install dependencies
-sudo pacman -S rust python-pyqt6 qt6-svg python-gobject gtk4 libadwaita
+sudo pacman -S rust dbus systemd-libs libevdev hidapi gtk4 libadwaita
 
 # 2. Clone and build
-git clone https://github.com/JuhLabs/juhradial-mx.git
-cd juhradial-mx
-cd daemon && cargo build --release && cd ..
+git clone https://github.com/JuhLabs/oxidemx.git
+cd oxidemx
+cargo build --release
 
 # 3. Run
-./scripts/juhradial-mx.sh
+./scripts/oxidemx.sh
 ```
 
 </details>
@@ -126,8 +123,8 @@ cd daemon && cargo build --release && cd ..
 <summary><strong>Requirements</strong></summary>
 
 - **Wayland compositor** (GNOME, KDE Plasma 6, Hyprland, COSMIC, Sway) or **X11**
-- **Rust** (for building the daemon)
-- **Python 3** with PyQt6 and GTK4/Adwaita
+- **Rust / Cargo** (workspace compiler)
+- **GTK4 & Libadwaita** development packages
 - **XWayland** (for overlay window positioning on Wayland)
 
 </details>
@@ -176,8 +173,8 @@ cd daemon && cargo build --release && cd ..
       Beautiful overlay triggered by gesture button - hold to drag-select or tap to keep open. Fully configurable 8-segment wheel with smooth animations and 3D themes.
     </td>
     <td width="50%">
-      <h3><img src="assets/github/bolt.png" width="24" alt=""> JuhFlow</h3>
-      Cross-computer control between Linux and Mac. Move your cursor across machines, share clipboard, all over encrypted connections (X25519 + AES-256-GCM). No cloud required.
+      <h3><img src="assets/github/bolt.png" width="24" alt=""> Gemini AI</h3>
+      Contextual AI assistant built right into the split circular menu. Design menus, generate custom styling matching screenshots, and run tools via LLM automation.
     </td>
   </tr>
   <tr>
@@ -199,7 +196,7 @@ cd daemon && cargo build --release && cd ..
     <td>
       <strong>AI Quick Access</strong> - Claude, ChatGPT, Gemini, Perplexity in a submenu<br>
       <strong>Native Wayland</strong> - GNOME, KDE Plasma 6, Hyprland, COSMIC, Sway & more<br>
-      <strong>Multiple Themes</strong> - JuhRadial MX, Catppuccin, Nord, Dracula, Solarized & more
+      <strong>Multiple Themes</strong> - OxideMX MX, Catppuccin, Nord, Dracula, Solarized & more
     </td>
   </tr>
 </table>
@@ -208,33 +205,13 @@ cd daemon && cargo build --release && cd ..
   <img src="assets/github/separator.png" width="80%" alt="">
 </div>
 
-## JuhFlow - Cross-Computer Control
+## Gemini AI Customization
 
-Move your cursor seamlessly between your Linux and Mac machines. Encrypted, peer-to-peer, no cloud.
+OxideMX includes direct integration with the Google Gemini API to offer an autonomous AI assistant capable of tailoring mouse configurations and overlay styles to your workflows.
 
-<div align="center">
-  <table>
-    <tr>
-      <td align="center">
-        <img src="assets/github/bolt.png" width="64" alt="JuhFlow">
-        <br><br>
-        <a href="https://github.com/JuhLabs/juhradial-mx/raw/master/juhflow/JuhFlow.dmg">
-          <img src="https://img.shields.io/badge/Download_JuhFlow-macOS_(.dmg)-000000?style=for-the-badge&logo=apple&logoColor=white" alt="Download JuhFlow for macOS">
-        </a>
-        <br><br>
-        <em>Signed & notarized by Apple - install and run directly</em>
-      </td>
-    </tr>
-  </table>
-</div>
-
-- **Linux side:** Built into JuhRadial MX - just enable Flow in Settings
-- **Mac side:** Download JuhFlow.dmg above, install, and pair
-- **Encrypted:** X25519 key exchange + AES-256-GCM - all traffic is end-to-end encrypted
-- **Zero config:** Auto-discovers peers on your local network
-- **Windows support:** Coming soon
-
-> **Note:** If you quit JuhRadial MX while JuhFlow is connected, you'll need to restart JuhFlow on the Mac side and reconnect.
+- **Split-Chat Interface**: Open a glassmorphic circular split chat menu next to the radial layout.
+- **Multimodal Design**: Feed themes or screenshots to the assistant to generate matching styles.
+- **Undo/Redo Actions**: Feel free to experiment—every style change made by the AI can be reverted instantly.
 
 <div align="center">
   <img src="assets/github/separator.png" width="80%" alt="">
@@ -308,7 +285,7 @@ Move your cursor seamlessly between your Linux and Mac machines. Encrypted, peer
 
 ## Configuration
 
-Configuration is stored in `~/.config/juhradial/config.json`.
+Configuration is stored in `~/.config/oxidemx/config.json`.
 
 ### Themes
 
@@ -316,7 +293,7 @@ Open Settings and select a theme:
 
 | Theme | Description |
 |-------|-------------|
-| **JuhRadial MX** (default) | Premium dark theme with vibrant cyan accents |
+| **OxideMX MX** (default) | Premium dark theme with vibrant cyan accents |
 | Catppuccin Mocha | Soothing pastel theme with lavender accents |
 | Catppuccin Latte | Light pastel theme |
 | Nord | Arctic, north-bluish palette |
@@ -329,8 +306,8 @@ Open Settings and select a theme:
 The installer sets up autostart automatically. For manual setup:
 
 ```bash
-cp packaging/juhradial-mx.desktop ~/.config/autostart/
-sed -i "s|Exec=.*|Exec=$(pwd)/scripts/juhradial-mx.sh|" ~/.config/autostart/juhradial-mx.desktop
+cp packaging/oxidemx.desktop ~/.config/autostart/
+sed -i "s|Exec=.*|Exec=$(pwd)/scripts/oxidemx.sh|" ~/.config/autostart/oxidemx.desktop
 ```
 
 <div align="center">
@@ -347,13 +324,13 @@ sed -i "s|Exec=.*|Exec=$(pwd)/scripts/juhradial-mx.sh|" ~/.config/autostart/juhr
 Add these rules to your `hyprland.conf` or `custom/rules.conf`:
 
 ```conf
-# JuhRadial MX overlay window rules
-windowrulev2 = float, title:^(JuhRadial MX)$
-windowrulev2 = noblur, title:^(JuhRadial MX)$
-windowrulev2 = noborder, title:^(JuhRadial MX)$
-windowrulev2 = noshadow, title:^(JuhRadial MX)$
-windowrulev2 = pin, title:^(JuhRadial MX)$
-windowrulev2 = noanim, title:^(JuhRadial MX)$
+# OxideMX MX overlay window rules
+windowrulev2 = float, title:^(OxideMX MX)$
+windowrulev2 = noblur, title:^(OxideMX MX)$
+windowrulev2 = noborder, title:^(OxideMX MX)$
+windowrulev2 = noshadow, title:^(OxideMX MX)$
+windowrulev2 = pin, title:^(OxideMX MX)$
+windowrulev2 = noanim, title:^(OxideMX MX)$
 ```
 
 </details>
@@ -366,9 +343,9 @@ windowrulev2 = noanim, title:^(JuhRadial MX)$
 
 | Problem | Solution |
 |---------|----------|
-| Menu doesn't appear | Check daemon is running: `pgrep juhradiald` or restart via the desktop launcher |
-| Menu stops after Easy-Switch | Update to v0.3.2 or newer, then restart JuhRadial MX so the HID++ reconnect and evdev fallback fixes are active |
-| Menu at top-left corner | Log out/in to load GNOME extension, or run `gnome-extensions enable juhradial-cursor@dev.juhlabs.com` |
+| Menu doesn't appear | Check daemon is running: `pgrep oxidemxd` or restart via the desktop launcher |
+| Menu stops after Easy-Switch | Update to v0.3.2 or newer, then restart OxideMX MX so the HID++ reconnect and evdev fallback fixes are active |
+| Menu at top-left corner | Log out/in to load GNOME extension, or run `gnome-extensions enable oxidemx-cursor@dev.juhlabs.com` |
 | Mouse not detected | Check HID permissions: ensure your user is in the `input` group |
 | Build fails | Install dev packages: `hidapi-devel`, `dbus-devel` |
 | Hyprland: Menu hidden | Add window rules from Hyprland Setup section above |
@@ -378,7 +355,7 @@ windowrulev2 = noanim, title:^(JuhRadial MX)$
 
 ```bash
 # Run daemon with verbose output
-./daemon/target/release/juhradiald --verbose
+./daemon/target/release/oxidemxd --verbose
 ```
 
 </details>
@@ -390,42 +367,33 @@ windowrulev2 = noanim, title:^(JuhRadial MX)$
 ## Architecture
 
 ```
-                                    JuhRadial MX
-                                    ============
+                                    OxideMX
+                                    =======
 
-  +--------------+    HID++      +------------------+    PyQt6      +--------------+
-  | Logitech MX  | -- hidraw --> |  juhradiald      | -----------> | Radial Menu  |
-  | Master       |   (native)   |  (Rust daemon)   |   overlay    | (8 segments) |
-  +--------------+               |                  |              +--------------+
+  +--------------+    HID++      +------------------+    D-Bus/IPC  +-----------------+
+  | Logitech MX  | -- hidraw --> |  oxidemxd        | ------------> | Radial Menu     |
+  | Master       |   (native)   |  (Rust daemon)   |                | (iced overlay)  |
+  +--------------+               |                  |                +-----------------+
                                  | Cursor detection |
-  +--------------+               | - Hyprland IPC   |              +--------------+
-  | Any Mouse    | -- evdev ---> | - KWin D-Bus     | -----------> | Settings     |
-  | (generic)    |               | - GNOME ext      |    GTK4      | (Adwaita)    |
-  +--------------+               | - XWayland       |              +--------------+
-                                 +------------------+
-                                        |
-                                   JuhFlow (encrypted)
-                                        |
-                                 +------------------+
-                                 |  Mac / Windows   |
-                                 |  companion app   |
+  +--------------+               | - Hyprland IPC   |                +-----------------+
+  | Any Mouse    | -- evdev ---> | - KWin D-Bus     | ------------> | Settings        |
+  | (generic)    |               | - GNOME ext      |                | (iced app)      |
+  +--------------+               | - XWayland       |                +-----------------+
                                  +------------------+
 ```
 
 ## Project Structure
 
 ```
-juhradial-mx/
+oxidemx/
 +-- daemon/              # Rust daemon (HID++ listener, D-Bus, cursor detection)
-+-- overlay/             # Python UI (overlay + GTK4 settings)
-|   +-- flow/            # JuhFlow multi-computer control
-|   +-- locales/         # Translations (19 languages)
-+-- juhflow/             # JuhFlow Mac companion app (Swift + Python)
++-- overlay-rs/          # Rust + iced radial menu overlay
++-- settings-rs/         # Rust + iced settings app
++-- popup-rs/            # Rust GJS-like quick indicator popup
 +-- gnome-extension/     # GNOME Shell cursor helper extension
 +-- scripts/             # Launcher scripts
 +-- packaging/           # Desktop files, Flatpak, RPM, Arch, systemd
 +-- assets/              # Icons, themes, and screenshots
-+-- tests/               # Test utilities
 ```
 
 <div align="center">
@@ -447,16 +415,16 @@ GNU General Public License v3.0 - see [LICENSE](LICENSE)
 ## Star History
 
 <div align="center">
-  <a href="https://star-history.com/#JuhLabs/juhradial-mx&Date">
+  <a href="https://star-history.com/#JuhLabs/oxidemx&Date">
     <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=JuhLabs/juhradial-mx&type=Date&theme=dark" />
-      <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=JuhLabs/juhradial-mx&type=Date" />
-      <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=JuhLabs/juhradial-mx&type=Date" width="600" />
+      <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=JuhLabs/oxidemx&type=Date&theme=dark" />
+      <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=JuhLabs/oxidemx&type=Date" />
+      <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=JuhLabs/oxidemx&type=Date" width="600" />
     </picture>
   </a>
 </div>
 
-> If you find JuhRadial MX useful, consider giving it a star - it helps others discover the project!
+> If you find OxideMX MX useful, consider giving it a star - it helps others discover the project!
 
 <br>
 
@@ -471,5 +439,5 @@ This project is **not affiliated with, endorsed by, or associated with Logitech*
   <br><br>
   <strong>Made with love by <a href="https://github.com/JuhLabs">JuhLabs</a></strong>
   <br><br>
-  <a href="https://github.com/JuhLabs/juhradial-mx/issues">Report Bug</a> - <a href="https://github.com/JuhLabs/juhradial-mx/issues">Request Feature</a> - <a href="https://github.com/JuhLabs/juhradial-mx/discussions">Discussions</a>
+  <a href="https://github.com/JuhLabs/oxidemx/issues">Report Bug</a> - <a href="https://github.com/JuhLabs/oxidemx/issues">Request Feature</a> - <a href="https://github.com/JuhLabs/oxidemx/discussions">Discussions</a>
 </div>

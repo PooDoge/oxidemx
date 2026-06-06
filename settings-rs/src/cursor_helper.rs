@@ -1,4 +1,4 @@
-//! Async client for the juhradial-cursor GNOME extension's D-Bus
+//! Async client for the oxidemx-cursor GNOME extension's D-Bus
 //! surface. Currently exposes `GetFocusedWindowClass` so the page
 //! editor's "Detect from focused window" button can capture the
 //! WM_CLASS / app_id of whatever app the user just clicked into.
@@ -11,12 +11,12 @@
 use tracing::warn;
 use zbus::{proxy, Connection};
 
-const SETTINGS_APP_ID: &str = "org.juhradial.settings";
+const SETTINGS_APP_ID: &str = "org.oxidemx.settings";
 
 #[proxy(
-    interface = "org.juhradial.CursorHelper",
-    default_service = "org.juhradial.CursorHelper",
-    default_path = "/org/juhradial/CursorHelper"
+    interface = "org.oxidemx.CursorHelper",
+    default_service = "org.oxidemx.CursorHelper",
+    default_path = "/org/oxidemx/CursorHelper"
 )]
 trait CursorHelper {
     fn get_focused_window_class(&self, ignore_app_id: &str) -> zbus::Result<String>;
@@ -37,7 +37,7 @@ pub async fn detect_focused_class() -> Option<String> {
         Err(e) => {
             warn!(
                 "GetFocusedWindowClass D-Bus call failed: {e} \
-                 (juhradial-cursor extension not enabled, or running \
+                 (oxidemx-cursor extension not enabled, or running \
                  against an old version that doesn't expose this method)"
             );
             None

@@ -2,7 +2,7 @@
 //!
 //! Story 3.1: Profile Configuration Schema
 //!
-//! Configuration is stored at `~/.config/juhradial/profiles.json`
+//! Configuration is stored at `~/.config/oxidemx/profiles.json`
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -16,7 +16,7 @@ use crate::actions::{get_default_actions, Action};
 pub const SCHEMA_VERSION: u32 = 1;
 
 /// Default config directory name
-const CONFIG_DIR_NAME: &str = "juhradial";
+const CONFIG_DIR_NAME: &str = "oxidemx";
 
 /// Default profiles filename
 const PROFILES_FILENAME: &str = "profiles.json";
@@ -169,7 +169,7 @@ pub mod direction {
     pub const NORTH_WEST: usize = 7;
 }
 
-/// Get the config directory path (~/.config/juhradial/) (Story 3.1: Task 2.1, 2.3)
+/// Get the config directory path (~/.config/oxidemx/) (Story 3.1: Task 2.1, 2.3)
 ///
 /// Respects XDG_CONFIG_HOME if set, otherwise uses ~/.config/
 pub fn get_config_dir() -> PathBuf {
@@ -641,7 +641,7 @@ mod tests {
     fn test_config_dir_functions() {
         // Test get_config_dir returns valid path
         let config_dir = get_config_dir();
-        assert!(config_dir.to_string_lossy().contains("juhradial"));
+        assert!(config_dir.to_string_lossy().contains("oxidemx"));
 
         // Test get_profiles_path
         let profiles_path = get_profiles_path();

@@ -1,0 +1,23 @@
+[Desktop Entry]
+Name=OxideMX MX Settings
+Comment=Configure OxideMX MX radial menu
+Comment[nb]=Konfigurer OxideMX MX radialmeny
+Comment[es]=Configurar el menú radial de OxideMX MX
+Comment[pt_BR]=Configurar o menu radial OxideMX MX
+Comment[de]=OxideMX MX Radialmenü konfigurieren
+Comment[fr]=Configurer le menu radial OxideMX MX
+Comment[it]=Configura il menu radiale OxideMX MX
+Comment[ru]=Настроить радиальное меню OxideMX MX
+Comment[ja]=OxideMX MX ラジアルメニューの設定
+Comment[th]=ตั้งค่าเมนูเรเดียล OxideMX MX
+Comment[zh_CN]=配置 OxideMX MX 径向菜单
+Comment[ko]=OxideMX MX 방사형 메뉴 설정
+Comment[hi]=OxideMX MX रेडियल मेनू कॉन्फ़िगर करें
+Exec=oxidemx-settings
+Icon=oxidemx
+Terminal=false
+Type=Application
+Categories=Settings;Utility;
+Keywords=mouse;logitech;radial;menu;settings;
+StartupNotify=true
+StartupWMClass=org.oxidemx.settings

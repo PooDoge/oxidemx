@@ -1,15 +1,15 @@
 //! "Indicator Popup" tab — configures the popup that opens when the
-//! user clicks the JuhRadial GNOME indicator icon. The popup itself
-//! is rendered by juhradial-popup (Phase 3); this tab edits the
+//! user clicks the OxideMX GNOME indicator icon. The popup itself
+//! is rendered by oxidemx-popup (Phase 3); this tab edits the
 //! `popup` config block on AppConfig that the popup binary watches
 //! via inotify.
 
-use juhradial_shared::{
+use oxidemx_shared::{
     HostLabelStyle, PopupMode, QuickEntry,
     QUICK_SLIDER_CATALOG, QUICK_TOGGLE_CATALOG,
 };
-use juhradial_widgets::style;
-use juhradial_widgets::widgets::section_header;
+use oxidemx_widgets::style;
+use oxidemx_widgets::widgets::section_header;
 
 use iced::widget::{button, column, container, row, rule, text, toggler, Space};
 use iced::{Alignment, Element, Length};
@@ -29,8 +29,8 @@ pub fn view(state: &State) -> Element<'_, Message> {
     column![
         section_header("Indicator Popup"),
         text(
-            "Controls what appears when you click the JuhRadial icon in \
-             the GNOME top bar. The popup is rendered by JuhRadial itself \
+            "Controls what appears when you click the OxideMX icon in \
+             the GNOME top bar. The popup is rendered by OxideMX itself \
              — not by the GNOME extension — so it shares this app's \
              theming and reacts to everything you change here.",
         )
@@ -478,7 +478,7 @@ fn interactions_card(state: &State) -> Element<'_, Message> {
 /// A row for an enabled quick entry that can be moved up/down or removed.
 /// `is_first` disables the up-arrow; `is_last` disables the down-arrow.
 fn reorder_row<'a>(
-    pal: &'a juhradial_widgets::palette::Palette,
+    pal: &'a oxidemx_widgets::palette::Palette,
     entry: &'a QuickEntry,
     is_first: bool,
     is_last: bool,
@@ -533,7 +533,7 @@ fn reorder_row<'a>(
 
 /// A row for an available (not yet enabled) quick entry with an add button.
 fn add_row<'a>(
-    pal: &'a juhradial_widgets::palette::Palette,
+    pal: &'a oxidemx_widgets::palette::Palette,
     entry: &'a QuickEntry,
     add: Message,
 ) -> Element<'a, Message> {

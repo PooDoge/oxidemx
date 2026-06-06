@@ -241,7 +241,7 @@ reject with `retval = -EINVAL`; games fall back gracefully.
 
 ### 5.3 udev rule
 
-`/etc/udev/rules.d/70-juhradial-haptic-pad.rules`:
+`/etc/udev/rules.d/70-oxidemx-haptic-pad.rules`:
 
 ```udev
 # Allow non-root to open /dev/uinput
@@ -574,7 +574,7 @@ Steam-owned file. Users can break their setups; we surface guidance only.
 
 ## 10. Config schema
 
-Extends `juhradial-shared/src/config.rs` under the existing `GamingConfig`
+Extends `oxidemx-shared/src/config.rs` under the existing `GamingConfig`
 (if it doesn't exist there yet, the existing Gaming tab probably reads from
 `config.haptic` and a `gaming` block — match the surrounding style).
 
@@ -897,7 +897,7 @@ server. Confirmed: no Wayland-specific concerns.
 The udev rule goes under `/usr/local/share/...` per the existing project
 convention (memory: `user_system.md`). `install.sh` already follows this.
 No additional Bazzite handling required for the daemon binary (matches the
-existing `juhradiald` install path).
+existing `oxidemxd` install path).
 
 ---
 
@@ -906,7 +906,7 @@ existing `juhradiald` install path).
 Strict order, with verification gates between phases:
 
 ### Phase 1 — Config schema (no behaviour)
-- Add `HapticRedirectConfig` to `juhradial-shared/src/config.rs`.
+- Add `HapticRedirectConfig` to `oxidemx-shared/src/config.rs`.
 - Add defaults; bump config schema version; write migration in
   `daemon/src/config.rs` (if there's a version-bump path; otherwise rely
   on serde defaults for absent fields).
@@ -919,7 +919,7 @@ Strict order, with verification gates between phases:
   toggle + curve + sliders + mode picker). Wire `Message::SetHapticRedirect*`
   variants in `settings-rs/src/main.rs`. **Don't** wire to daemon yet —
   just write to config.
-- **Gate:** `cargo build -p juhradial-settings` clean; UI renders;
+- **Gate:** `cargo build -p oxidemx-settings` clean; UI renders;
   config.json updates as the user moves sliders.
 
 ### Phase 3 — Virtual pad creation
@@ -1051,4 +1051,4 @@ Phase 7. Phase 8 sweep stretches with title coverage.
 - `daemon/src/hidpp/patterns.rs` — existing haptic patterns
 - `daemon/src/hidpp/mod.rs` — SharedHapticManager
 - `settings-rs/src/tabs/gaming.rs` — existing Gaming tab
-- `juhradial-shared/src/config.rs` — config schema
+- `oxidemx-shared/src/config.rs` — config schema

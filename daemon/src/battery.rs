@@ -503,10 +503,10 @@ pub async fn start_battery_updater(state: SharedBatteryState) {
 ///
 /// Emits battery + charging only; device_name / connection / device_id are
 /// left as empty strings because BatteryHandler doesn't have access to the
-/// JuhRadialService fields that carry that information.  Consumers that
+/// OxideMXService fields that carry that information.  Consumers that
 /// need those fields should follow up with GetActiveDeviceState().
 ///
-/// TODO: thread JuhRadialService device_name / device_mode into the emit
+/// TODO: thread OxideMXService device_name / device_mode into the emit
 ///       call once the device-cache module lands.
 async fn maybe_emit_device_state_changed(
     dbus_conn: &Option<zbus::Connection>,
@@ -579,10 +579,13 @@ pub async fn start_battery_updater_shared_with_dbus(
     let mut consecutive_errors = 0u32;
 
     // Initial update - get result first, then update state (don't hold lock across await)
-    let initial_result = {
-        let mut manager = haptic_manager.lock().unwrap();
+    let haptic_manager_clone = haptic_manager.clone();
+    let initial_result = tokio::task::spawn_blocking(move || {
+        let mut manager = haptic_manager_clone.lock().unwrap();
         manager.query_battery()
-    };
+    })
+    .await
+    .unwrap_or_else(|e| Err(crate::hidpp::error::HapticError::ProtocolError(format!("spawn_blocking failed: {e}"))));
 
     match initial_result {
         Ok((percentage, charging)) => {
@@ -611,10 +614,13 @@ pub async fn start_battery_updater_shared_with_dbus(
         interval.tick().await;
 
         // Lock the haptic manager briefly to query battery
-        let result = {
-            let mut manager = haptic_manager.lock().unwrap();
+        let haptic_manager_clone = haptic_manager.clone();
+        let result = tokio::task::spawn_blocking(move || {
+            let mut manager = haptic_manager_clone.lock().unwrap();
             manager.query_battery()
-        };
+        })
+        .await
+        .unwrap_or_else(|e| Err(crate::hidpp::error::HapticError::ProtocolError(format!("spawn_blocking failed: {e}"))));
 
         match result {
             Ok((percentage, charging)) => {

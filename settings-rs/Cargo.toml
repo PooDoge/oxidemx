@@ -1,19 +1,19 @@
 [package]
-name = "juhradial-settings-rs"
+name = "oxidemx-settings"
 version = "0.0.1"
 edition = "2021"
-description = "JuhRadial MX settings GUI (Rust + iced)"
+description = "OxideMX settings GUI (Rust + iced)"
 license = "GPL-3.0"
-repository = "https://github.com/JuhLabs/juhradial-mx"
+repository = "https://github.com/JuhLabs/oxidemx"
 
 [[bin]]
-name = "juhradial-settings"
+name = "oxidemx-settings"
 path = "src/main.rs"
 
 [dependencies]
-juhradial-shared = { path = "../juhradial-shared" }
-juhradial-icons = { path = "../juhradial-icons" }
-juhradial-widgets = { path = "../juhradial-widgets" }
+oxidemx-shared = { path = "../oxidemx-shared" }
+oxidemx-icons = { path = "../oxidemx-icons" }
+oxidemx-widgets = { path = "../oxidemx-widgets" }
 
 # iced 0.14 — same toolkit as the overlay so we share render
 # tech and don't drag in a separate UI dep tree. Standard widgets
@@ -38,7 +38,7 @@ tokio = { version = "1", features = ["rt", "macros", "time"] }
 
 # Singleton enforcement + the GNOME extension's RaiseOverlay focus
 # bypass: the second instance calls Focus on the primary; the
-# primary then asks the juhradial-cursor GNOME extension to raise
+# primary then asks the oxidemx-cursor GNOME extension to raise
 # + activate its window (Wayland blocks app-side focus, but the
 # extension runs inside Mutter and isn't subject to that).
 zbus = "5"

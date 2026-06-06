@@ -6,12 +6,12 @@
 //! is three steps. This collapses it to one.
 //!
 //! Reuses the State.installed_apps cache populated at startup by
-//! `juhradial_shared::enumerate_applications()` (system + user +
+//! `oxidemx_shared::enumerate_applications()` (system + user +
 //! flatpak XDG application dirs).
 
 use crate::radial_preview::peek_icon_handle_untinted;
 use crate::{Message};
-use juhradial_widgets::style;
+use oxidemx_widgets::style;
 use iced::widget::{button, column, container, image, row, scrollable, text, text_input, toggler, Space};
 use iced::{Alignment, Element, Length};
 
@@ -49,7 +49,7 @@ pub fn view<'a>(
 ) -> Element<'a, Message> {
     let pal = &state.palette;
     let lc = picker.search.to_lowercase();
-    let matched: Vec<&juhradial_shared::DesktopEntry> = state
+    let matched: Vec<&oxidemx_shared::DesktopEntry> = state
         .installed_apps
         .iter()
         .filter(|a| picker.search.is_empty() || a.name.to_lowercase().contains(&lc))
@@ -124,11 +124,11 @@ pub fn view<'a>(
 /// One app row: icon + name + exec preview, click anywhere → pick.
 fn app_row<'a>(
     state: &'a crate::State,
-    entry: &'a juhradial_shared::DesktopEntry,
+    entry: &'a oxidemx_shared::DesktopEntry,
 ) -> Element<'a, Message> {
     let pal = &state.palette;
     let pick_msg = Message::PickAppForCommand {
-        command: juhradial_shared::clean_exec_line(&entry.exec),
+        command: oxidemx_shared::clean_exec_line(&entry.exec),
         icon: entry.icon.clone(),
         label: entry.name.clone(),
     };
@@ -152,7 +152,7 @@ fn app_row<'a>(
     let exec_preview = if entry.exec.is_empty() {
         "(no exec)".to_string()
     } else {
-        let cleaned = juhradial_shared::clean_exec_line(&entry.exec);
+        let cleaned = oxidemx_shared::clean_exec_line(&entry.exec);
         if cleaned.chars().count() > 60 {
             let mut s: String = cleaned.chars().take(57).collect();
             s.push('…');

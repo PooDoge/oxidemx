@@ -9,7 +9,7 @@
 #   sudo systemctl reboot
 #
 # What this does:
-#   1. Builds juhradial-overlay-rs in release mode.
+#   1. Builds oxidemx-overlay in release mode.
 #   2. Confirms the daemon is running (or warns that you'll see no menu).
 #   3. Launches the overlay in the foreground with verbose tracing so
 #      D-Bus events are visible.
@@ -22,24 +22,24 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
 echo "==> cargo build (release)"
-cargo build --release -p juhradial-overlay-rs
+cargo build --release -p oxidemx-overlay
 
 echo ""
 echo "==> daemon health"
-if systemctl --user is-active --quiet juhradialmx-daemon.service; then
-    PID=$(systemctl --user show -p MainPID --value juhradialmx-daemon.service)
-    echo "    juhradialmx-daemon active (PID $PID)"
+if systemctl --user is-active --quiet oxidemx-daemon.service; then
+    PID=$(systemctl --user show -p MainPID --value oxidemx-daemon.service)
+    echo "    oxidemx-daemon active (PID $PID)"
 else
-    echo "    juhradialmx-daemon NOT running — the overlay will load but"
+    echo "    oxidemx-daemon NOT running — the overlay will load but"
     echo "    won't receive any MenuRequested signals. Start it with:"
-    echo "      systemctl --user start juhradialmx-daemon.service"
+    echo "      systemctl --user start oxidemx-daemon.service"
 fi
 
 echo ""
-echo "==> launching overlay (RUST_LOG=info,juhradial_overlay_rs=debug)"
+echo "==> launching overlay (RUST_LOG=info,oxidemx_overlay_rs=debug)"
 echo "    Press the gesture button on your MX Master to test."
 echo "    Ctrl-C here to quit."
 echo ""
 
-exec env RUST_LOG="info,juhradial_overlay_rs=debug" \
-    ./target/release/juhradial-overlay-rs
+exec env RUST_LOG="info,oxidemx_overlay_rs=debug" \
+    ./target/release/oxidemx-overlay

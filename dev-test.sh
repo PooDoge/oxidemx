@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Dev-mode end-to-end test setup for juhradial-mx.
+# Dev-mode end-to-end test setup for oxidemx.
 #
 # What this does, in order:
 #   1. Checks prerequisites (input group for the daemon, GNOME Shell
@@ -15,7 +15,7 @@
 #   - No `sudo`. No system installs. No rpm-ostree calls. Pure
 #     user-space, safe on Bazzite / Silverblue / atomic Fedora.
 #   - No udev rule installation. If you don't have
-#     /etc/udev/rules.d/99-juhradialmx.rules, run install.sh once for
+#     /etc/udev/rules.d/99-oxidemx.rules, run install.sh once for
 #     the system bits, then come back here for ongoing dev cycles.
 #
 # Usage:
@@ -26,7 +26,7 @@
 #   ./dev-test.sh status      # show component states (alias for ./dev.sh status)
 #
 # Env overrides:
-#   JUHRADIAL_DISTROBOX  distrobox container name (default: claude_development)
+#   OXIDEMX_DISTROBOX  distrobox container name (default: claude_development)
 
 set -euo pipefail
 
@@ -91,8 +91,8 @@ check_gnome() {
 }
 
 check_udev_rules() {
-  if [[ -f /etc/udev/rules.d/99-juhradialmx.rules ]]; then
-    ok "udev rules present (/etc/udev/rules.d/99-juhradialmx.rules)"
+  if [[ -f /etc/udev/rules.d/99-oxidemx.rules ]]; then
+    ok "udev rules present (/etc/udev/rules.d/99-oxidemx.rules)"
   else
     warn "udev rules NOT installed. The daemon may not be able to access"
     warn "the Logitech receiver via hidraw. Run install.sh once to set"
@@ -129,13 +129,13 @@ do_start_daemon() {
   fi
   "$DEV" start daemon
   # Give it a moment to claim the D-Bus name + scan hidraw, then sanity-
-  # check that org.juhradial.Daemon actually appeared. A failed
+  # check that org.oxidemx.Daemon actually appeared. A failed
   # daemon would leave us starting overlay+settings against a dead
   # bus name and confuse the user later.
   sleep 0.6
   if command -v busctl >/dev/null 2>&1; then
-    if busctl --user list 2>/dev/null | grep -q "org.juhradial.Daemon"; then
-      ok "Daemon claimed org.juhradial.Daemon on the session bus."
+    if busctl --user list 2>/dev/null | grep -q "org.oxidemx.Daemon"; then
+      ok "Daemon claimed org.oxidemx.Daemon on the session bus."
     else
       warn "Daemon started but D-Bus name not yet visible. Tail logs:"
       warn "  ./dev.sh logs daemon -f"
@@ -167,7 +167,7 @@ print_done() {
   echo -e "  ${DIM}Restart overlay${RESET}     ./dev.sh restart overlay"
   echo -e "  ${DIM}Stop everything${RESET}     ./dev-test.sh stop"
   echo -e "  ${DIM}Probe focus method${RESET}  busctl --user introspect \\"
-  echo -e "                          org.juhradial.CursorHelper /org/juhradial/CursorHelper"
+  echo -e "                          org.oxidemx.CursorHelper /org/oxidemx/CursorHelper"
   if [[ "$EXT_OK" = true ]]; then
     echo
     echo -e "  ${YELLOW}${BOLD}Extension hot-reload caveat:${RESET} GJS sometimes caches the"
@@ -180,7 +180,7 @@ print_done() {
 # ── Subcommands ────────────────────────────────────────────────────
 run_full() {
   echo
-  echo -e "  ${BOLD}juhradial-mx dev test setup${RESET}"
+  echo -e "  ${BOLD}oxidemx dev test setup${RESET}"
   hr
   check_scripts
   check_input_group
@@ -210,7 +210,7 @@ run_status() {
 
 usage() {
   cat <<USAGE
-Dev-mode end-to-end test setup for juhradial-mx.
+Dev-mode end-to-end test setup for oxidemx.
 
   $0                  full setup: build → ext → start daemon/overlay/settings
   $0 --no-build       skip rebuild
@@ -221,9 +221,9 @@ Dev-mode end-to-end test setup for juhradial-mx.
 
 What this script changes on your system:
   - Writes built binaries under ./target/release/ (cargo)
-  - Writes ~/.local/share/gnome-shell/extensions/juhradial-cursor@dev.juhlabs.com/
+  - Writes ~/.local/share/gnome-shell/extensions/oxidemx-cursor@dev.juhlabs.com/
   - Toggles that extension via 'gnome-extensions disable/enable'
-  - Starts processes whose PIDs/logs live under \$XDG_RUNTIME_DIR/juhradial-dev/
+  - Starts processes whose PIDs/logs live under \$XDG_RUNTIME_DIR/oxidemx-dev/
 
 What it does NOT change:
   - Nothing under /usr, /opt, or /etc

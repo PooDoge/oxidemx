@@ -1,4 +1,4 @@
-//! Owns the child process handle for juhradial-overlay-rs.
+//! Owns the child process handle for oxidemx-overlay.
 //!
 //! Backs the daemon's `EnsureOverlayRunning()` D-Bus handler. The
 //! indicator extension calls that handler when the user toggles
@@ -21,7 +21,7 @@ use zbus::Connection;
 /// Wayland app_id / D-Bus well-known name the overlay claims when
 /// it boots. Matches `overlay-rs/src/app.rs::APP_ID`. If you change
 /// one, change both.
-const OVERLAY_BUS_NAME: &str = "org.juhradial.overlay";
+const OVERLAY_BUS_NAME: &str = "org.oxidemx.overlay";
 
 /// Total time we wait for the overlay process to claim its bus
 /// name after spawn before giving up. Empirically the overlay takes
@@ -46,7 +46,7 @@ impl OverlaySpawner {
     ///
     /// Returns `Ok(())` immediately if `OVERLAY_BUS_NAME` already has
     /// an owner on the session bus. Otherwise spawns
-    /// `juhradial-overlay-rs` and polls until the name appears or
+    /// `oxidemx-overlay` and polls until the name appears or
     /// `SPAWN_WAIT_TIMEOUT` elapses.
     pub async fn ensure_running(&self, conn: &Connection) -> Result<(), String> {
         let proxy = match zbus::fdo::DBusProxy::new(conn).await {
@@ -56,9 +56,12 @@ impl OverlaySpawner {
         if name_owned(&proxy, OVERLAY_BUS_NAME).await {
             return Ok(());
         }
-        match Command::new("juhradial-overlay-rs").spawn() {
+        match Command::new("oxidemx-overlay")
+            .env("WINIT_UNIX_BACKEND", "x11")
+            .spawn()
+        {
             Ok(child) => {
-                info!("Spawned juhradial-overlay-rs via EnsureOverlayRunning");
+                info!("Spawned oxidemx-overlay via EnsureOverlayRunning");
                 match self.child.lock() {
                     Ok(mut guard) => *guard = Some(child),
                     Err(poisoned) => {
@@ -68,8 +71,8 @@ impl OverlaySpawner {
                 }
             }
             Err(e) => {
-                warn!(error = %e, "Failed to spawn juhradial-overlay-rs");
-                return Err(format!("spawn juhradial-overlay-rs: {e}"));
+                warn!(error = %e, "Failed to spawn oxidemx-overlay");
+                return Err(format!("spawn oxidemx-overlay: {e}"));
             }
         }
         let deadline = Instant::now() + SPAWN_WAIT_TIMEOUT;

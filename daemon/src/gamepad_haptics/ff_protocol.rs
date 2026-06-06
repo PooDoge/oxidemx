@@ -26,7 +26,7 @@ use evdev::{
     AbsoluteAxisCode, Device, EventSummary, EventStream, EventType, FFEffectCode,
     FFEffectData, FFEffectKind, InputEvent, UInputCode,
 };
-use juhradial_shared::HapticRedirectConfig;
+use oxidemx_shared::HapticRedirectConfig;
 use tokio::sync::oneshot;
 
 use super::translator::RumbleTranslator;
@@ -510,7 +510,7 @@ mod tests {
     /// (not failed) on `PermissionDenied`. Run with:
     ///
     /// ```text
-    /// cargo test -p juhradiald --lib -- --ignored ff_upload
+    /// cargo test -p oxidemxd --lib -- --ignored ff_upload
     /// ```
     #[tokio::test]
     #[ignore = "creates a real uinput device + uploads FF; needs /dev/uinput access"]
@@ -588,7 +588,7 @@ mod tests {
                 true => { /* handshake completed end-to-end */ }
                 false => eprintln!(
                     "skipped the FF upload half: no access to the event node. \
-                     Install packaging/udev/70-juhradial-haptic-pad.rules."
+                     Install packaging/udev/70-oxidemx-haptic-pad.rules."
                 ),
             },
         }
@@ -604,13 +604,13 @@ mod tests {
     /// node isn't accessible. Run with:
     ///
     /// ```text
-    /// cargo test -p juhradiald --lib -- --ignored --nocapture live_haptic_feel
+    /// cargo test -p oxidemxd --lib -- --ignored --nocapture live_haptic_feel
     /// ```
     #[tokio::test]
     #[ignore = "drives the real MX Master 4 haptic actuator; needs the device + /dev/uinput"]
     async fn live_haptic_feel_walkthrough() {
         use evdev::{Device, FFEffectData, FFEffectKind, FFReplay, FFTrigger};
-        use juhradial_shared::HapticRedirectCurve;
+        use oxidemx_shared::HapticRedirectCurve;
         use std::io::ErrorKind;
         use std::time::Duration;
 
@@ -707,7 +707,7 @@ mod tests {
                 ),
                 false => eprintln!(
                     "skipped: no access to the event node — install \
-                     packaging/udev/70-juhradial-haptic-pad.rules."
+                     packaging/udev/70-oxidemx-haptic-pad.rules."
                 ),
             },
         }
@@ -745,7 +745,7 @@ mod tests {
     /// on `PermissionDenied`. Run with:
     ///
     /// ```text
-    /// cargo test -p juhradiald --lib -- --ignored --nocapture proxy_forwards
+    /// cargo test -p oxidemxd --lib -- --ignored --nocapture proxy_forwards
     /// ```
     #[tokio::test]
     #[ignore = "creates two uinput devices; needs /dev/uinput + event-node access"]

@@ -3,9 +3,9 @@
 //! Flow:
 //!   1. Spawn a dedicated thread with its own tokio runtime.
 //!   2. The thread connects to the session bus and tries to claim
-//!      `org.juhradial.Settings` with `DoNotQueue`.
+//!      `org.oxidemx.Settings` with `DoNotQueue`.
 //!   3a. If we get the name → register a `Focus` method handler at
-//!       `/org/juhlabs/juhradial/Settings`. Each call writes `()`
+//!       `/org/juhlabs/oxidemx/Settings`. Each call writes `()`
 //!       into an async-channel that iced consumes via a
 //!       `Subscription::run` stream. The thread parks forever to
 //!       keep the connection + service alive.
@@ -29,9 +29,9 @@ use zbus::{
     interface, Connection,
 };
 
-const BUS_NAME: &str = "org.juhradial.Settings";
-const OBJECT_PATH: &str = "/org/juhradial/Settings";
-const INTERFACE: &str = "org.juhradial.Settings";
+const BUS_NAME: &str = "org.oxidemx.Settings";
+const OBJECT_PATH: &str = "/org/oxidemx/Settings";
+const INTERFACE: &str = "org.oxidemx.Settings";
 
 /// Outcome of the singleton handshake.
 pub enum Acquisition {
@@ -55,11 +55,11 @@ struct SettingsService {
     focus_tx: Sender<()>,
 }
 
-#[interface(name = "org.juhradial.Settings")]
+#[interface(name = "org.oxidemx.Settings")]
 impl SettingsService {
     /// Bring the settings window to the front + focus it. Idempotent
     /// — second instance calls this and exits, but additional
-    /// `juhradial-settings` invocations from any source (terminal,
+    /// `oxidemx-settings` invocations from any source (terminal,
     /// .desktop file, etc.) all funnel through here.
     async fn focus(&self) {
         info!("Focus requested via D-Bus");
@@ -75,7 +75,7 @@ pub fn try_acquire_or_focus_existing() -> Acquisition {
     let (focus_tx, focus_rx) = async_channel::unbounded::<()>();
 
     std::thread::Builder::new()
-        .name("juhradial-settings-singleton".into())
+        .name("oxidemx-settings-singleton".into())
         .spawn(move || {
             let rt = match tokio::runtime::Builder::new_current_thread()
                 .enable_all()

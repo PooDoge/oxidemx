@@ -1,6 +1,6 @@
 //! D-Bus interface implementation
 //!
-//! All methods, signals, and properties for org.juhradial.Daemon.
+//! All methods, signals, and properties for org.oxidemx.Daemon.
 //! This must be a single `#[interface]` impl block per zbus requirements.
 
 use zbus::{interface, object_server::SignalEmitter, fdo};
@@ -8,7 +8,7 @@ use crate::config::{Config, PointerConfig, ScrollConfig};
 use crate::hidpp::{HapticEvent, HapticManager, SharedHapticManager};
 use crate::macros::events_to_actions;
 use crate::thumb_wheel::{SharedThumbWheelState, ThumbWheelForwarder};
-use super::service::JuhRadialService;
+use super::service::OxideMXService;
 
 /// True iff any field that actually drives the HID++ SmartShift
 /// write differs between the two configs.
@@ -36,7 +36,7 @@ fn pointer_changed(a: &PointerConfig, b: &PointerConfig) -> bool {
 /// | device_mode  | connection_kind |
 /// |--------------|-----------------|
 /// | "logitech"   | "unifying"      |  (conservative default; real sub-type
-/// |              |                 |   not yet stored on JuhRadialService)
+/// |              |                 |   not yet stored on OxideMXService)
 /// | "bolt"       | "bolt"          |
 /// | "bluetooth"  | "bluetooth"     |
 /// | "usb"        | "usb"           |
@@ -305,8 +305,8 @@ fn apply_thumb_wheel_invert(
     Ok(())
 }
 
-#[interface(name = "org.juhradial.Daemon")]
-impl JuhRadialService {
+#[interface(name = "org.oxidemx.Daemon")]
+impl OxideMXService {
     // =========================================================================
     // MENU METHODS
     // =========================================================================
@@ -325,7 +325,9 @@ impl JuhRadialService {
             }
         }
 
-        tracing::info!(x, y, "ShowMenu called - emitting MenuRequested signal");
+        tracing::info!(x, y, "ShowMenu called - ensuring overlay is running");
+        let _ = self.ensure_overlay_running().await;
+
         Self::menu_requested(&emitter, x, y).await?;
         Ok(())
     }
@@ -635,7 +637,9 @@ impl JuhRadialService {
         x: i32,
         y: i32,
     ) -> fdo::Result<()> {
-        tracing::info!(x, y, "ShowMenuAtCursor called from KWin script");
+        tracing::info!(x, y, "ShowMenuAtCursor called from KWin script - ensuring overlay is running");
+        let _ = self.ensure_overlay_running().await;
+
         Self::menu_requested(&emitter, x, y).await?;
         Ok(())
     }
@@ -664,8 +668,8 @@ impl JuhRadialService {
     /// device_name comes from self.device_name (set at startup by the
     /// HID++ probe or evdev fallback).
     /// device_id is empty — no hidraw-path source exists on
-    /// JuhRadialService yet.
-    /// TODO: thread hidraw path through JuhRadialService when
+    /// OxideMXService yet.
+    /// TODO: thread hidraw path through OxideMXService when
     ///       device-cache module lands.
     async fn get_active_device_state(
         &self,
@@ -678,47 +682,25 @@ impl JuhRadialService {
         };
         let connection = normalize_connection_kind(&self.device_mode, state.available);
         let name = self.device_name.clone();
-        // device_id: no hidraw-path source on JuhRadialService yet.
-        // TODO: thread hidraw path through JuhRadialService when
+        // device_id: no hidraw-path source on OxideMXService yet.
+        // TODO: thread hidraw path through OxideMXService when
         //       device-cache module lands.
         let id = String::new();
         Ok((battery, charging, connection, name, id))
     }
 
-    /// Spawns the indicator popup as a one-shot subprocess.
+    /// Spawns the indicator popup as a one-shot subprocess, or kills it if already running (toggle behavior).
     /// panel_{x,y,w,h} are stage-absolute Mutter logical pixels of the
-    /// indicator's panel rect so the popup can position its tip
-    /// underneath. Fire-and-forget — the popup exits on its own
-    /// dismiss path; the daemon doesn't track its lifetime. A detached
-    /// tokio task awaits the child so the popup is reaped cleanly
-    /// without holding any handle here.
+    /// indicator's panel rect so the popup can position its tip underneath.
     async fn show_popup(
         &self,
-        panel_x: i32,
-        panel_y: i32,
-        panel_w: i32,
-        panel_h: i32,
+        _panel_x: i32,
+        _panel_y: i32,
+        _panel_w: i32,
+        _panel_h: i32,
     ) -> fdo::Result<()> {
-        let rect = format!("{panel_x},{panel_y},{panel_w},{panel_h}");
-        tracing::info!(rect = %rect, "ShowPopup spawning juhradial-popup");
-        match std::process::Command::new("juhradial-popup")
-            .args(["--panel-rect", &rect])
-            .spawn()
-        {
-            Ok(mut child) => {
-                // Detach: reap the popup's exit asynchronously so it doesn't
-                // linger as a zombie until the daemon exits. The popup is
-                // genuinely fire-and-forget from this method's perspective.
-                std::thread::spawn(move || {
-                    let _ = child.wait();
-                });
-                Ok(())
-            }
-            Err(e) => {
-                tracing::warn!(error = %e, "Failed to spawn juhradial-popup");
-                Err(fdo::Error::Failed(format!("spawn juhradial-popup: {e}")))
-            }
-        }
+        tracing::info!("ShowPopup invoked on daemon, but the extension uses native GJS popover now. Skipping.");
+        Ok(())
     }
 
     /// Idempotent overlay-process ensure. See `crate::overlay_spawner`

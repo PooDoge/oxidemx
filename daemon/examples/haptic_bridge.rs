@@ -8,16 +8,16 @@
 //! holds it until Ctrl-C.
 //!
 //! ```text
-//! cargo run -p juhradiald --example haptic_bridge
+//! cargo run -p oxidemxd --example haptic_bridge
 //! ```
 //!
 //! Then launch a game. Force feedback the game sends to the virtual
 //! pad is logged here ("FF effect playing …") and rendered on the
 //! mouse.
 
-use juhradial_shared::{HapticRedirectConfig, HapticRedirectMode};
-use juhradiald::config::HapticConfig;
-use juhradiald::{new_shared_haptic_manager, GamepadHapticsService};
+use oxidemx_shared::{HapticRedirectConfig, HapticRedirectMode};
+use oxidemxd::config::HapticConfig;
+use oxidemxd::{new_shared_haptic_manager, GamepadHapticsService};
 
 #[tokio::main]
 async fn main() {

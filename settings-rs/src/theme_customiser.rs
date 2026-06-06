@@ -24,7 +24,7 @@ use iced::widget::{
 use iced::{Alignment, Element, Length};
 
 use crate::color_canvas;
-use juhradial_widgets::style;
+use oxidemx_widgets::style;
 use crate::{ColorChannel, Message, State, ThemeEditor};
 
 pub fn view<'a>(state: &'a State, editor: &'a ThemeEditor) -> Element<'a, Message> {
@@ -53,7 +53,7 @@ pub fn view<'a>(state: &'a State, editor: &'a ThemeEditor) -> Element<'a, Messag
     let intro = text(
         "Click any element on the left mock UI to edit its colour. \
          Edits live-preview on this window; \"Save\" writes it to \
-         ~/.local/share/juhradial/themes/<name>.json and switches \
+         ~/.local/share/oxidemx/themes/<name>.json and switches \
          the picker to it.",
     )
     .size(11)
@@ -760,7 +760,7 @@ fn contrast_text(bg: iced::Color) -> iced::Color {
 }
 
 fn parse_hex(s: &str) -> iced::Color {
-    juhradial_shared::theme::parse_hex_rgba(s)
+    oxidemx_shared::theme::parse_hex_rgba(s)
         .map(|(r, g, b, _)| iced::Color::from_rgb(r as f32, g as f32, b as f32))
         .unwrap_or(iced::Color::from_rgb(1.0, 0.0, 1.0))
 }

@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <component type="desktop-application">
-  <id>org.juhlabs.JuhRadialMX</id>
+  <id>org.juhlabs.OxideMXMX</id>
 
-  <name>JuhRadial MX</name>
+  <name>OxideMX MX</name>
   <summary>Beautiful radial menu for Logitech MX Master mice on Linux</summary>
 
   <developer id="org.juhlabs">
@@ -12,14 +12,14 @@
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>GPL-3.0-or-later</project_license>
 
-  <url type="homepage">https://github.com/JuhLabs/juhradial-mx</url>
-  <url type="bugtracker">https://github.com/JuhLabs/juhradial-mx/issues</url>
+  <url type="homepage">https://github.com/JuhLabs/oxidemx</url>
+  <url type="bugtracker">https://github.com/JuhLabs/oxidemx/issues</url>
   <url type="donation">https://paypal.me/LangbachHermstad</url>
-  <url type="vcs-browser">https://github.com/JuhLabs/juhradial-mx</url>
+  <url type="vcs-browser">https://github.com/JuhLabs/oxidemx</url>
 
   <description>
     <p>
-      JuhRadial MX brings a Logi Options+ inspired radial menu experience to Linux.
+      OxideMX MX brings a Logi Options+ inspired radial menu experience to Linux.
       Hold the gesture button on your MX Master mouse to open a beautiful glassmorphic
       radial menu overlay, then move to select actions.
     </p>
@@ -35,25 +35,25 @@
       <li>Native KDE Plasma and Wayland integration</li>
     </ul>
     <p>
-      JuhRadial MX never modifies your mouse's onboard memory, ensuring 100%
+      OxideMX MX never modifies your mouse's onboard memory, ensuring 100%
       compatibility with Logi Options+ on Windows and macOS.
     </p>
   </description>
 
-  <launchable type="desktop-id">org.juhlabs.JuhRadialMX.desktop</launchable>
+  <launchable type="desktop-id">org.juhlabs.OxideMXMX.desktop</launchable>
 
   <screenshots>
     <screenshot type="default">
-      <caption>Radial menu overlay with JuhRadial MX theme</caption>
-      <image>https://raw.githubusercontent.com/JuhLabs/juhradial-mx/master/assets/screenshots/RadialWheel.png</image>
+      <caption>Radial menu overlay with OxideMX MX theme</caption>
+      <image>https://raw.githubusercontent.com/JuhLabs/oxidemx/master/assets/screenshots/RadialWheel.png</image>
     </screenshot>
     <screenshot>
       <caption>Settings dashboard</caption>
-      <image>https://raw.githubusercontent.com/JuhLabs/juhradial-mx/master/assets/screenshots/Settings.png</image>
+      <image>https://raw.githubusercontent.com/JuhLabs/oxidemx/master/assets/screenshots/Settings.png</image>
     </screenshot>
     <screenshot>
       <caption>DPI and scroll wheel settings</caption>
-      <image>https://raw.githubusercontent.com/JuhLabs/juhradial-mx/master/assets/screenshots/settingsscroll.png</image>
+      <image>https://raw.githubusercontent.com/JuhLabs/oxidemx/master/assets/screenshots/settingsscroll.png</image>
     </screenshot>
   </screenshots>
 
@@ -176,7 +176,7 @@
     </release>
     <release version="0.1.0" date="2024-12-13">
       <description>
-        <p>Initial release of JuhRadial MX</p>
+        <p>Initial release of OxideMX MX</p>
         <ul>
           <li>Glassmorphic radial menu overlay</li>
           <li>Battery status monitoring</li>

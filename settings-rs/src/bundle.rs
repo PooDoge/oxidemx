@@ -1,7 +1,7 @@
 //! Self-contained config export / import bundle.
 //!
 //! A "bundle" is a single JSON document containing the user's
-//! whole JuhRadial setup — radial config + recorded macros + saved
+//! whole OxideMX setup — radial config + recorded macros + saved
 //! themes — so it can be exported once and imported on a new
 //! machine without fishing for sidecar files.
 //!
@@ -25,7 +25,7 @@ use std::path::PathBuf;
 pub struct ConfigBundle {
     #[serde(default = "default_bundle_version")]
     pub __bundle_version: u32,
-    pub config: juhradial_shared::AppConfig,
+    pub config: oxidemx_shared::AppConfig,
     #[serde(default)]
     pub macros: Vec<BundledMacro>,
     #[serde(default)]
@@ -44,7 +44,7 @@ pub struct BundledMacro {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BundledTheme {
     pub slug: String,
-    pub theme: juhradial_shared::theme::Theme,
+    pub theme: oxidemx_shared::theme::Theme,
 }
 
 fn default_bundle_version() -> u32 {
@@ -53,7 +53,7 @@ fn default_bundle_version() -> u32 {
 
 impl ConfigBundle {
     /// Snapshot the current on-disk state into a bundle.
-    pub fn capture(config: juhradial_shared::AppConfig) -> Self {
+    pub fn capture(config: oxidemx_shared::AppConfig) -> Self {
         ConfigBundle {
             __bundle_version: default_bundle_version(),
             config,
@@ -67,7 +67,7 @@ impl ConfigBundle {
     /// the caller can install it into State. Errors are collected
     /// + returned; partial success is the norm here (one bad
     /// macro shouldn't block restoring everything else).
-    pub fn install(self) -> (juhradial_shared::AppConfig, Vec<String>) {
+    pub fn install(self) -> (oxidemx_shared::AppConfig, Vec<String>) {
         let mut errors = Vec::new();
         for m in self.macros {
             if let Err(e) = write_macro(&m) {
@@ -76,7 +76,7 @@ impl ConfigBundle {
         }
         for t in self.themes {
             if let Err(e) =
-                juhradial_shared::theme::save_user_theme(&t.slug, &t.theme)
+                oxidemx_shared::theme::save_user_theme(&t.slug, &t.theme)
             {
                 errors.push(format!("theme {}: {e}", t.slug));
             }
@@ -113,12 +113,12 @@ fn collect_macros() -> Vec<BundledMacro> {
 }
 
 fn collect_themes() -> Vec<BundledTheme> {
-    let slugs = juhradial_shared::theme::list_user_theme_slugs();
+    let slugs = oxidemx_shared::theme::list_user_theme_slugs();
     slugs
         .into_iter()
         .filter_map(|slug| {
-            juhradial_shared::theme::Theme::load(
-                &juhradial_shared::theme::ThemeName::from(slug.as_str()),
+            oxidemx_shared::theme::Theme::load(
+                &oxidemx_shared::theme::ThemeName::from(slug.as_str()),
             )
             .map(|theme| BundledTheme { slug, theme })
         })
@@ -140,7 +140,7 @@ fn write_macro(m: &BundledMacro) -> Result<(), String> {
 /// `AppConfig` for backwards compatibility with the older export
 /// format. Returns `(config, errors)` after applying any
 /// macro/theme files in the bundle.
-pub fn parse_and_install(bytes: &[u8]) -> Result<(juhradial_shared::AppConfig, Vec<String>), String> {
+pub fn parse_and_install(bytes: &[u8]) -> Result<(oxidemx_shared::AppConfig, Vec<String>), String> {
     if let Ok(bundle) = serde_json::from_slice::<ConfigBundle>(bytes) {
         if bundle.__bundle_version == 1 {
             return Ok(bundle.install());
@@ -151,7 +151,7 @@ pub fn parse_and_install(bytes: &[u8]) -> Result<(juhradial_shared::AppConfig, V
         ));
     }
     // Older format — bare AppConfig.
-    let cfg: juhradial_shared::AppConfig = serde_json::from_slice(bytes)
+    let cfg: oxidemx_shared::AppConfig = serde_json::from_slice(bytes)
         .map_err(|e| format!("parse: {e}"))?;
     Ok((cfg, Vec::new()))
 }

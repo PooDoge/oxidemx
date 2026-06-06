@@ -1,4 +1,4 @@
-//! Listener for the daemon's D-Bus signals on `org.juhradial.Daemon`.
+//! Listener for the daemon's D-Bus signals on `org.oxidemx.Daemon`.
 //!
 //! Wire format mirrors what the Python overlay subscribes to. Names
 //! and signatures are taken directly from
@@ -15,9 +15,9 @@
 
 use futures_util::stream::{Stream, StreamExt};
 use tracing::{debug, info, warn};
-use zbus::{proxy, Connection};
+use zbus::proxy;
 
-const DAEMON_PATH: &str = "/org/juhradial/Daemon";
+const DAEMON_PATH: &str = "/org/oxidemx/Daemon";
 
 #[derive(Debug, Clone)]
 pub enum OverlayEvent {
@@ -27,9 +27,9 @@ pub enum OverlayEvent {
 }
 
 #[proxy(
-    interface = "org.juhradial.Daemon",
-    default_service = "org.juhradial.Daemon",
-    default_path = "/org/juhradial/Daemon"
+    interface = "org.oxidemx.Daemon",
+    default_service = "org.oxidemx.Daemon",
+    default_path = "/org/oxidemx/Daemon"
 )]
 trait Daemon {
     #[zbus(signal)]
@@ -71,10 +71,13 @@ pub fn stream() -> impl Stream<Item = OverlayEvent> {
 }
 
 async fn run_listener(tx: async_channel::Sender<OverlayEvent>) -> zbus::Result<()> {
-    let conn = Connection::session().await?;
+    let conn = zbus::connection::Builder::session()?
+        .name("org.oxidemx.overlay")?
+        .build()
+        .await?;
     let proxy = DaemonProxy::new(&conn).await?;
     info!(
-        "Subscribing to org.juhradial.Daemon signals on {}",
+        "Subscribing to org.oxidemx.Daemon signals on {}",
         DAEMON_PATH
     );
 

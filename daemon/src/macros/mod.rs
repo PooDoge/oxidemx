@@ -1,4 +1,4 @@
-//! Macro system for JuhRadial MX
+//! Macro system for OxideMX MX
 //!
 //! Provides macro recording, playback, and storage for automating
 //! keyboard/mouse sequences. Supports five repeat modes:

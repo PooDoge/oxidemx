@@ -1,6 +1,6 @@
 //! Macro file I/O with atomic writes
 //!
-//! Macros are stored as individual JSON files in `~/.config/juhradial/macros/`.
+//! Macros are stored as individual JSON files in `~/.config/oxidemx/macros/`.
 //! Each file is named `{id}.json`. All writes use atomic pattern (write .tmp,
 //! then rename) to prevent corruption.
 
@@ -24,9 +24,9 @@ const MACRO_EXT: &str = "json";
 // Directory Management
 // ============================================================================
 
-/// Get the macros directory path: ~/.config/juhradial/macros/
+/// Get the macros directory path: ~/.config/oxidemx/macros/
 pub fn macros_dir() -> Option<PathBuf> {
-    dirs::config_dir().map(|p| p.join("juhradial").join(MACROS_DIR))
+    dirs::config_dir().map(|p| p.join("oxidemx").join(MACROS_DIR))
 }
 
 /// Create the macros directory if it does not exist

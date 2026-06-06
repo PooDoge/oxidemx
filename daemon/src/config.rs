@@ -1,7 +1,7 @@
-//! Configuration management for JuhRadial MX
+//! Configuration management for OxideMX MX
 //!
 //! Handles loading, validation, and hot-reload of JSON configuration files.
-//! Configuration is stored at `~/.config/juhradial/config.json`.
+//! Configuration is stored at `~/.config/oxidemx/config.json`.
 
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 // ============================================================================
 
 /// Default config directory name
-const CONFIG_DIR: &str = "juhradial";
+const CONFIG_DIR: &str = "oxidemx";
 
 /// Default config file name
 const CONFIG_FILE: &str = "config.json";
@@ -316,12 +316,12 @@ pub struct Config {
 
     /// Pointer feel — speed + acceleration. Mirrors the legacy
     /// Python overlay's `pointer.*` keys + the new
-    /// `juhradial_shared::PointerConfig`.
+    /// `oxidemx_shared::PointerConfig`.
     #[serde(default)]
     pub pointer: PointerConfig,
 
     /// Scroll wheel behaviour — natural / smooth / SmartShift /
-    /// wheel mode. Same shape as `juhradial_shared::ScrollConfig`.
+    /// wheel mode. Same shape as `oxidemx_shared::ScrollConfig`.
     #[serde(default)]
     pub scroll: ScrollConfig,
 
@@ -331,7 +331,11 @@ pub struct Config {
     /// legacy daemon struct to keep compatible. See
     /// `HAPTIC_GAMEPAD_BRIDGE_DESIGN.md`.
     #[serde(default)]
-    pub gaming: juhradial_shared::GamingConfig,
+    pub gaming: oxidemx_shared::GamingConfig,
+
+    /// Catch-all for extra config fields to preserve them when writing back
+    #[serde(flatten)]
+    pub other_fields: std::collections::BTreeMap<String, serde_json::Value>,
 
     /// Configuration file path (not serialized)
     #[serde(skip)]
@@ -339,7 +343,7 @@ pub struct Config {
 }
 
 /// Pointer settings persisted under `pointer` in config.json. The
-/// settings UI writes these via `juhradial_shared::PointerConfig`;
+/// settings UI writes these via `oxidemx_shared::PointerConfig`;
 /// the daemon reads them here to drive its (still-TODO) device-
 /// side apply path.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -419,8 +423,9 @@ impl Default for Config {
             buttons: ButtonsConfig::default(),
             pointer: PointerConfig::default(),
             scroll: ScrollConfig::default(),
-            gaming: juhradial_shared::GamingConfig::default(),
+            gaming: oxidemx_shared::GamingConfig::default(),
             config_path: None,
+            other_fields: std::collections::BTreeMap::new(),
         }
     }
 }

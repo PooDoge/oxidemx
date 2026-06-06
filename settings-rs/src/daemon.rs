@@ -1,4 +1,4 @@
-//! Async D-Bus client for `org.juhradial.Daemon` (juhradiald).
+//! Async D-Bus client for `org.oxidemx.Daemon` (oxidemxd).
 //!
 //! Wraps the daemon's HID++ surface so the settings UI can read
 //! live device state (DPI, battery, host slots, real device name)
@@ -9,13 +9,13 @@
 
 use zbus::{proxy, Connection};
 
-const DAEMON_BUS: &str = "org.juhradial.Daemon";
-const DAEMON_PATH: &str = "/org/juhradial/Daemon";
+const DAEMON_BUS: &str = "org.oxidemx.Daemon";
+const DAEMON_PATH: &str = "/org/oxidemx/Daemon";
 
 #[proxy(
-    interface = "org.juhradial.Daemon",
-    default_service = "org.juhradial.Daemon",
-    default_path = "/org/juhradial/Daemon"
+    interface = "org.oxidemx.Daemon",
+    default_service = "org.oxidemx.Daemon",
+    default_path = "/org/oxidemx/Daemon"
 )]
 trait Daemon {
     fn get_battery_status(&self) -> zbus::Result<(u8, bool)>;
@@ -82,7 +82,7 @@ trait Daemon {
     fn execute_macro(&self, id: &str) -> zbus::Result<()>;
     fn show_menu_at_cursor(&self, x: i32, y: i32) -> zbus::Result<()>;
 
-    // Tell the daemon to re-read `~/.config/juhradial/config.json`
+    // Tell the daemon to re-read `~/.config/oxidemx/config.json`
     // from disk and re-apply the changed sections (button diverts,
     // scroll/smartshift, pointer accel, haptic patterns). The
     // settings GUI calls this immediately after every successful
@@ -141,7 +141,7 @@ pub async fn trigger_macro(id: String) {
     let _ = proxy.execute_macro(&id).await;
 }
 
-/// Tell the daemon to re-read `~/.config/juhradial/config.json`
+/// Tell the daemon to re-read `~/.config/oxidemx/config.json`
 /// from disk and re-apply changed sections (button diverts,
 /// scroll/smartshift, pointer accel, haptic patterns). The
 /// settings GUI fires this after every successful `persist::save`

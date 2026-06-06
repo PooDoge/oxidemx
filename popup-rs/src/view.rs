@@ -1,6 +1,6 @@
 //! Iced view for the indicator popup.
 //!
-//! Mirrors the structure of `design/juhradial-indicator/popup.jsx`:
+//! Mirrors the structure of `design/oxidemx-indicator/popup.jsx`:
 //!
 //!   • Header row — device name pill on the left, connection status on right.
 //!   • Battery ring — large circular progress drawn on a `Canvas`.
@@ -17,9 +17,9 @@ use iced::widget::{
     button, column, container, row, rule, scrollable, text, toggler, Space,
 };
 use iced::{Alignment, Color, Element, Length, Radians};
-use juhradial_widgets::style;
-use juhradial_widgets::widgets::labeled_int_slider;
-use juhradial_shared::{PopupMode, QUICK_SLIDER_CATALOG, QUICK_TOGGLE_CATALOG};
+use oxidemx_widgets::style;
+use oxidemx_widgets::widgets::labeled_int_slider;
+use oxidemx_shared::{PopupMode, QUICK_SLIDER_CATALOG, QUICK_TOGGLE_CATALOG};
 
 use crate::app::{Message, State};
 use crate::gsettings_bridge::BatteryColors;
@@ -149,7 +149,7 @@ fn battery_ring<'a>(
     pct: u8,
     charging: bool,
     colors: &BatteryColors,
-    palette: &juhradial_widgets::palette::Palette,
+    palette: &oxidemx_widgets::palette::Palette,
 ) -> Element<'a, Message> {
     let fg = ring_fill_color(pct, charging, colors);
     let bg = palette.surface0;

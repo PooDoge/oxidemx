@@ -1,9 +1,9 @@
-# Cargo workspace for the JuhRadial MX project.
+# Cargo workspace for the OxideMX MX project.
 #
 # Members:
-#   * daemon/             — juhradiald, the HID++ + D-Bus + KWin daemon.
+#   * daemon/             — oxidemxd, the HID++ + D-Bus + KWin daemon.
 #                           Pre-existing; not touched by this rewrite.
-#   * juhradial-shared/   — types shared between daemon and overlay
+#   * oxidemx-shared/   — types shared between daemon and overlay
 #                           (config.json structs, theme names, action enums).
 #   * overlay-rs/         — Rust + iced overlay. Replacement for the
 #                           Python overlay/ tree.
@@ -19,10 +19,10 @@
 resolver = "2"
 members = [
     "daemon",
-    "juhradial-icons",
-    "juhradial-shared",
-    "juhradial-widgets",
-    "juhradial-window",
+    "oxidemx-icons",
+    "oxidemx-shared",
+    "oxidemx-widgets",
+    "oxidemx-window",
     "overlay-rs",
     "popup-rs",
     "settings-rs",
@@ -31,7 +31,7 @@ members = [
 
 [profile.release]
 # Match daemon/Cargo.toml's existing release profile so a `cargo build
-# --release -p juhradiald` from the workspace root produces an identical
+# --release -p oxidemxd` from the workspace root produces an identical
 # binary to the legacy `cd daemon && cargo build --release` flow.
 opt-level = 3
 lto = true

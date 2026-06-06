@@ -17,13 +17,13 @@ use iced::widget::canvas::Canvas;
 use iced::{Color, Element, Length, Size, Subscription, Task};
 use tracing::{debug, error, info, warn};
 
-use juhradial_shared::AppConfig;
+use oxidemx_shared::AppConfig;
 
 use crate::dbus::OverlayEvent;
 use crate::geometry::WINDOW_SIZE;
 use crate::radial::{RadialState, Painter};
 
-const APP_ID: &str = "org.juhradial.overlay";
+const APP_ID: &str = "org.oxidemx.overlay";
 
 #[derive(Debug, Clone)]
 pub enum Message {
@@ -56,17 +56,18 @@ pub enum Message {
     FocusedClassResolved(Option<String>),
     /// Config reload from inotify watcher — replace theme + slices
     /// in the live state without restarting the overlay.
-    ConfigReloaded(juhradial_shared::AppConfig),
+    ConfigReloaded(oxidemx_shared::AppConfig),
+    WindowOpened(iced::window::Id),
 }
 
 pub fn run() -> iced::Result {
-    let window = juhradial_window::frameless_topmost(
+    let window = oxidemx_window::frameless_topmost(
         APP_ID,
         Size::new(WINDOW_SIZE as f32, WINDOW_SIZE as f32),
     );
 
     iced::application(boot, update, view)
-        .title("JuhRadial MX")
+        .title("OxideMX MX")
         .window(window)
         .style(|_state, _theme| iced::theme::Style {
             background_color: Color::TRANSPARENT,
@@ -112,9 +113,17 @@ fn update(state: &mut RadialState, message: Message) -> Task<Message> {
             // ripple too so visual feedback synchronises with the
             // motor pulse.
             state.trigger_ripple();
-            Task::batch([
+
+            let move_task = if let Some(id) = state.window_id {
+                iced::window::move_to(id, iced::Point::new((x - half) as f32, (y - half) as f32))
+            } else {
+                Task::none()
+            };
+
+            Task::batch(vec![
+                move_task,
                 Task::perform(
-                    juhradial_window::cursor_helper::move_overlay(
+                    oxidemx_window::cursor_helper::move_overlay(
                         APP_ID.to_string(),
                         x - half,
                         y - half,
@@ -123,7 +132,7 @@ fn update(state: &mut RadialState, message: Message) -> Task<Message> {
                     Message::Positioned,
                 ),
                 Task::perform(
-                    juhradial_window::cursor_helper::get_focused_window_class(APP_ID.to_string()),
+                    oxidemx_window::cursor_helper::get_focused_window_class(APP_ID.to_string()),
                     Message::FocusedClassResolved,
                 ),
                 Task::perform(
@@ -188,7 +197,7 @@ fn update(state: &mut RadialState, message: Message) -> Task<Message> {
             if !success {
                 warn!(
                     "MoveOverlay failed — extension couldn't find window with app_id={}; \
-                     check that juhradial-cursor extension is enabled",
+                     check that oxidemx-cursor extension is enabled",
                     APP_ID
                 );
             }
@@ -260,6 +269,10 @@ fn update(state: &mut RadialState, message: Message) -> Task<Message> {
             state.reload_from(&cfg);
             Task::none()
         }
+        Message::WindowOpened(id) => {
+            state.window_id = Some(id);
+            Task::none()
+        }
     }
 }
 
@@ -319,7 +332,7 @@ fn dispatch_origin_for(state: &RadialState) -> Option<usize> {
     state.target_slice()
 }
 
-fn classify(slice: &juhradial_shared::Slice) -> DispatchOutcome {
+fn classify(slice: &oxidemx_shared::Slice) -> DispatchOutcome {
     let visible = slice
         .visible_if
         .as_ref()
@@ -332,7 +345,7 @@ fn classify(slice: &juhradial_shared::Slice) -> DispatchOutcome {
     // useful, but pressing them with no sub-item highlighted
     // doesn't dispatch anything — treat as unactionable so the
     // user gets `invalid` feedback for that confused state.
-    if matches!(slice.kind, juhradial_shared::ActionKind::Submenu) && !slice.submenu.is_empty() {
+    if matches!(slice.kind, oxidemx_shared::ActionKind::Submenu) && !slice.submenu.is_empty() {
         return DispatchOutcome::Unactionable;
     }
     if slice.command.trim().is_empty() {
@@ -414,7 +427,7 @@ fn view(state: &RadialState) -> Element<'_, Message> {
     let intensity = state.visuals.aurora_intensity.clamp(0.0, 1.0);
     let menu_alpha = state.menu.current.clamp(0.0, 1.0);
     let palette = &state.theme.theme.colors;
-    let accent_rgba = juhradial_shared::theme::parse_hex_rgba(&palette.accent)
+    let accent_rgba = oxidemx_shared::theme::parse_hex_rgba(&palette.accent)
         .map(|(r, g, b, a)| [r as f32, g as f32, b as f32, a as f32])
         .unwrap_or([0.5, 0.5, 1.0, 1.0]);
     let mut layers: Vec<iced::Element<Message>> = Vec::with_capacity(8);
@@ -479,10 +492,10 @@ fn view(state: &RadialState) -> Element<'_, Message> {
 
     // Aurora backdrop — bottom layer when enabled + menu visible.
     if intensity > 0.001 && menu_alpha > 0.001 {
-        let accent2 = juhradial_shared::theme::parse_hex_rgba(&palette.accent2)
+        let accent2 = oxidemx_shared::theme::parse_hex_rgba(&palette.accent2)
             .map(|(r, g, b, a)| [r as f32, g as f32, b as f32, a as f32])
             .unwrap_or(accent_rgba);
-        let accent_dim = juhradial_shared::theme::parse_hex_rgba(&palette.accent_dim)
+        let accent_dim = oxidemx_shared::theme::parse_hex_rgba(&palette.accent_dim)
             .map(|(r, g, b, a)| [r as f32, g as f32, b as f32, a as f32])
             .unwrap_or(accent_rgba);
         let effective = intensity * menu_alpha;
@@ -525,23 +538,23 @@ fn view(state: &RadialState) -> Element<'_, Message> {
         let scale = menu_alpha;
         let palette = &state.theme.theme.colors;
         let (sr, sg, sb, _) =
-            juhradial_shared::theme::parse_hex_rgba(&palette.surface0)
+            oxidemx_shared::theme::parse_hex_rgba(&palette.surface0)
                 .unwrap_or((0.18, 0.18, 0.20, 1.0));
         let surface0 = [sr as f32, sg as f32, sb as f32, 1.0];
         let colors = [surface0; 8];
         let (s1r, s1g, s1b, _) =
-            juhradial_shared::theme::parse_hex_rgba(&palette.surface1)
+            oxidemx_shared::theme::parse_hex_rgba(&palette.surface1)
                 .unwrap_or((0.25, 0.25, 0.28, 1.0));
         let surface1_color = [s1r as f32, s1g as f32, s1b as f32, 1.0];
         let (s2r, s2g, s2b, _) =
-            juhradial_shared::theme::parse_hex_rgba(&palette.surface2)
+            oxidemx_shared::theme::parse_hex_rgba(&palette.surface2)
                 .unwrap_or((0.4, 0.4, 0.45, 1.0));
         let surface2_color = [s2r as f32, s2g as f32, s2b as f32, 1.0];
         // Canvas's stroke uses surface2 as its base colour, then
         // lerps to accent on hover. Same here.
         let stroke_color = surface2_color;
         let (ar, ag, ab, _) =
-            juhradial_shared::theme::parse_hex_rgba(&palette.accent)
+            oxidemx_shared::theme::parse_hex_rgba(&palette.accent)
                 .unwrap_or((0.5, 0.5, 1.0, 1.0));
         let accent_color = [ar as f32, ag as f32, ab as f32, 1.0];
         let highlights = state.highlights.map(|t| t.current);
@@ -859,20 +872,20 @@ fn view(state: &RadialState) -> Element<'_, Message> {
     let shader_style = pt_cfg.shader.effective_style(pt_cfg.style);
     if !matches!(
         shader_style,
-        juhradial_shared::PageTransitionShaderStyle::None
+        oxidemx_shared::PageTransitionShaderStyle::None
     ) && state.previous_slices.is_some()
     {
         let progress = state.page_transition.current.clamp(0.0, 1.0);
         if progress > 0.001 && progress < 0.999 {
             let palette = &state.theme.theme.colors;
-            let color_a = juhradial_shared::theme::parse_hex_rgba(&palette.accent)
+            let color_a = oxidemx_shared::theme::parse_hex_rgba(&palette.accent)
                 .map(|(r, g, b, a)| [r as f32, g as f32, b as f32, a as f32])
                 .unwrap_or([0.5, 0.5, 1.0, 1.0]);
-            let color_b = juhradial_shared::theme::parse_hex_rgba(&palette.accent2)
+            let color_b = oxidemx_shared::theme::parse_hex_rgba(&palette.accent2)
                 .map(|(r, g, b, a)| [r as f32, g as f32, b as f32, a as f32])
                 .unwrap_or(color_a);
             let style = match shader_style {
-                juhradial_shared::PageTransitionShaderStyle::Dissolve => {
+                oxidemx_shared::PageTransitionShaderStyle::Dissolve => {
                     crate::render::page_fx::PageFxStyle::Dissolve
                 }
                 _ => crate::render::page_fx::PageFxStyle::Plasma,
@@ -955,7 +968,7 @@ fn subscription(_state: &RadialState) -> Subscription<Message> {
     //   * D-Bus listener — translates the daemon's three signal
     //     streams into OverlayEvent values.
     //   * Inotify config watcher — yields a fresh AppConfig each
-    //     time `~/.config/juhradial/config.json` is saved.
+    //     time `~/.config/oxidemx/config.json` is saved.
     //   * 60 Hz frame ticker — keeps animations smooth while a
     //     menu is visible. (Cheap when nothing animates because
     //     update() returns Task::none() immediately.)
@@ -963,6 +976,10 @@ fn subscription(_state: &RadialState) -> Subscription<Message> {
         Subscription::run(crate::dbus::stream).map(Message::Overlay),
         Subscription::run(crate::config::watch_stream).map(Message::ConfigReloaded),
         iced::time::every(std::time::Duration::from_millis(16)).map(|_| Message::Tick),
+        iced::window::events().map(|(id, event)| match event {
+            iced::window::Event::Opened { .. } => Message::WindowOpened(id),
+            _ => Message::Noop,
+        }),
     ])
 }
 

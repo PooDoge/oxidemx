@@ -11,11 +11,11 @@
 
 use crate::radial_preview::radial_preview_widget;
 use crate::{Message, State};
-use juhradial_widgets::style;
-use juhradial_widgets::widgets::section_header;
+use oxidemx_widgets::style;
+use oxidemx_widgets::widgets::section_header;
 use iced::widget::{button, column, container, pick_list, row, rule, text, text_input, toggler, Space};
 use iced::{Alignment, Element, Length};
-use juhradial_shared::{ActionKind, Condition, RadialPage, Slice};
+use oxidemx_shared::{ActionKind, Condition, RadialPage, Slice};
 
 // ============================================================================
 // View entry
@@ -883,7 +883,7 @@ fn visibility_editor<'a>(
         }
         Some(Condition::All { conditions }) | Some(Condition::Any { conditions }) => {
             text(format!(
-                "Compound predicate ({} sub-condition{}) — edit ~/.config/juhradial/config.json directly to modify.",
+                "Compound predicate ({} sub-condition{}) — edit ~/.config/oxidemx/config.json directly to modify.",
                 conditions.len(),
                 if conditions.len() == 1 { "" } else { "s" }
             ))
@@ -892,7 +892,7 @@ fn visibility_editor<'a>(
             .into()
         }
         Some(Condition::Not { .. }) => text(
-            "Compound NOT predicate — edit ~/.config/juhradial/config.json directly to modify.",
+            "Compound NOT predicate — edit ~/.config/oxidemx/config.json directly to modify.",
         )
         .size(10)
         .style(style::text_faint(pal))
@@ -1385,7 +1385,7 @@ impl std::fmt::Display for ColorOption {
     }
 }
 
-// Catppuccin-style colour key list (matches juhradial_shared's
+// Catppuccin-style colour key list (matches oxidemx_shared's
 // ThemeColors::slice_color_rgba lookup), with a special "Full
 // colour" sentinel at the top that maps to icon_untinted = true
 // rather than a tint colour. Selecting it leaves the slice's

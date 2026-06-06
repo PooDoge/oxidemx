@@ -9,7 +9,7 @@
 use std::fmt::Write as _;
 
 use evdev::Device;
-use juhradial_shared::{HapticRedirectConfig, HapticRedirectMode};
+use oxidemx_shared::{HapticRedirectConfig, HapticRedirectMode};
 
 use super::{proxy, virtual_pad};
 

@@ -1,6 +1,6 @@
-# Contributing to JuhRadial MX
+# Contributing to OxideMX MX
 
-First off, thank you for considering contributing to JuhRadial MX! It's people like you that make this project better for everyone.
+First off, thank you for considering contributing to OxideMX MX! It's people like you that make this project better for everyone.
 
 ## Code of Conduct
 
@@ -10,7 +10,7 @@ By participating in this project, you agree to maintain a welcoming, inclusive, 
 
 ### Reporting Bugs
 
-Before creating a bug report, please check the [existing issues](https://github.com/JuhLabs/juhradial-mx/issues) to avoid duplicates.
+Before creating a bug report, please check the [existing issues](https://github.com/JuhLabs/oxidemx/issues) to avoid duplicates.
 
 When reporting a bug, include:
 
@@ -21,7 +21,7 @@ When reporting a bug, include:
   - Linux distribution and version
   - Desktop environment (KDE Plasma version)
   - Logitech mouse model
-  - JuhRadial MX version
+  - OxideMX MX version
 
 ### Suggesting Features
 
@@ -52,8 +52,8 @@ Feature requests are welcome! Please:
 ### Prerequisites
 
 - Rust (latest stable)
-- Python 3.10+
-- KDE Plasma 6 with Wayland
+- GTK4 / Libadwaita development headers (for settings-rs)
+- Wayland / X11 development headers
 
 ### System Dependencies
 
@@ -61,10 +61,9 @@ Feature requests are welcome! Please:
 ```bash
 sudo dnf install \
   rust cargo \
-  python3-pyqt6 qt6-qtsvg \
-  python3-gobject gtk4 libadwaita \
   dbus-devel systemd-devel \
   libevdev-devel hidapi-devel \
+  gtk4-devel libadwaita-devel \
   git make
 ```
 
@@ -72,10 +71,9 @@ sudo dnf install \
 ```bash
 sudo pacman -S --needed \
   rust \
-  python-pyqt6 qt6-svg \
-  python-gobject gtk4 libadwaita \
   dbus systemd-libs \
   libevdev hidapi \
+  gtk4 libadwaita \
   git make base-devel
 ```
 
@@ -83,64 +81,54 @@ sudo pacman -S --needed \
 ```bash
 sudo apt install \
   rustc cargo \
-  python3-pyqt6 python3-pyqt6.qtsvg \
-  python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 \
   libdbus-1-dev libsystemd-dev \
   libevdev-dev libhidapi-dev \
+  libgtk-4-dev libadwaita-1-dev \
   git make build-essential
 ```
 
 ### Building
 
 ```bash
-# Clone your fork
-git clone https://github.com/YOUR_USERNAME/juhradial-mx
-cd juhradial-mx
+# Clone the repository
+git clone https://github.com/JuhLabs/oxidemx
+cd oxidemx
 
-# Build the daemon
-make build
-
-# Or manually
-cd daemon && cargo build --release
+# Build the entire workspace
+cargo build --release
 ```
 
 ### Running Locally
 
 ```bash
 # Start the daemon in verbose mode
-./daemon/target/release/juhradiald --verbose
+./target/release/oxidemxd --verbose
 
 # In another terminal, run the overlay
-python3 overlay/juhradial-overlay.py
+./target/release/oxidemx-overlay
 
-# Or use the launcher script
-./scripts/juhradial-mx.sh
+# Or run the settings app
+./target/release/oxidemx-settings
 ```
 
 ### Testing
 
 ```bash
-# Run Rust tests
-cd daemon && cargo test
+# Run tests
+cargo test --all
 
 # Lint checks
-cd daemon && cargo clippy
+cargo clippy --all
 ```
 
 ## Code Style
 
-### Rust (Daemon)
+### Rust (Workspace)
 
 - Follow [Rust API Guidelines](https://rust-lang.github.io/api-guidelines/)
 - Use `cargo fmt` before committing
 - Run `cargo clippy` and address warnings
 - Document public APIs with `///` doc comments
-
-### Python (Overlay)
-
-- Follow PEP 8 style guide
-- Use type hints where practical
-- Keep functions focused and well-named
 
 ## Commit Messages
 
@@ -173,20 +161,23 @@ docs: update installation instructions
 ## Project Structure
 
 ```
-juhradial-mx/
+oxidemx/
 ├── daemon/           # Rust daemon (input handling, D-Bus, HID++)
-│   └── src/
-├── overlay/          # Python UI components
-│   ├── juhradial-overlay.py   # PyQt6 radial menu
-│   └── settings_dashboard.py  # GTK4/Adwaita settings app
-├── assets/           # Icons and screenshots
+├── overlay-rs/       # Rust + iced radial menu overlay
+├── settings-rs/      # Rust + iced settings dashboard
+├── popup-rs/         # Rust GJS-like quick indicator popup
+├── oxidemx-shared/   # Shared types and config structures
+├── oxidemx-icons/    # Icon rendering & assets
+├── oxidemx-widgets/  # Custom UI widgets
+├── oxidemx-window/   # Window and cursor management
+├── assets/           # Theme backgrounds, images, and visual assets
 └── packaging/        # Distribution files (systemd, udev rules)
 ```
 
 ## Getting Help
 
-- **Questions**: Open a [Discussion](https://github.com/JuhLabs/juhradial-mx/discussions)
-- **Bugs**: Open an [Issue](https://github.com/JuhLabs/juhradial-mx/issues)
+- **Questions**: Open a [Discussion](https://github.com/JuhLabs/oxidemx/discussions)
+- **Bugs**: Open an [Issue](https://github.com/JuhLabs/oxidemx/issues)
 
 ## Recognition
 
@@ -194,7 +185,7 @@ Contributors will be recognized in:
 - The project README
 - Release notes
 
-Thank you for helping make JuhRadial MX better!
+Thank you for helping make OxideMX MX better!
 
 ---
 

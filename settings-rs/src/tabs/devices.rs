@@ -8,11 +8,11 @@
 //! transport type, battery (placeholder until daemon exposes it
 //! to the new shared schema). Adding edit knobs (rename, unpair)
 //! lands once the daemon's device-list method is wired into
-//! juhradial-shared.
+//! oxidemx-shared.
 
-use juhradial_widgets::widgets::section_header;
+use oxidemx_widgets::widgets::section_header;
 use crate::{Message, State};
-use juhradial_widgets::style;
+use oxidemx_widgets::style;
 use iced::widget::{column, container, row, rule, text, Space};
 use iced::{Alignment, Element, Length};
 

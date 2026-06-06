@@ -1,7 +1,7 @@
 //! Quick-toggle and quick-slider actions → daemon D-Bus method calls.
 //!
 //! Each `Action` variant maps to one or more method calls on
-//! `org.juhradial.Daemon`. The proxy is defined inline via `#[zbus::proxy]`.
+//! `org.oxidemx.Daemon`. The proxy is defined inline via `#[zbus::proxy]`.
 //! All calls are fire-and-forget: errors are logged but not propagated so
 //! a transient D-Bus hiccup doesn't crash the popup.
 
@@ -32,9 +32,9 @@ async fn session_conn() -> Result<&'static Connection, String> {
 // ---------------------------------------------------------------------------
 
 #[proxy(
-    interface = "org.juhradial.Daemon",
-    default_service = "org.juhradial.Daemon",
-    default_path = "/org/juhradial/Daemon"
+    interface = "org.oxidemx.Daemon",
+    default_service = "org.oxidemx.Daemon",
+    default_path = "/org/oxidemx/Daemon"
 )]
 trait Daemon {
     /// Set gaming-mode on/off. Bumps DPI and hides the radial when on.

@@ -1,0 +1,16 @@
+[package]
+name = "oxidemx-widgets"
+version = "0.0.1"
+edition = "2021"
+license = "GPL-3.0"
+description = "Shared iced widgets, style closures, and palette for OxideMX UIs"
+repository = "https://github.com/JuhLabs/oxidemx"
+
+[dependencies]
+# Shared config types: Theme, ThemeName, parse_hex_rgba used by palette.rs.
+oxidemx-shared = { path = "../oxidemx-shared" }
+
+# Iced version pinned to match settings-rs / overlay-rs. Feature list
+# kept minimal (no tokio, no image, no canvas) so consumers don't
+# pay for what they don't need - they can re-enable per-binary.
+iced = { version = "0.14", features = ["wayland", "x11"] }

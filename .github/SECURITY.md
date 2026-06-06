@@ -12,7 +12,7 @@ We release patches for security vulnerabilities for the following versions:
 | 0.1.x   | :x: Upgrade required (critical security fixes in 0.2.1+) |
 | < 0.1   | :x:                |
 
-**Note:** JuhRadial MX is in active development. Security updates are provided for the latest release on the master branch. Always run the latest version.
+**Note:** OxideMX MX is in active development. Security updates are provided for the latest release on the master branch. Always run the latest version.
 
 ### Recent Security Updates
 
@@ -40,7 +40,7 @@ We release patches for security vulnerabilities for the following versions:
 
 ## Reporting a Vulnerability
 
-We take the security of JuhRadial MX seriously. If you believe you have found a security vulnerability, please report it to us as described below.
+We take the security of OxideMX MX seriously. If you believe you have found a security vulnerability, please report it to us as described below.
 
 ### Preferred Reporting Method: Private Vulnerability Reporting
 
@@ -55,7 +55,7 @@ We take the security of JuhRadial MX seriously. If you believe you have found a 
    - This allows security researchers to privately report vulnerabilities
 
 2. **Security Researchers**:
-   - Go to the [Security tab](https://github.com/JuhLabs/juhradial-mx/security)
+   - Go to the [Security tab](https://github.com/JuhLabs/oxidemx/security)
    - Click **"Report a vulnerability"**
    - Fill in the vulnerability details using the private advisory draft
    - Submit the report
@@ -100,16 +100,16 @@ When you report a vulnerability, we commit to:
    - **Medium/Low severity:** 90 days
 5. **Credit:** We'll acknowledge your contribution (unless you prefer to remain anonymous)
 
-## Security Considerations for JuhRadial MX
+## Security Considerations for OxideMX MX
 
-JuhRadial MX is a Linux desktop application that:
+OxideMX MX is a Linux desktop application that:
 
 - **Runs with user privileges** (no elevated permissions required for normal operation)
 - **Communicates via D-Bus** for IPC between daemon and overlay
-- **GNOME Shell extension** exposes cursor position via a session D-Bus service (`org.juhradial.CursorHelper`)
+- **GNOME Shell extension** exposes cursor position via a session D-Bus service (`org.oxidemx.CursorHelper`)
 - **Dynamically loads libX11** via `dlopen`/`dlsym` for XWayland cursor detection (with null-safety checks)
 - **Accesses HID devices** via hidraw (requires udev rules for user access)
-- **Reads configuration** from `~/.config/juhradial/config.json`
+- **Reads configuration** from `~/.config/oxidemx/config.json`
 - **Listens to keyboard events** via evdev (F19 key only)
 
 ### In-Scope Security Concerns
@@ -158,7 +158,7 @@ We use GitHub's CodeQL to automatically scan for security vulnerabilities:
 
 - **Triggers:** Every push to master and all pull requests
 - **Languages:** Python (overlay) and Rust (daemon)
-- **Results:** Available in the [Security tab](https://github.com/JuhLabs/juhradial-mx/security/code-scanning)
+- **Results:** Available in the [Security tab](https://github.com/JuhLabs/oxidemx/security/code-scanning)
 
 CodeQL helps identify:
 - SQL injection (not applicable to this project)
@@ -186,7 +186,7 @@ We request that reporters:
 
 ## Security Best Practices for Contributors
 
-If you're contributing code to JuhRadial MX:
+If you're contributing code to OxideMX MX:
 
 - Never commit secrets, API keys, or credentials
 - Use parameterized queries for any database operations
@@ -207,7 +207,7 @@ If you're contributing code to JuhRadial MX:
 
 For general security questions or concerns (non-vulnerabilities):
 
-- Open a [GitHub Discussion](https://github.com/JuhLabs/juhradial-mx/discussions)
+- Open a [GitHub Discussion](https://github.com/JuhLabs/oxidemx/discussions)
 - Tag with `security` label
 
 For security vulnerabilities, **always use Private Vulnerability Reporting or direct email** as described above.
@@ -220,4 +220,4 @@ We recognize security researchers who have responsibly disclosed vulnerabilities
 
 ---
 
-**Thank you for helping keep JuhRadial MX and its users safe!**
+**Thank you for helping keep OxideMX MX and its users safe!**

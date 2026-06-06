@@ -1,0 +1,203 @@
+/*
+ * oxidemx-indicator panel button styling.
+ *
+ * Shell CSS rules. Selectors target the panel button (.jr-indicator)
+ * and the four band-color classes that extension.ts applies on each
+ * battery state change. Hex values mirror the GSettings color-* keys
+ * (which the user can edit at runtime via prefs) — these CSS rules
+ * are the fallback for theming that doesn't go through Gio.Settings.
+ * The runtime always overrides via inline style: { color: ... }
+ * before this stylesheet's rules fire.
+ *
+ * If you need to test theming locally without the extension running,
+ * tools/preview.html (TODO) mirrors these classes for browser preview.
+ */
+
+.jr-indicator {
+    spacing: 4px;
+    padding: 0 6px;
+}
+
+.jr-indicator StIcon {
+    icon-size: 16px;
+}
+
+.jr-indicator .jr-pct-label {
+    font-size: 0.92em;
+    font-feature-settings: "tnum";  /* tabular numerals: 30% and 100% don't shift */
+}
+
+/* Band-color overrides. Inline style from extension.ts wins;
+   these are the documented baseline. */
+.jr-band-critical { color: #FF3E5A; }
+.jr-band-low      { color: #F2C94C; }
+.jr-band-healthy  { color: #E7E9EE; }   /* foreground; not green by default to avoid loud panel */
+.jr-band-charging { color: #5BE095; }
+
+/* Right-click "Start daemon" menu item when the daemon is down -
+   give it a hint of accent so the user sees it's a remediation. */
+.jr-start-daemon-item {
+    color: #5BE095;
+}
+
+/* ── OxideMX Settings Popup Styles ── */
+
+.oxidemx-popup {
+    min-width: 360px;
+    color: #cdd6f4;
+}
+
+.oxidemx-scroll {
+    height: 460px;
+}
+
+.oxidemx-content {
+    padding: 12px;
+}
+
+.oxidemx-header {
+    spacing: 8px;
+    padding: 4px 6px;
+}
+
+.oxidemx-device-chip {
+    font-size: 11px;
+    font-weight: bold;
+    color: #a6e3a1; /* healthy green / accent */
+    background-color: rgba(166, 227, 161, 0.15);
+    border-radius: 6px;
+    padding: 3px 8px;
+}
+
+.oxidemx-connection-status {
+    font-size: 11px;
+    color: #a6adc8;
+}
+
+.oxidemx-hero {
+    spacing: 16px;
+    padding: 8px 6px;
+}
+
+.oxidemx-battery-percent-label {
+    font-size: 16px;
+    font-weight: bold;
+    color: #cdd6f4;
+    font-feature-settings: "tnum";
+}
+
+.oxidemx-hero-meta {
+    spacing: 4px;
+}
+
+.oxidemx-hero-title {
+    font-size: 16px;
+    font-weight: bold;
+    color: #cdd6f4;
+}
+
+.oxidemx-hero-subtitle {
+    font-size: 12px;
+    color: #a6adc8;
+}
+
+.oxidemx-section {
+    spacing: 6px;
+    padding: 4px 0;
+}
+
+.oxidemx-section-title {
+    font-size: 11px;
+    font-weight: bold;
+    color: #89b4fa; /* blue accent */
+    text-transform: uppercase;
+    padding-left: 6px;
+}
+
+.oxidemx-segmented {
+    spacing: 4px;
+    background-color: rgba(0, 0, 0, 0.25);
+    border-radius: 8px;
+    padding: 4px;
+}
+
+.oxidemx-segment {
+    padding: 6px 12px;
+    border-radius: 6px;
+    font-size: 13px;
+    text-align: center;
+    color: #cdd6f4;
+}
+
+.oxidemx-segment:hover {
+    background-color: rgba(255, 255, 255, 0.05);
+}
+
+.oxidemx-segment-active,
+.oxidemx-segment-active:hover {
+    background-color: #89b4fa;
+    color: #11111b;
+    font-weight: bold;
+}
+
+.oxidemx-optrow-header {
+    padding: 8px 10px;
+    border-radius: 8px;
+}
+
+.oxidemx-optrow-header:hover {
+    background-color: rgba(255, 255, 255, 0.05);
+}
+
+.oxidemx-row-icon {
+    margin-right: 10px;
+    color: #a6adc8;
+}
+
+.oxidemx-row-title {
+    font-size: 13px;
+    color: #cdd6f4;
+}
+
+.oxidemx-optrow-value {
+    font-size: 13px;
+    color: #a6adc8;
+}
+
+.oxidemx-optrow-value-on {
+    color: #a6e3a1; /* green */
+    font-weight: bold;
+}
+
+.oxidemx-slider-row {
+    spacing: 6px;
+    padding: 8px 10px;
+}
+
+.oxidemx-footer {
+    padding: 8px 6px 4px 6px;
+}
+
+.oxidemx-footer-btn {
+    padding: 6px 14px;
+    background-color: rgba(255, 255, 255, 0.07);
+    color: #cdd6f4;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: bold;
+}
+
+.oxidemx-footer-btn:hover {
+    background-color: rgba(255, 255, 255, 0.12);
+}
+
+.oxidemx-footer-version {
+    font-size: 11px;
+    color: #585b70;
+}
+
+.oxidemx-popup-separator {
+    height: 1px;
+    background-color: rgba(255, 255, 255, 0.08);
+    margin: 6px 0;
+}

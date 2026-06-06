@@ -40,6 +40,12 @@
       "resource:///org/gnome/shell/ui/popupMenu.js": [
         "./node_modules/@girs/gnome-shell/dist/ui/popupMenu-ambient.d.ts"
       ],
+      "resource:///org/gnome/shell/ui/slider.js": [
+        "./node_modules/@girs/gnome-shell/dist/ui/slider-ambient.d.ts"
+      ],
+      "resource:///org/gnome/shell/ui/boxpointer.js": [
+        "./node_modules/@girs/gnome-shell/dist/ui/boxpointer-ambient.d.ts"
+      ],
       "gi://GObject": [
         "./node_modules/@girs/gobject-2.0/gobject-2.0-ambient.d.ts"
       ],
@@ -56,8 +62,8 @@
     ]
   },
   "include": [
-    "juhradial-cursor@dev.juhlabs.com/**/*.ts",
-    "juhradial-indicator@dev.juhlabs.com/**/*.ts"
+    "oxidemx-cursor@dev.juhlabs.com/**/*.ts",
+    "oxidemx-indicator@dev.juhlabs.com/**/*.ts"
   ],
   "exclude": [
     "node_modules",

@@ -6,7 +6,7 @@
 
 use iced::widget::canvas::Frame;
 use iced::{Point, Radians, Vector};
-use juhradial_shared::{Axis, ComposedTransform};
+use oxidemx_shared::{Axis, ComposedTransform};
 
 #[allow(dead_code)]
 pub fn ease_out_back(t: f64, overshoot: f64) -> f64 {
@@ -121,12 +121,12 @@ impl MenuXformRaw {
     /// translate gets normalised into the same space the shader
     /// reads UVs in (clip-space `[-1, 1]²`, half-extent units).
     pub fn from_composed(
-        transform: &juhradial_shared::ComposedTransform,
+        transform: &oxidemx_shared::ComposedTransform,
         half_extent: f32,
     ) -> Self {
         let flip_axis = match transform.flip_axis {
-            juhradial_shared::Axis::X => 0u32,
-            juhradial_shared::Axis::Y => 1u32,
+            oxidemx_shared::Axis::X => 0u32,
+            oxidemx_shared::Axis::Y => 1u32,
         };
         MenuXformRaw {
             translate_norm: [

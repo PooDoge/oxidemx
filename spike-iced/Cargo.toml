@@ -20,6 +20,6 @@ edition = "2021"
 publish = false
 
 [dependencies]
-juhradial-shared = { path = "../juhradial-shared" }
+oxidemx-shared = { path = "../oxidemx-shared" }
 iced = { version = "0.14", features = ["canvas", "wayland", "x11"] }
 serde_json = "1"

@@ -2,7 +2,7 @@
 //!   * **Theme** — searchable grid of every freedesktop symbolic icon
 //!     available on the system, enumerated via `gtk::IconTheme`.
 //!   * **Files** — drop a custom SVG/PNG via GtkFileChooser; copies it
-//!     into `~/.local/share/juhradial/icons/` for portability.
+//!     into `~/.local/share/oxidemx/icons/` for portability.
 //!   * **Bundled** — the legacy hand-drawn ids ("play_pause", "folder",
 //!     "easy_switch", …) shown with a thumbnail.
 //!

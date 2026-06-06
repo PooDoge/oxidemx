@@ -2,7 +2,7 @@
 //! on activation. Spawned as detached children so the overlay is
 //! never blocked waiting for the launched program to exit.
 
-use juhradial_shared::{ActionKind, Slice};
+use oxidemx_shared::{ActionKind, Slice};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use tracing::{info, warn};
@@ -20,15 +20,15 @@ pub fn dispatch(slice: &Slice) {
             // target/release/, not on PATH) and packaged installs:
             //   1. user override in slice.command
             //   2. sibling next to the running overlay binary
-            //      (target/release/juhradial-settings)
-            //   3. PATH lookup for `juhradial-settings`
+            //      (target/release/oxidemx-settings)
+            //   3. PATH lookup for `oxidemx-settings`
             let user_override = slice.command.trim();
             let resolved = if !user_override.is_empty() {
                 user_override.to_string()
-            } else if let Some(sibling) = sibling_binary("juhradial-settings") {
+            } else if let Some(sibling) = sibling_binary("oxidemx-settings") {
                 sibling.display().to_string()
             } else {
-                "juhradial-settings".to_string()
+                "oxidemx-settings".to_string()
             };
             spawn_shell(&resolved, &slice.label);
         }

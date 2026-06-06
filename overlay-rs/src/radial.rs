@@ -8,7 +8,7 @@
 
 use iced::widget::canvas::{self, Action, Frame, Geometry, Path};
 use iced::{mouse, Color, Event, Point, Rectangle, Renderer, Theme};
-use juhradial_shared::{
+use oxidemx_shared::{
     theme::parse_hex_rgba, ActionKind, AnimationConfig, AppConfig, ElementAnimation, RadialPage,
     Slice, VisualSettings,
 };
@@ -260,6 +260,7 @@ pub struct RadialState {
     /// centre angle so Sparks/Shockwave/Glow all read as
     /// "originating from the slice you just clicked".
     pub(crate) dispatch_origin: Option<usize>,
+    pub window_id: Option<iced::window::Id>,
 }
 
 /// How long a haptic-ripple shader pass animates from trigger to
@@ -340,6 +341,7 @@ impl RadialState {
             dispatch_started: None,
             dispatch_origin: None,
             page_name_flash: None,
+            window_id: None,
         }
     }
 
@@ -566,7 +568,7 @@ impl RadialState {
         // `advance_animations` once the tween settles.
         let pt_cfg = self.anim_config.page_transition.clone();
         let pt_style = pt_cfg.style;
-        let animate = !matches!(pt_style, juhradial_shared::PageTransitionStyle::None)
+        let animate = !matches!(pt_style, oxidemx_shared::PageTransitionStyle::None)
             && pt_cfg.duration_ms > 0;
         if animate {
             self.previous_slices = Some(self.slices.clone());
@@ -1301,9 +1303,9 @@ impl<'a> canvas::Program<crate::app::Message> for Painter<'a> {
         let (old_t, new_t) = if !pt_active {
             // No transition in flight — incoming ring at rest, no
             // outgoing ring (its alpha is 0 so it won't render).
-            let mut hidden = juhradial_shared::ComposedTransform::IDENTITY;
+            let mut hidden = oxidemx_shared::ComposedTransform::IDENTITY;
             hidden.alpha = 0.0;
-            (hidden, juhradial_shared::ComposedTransform::IDENTITY)
+            (hidden, oxidemx_shared::ComposedTransform::IDENTITY)
         } else if pt_uses_custom_tracks {
             // Track-based: outgoing ring uses Exit semantics,
             // incoming uses Enter. Same tween drives both — just
@@ -1311,20 +1313,20 @@ impl<'a> canvas::Program<crate::app::Message> for Painter<'a> {
             let new_t = crate::anim::evaluate_composed_for(
                 &self.state.page_transition,
                 &pt_cfg.animation.enter,
-                juhradial_shared::TransitionDirection::Enter,
+                oxidemx_shared::TransitionDirection::Enter,
             );
             let old_t = crate::anim::evaluate_composed_for(
                 &self.state.page_transition,
                 &pt_cfg.animation.exit,
-                juhradial_shared::TransitionDirection::Exit,
+                oxidemx_shared::TransitionDirection::Exit,
             );
             (old_t, new_t)
         } else {
             // Preset path. The shape of each style matches the
             // legacy code that returned (rot, scale, alpha) tuples —
             // we just lift them into ComposedTransform.
-            use juhradial_shared::ComposedTransform as CT;
-            use juhradial_shared::PageTransitionStyle as PTS;
+            use oxidemx_shared::ComposedTransform as CT;
+            use oxidemx_shared::PageTransitionStyle as PTS;
             let p = pt_progress;
             let inv = 1.0 - p;
             let mut old_t = CT::IDENTITY;
@@ -1370,10 +1372,10 @@ impl<'a> canvas::Program<crate::app::Message> for Painter<'a> {
                     let cos_p = (p * half_pi).cos();
                     let sin_p = (p * half_pi).sin();
                     old_t.flip_scale = cos_p;
-                    old_t.flip_axis = juhradial_shared::Axis::Y;
+                    old_t.flip_axis = oxidemx_shared::Axis::Y;
                     old_t.alpha = cos_p;
                     new_t.flip_scale = sin_p;
-                    new_t.flip_axis = juhradial_shared::Axis::Y;
+                    new_t.flip_axis = oxidemx_shared::Axis::Y;
                     new_t.alpha = sin_p;
                 }
             }
@@ -1414,7 +1416,7 @@ impl<'a> canvas::Program<crate::app::Message> for Painter<'a> {
         // wrapped inside `draw_ring_transformed` per slice. With
         // no custom tracks the array is all-identity and the inner
         // loop skips the per-slot `with_save` entirely (None branch).
-        let slot_transforms: [juhradial_shared::ComposedTransform; 8] =
+        let slot_transforms: [oxidemx_shared::ComposedTransform; 8] =
             self.state.highlights.map(|tween| {
                 crate::anim::evaluate_composed(
                     &tween,
@@ -1463,7 +1465,7 @@ impl<'a> canvas::Program<crate::app::Message> for Painter<'a> {
         // slice → nothing. Description is the slice's optional
         // longer-form notes field — when present it renders as a
         // smaller subtitle under the label inside the puck.
-        let hovered_slice: Option<&juhradial_shared::config::Slice> = self
+        let hovered_slice: Option<&oxidemx_shared::config::Slice> = self
             .state
             .submenu
             .as_ref()
@@ -1535,7 +1537,7 @@ impl<'a> canvas::Program<crate::app::Message> for Painter<'a> {
         let pulse_factor = if pt_active
             && matches!(
                 pt_style,
-                juhradial_shared::PageTransitionStyle::CenterPulse
+                oxidemx_shared::PageTransitionStyle::CenterPulse
             ) {
             // Triangle wave: 0 at p=0, 1 at p=0.5, 0 at p=1.
             1.0 - (2.0 * pt_progress - 1.0).abs()
@@ -1687,10 +1689,10 @@ impl<'a> canvas::Program<crate::app::Message> for Painter<'a> {
                         .lookup(&v.tooltip_text_color)
                         .unwrap_or(palette.text.as_str());
                     let (br, bg_g, bb, ba) =
-                        juhradial_shared::theme::parse_hex_rgba(bg_hex)
+                        oxidemx_shared::theme::parse_hex_rgba(bg_hex)
                             .unwrap_or((0.0, 0.0, 0.0, 1.0));
                     let (fr, fg_g, fb, fa) =
-                        juhradial_shared::theme::parse_hex_rgba(fg_hex)
+                        oxidemx_shared::theme::parse_hex_rgba(fg_hex)
                             .unwrap_or((1.0, 1.0, 1.0, 1.0));
                     let style = crate::render::slices::ArcTooltipStyle {
                         font,

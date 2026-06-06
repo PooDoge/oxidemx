@@ -17,7 +17,7 @@
 //! tween drive a sequence of sub-items each starting `stagger_ms`
 //! later than the previous — used by the submenu sub-item arc.
 
-use juhradial_shared::{
+use oxidemx_shared::{
     Axis, ChainConfig, ComposedTransform, Easing, TransitionConfig, TransitionDirection,
     TransitionKind,
 };
@@ -320,7 +320,7 @@ pub fn chain_stagger_ms(chain: Option<&ChainConfig>) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use juhradial_shared::{Easing, TransitionConfig, TransitionKind};
+    use oxidemx_shared::{Easing, TransitionConfig, TransitionKind};
 
     fn fade_cfg(duration_ms: u32) -> TransitionConfig {
         TransitionConfig {

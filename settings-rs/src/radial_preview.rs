@@ -15,12 +15,12 @@
 //! disc at the cursor, and release fires `SwapSlices` for the
 //! slot under the release point.
 
-use juhradial_widgets::palette::Palette;
+use oxidemx_widgets::palette::Palette;
 use iced::widget::canvas::{self, path::Builder, Frame, Geometry, Image, Path, Stroke, Text};
 use iced::widget::image::Handle;
 use iced::{mouse, Color, Length, Point, Rectangle, Renderer, Theme};
-use juhradial_icons::{IconCache, RasterIcon};
-use juhradial_shared::{ActionKind, Slice};
+use oxidemx_icons::{IconCache, RasterIcon};
+use oxidemx_shared::{ActionKind, Slice};
 use std::cell::RefCell;
 use std::collections::HashMap;
 

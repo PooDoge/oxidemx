@@ -26,8 +26,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Analyze both Python (overlay) and Rust (daemon)
-        language: [ 'python', 'rust' ]
+        # Analyze the Rust workspace
+        language: [ 'rust' ]
         # Learn more about CodeQL language support:
         # https://docs.github.com/en/code-security/code-scanning/creating-an-advanced-setup-for-code-scanning/codeql-code-scanning-for-compiled-languages
 
@@ -50,9 +50,6 @@ jobs:
     - name: Autobuild
       uses: github/codeql-action/autobuild@v4
       if: matrix.language == 'rust'
-
-    # For Python, no build step is needed (interpreted language)
-    # CodeQL will analyze the source directly
 
     - name: Perform CodeQL Analysis
       uses: github/codeql-action/analyze@v4

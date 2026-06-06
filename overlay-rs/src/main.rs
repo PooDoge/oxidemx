@@ -1,9 +1,9 @@
-//! JuhRadial MX overlay (Rust + iced + xdg-shell).
+//! OxideMX MX overlay (Rust + iced + xdg-shell).
 //!
 //! Replacement for the legacy Python overlay/. Same daemon, same
-//! D-Bus contract (`org.juhradial.Daemon`). Mutter doesn't advertise
+//! D-Bus contract (`org.oxidemx.Daemon`). Mutter doesn't advertise
 //! `wlr-layer-shell` on stable GNOME, so positioning is delegated to
-//! the `juhradial-cursor` GNOME Shell extension's `MoveOverlay`
+//! the `oxidemx-cursor` GNOME Shell extension's `MoveOverlay`
 //! D-Bus method — the overlay is a regular xdg-shell window that
 //! the extension places exactly where we want it after each show.
 //!

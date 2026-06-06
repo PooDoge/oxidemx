@@ -1,9 +1,9 @@
-//! JuhRadial MX indicator popup.
+//! OxideMX MX indicator popup.
 //!
-//! Spawned by `juhradiald` when it handles a `ShowPopup(x, y, w, h)`
+//! Spawned by `oxidemxd` when it handles a `ShowPopup(x, y, w, h)`
 //! D-Bus call from the GNOME Shell indicator. Opens a frameless,
 //! always-on-top iced window positioned below the indicator icon via
-//! the `juhradial-cursor` extension's `MoveOverlay` D-Bus method.
+//! the `oxidemx-cursor` extension's `MoveOverlay` D-Bus method.
 //!
 //! Lifecycle: the popup is a short-lived process. The daemon spawns it
 //! on demand; the window dismisses itself when focus is lost or the
@@ -58,10 +58,10 @@ pub mod cli {
     }
 }
 
-use juhradial_window::frameless_topmost;
+use oxidemx_window::frameless_topmost;
 use tracing::info;
 
-const APP_ID: &str = "org.juhradial.popup";
+const APP_ID: &str = "org.oxidemx.popup";
 
 fn main() -> iced::Result {
     use clap::Parser;
@@ -74,7 +74,7 @@ fn main() -> iced::Result {
         .init();
 
     let args = Args::parse();
-    info!(?args, "juhradial-popup starting");
+    info!(?args, "oxidemx-popup starting");
 
     let window = frameless_topmost(APP_ID, iced::Size::new(POPUP_W, POPUP_H));
     iced::application(
@@ -82,7 +82,7 @@ fn main() -> iced::Result {
         app::update,
         app::view,
     )
-    .title("JuhRadial Popup")
+    .title("OxideMX Popup")
     .window(window)
     .style(|_state, _theme| iced::theme::Style {
         background_color: iced::Color::TRANSPARENT,

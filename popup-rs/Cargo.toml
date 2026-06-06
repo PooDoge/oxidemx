@@ -1,19 +1,19 @@
 [package]
-name = "juhradial-popup-rs"
+name = "oxidemx-popup"
 version = "0.0.1"
 edition = "2021"
 license = "GPL-3.0"
-description = "JuhRadial MX indicator-popup (Rust + iced) - spawned by juhradiald on ShowPopup"
-repository = "https://github.com/JuhLabs/juhradial-mx"
+description = "OxideMX indicator-popup (Rust + iced) - spawned by oxidemxd on ShowPopup"
+repository = "https://github.com/JuhLabs/oxidemx"
 
 [[bin]]
-name = "juhradial-popup"
+name = "oxidemx-popup"
 path = "src/main.rs"
 
 [dependencies]
-juhradial-shared = { path = "../juhradial-shared" }
-juhradial-widgets = { path = "../juhradial-widgets" }
-juhradial-window = { path = "../juhradial-window" }
+oxidemx-shared = { path = "../oxidemx-shared" }
+oxidemx-widgets = { path = "../oxidemx-widgets" }
+oxidemx-window = { path = "../oxidemx-window" }
 
 iced = { version = "0.14", features = ["canvas", "wayland", "x11", "tokio", "image"] }
 
@@ -29,10 +29,6 @@ tokio = { version = "1", features = ["rt", "macros", "time", "process", "sync"] 
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 notify = "6"
-
-# GSettings via gtk-rs.
-gio = { version = "0.20", features = ["v2_74"] }
-glib = "0.20"
 
 # Logging.
 tracing = "0.1"

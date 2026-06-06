@@ -7,7 +7,7 @@
 //!
 //! Full design — including the rumble-capture surface, Steam Input
 //! interaction, and the implementation phases — lives in
-//! `juhradial-mx/HAPTIC_GAMEPAD_BRIDGE_DESIGN.md`.
+//! `oxidemx/HAPTIC_GAMEPAD_BRIDGE_DESIGN.md`.
 //!
 //! ## Implementation status
 //!
@@ -29,7 +29,7 @@ mod virtual_pad;
 pub use diagnostics::diagnostic_report;
 pub use translator::fire_test_pulse;
 
-use juhradial_shared::{HapticRedirectConfig, HapticRedirectMode};
+use oxidemx_shared::{HapticRedirectConfig, HapticRedirectMode};
 use tokio::sync::oneshot;
 
 use crate::hidpp::SharedHapticManager;

@@ -1,25 +1,11 @@
 //! GSettings bridge for the GNOME indicator extension's battery-colour prefs.
 //!
-//! Reads `org.gnome.shell.extensions.juhradial-indicator` so the popup's
+//! Reads `org.gnome.shell.extensions.oxidemx-indicator` so the popup's
 //! battery-ring colours exactly match the top-bar indicator. Uses a 1-second
-//! poll rather than glib signal wiring — avoids the complexity of bridging
-//! a glib `MainContext` into iced's tokio executor while keeping latency
-//! acceptable (colour preferences change rarely).
+//! poll calling the `gsettings` CLI utility via a subprocess to avoid GObject/GIO
+//! threading context issues and deadlocks.
 //!
-//! # Why poll, not glib signals?
-//!
-//! `gio::Settings` is `!Send` (wraps a raw GObject pointer). Holding it
-//! across an `.await` would require `spawn_local` which needs a
-//! `LocalSet`, complicating the iced executor wiring. Polling each second
-//! from a `spawn_blocking` call is simpler and sufficient — colour prefs
-//! change at human speed, not event speed.
-//!
-//! # Trade-off
-//!
-//! A native glib signal subscription would react immediately. The 1-second
-//! poll adds ≤1 s lag when the user edits indicator colours in the
-//! extension's prefs panel. This is acceptable because the popup is
-//! short-lived.
+//! SPDX-License-Identifier: GPL-3.0
 
 use tracing::warn;
 
@@ -47,53 +33,63 @@ impl Default for BatteryColors {
     }
 }
 
-/// Read the current `BatteryColors` from GSettings.
-/// Must be called from a thread where the glib type system is available.
-/// Returns `None` when the schema is not installed.
-fn read_from_gsettings() -> Option<BatteryColors> {
-    use gio::prelude::*;
+/// Helper to run `gsettings get` CLI command to retrieve a key.
+fn get_gsettings_value(key: &str) -> Option<String> {
+    let home = std::env::var("HOME").ok()?;
+    let schema_dir = format!("{}/.local/share/gnome-shell/extensions/oxidemx-indicator@dev.juhlabs.com/schemas", home);
+    let output = std::process::Command::new("gsettings")
+        .env("GSETTINGS_SCHEMA_DIR", &schema_dir)
+        .args(["get", "org.gnome.shell.extensions.oxidemx-indicator", key])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let val = String::from_utf8(output.stdout).ok()?;
+    let val = val.trim();
+    // gsettings CLI returns strings wrapped in single quotes, e.g. '#f38ba8' or 'color'
+    let val = val.strip_prefix('\'').unwrap_or(val);
+    let val = val.strip_suffix('\'').unwrap_or(val);
+    Some(val.to_string())
+}
 
-    let source = gio::SettingsSchemaSource::default()?;
-    source.lookup(
-        "org.gnome.shell.extensions.juhradial-indicator",
-        true,
-    )?;
-    let settings =
-        gio::Settings::new("org.gnome.shell.extensions.juhradial-indicator");
+/// Read the current `BatteryColors` from GSettings using the CLI tool.
+fn read_from_gsettings() -> Option<BatteryColors> {
+    let threshold_critical = get_gsettings_value("threshold-critical")?
+        .parse::<u8>()
+        .ok()?;
+    let threshold_low = get_gsettings_value("threshold-low")?
+        .parse::<u8>()
+        .ok()?;
+    let color_critical = get_gsettings_value("color-critical")?;
+    let color_low = get_gsettings_value("color-low")?;
+    let color_healthy = get_gsettings_value("color-healthy")?;
+    let color_charging = get_gsettings_value("color-charging")?;
+
     Some(BatteryColors {
-        threshold_critical: settings.int("threshold-critical") as u8,
-        threshold_low: settings.int("threshold-low") as u8,
-        color_critical: settings.string("color-critical").to_string(),
-        color_low: settings.string("color-low").to_string(),
-        color_healthy: settings.string("color-healthy").to_string(),
-        color_charging: settings.string("color-charging").to_string(),
+        threshold_critical,
+        threshold_low,
+        color_critical,
+        color_low,
+        color_healthy,
+        color_charging,
     })
 }
 
 /// Poll GSettings once per second and yield `BatteryColors` whenever
 /// the value changes. Used as an iced `Subscription::run` source.
-///
-/// `gio::Settings` is `!Send`, so we open and read it inside
-/// `spawn_blocking` on each tick rather than holding it across an
-/// `await`. This avoids the `LocalSet` complexity.
-///
-/// If the schema isn't installed (extension not present), emits a single
-/// `BatteryColors::default()` and then terminates — the subscriber
-/// receives the default value and never sees another event.
 pub fn poll_stream()
 -> impl futures_util::stream::Stream<Item = BatteryColors>
 {
-    use futures_util::StreamExt;
+    use futures_util::stream;
 
-    let (tx, rx) = async_channel::unbounded::<BatteryColors>();
+    let initial_state = BatteryColors {
+        threshold_critical: 255,
+        ..BatteryColors::default()
+    };
 
-    tokio::task::spawn(async move {
-        // Use a sentinel threshold value that will never match a real
-        // reading to force the first emit.
-        let mut last = BatteryColors {
-            threshold_critical: 255,
-            ..BatteryColors::default()
-        };
+    stream::unfold(Some(initial_state), |state_opt| async move {
+        let last = state_opt?;
 
         loop {
             let current = tokio::task::spawn_blocking(read_from_gsettings)
@@ -103,28 +99,21 @@ pub fn poll_stream()
             let current = match current {
                 Some(c) => c,
                 None => {
-                    // Schema not found — emit the default once and stop.
                     warn!(
                         "GSettings schema \
-                         'org.gnome.shell.extensions.juhradial-indicator' \
-                         not found — extension not installed? \
-                         Using default battery colours."
+                         'org.gnome.shell.extensions.oxidemx-indicator' \
+                         not found or query failed — using default battery colours."
                     );
-                    let _ = tx.send(BatteryColors::default()).await;
-                    return;
+                    return Some((BatteryColors::default(), None));
                 }
             };
 
             if current != last {
-                if tx.send(current.clone()).await.is_err() {
-                    return;
-                }
-                last = current;
+                let next_state = current.clone();
+                return Some((current, Some(next_state)));
             }
 
             tokio::time::sleep(std::time::Duration::from_secs(1)).await;
         }
-    });
-
-    rx.boxed()
+    })
 }

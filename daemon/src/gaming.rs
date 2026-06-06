@@ -1,4 +1,4 @@
-//! Gaming mode for JuhRadial MX
+//! Gaming mode for OxideMX MX
 //!
 //! When gaming mode is enabled:
 //! - The overlay (radial menu) is suppressed (no MenuRequested signals)
@@ -14,7 +14,7 @@
 
 use std::sync::{Arc, RwLock};
 
-use juhradial_shared::HapticRedirectConfig;
+use oxidemx_shared::HapticRedirectConfig;
 
 use crate::gamepad_haptics::GamepadHapticsService;
 use crate::hidpp::SharedHapticManager;

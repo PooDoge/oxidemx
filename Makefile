@@ -1,9 +1,9 @@
-# JuhRadial MX - Build System
+# OxideMX MX - Build System
 #
 # Usage:
 #   make build   - Build the Rust daemon
 #   make clean   - Clean build artifacts
-#   make run     - Run JuhRadial MX (daemon + overlay)
+#   make run     - Run OxideMX MX (daemon + overlay)
 
 .PHONY: all build clean run help
 
@@ -14,7 +14,7 @@ all: build
 build:
 	@echo "Building Rust daemon..."
 	cd daemon && cargo build --release
-	@echo "✓ Daemon built: daemon/target/release/juhradiald"
+	@echo "✓ Daemon built: daemon/target/release/oxidemxd"
 
 # Clean build artifacts
 clean:
@@ -22,19 +22,19 @@ clean:
 	cd daemon && cargo clean
 	@echo "✓ Clean complete"
 
-# Run JuhRadial MX
+# Run OxideMX MX
 run: build
-	@echo "Starting JuhRadial MX..."
-	./scripts/juhradial-mx.sh
+	@echo "Starting OxideMX MX..."
+	./scripts/oxidemx.sh
 
 # Help
 help:
-	@echo "JuhRadial MX Build System"
+	@echo "OxideMX MX Build System"
 	@echo ""
 	@echo "Usage: make [target]"
 	@echo ""
 	@echo "Targets:"
 	@echo "  build  - Build the Rust daemon (default)"
 	@echo "  clean  - Clean build artifacts"
-	@echo "  run    - Build and run JuhRadial MX"
+	@echo "  run    - Build and run OxideMX MX"
 	@echo "  help   - Show this help"

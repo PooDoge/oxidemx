@@ -1,4 +1,4 @@
-# JuhRadial Indicator + Popup + Settings — Implementation Plan
+# OxideMX Indicator + Popup + Settings — Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -6,16 +6,16 @@
 
 **Architecture:** Four cooperating components, two persistence layers, three new workspace crates.
 
-1. **`gnome-extension/juhradial-indicator@dev.juhlabs.com/`** — new TypeScript extension, draws the panel button, polls `org.juhradial.Daemon.GetActiveDeviceState`, dispatches click → `org.juhradial.Daemon.ShowPopup()` (new D-Bus method we add).
-2. **`gnome-extension/juhradial-indicator@dev.juhlabs.com/prefs.ts`** — libadwaita single-page prefs.
+1. **`gnome-extension/oxidemx-indicator@dev.juhlabs.com/`** — new TypeScript extension, draws the panel button, polls `org.oxidemx.Daemon.GetActiveDeviceState`, dispatches click → `org.oxidemx.Daemon.ShowPopup()` (new D-Bus method we add).
+2. **`gnome-extension/oxidemx-indicator@dev.juhlabs.com/prefs.ts`** — libadwaita single-page prefs.
 3. **`settings-rs/src/tabs/indicator_popup.rs`** — new tab in the existing settings app, slotted between `PointScroll` and `Haptic` in the `Tab` enum.
-4. **`popup-rs/`** — NEW sibling workspace member; tiny Iced binary `juhradial-popup` that the daemon spawns when `ShowPopup` is called. (Daemon stays UI-free; mirrors the overlay-rs split.)
-5. **`juhradial-widgets/`** — NEW sibling workspace crate that owns the reusable Iced widgets, style closures, and palette (extracted from `settings-rs/src/{widgets,style,palette}.rs`). Imported by `settings-rs`, `overlay-rs` (where applicable), and `popup-rs`.
-6. **`juhradial-window/`** — NEW sibling workspace crate that owns the iced window-shell helper (the 6-line `iced::window::Settings` for a frameless, transparent, always-on-top xdg-shell window) plus the `CursorHelper.MoveOverlay` D-Bus client extracted from `overlay-rs/src/ext_positioner.rs`. Imported by `overlay-rs` and `popup-rs`.
+4. **`popup-rs/`** — NEW sibling workspace member; tiny Iced binary `oxidemx-popup` that the daemon spawns when `ShowPopup` is called. (Daemon stays UI-free; mirrors the overlay-rs split.)
+5. **`oxidemx-widgets/`** — NEW sibling workspace crate that owns the reusable Iced widgets, style closures, and palette (extracted from `settings-rs/src/{widgets,style,palette}.rs`). Imported by `settings-rs`, `overlay-rs` (where applicable), and `popup-rs`.
+6. **`oxidemx-window/`** — NEW sibling workspace crate that owns the iced window-shell helper (the 6-line `iced::window::Settings` for a frameless, transparent, always-on-top xdg-shell window) plus the `CursorHelper.MoveOverlay` D-Bus client extracted from `overlay-rs/src/ext_positioner.rs`. Imported by `overlay-rs` and `popup-rs`.
 
 Two persistence layers:
-- **Extension prefs** → `gsettings` under `org.gnome.shell.extensions.juhradial-indicator.*`. Daemon reads via `gio` (gtk-rs) so popup battery-ring color matches the panel icon.
-- **Popup prefs** (mode, quick toggles/sliders, host labels, volume-on-scroll) → new `popup: PopupConfig` field on `juhradial_shared::AppConfig`, lands in `~/.config/juhradial/config.json` alongside everything else.
+- **Extension prefs** → `gsettings` under `org.gnome.shell.extensions.oxidemx-indicator.*`. Daemon reads via `gio` (gtk-rs) so popup battery-ring color matches the panel icon.
+- **Popup prefs** (mode, quick toggles/sliders, host labels, volume-on-scroll) → new `popup: PopupConfig` field on `oxidemx_shared::AppConfig`, lands in `~/.config/oxidemx/config.json` alongside everything else.
 
 **Tech Stack:**
 - Rust 2021 + Iced 0.14 (matches `settings-rs/`, `overlay-rs/`)
@@ -31,14 +31,14 @@ The repo state diverged from the prompt in several load-bearing ways. The 2026-0
 
 | Prompt assumed | Repo state | Confirmed decision |
 |---|---|---|
-| D-Bus name `org.juhradial.Daemon` | Daemon currently claims `org.kde.juhradialmx` at `/org/kde/juhradialmx/Daemon`, interface `org.kde.juhradialmx.Daemon`. Constants live in `daemon/src/dbus/mod.rs`. | **Rename to `org.juhradial.Daemon` in Phase 0.** Flag-day across `daemon/` (5 files), `overlay-rs/` (4 files), `settings-rs/src/daemon.rs`, `packaging/org.kde.juhradialmx.settings.desktop` (rename file), `install.sh`, `local-test-install.sh`, `dev-test.sh`, `CONTRIBUTING-BAZZITE-PR.md`, and the docstring/comment trail. Path becomes `/org/juhradial/Daemon`. |
-| `~/.config/juhradial/config.toml` (serde TOML) | `~/.config/juhradial/config.json` (serde_json). `juhradial_shared::config::AppConfig` is the root struct. | **Keep JSON.** Add `popup: PopupConfig` field on `AppConfig`. Reuses the overlay's existing inotify watcher and `settings-rs/src/persist.rs` debounce. |
-| Popup is "owned by the daemon (in-process Iced window)" | Daemon binary `juhradiald` has zero UI deps. | **Separate `juhradial-popup` binary.** New workspace member `popup-rs/`. Daemon's `ShowPopup` D-Bus handler spawns it via `tokio::process::Command`. Mirrors the overlay split. |
-| Extract `widgets/` into `juhradial-widgets` crate | `settings-rs/src/widgets.rs` (~120 LOC) + `style.rs` + `palette.rs` are inline modules. | **Extract.** New workspace crate `juhradial-widgets/` owns `widgets.rs` + `style.rs` + `palette.rs`. `settings-rs` keeps a thin façade re-exporting through `pub use` for its own tab files. `popup-rs` imports directly. Done in Phase A. |
-| Extract `overlay-rs/src/window.rs` → `juhradial-window` | No `window.rs` exists; the 6-line iced window setup is inlined in `overlay-rs/src/app.rs::run()`; the `MoveOverlay` D-Bus client is in `overlay-rs/src/ext_positioner.rs`. | **Extract.** New workspace crate `juhradial-window/` owns: (a) a `frameless_topmost(app_id, size)` helper returning a configured `iced::window::Settings`, and (b) the `CursorHelper` zbus proxy from `ext_positioner.rs`. `overlay-rs` and `popup-rs` both import it. Done in Phase A. |
+| D-Bus name `org.oxidemx.Daemon` | Daemon currently claims `org.kde.oxidemx` at `/org/kde/oxidemx/Daemon`, interface `org.kde.oxidemx.Daemon`. Constants live in `daemon/src/dbus/mod.rs`. | **Rename to `org.oxidemx.Daemon` in Phase 0.** Flag-day across `daemon/` (5 files), `overlay-rs/` (4 files), `settings-rs/src/daemon.rs`, `packaging/org.kde.oxidemx.settings.desktop` (rename file), `install.sh`, `local-test-install.sh`, `dev-test.sh`, `CONTRIBUTING-BAZZITE-PR.md`, and the docstring/comment trail. Path becomes `/org/oxidemx/Daemon`. |
+| `~/.config/oxidemx/config.toml` (serde TOML) | `~/.config/oxidemx/config.json` (serde_json). `oxidemx_shared::config::AppConfig` is the root struct. | **Keep JSON.** Add `popup: PopupConfig` field on `AppConfig`. Reuses the overlay's existing inotify watcher and `settings-rs/src/persist.rs` debounce. |
+| Popup is "owned by the daemon (in-process Iced window)" | Daemon binary `oxidemxd` has zero UI deps. | **Separate `oxidemx-popup` binary.** New workspace member `popup-rs/`. Daemon's `ShowPopup` D-Bus handler spawns it via `tokio::process::Command`. Mirrors the overlay split. |
+| Extract `widgets/` into `oxidemx-widgets` crate | `settings-rs/src/widgets.rs` (~120 LOC) + `style.rs` + `palette.rs` are inline modules. | **Extract.** New workspace crate `oxidemx-widgets/` owns `widgets.rs` + `style.rs` + `palette.rs`. `settings-rs` keeps a thin façade re-exporting through `pub use` for its own tab files. `popup-rs` imports directly. Done in Phase A. |
+| Extract `overlay-rs/src/window.rs` → `oxidemx-window` | No `window.rs` exists; the 6-line iced window setup is inlined in `overlay-rs/src/app.rs::run()`; the `MoveOverlay` D-Bus client is in `overlay-rs/src/ext_positioner.rs`. | **Extract.** New workspace crate `oxidemx-window/` owns: (a) a `frameless_topmost(app_id, size)` helper returning a configured `iced::window::Settings`, and (b) the `CursorHelper` zbus proxy from `ext_positioner.rs`. `overlay-rs` and `popup-rs` both import it. Done in Phase A. |
 | Wayland layer-shell for the popup | Mutter does not advertise wlr-layer-shell on stable GNOME. | **No layer-shell.** Popup is a regular xdg-shell window positioned by the cursor extension's `MoveOverlay`, same as the overlay. |
 | Settings app uses `nav.ts` / `pages/X.tsx` | Settings app is Rust. Nav is the `Tab` enum in `settings-rs/src/main.rs`. | **New tab file:** `settings-rs/src/tabs/indicator_popup.rs` (snake_case, like every other tab). `Tab::IndicatorPopup` slotted between `PointScroll` and `Haptic`. |
-| GNOME extension is TypeScript | Existing `juhradial-cursor@dev.juhlabs.com` is plain ES-modules JavaScript. | **Migrate both extensions to TypeScript in Phase 1.** Single shared `tsconfig.json` and `@girs/*` typing dep tree under `gnome-extension/`. The existing cursor extension converts at the same time as the new indicator is added. |
+| GNOME extension is TypeScript | Existing `oxidemx-cursor@dev.juhlabs.com` is plain ES-modules JavaScript. | **Migrate both extensions to TypeScript in Phase 1.** Single shared `tsconfig.json` and `@girs/*` typing dep tree under `gnome-extension/`. The existing cursor extension converts at the same time as the new indicator is added. |
 | Daemon already exposes `GetActiveDeviceState() -> {battery, charging, connection, deviceName, deviceId}` and `DeviceStateChanged` signal | Daemon exposes only `get_battery_status() -> (u8 percent, bool charging)`. No connection / name / id; no change signal. | **Add in Phase 0.** New zbus method `get_active_device_state() -> (u8, bool, String, String, String)` and signal `DeviceStateChanged(yysss)` emitted from `daemon/src/battery.rs` after each poll when any field changed. |
 | Critical-battery: no notification spec | n/a | **Emit one-shot `Gio.Notification` (urgency=critical)** when the indicator first observes battery crossing into critical. Re-armable: clears once battery goes back above critical or device charges. Title: "MX device low" · body: "{deviceName} at {pct}% — connect charging cable". Implemented in extension (`lib/battery.ts`), not the daemon. |
 | Quick-toggle ids `highlight`, `flow` map to daemon methods | Daemon doesn't expose them yet. | **Render anyway, log "not yet wired" on click.** Popup shows a transient inline notice. Full wiring tracked as a Phase 3.5 follow-up. Settings catalog stays complete per the design. |
@@ -51,7 +51,7 @@ The repo state diverged from the prompt in several load-bearing ways. The 2026-0
 | Phase | PR | Contents | Depends on |
 |---|---|---|---|
 | 0 | #1 | Shared types (`PopupConfig`) + D-Bus rename + new D-Bus methods/signal + GSettings schema | — |
-| A | #2 | Extract `juhradial-widgets` and `juhradial-window` crates; update `settings-rs`, `overlay-rs` to consume them | Phase 0 |
+| A | #2 | Extract `oxidemx-widgets` and `oxidemx-window` crates; update `settings-rs`, `overlay-rs` to consume them | Phase 0 |
 | 1 | #3 | GNOME extensions — new indicator (TS) + migrate cursor to TS; libadwaita prefs; symbolic icons | Phase 0 |
 | 2 | #4 | Settings tab `IndicatorPopup` | Phase 0, Phase A |
 | 3 | #5 | `popup-rs` binary | Phase 0, Phase A, Phase 1 (uses CursorHelper proxy) |
@@ -64,9 +64,9 @@ Each phase ships an independently mergeable PR.
 
 ### Phase 0 — D-Bus rename + shared types + new wire surface
 
-**Why first:** every other phase consumes types from `juhradial-shared` and methods from the daemon's D-Bus interface. The rename is bundled here so the entire workspace lands on the new name in one atomic change rather than dribbling rename commits across every later PR.
+**Why first:** every other phase consumes types from `oxidemx-shared` and methods from the daemon's D-Bus interface. The rename is bundled here so the entire workspace lands on the new name in one atomic change rather than dribbling rename commits across every later PR.
 
-#### Task 0.0 — Rename `org.kde.juhradialmx*` → `org.juhradial*` across the workspace
+#### Task 0.0 — Rename `org.kde.oxidemx*` → `org.oxidemx*` across the workspace
 
 **Files (every one needs editing):**
 - Modify: `daemon/src/dbus/mod.rs` (constants `DBUS_INTERFACE`, `DBUS_PATH`, `DBUS_NAME`; the two assertion tests)
@@ -76,51 +76,51 @@ Each phase ships an independently mergeable PR.
 - Modify: `overlay-rs/src/dbus.rs` (`DAEMON_PATH`, `#[proxy]` annotations, log string)
 - Modify: `overlay-rs/src/haptic_client.rs` (`DAEMON_SERVICE`, `DAEMON_PATH`, `#[proxy]` annotations)
 - Modify: `overlay-rs/src/main.rs:4`, `overlay-rs/Cargo.toml:30` (doc comments)
-- Modify: `overlay-rs/src/app.rs:27` (`APP_ID = "org.juhradial.overlay"`)
+- Modify: `overlay-rs/src/app.rs:27` (`APP_ID = "org.oxidemx.overlay"`)
 - Modify: `overlay-rs/src/ext_positioner.rs:114` (doc comment)
 - Modify: `settings-rs/src/daemon.rs:12-18` (`DAEMON_BUS`, `DAEMON_PATH`, `#[proxy]`)
-- Rename: `packaging/org.kde.juhradialmx.settings.desktop` → `packaging/org.juhradial.settings.desktop`
+- Rename: `packaging/org.kde.oxidemx.settings.desktop` → `packaging/org.oxidemx.settings.desktop`
 - Modify: `install.sh:525`, `local-test-install.sh:68-69`, `dev-test.sh:132-138` (path + `busctl` lookups)
 - Modify: `CONTRIBUTING-BAZZITE-PR.md:240`, `RUST_GTK4_OVERLAY_DESIGN.md:158` (docstring trail)
 
 **Naming policy (locked):**
-- D-Bus name: `org.juhradial.Daemon`
-- D-Bus path: `/org/juhradial/Daemon`
-- Interface: `org.juhradial.Daemon`
-- Overlay app_id: `org.juhradial.overlay`
-- Popup app_id: `org.juhradial.popup`
-- Desktop file: `org.juhradial.settings.desktop`
-- Cursor-helper extension service stays `org.juhradial.CursorHelper` (already correct namespace)
+- D-Bus name: `org.oxidemx.Daemon`
+- D-Bus path: `/org/oxidemx/Daemon`
+- Interface: `org.oxidemx.Daemon`
+- Overlay app_id: `org.oxidemx.overlay`
+- Popup app_id: `org.oxidemx.popup`
+- Desktop file: `org.oxidemx.settings.desktop`
+- Cursor-helper extension service stays `org.oxidemx.CursorHelper` (already correct namespace)
 
 - [ ] **Step 1: Update daemon-side constants + interface attribute**
 
 Edit `daemon/src/dbus/mod.rs`:
 ```rust
-pub const DBUS_INTERFACE: &str = "org.juhradial.Daemon";
-pub const DBUS_PATH:      &str = "/org/juhradial/Daemon";
-pub const DBUS_NAME:      &str = "org.juhradial.Daemon";
+pub const DBUS_INTERFACE: &str = "org.oxidemx.Daemon";
+pub const DBUS_PATH:      &str = "/org/oxidemx/Daemon";
+pub const DBUS_NAME:      &str = "org.oxidemx.Daemon";
 
 #[cfg(test)]
 mod tests {
     use super::*;
     #[test]
     fn naming_locked() {
-        assert_eq!(DBUS_INTERFACE, "org.juhradial.Daemon");
-        assert_eq!(DBUS_PATH,      "/org/juhradial/Daemon");
-        assert_eq!(DBUS_NAME,      "org.juhradial.Daemon");
+        assert_eq!(DBUS_INTERFACE, "org.oxidemx.Daemon");
+        assert_eq!(DBUS_PATH,      "/org/oxidemx/Daemon");
+        assert_eq!(DBUS_NAME,      "org.oxidemx.Daemon");
     }
 }
 ```
 
 Edit `daemon/src/dbus/interface.rs:278`:
 ```rust
-#[interface(name = "org.juhradial.Daemon")]
-impl JuhRadialService { … }
+#[interface(name = "org.oxidemx.Daemon")]
+impl OxideMXService { … }
 ```
 
 - [ ] **Step 2: Update all daemon string-literal D-Bus calls (KWin-script callDBus paths)**
 
-Replace `org.kde.juhradialmx` → `org.juhradial.Daemon` and `/org/kde/juhradialmx/Daemon` → `/org/juhradial/Daemon` in:
+Replace `org.kde.oxidemx` → `org.oxidemx.Daemon` and `/org/kde/oxidemx/Daemon` → `/org/oxidemx/Daemon` in:
 - `daemon/src/hidraw.rs:590-591`
 - `daemon/src/evdev.rs:839-840`
 - `daemon/src/cursor.rs:203-204`
@@ -131,16 +131,16 @@ The KWin script bodies these literals get pushed into still reference the same o
 - [ ] **Step 3: Update overlay + settings consumers**
 
 Edit:
-- `overlay-rs/src/dbus.rs:20-32`: `DAEMON_PATH = "/org/juhradial/Daemon"`, `default_service = "org.juhradial.Daemon"`, `default_path = "/org/juhradial/Daemon"`, interface attr `"org.juhradial.Daemon"`.
+- `overlay-rs/src/dbus.rs:20-32`: `DAEMON_PATH = "/org/oxidemx/Daemon"`, `default_service = "org.oxidemx.Daemon"`, `default_path = "/org/oxidemx/Daemon"`, interface attr `"org.oxidemx.Daemon"`.
 - `overlay-rs/src/haptic_client.rs:18-24`: same triplet.
-- `overlay-rs/src/app.rs:27`: `APP_ID = "org.juhradial.overlay"`.
-- `settings-rs/src/daemon.rs:12-18`: `DAEMON_BUS = "org.juhradial.Daemon"`, `DAEMON_PATH = "/org/juhradial/Daemon"`, interface attr `"org.juhradial.Daemon"`.
+- `overlay-rs/src/app.rs:27`: `APP_ID = "org.oxidemx.overlay"`.
+- `settings-rs/src/daemon.rs:12-18`: `DAEMON_BUS = "org.oxidemx.Daemon"`, `DAEMON_PATH = "/org/oxidemx/Daemon"`, interface attr `"org.oxidemx.Daemon"`.
 
 - [ ] **Step 4: Rename packaging desktop file + update installers**
 
 ```bash
-git mv packaging/org.kde.juhradialmx.settings.desktop packaging/org.juhradial.settings.desktop
-sed -i 's|org\.kde\.juhradialmx|org.juhradial|g' packaging/org.juhradial.settings.desktop install.sh local-test-install.sh dev-test.sh
+git mv packaging/org.kde.oxidemx.settings.desktop packaging/org.oxidemx.settings.desktop
+sed -i 's|org\.kde\.oxidemx|org.oxidemx|g' packaging/org.oxidemx.settings.desktop install.sh local-test-install.sh dev-test.sh
 ```
 
 Verify the `Icon=` / `Exec=` fields inside the desktop file are still valid (they reference binary names, not D-Bus names — should be unaffected).
@@ -148,7 +148,7 @@ Verify the `Icon=` / `Exec=` fields inside the desktop file are still valid (the
 - [ ] **Step 5: Sweep for stragglers**
 
 ```bash
-rg "org\.kde\.juhradialmx|kde/juhradialmx" -g '!target/' -g '!node_modules/' -g '!design/'
+rg "org\.kde\.oxidemx|kde/oxidemx" -g '!target/' -g '!node_modules/' -g '!design/'
 ```
 
 Expected: zero hits except in `CHANGELOG.md` (historical) and any contributing-doc blockquotes that quote the old name as historical context. Update doc trail (`CONTRIBUTING-BAZZITE-PR.md`, `RUST_GTK4_OVERLAY_DESIGN.md`) in the same commit.
@@ -164,25 +164,25 @@ Expected: clean build, all existing tests pass (the rename is a string substitut
 
 ```bash
 git add -A   # explicitly preferred over `git add .` to capture the desktop-file rename
-git commit -m "rename(dbus): org.kde.juhradialmx -> org.juhradial.Daemon
+git commit -m "rename(dbus): org.kde.oxidemx -> org.oxidemx.Daemon
 
 Flag-day rename across daemon, overlay, settings, packaging, and
 install/test scripts. No behaviour change. Stops the indicator
 work shipping with a legacy KDE-era name on the wire."
 ```
 
-#### Task 0.1 — Add `PopupConfig` to `juhradial-shared`
+#### Task 0.1 — Add `PopupConfig` to `oxidemx-shared`
 
 **Files:**
-- Create: `juhradial-shared/src/popup.rs`
-- Modify: `juhradial-shared/src/lib.rs` (add `mod popup; pub use popup::*;`)
-- Modify: `juhradial-shared/src/config.rs` (add `#[serde(default)] pub popup: PopupConfig,` field on `AppConfig`)
-- Test: `juhradial-shared/src/popup.rs` (inline `#[cfg(test)] mod tests`)
+- Create: `oxidemx-shared/src/popup.rs`
+- Modify: `oxidemx-shared/src/lib.rs` (add `mod popup; pub use popup::*;`)
+- Modify: `oxidemx-shared/src/config.rs` (add `#[serde(default)] pub popup: PopupConfig,` field on `AppConfig`)
+- Test: `oxidemx-shared/src/popup.rs` (inline `#[cfg(test)] mod tests`)
 
 - [ ] **Step 1: Write the failing serde round-trip test**
 
 ```rust
-// juhradial-shared/src/popup.rs (bottom)
+// oxidemx-shared/src/popup.rs (bottom)
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -229,15 +229,15 @@ mod tests {
 
 - [ ] **Step 2: Run tests — expect failure**
 
-Run: `cargo test -p juhradial-shared popup`
+Run: `cargo test -p oxidemx-shared popup`
 Expected: FAIL with "cannot find type `PopupConfig`".
 
 - [ ] **Step 3: Implement `PopupConfig`**
 
 ```rust
-// juhradial-shared/src/popup.rs (top)
+// oxidemx-shared/src/popup.rs (top)
 //! Indicator-popup preferences. Persisted as the `popup` table in
-//! the same `~/.config/juhradial/config.json` everything else lives
+//! the same `~/.config/oxidemx/config.json` everything else lives
 //! in (one file = one inotify event = one reload).
 //!
 //! Read by:
@@ -245,7 +245,7 @@ Expected: FAIL with "cannot find type `PopupConfig`".
 //!   * popup-rs    (displays the popup using these knobs)
 //! NOT read by the GNOME extension. The extension's prefs are
 //! visual/icon-only and live in GSettings (separate concern; see
-//! org.gnome.shell.extensions.juhradial-indicator).
+//! org.gnome.shell.extensions.oxidemx-indicator).
 
 use serde::{Deserialize, Serialize};
 
@@ -329,13 +329,13 @@ pub const QUICK_SLIDER_CATALOG: &[QuickEntry] = &[
 ```
 
 ```rust
-// juhradial-shared/src/lib.rs (add)
+// oxidemx-shared/src/lib.rs (add)
 mod popup;
 pub use popup::*;
 ```
 
 ```rust
-// juhradial-shared/src/config.rs (modify AppConfig)
+// oxidemx-shared/src/config.rs (modify AppConfig)
 // Add field:
 #[serde(default)]
 pub popup: crate::popup::PopupConfig,
@@ -343,13 +343,13 @@ pub popup: crate::popup::PopupConfig,
 
 - [ ] **Step 4: Run tests — expect pass**
 
-Run: `cargo test -p juhradial-shared`
+Run: `cargo test -p oxidemx-shared`
 Expected: PASS, all popup tests green.
 
 - [ ] **Step 5: Add reorder helper + unit tests**
 
 ```rust
-// juhradial-shared/src/popup.rs (bottom, before #[cfg(test)])
+// oxidemx-shared/src/popup.rs (bottom, before #[cfg(test)])
 impl PopupConfig {
     /// Move `id` up in whichever vec contains it. No-op if not present
     /// or already first.
@@ -383,14 +383,14 @@ impl<T> ReverseClone for Vec<T> {
 
 - [ ] **Step 6: Run + commit**
 
-Run: `cargo test -p juhradial-shared && cargo clippy -p juhradial-shared --all-targets -- -D warnings`
+Run: `cargo test -p oxidemx-shared && cargo clippy -p oxidemx-shared --all-targets -- -D warnings`
 
 ```bash
-git add juhradial-shared/src/popup.rs juhradial-shared/src/lib.rs juhradial-shared/src/config.rs
+git add oxidemx-shared/src/popup.rs oxidemx-shared/src/lib.rs oxidemx-shared/src/config.rs
 git commit -m "feat(shared): add PopupConfig + quick-action catalogs"
 ```
 
-#### Task 0.2 — Extend `org.juhradial.Daemon` D-Bus interface
+#### Task 0.2 — Extend `org.oxidemx.Daemon` D-Bus interface
 
 **Files:**
 - Modify: `daemon/src/dbus/interface.rs` (add `get_active_device_state`, `show_popup`, `ensure_overlay_running`, `device_state_changed` signal)
@@ -413,8 +413,8 @@ async fn get_active_device_state(&self) -> fdo::Result<(u8, bool, String, String
 // close/dismiss path.
 async fn show_popup(&self, panel_x: i32, panel_y: i32, panel_w: i32, panel_h: i32) -> fdo::Result<()> { … }
 
-// Idempotent. Returns Ok(()) immediately if `org.juhradial.overlay` is
-// already on the session bus. Otherwise spawns `juhradial-overlay-rs`
+// Idempotent. Returns Ok(()) immediately if `org.oxidemx.overlay` is
+// already on the session bus. Otherwise spawns `oxidemx-overlay`
 // and waits up to 3s for the bus name to appear; returns Err(...) on
 // spawn failure or timeout. Backs the indicator's "Radial Overlay"
 // toggle so the extension never has to spawn long-lived processes
@@ -434,7 +434,7 @@ async fn device_state_changed(
 `overlay_spawner.rs` outline (~60 LOC):
 
 ```rust
-//! Owns the child process handle for juhradial-overlay-rs.
+//! Owns the child process handle for oxidemx-overlay.
 //!
 //! Wraps tokio::process::Command::spawn so the daemon's ensure_overlay_running
 //! D-Bus handler can call it without duplicating the bus-name-probe + spawn +
@@ -447,7 +447,7 @@ use tokio::process::{Child, Command};
 use tokio::time::{Duration, Instant};
 use zbus::Connection;
 
-const OVERLAY_BUS_NAME: &str = "org.juhradial.overlay";
+const OVERLAY_BUS_NAME: &str = "org.oxidemx.overlay";
 const SPAWN_WAIT_TIMEOUT: Duration = Duration::from_secs(3);
 const SPAWN_WAIT_POLL: Duration = Duration::from_millis(100);
 
@@ -462,9 +462,9 @@ impl OverlaySpawner {
         if name_owned(conn, OVERLAY_BUS_NAME).await {
             return Ok(());
         }
-        let child = Command::new("juhradial-overlay-rs")
+        let child = Command::new("oxidemx-overlay")
             .spawn()
-            .map_err(|e| format!("spawn juhradial-overlay-rs: {e}"))?;
+            .map_err(|e| format!("spawn oxidemx-overlay: {e}"))?;
         *self.child.lock().unwrap() = Some(child);
 
         let deadline = Instant::now() + SPAWN_WAIT_TIMEOUT;
@@ -486,7 +486,7 @@ async fn name_owned(conn: &Connection, name: &str) -> bool {
 `ShowPopup` spawner uses the same `tokio::process::Command` pattern:
 
 ```rust
-let _ = Command::new("juhradial-popup")
+let _ = Command::new("oxidemx-popup")
     .args(["--panel-rect", &format!("{panel_x},{panel_y},{panel_w},{panel_h}")])
     .spawn();
 ```
@@ -500,15 +500,15 @@ Steps mirror Task 0.1 — write failing test in `daemon/src/dbus/tests.rs` for t
 #### Task 0.3 — Write the GSettings schema
 
 **Files:**
-- Create: `gnome-extension/juhradial-indicator@dev.juhlabs.com/schemas/org.gnome.shell.extensions.juhradial-indicator.gschema.xml`
+- Create: `gnome-extension/oxidemx-indicator@dev.juhlabs.com/schemas/org.gnome.shell.extensions.oxidemx-indicator.gschema.xml`
 
 Verbatim contents (mirrors prompt's spec; lower-case kebab keys as GNOME convention):
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
-<schemalist gettext-domain="juhradial-indicator">
-  <schema id="org.gnome.shell.extensions.juhradial-indicator"
-          path="/org/gnome/shell/extensions/juhradial-indicator/">
+<schemalist gettext-domain="oxidemx-indicator">
+  <schema id="org.gnome.shell.extensions.oxidemx-indicator"
+          path="/org/gnome/shell/extensions/oxidemx-indicator/">
     <key name="display-mode" type="s">
       <choices><choice value="percent"/><choice value="icon"/><choice value="both"/></choices>
       <default>'both'</default>
@@ -553,40 +553,40 @@ Compile to GVDB at install time via `glib-compile-schemas`. `dev-install-ext.sh`
 
 ---
 
-### Phase A — Extract `juhradial-widgets` and `juhradial-window` sibling crates
+### Phase A — Extract `oxidemx-widgets` and `oxidemx-window` sibling crates
 
 **Why a separate phase:** confirmed in the 2026-05-24 clarification round. Doing it after Phase 0 (so the rename has landed) and before Phase 1/2/3 means the new consumers can import from the new crates from day one, instead of binding to a moving target.
 
-#### Task A.1 — Stand up `juhradial-widgets` crate
+#### Task A.1 — Stand up `oxidemx-widgets` crate
 
 **Files:**
-- Create: `juhradial-widgets/Cargo.toml`
-- Create: `juhradial-widgets/src/lib.rs`
-- Move (not copy): `settings-rs/src/widgets.rs` → `juhradial-widgets/src/widgets.rs`
-- Move: `settings-rs/src/style.rs` → `juhradial-widgets/src/style.rs`
-- Move: `settings-rs/src/palette.rs` → `juhradial-widgets/src/palette.rs`
-- Modify: `settings-rs/src/main.rs` (drop the three `mod` declarations; replace with `use juhradial_widgets::{widgets, style, palette};`)
-- Modify: every `settings-rs/src/tabs/*.rs` that uses `crate::widgets` / `crate::style` / `crate::palette` (~12 files): replace `crate::widgets::X` with `juhradial_widgets::widgets::X`, similarly for `style` and `palette`. Most callsites already use `use crate::widgets::{labeled_slider, …};`, so the rename is `crate::` → `juhradial_widgets::`.
+- Create: `oxidemx-widgets/Cargo.toml`
+- Create: `oxidemx-widgets/src/lib.rs`
+- Move (not copy): `settings-rs/src/widgets.rs` → `oxidemx-widgets/src/widgets.rs`
+- Move: `settings-rs/src/style.rs` → `oxidemx-widgets/src/style.rs`
+- Move: `settings-rs/src/palette.rs` → `oxidemx-widgets/src/palette.rs`
+- Modify: `settings-rs/src/main.rs` (drop the three `mod` declarations; replace with `use oxidemx_widgets::{widgets, style, palette};`)
+- Modify: every `settings-rs/src/tabs/*.rs` that uses `crate::widgets` / `crate::style` / `crate::palette` (~12 files): replace `crate::widgets::X` with `oxidemx_widgets::widgets::X`, similarly for `style` and `palette`. Most callsites already use `use crate::widgets::{labeled_slider, …};`, so the rename is `crate::` → `oxidemx_widgets::`.
 - Modify: `Cargo.toml` (workspace `members` list)
-- Modify: `settings-rs/Cargo.toml` (add `juhradial-widgets = { path = "../juhradial-widgets" }`)
+- Modify: `settings-rs/Cargo.toml` (add `oxidemx-widgets = { path = "../oxidemx-widgets" }`)
 
 `Cargo.toml` for the new crate:
 ```toml
 [package]
-name = "juhradial-widgets"
+name = "oxidemx-widgets"
 version = "0.0.1"
 edition = "2021"
 license = "GPL-3.0"
-description = "Shared iced widgets, style closures, and palette for JuhRadial UIs"
+description = "Shared iced widgets, style closures, and palette for OxideMX UIs"
 
 [dependencies]
 iced = { version = "0.14", features = ["wayland", "x11"] }
 # No tokio / image / canvas — leaf widgets only. Consumers add features.
 ```
 
-`juhradial-widgets/src/lib.rs`:
+`oxidemx-widgets/src/lib.rs`:
 ```rust
-//! Shared UI primitives for JuhRadial MX (settings, overlay, popup).
+//! Shared UI primitives for OxideMX MX (settings, overlay, popup).
 //!
 //! Three modules:
 //!   * [`widgets`] — small composite widgets (labeled sliders, section
@@ -611,7 +611,7 @@ pub mod palette;
 
 ```bash
 git add -A
-git commit -m "refactor: extract juhradial-widgets sibling crate
+git commit -m "refactor: extract oxidemx-widgets sibling crate
 
 Moves widgets.rs / style.rs / palette.rs out of settings-rs into a
 new sibling crate so popup-rs (Phase 3) can import the same UI
@@ -619,23 +619,23 @@ primitives without copy-paste. settings-rs and (later) overlay-rs
 remain the public consumers; no behaviour change."
 ```
 
-#### Task A.2 — Stand up `juhradial-window` crate
+#### Task A.2 — Stand up `oxidemx-window` crate
 
 **Files:**
-- Create: `juhradial-window/Cargo.toml`
-- Create: `juhradial-window/src/lib.rs`
-- Create: `juhradial-window/src/settings.rs` — `frameless_topmost(app_id: &str, size: iced::Size) -> iced::window::Settings`
-- Create: `juhradial-window/src/cursor_helper.rs` — extracted from `overlay-rs/src/ext_positioner.rs` (the `CursorHelperProxy`, `move_overlay`, `get_focused_window_class`, `list_monitors`, `raise_overlay`)
+- Create: `oxidemx-window/Cargo.toml`
+- Create: `oxidemx-window/src/lib.rs`
+- Create: `oxidemx-window/src/settings.rs` — `frameless_topmost(app_id: &str, size: iced::Size) -> iced::window::Settings`
+- Create: `oxidemx-window/src/cursor_helper.rs` — extracted from `overlay-rs/src/ext_positioner.rs` (the `CursorHelperProxy`, `move_overlay`, `get_focused_window_class`, `list_monitors`, `raise_overlay`)
 - Modify: `overlay-rs/src/main.rs` — drop `mod ext_positioner;`
-- Modify: `overlay-rs/src/app.rs` — change `use crate::ext_positioner::{…}` to `use juhradial_window::cursor_helper::{…}`; replace the 6-line iced window construction with `let window = juhradial_window::frameless_topmost(APP_ID, iced::Size::new(WINDOW_SIZE as f32, WINDOW_SIZE as f32));`.
+- Modify: `overlay-rs/src/app.rs` — change `use crate::ext_positioner::{…}` to `use oxidemx_window::cursor_helper::{…}`; replace the 6-line iced window construction with `let window = oxidemx_window::frameless_topmost(APP_ID, iced::Size::new(WINDOW_SIZE as f32, WINDOW_SIZE as f32));`.
 - Delete: `overlay-rs/src/ext_positioner.rs`
-- Modify: `overlay-rs/Cargo.toml` — add `juhradial-window = { path = "../juhradial-window" }`
+- Modify: `overlay-rs/Cargo.toml` — add `oxidemx-window = { path = "../oxidemx-window" }`
 - Modify: `Cargo.toml` (workspace members list)
 
-`juhradial-window/Cargo.toml`:
+`oxidemx-window/Cargo.toml`:
 ```toml
 [package]
-name = "juhradial-window"
+name = "oxidemx-window"
 version = "0.0.1"
 edition = "2021"
 license = "GPL-3.0"
@@ -647,7 +647,7 @@ zbus = "5"
 tracing = "0.1"
 ```
 
-`juhradial-window/src/settings.rs`:
+`oxidemx-window/src/settings.rs`:
 ```rust
 //! Frameless, transparent, always-on-top xdg-shell window helper.
 //!
@@ -675,11 +675,11 @@ pub fn frameless_topmost(app_id: &str, size: iced::Size) -> Settings {
 }
 ```
 
-`juhradial-window/src/cursor_helper.rs` is a verbatim move of `overlay-rs/src/ext_positioner.rs` into the new crate's namespace.
+`oxidemx-window/src/cursor_helper.rs` is a verbatim move of `overlay-rs/src/ext_positioner.rs` into the new crate's namespace.
 
 - [ ] **Step 1: Move, register, update overlay imports + 6-line window setup**
 - [ ] **Step 2: `cargo build --workspace && cargo test --workspace`**
-- [ ] **Step 3: Sanity-run the overlay against a running daemon** (`cargo run -p juhradial-overlay-rs --release` + `busctl --user call org.juhradial.Daemon /org/juhradial/Daemon org.juhradial.Daemon ShowMenu xy 400 300`) — overlay still appears under the cursor.
+- [ ] **Step 3: Sanity-run the overlay against a running daemon** (`cargo run -p oxidemx-overlay --release` + `busctl --user call org.oxidemx.Daemon /org/oxidemx/Daemon org.oxidemx.Daemon ShowMenu xy 400 300`) — overlay still appears under the cursor.
 - [ ] **Step 4: Commit**
 
 **Phase A ships as PR #2.**
@@ -688,30 +688,30 @@ pub fn frameless_topmost(app_id: &str, size: iced::Size) -> Settings {
 
 ### Phase 1 — GNOME Shell extensions (new indicator + migrate cursor to TS)
 
-#### Task 1.0 — Migrate `juhradial-cursor@dev.juhlabs.com/extension.js` to TypeScript
+#### Task 1.0 — Migrate `oxidemx-cursor@dev.juhlabs.com/extension.js` to TypeScript
 
 Confirmed in the clarification round: both extensions land on the same tsconfig.
 
 **Files:**
 - Create: `gnome-extension/tsconfig.json` (shared)
 - Create: `gnome-extension/package.json` (shared — dev deps `typescript`, `@girs/gjs`, `@girs/gnome-shell-49`, `@girs/meta-15`, `@girs/gtk-4.0`, `@girs/glib-2.0`, `@girs/gio-2.0`)
-- Create: `gnome-extension/juhradial-cursor@dev.juhlabs.com/extension.ts` (typed rewrite of existing `extension.js`)
-- Delete: `gnome-extension/juhradial-cursor@dev.juhlabs.com/extension.js` (tracked under git but compiled output going forward)
+- Create: `gnome-extension/oxidemx-cursor@dev.juhlabs.com/extension.ts` (typed rewrite of existing `extension.js`)
+- Delete: `gnome-extension/oxidemx-cursor@dev.juhlabs.com/extension.js` (tracked under git but compiled output going forward)
 - Add: `gnome-extension/.gitignore` entry for compiled `*.js` (compiled in CI / dev install)
 - Modify: `dev-install-ext.sh` — run `npx tsc -p gnome-extension/tsconfig.json` then install both extensions
 
 `tsconfig.json` targets ES2022, module ESNext, `outDir`/`rootDir` configured per-extension so `extension.ts` compiles to `extension.js` alongside.
 
-Behaviour-preservation test: after migration, `busctl --user call org.juhradial.CursorHelper /org/juhradial/CursorHelper org.juhradial.CursorHelper GetCursorPosition` still returns `(ii)` and `MoveOverlay` still works against the overlay. Run `dev-test.sh` to verify the overlay still positions correctly.
+Behaviour-preservation test: after migration, `busctl --user call org.oxidemx.CursorHelper /org/oxidemx/CursorHelper org.oxidemx.CursorHelper GetCursorPosition` still returns `(ii)` and `MoveOverlay` still works against the overlay. Run `dev-test.sh` to verify the overlay still positions correctly.
 
 This task lands as its own commit at the top of PR #3 so the indicator work isn't entangled with the cursor migration if either needs to be reverted.
 
 #### Task 1.1 — Scaffold the indicator extension dir
 
 **Files:**
-- Create: `gnome-extension/juhradial-indicator@dev.juhlabs.com/metadata.json`
+- Create: `gnome-extension/oxidemx-indicator@dev.juhlabs.com/metadata.json`
 
-`metadata.json` mirrors `juhradial-cursor`'s: `shell-version: ["45","46","47","48","49","50","51"]`, `uuid: juhradial-indicator@dev.juhlabs.com`. The shared `tsconfig.json` from Task 1.0 already covers this extension's TS build.
+`metadata.json` mirrors `oxidemx-cursor`'s: `shell-version: ["45","46","47","48","49","50","51"]`, `uuid: oxidemx-indicator@dev.juhlabs.com`. The shared `tsconfig.json` from Task 1.0 already covers this extension's TS build.
 
 #### Task 1.2 — `lib/settings.ts` — typed GSettings wrapper + round-trip test
 
@@ -735,7 +735,7 @@ Tests cover the exact thresholds from the design (15 / 30) and the charging over
 
 #### Task 1.4 — `lib/battery.ts` — D-Bus client + critical-band one-shot notify
 
-`Gio.DBusProxy` against `org.juhradial.Daemon`. Subscribe to the `DeviceStateChanged` signal for push updates; fall back to `refresh-interval`-spaced `GetActiveDeviceState` polls when the signal stream stalls. Mock mode (env var `JUHRADIAL_INDICATOR_MOCK=1`) returns a synthetic cycling battery for prefs-only development. Cancellable; tear down on `disable()`.
+`Gio.DBusProxy` against `org.oxidemx.Daemon`. Subscribe to the `DeviceStateChanged` signal for push updates; fall back to `refresh-interval`-spaced `GetActiveDeviceState` polls when the signal stream stalls. Mock mode (env var `OXIDEMX_INDICATOR_MOCK=1`) returns a synthetic cycling battery for prefs-only development. Cancellable; tear down on `disable()`.
 
 Critical-band notification (confirmed UX):
 - Track `_armed: boolean = true` per-device.
@@ -746,20 +746,20 @@ Critical-band notification (confirmed UX):
 
 #### Task 1.4b — `lib/supervisor.ts` — stack health probes + remediation
 
-**Confirmed scope addition (2026-05-24).** The indicator is the single front-of-house surface for "is the JuhRadial stack working" and the single click-to-remediate surface. Implements §3.4 of `INDICATOR_DESIGN.md`.
+**Confirmed scope addition (2026-05-24).** The indicator is the single front-of-house surface for "is the OxideMX stack working" and the single click-to-remediate surface. Implements §3.4 of `INDICATOR_DESIGN.md`.
 
 **Files:**
-- Create: `gnome-extension/juhradial-indicator@dev.juhlabs.com/lib/supervisor.ts`
-- Modify: `gnome-extension/juhradial-indicator@dev.juhlabs.com/extension.ts` (subscribe `supervisor.health$` to update panel-icon class + right-click menu items)
+- Create: `gnome-extension/oxidemx-indicator@dev.juhlabs.com/lib/supervisor.ts`
+- Modify: `gnome-extension/oxidemx-indicator@dev.juhlabs.com/extension.ts` (subscribe `supervisor.health$` to update panel-icon class + right-click menu items)
 
 Public surface:
 
 ```ts
 export type StackHealth = {
-    daemonRunning: boolean;     // org.juhradial.Daemon on the bus AND systemctl active
+    daemonRunning: boolean;     // org.oxidemx.Daemon on the bus AND systemctl active
     deviceLinked:  boolean;     // GetActiveDeviceState returned connection != "off"
-    overlayRunning: boolean;    // org.juhradial.overlay on the bus
-    cursorExtension: boolean;   // juhradial-cursor enabled
+    overlayRunning: boolean;    // org.oxidemx.overlay on the bus
+    cursorExtension: boolean;   // oxidemx-cursor enabled
     daemonName: string;         // active device's display name when linked
 };
 
@@ -769,10 +769,10 @@ export class Supervisor {
      *  refresh-interval tick, and on demand via `poll()`. */
     health$: AsyncIterable<StackHealth>;
     poll(): Promise<StackHealth>;
-    /** systemctl --user start juhradialmx-daemon.service */
+    /** systemctl --user start oxidemx-daemon.service */
     startDaemon(): Promise<void>;
     /** Asks the daemon to spawn the overlay process (NOT us). Returns when
-     *  org.juhradial.overlay appears on the bus or the daemon errors out. */
+     *  org.oxidemx.overlay appears on the bus or the daemon errors out. */
     ensureOverlay(): Promise<void>;
     destroy(): void;
 }
@@ -780,7 +780,7 @@ export class Supervisor {
 
 Implementation rules (mirrors the architecture rules in `INDICATOR_DESIGN.md` §3.4):
 
-- **Never** spawn long-lived processes from the extension. `startDaemon()` uses `Gio.Subprocess.new(['systemctl', '--user', 'start', 'juhradialmx-daemon.service'], …)`. `ensureOverlay()` calls `org.juhradial.Daemon.EnsureOverlayRunning()` — the daemon owns the spawn.
+- **Never** spawn long-lived processes from the extension. `startDaemon()` uses `Gio.Subprocess.new(['systemctl', '--user', 'start', 'oxidemx-daemon.service'], …)`. `ensureOverlay()` calls `org.oxidemx.Daemon.EnsureOverlayRunning()` — the daemon owns the spawn.
 - Daemon-running probe uses both signals (bus-name probe via `Gio.DBusConnection.list_names()` AND `systemctl --user is-active`) to distinguish "daemon crashed, systemd will restart" from "daemon not installed".
 - Remediation actions are **user-confirmed** by default (right-click menu items, popup footer buttons). The exception is `ensureOverlay()` when the user toggles `Radial Overlay` ON — that toggle is itself the consent.
 - `destroy()` cancels every in-flight `Gio.DBusProxy` and `Gio.Subprocess` via the shared `cancellable`. Called from `extension.disable()`.
@@ -792,7 +792,7 @@ Implementation rules (mirrors the architecture rules in `INDICATOR_DESIGN.md` §
 describe('Supervisor', () => {
     it('reports daemon down when bus name is absent', async () => { … });
     it('reports daemon down when systemctl says inactive even if bus name is present', async () => { … });
-    it('reports overlay missing only when daemon is up but org.juhradial.overlay is absent', async () => { … });
+    it('reports overlay missing only when daemon is up but org.oxidemx.overlay is absent', async () => { … });
 });
 ```
 
@@ -812,7 +812,7 @@ for await (const h of this._supervisor.health$) {
 - [ ] **Step 4: Integration smoke test under `dev-test.sh`**
 
 ```bash
-systemctl --user stop juhradialmx-daemon.service
+systemctl --user stop oxidemx-daemon.service
 # panel icon turns critical-color within `refresh-interval` seconds
 # right-click → "Start daemon" appears
 # clicking it brings the daemon back; icon goes healthy
@@ -821,8 +821,8 @@ systemctl --user stop juhradialmx-daemon.service
 - [ ] **Step 5: Commit**
 
 ```bash
-git add gnome-extension/juhradial-indicator@dev.juhlabs.com/lib/supervisor.ts \
-        gnome-extension/juhradial-indicator@dev.juhlabs.com/extension.ts
+git add gnome-extension/oxidemx-indicator@dev.juhlabs.com/lib/supervisor.ts \
+        gnome-extension/oxidemx-indicator@dev.juhlabs.com/extension.ts
 git commit -m "feat(indicator): add stack supervisor / unified health surface"
 ```
 
@@ -896,20 +896,20 @@ Write `settings-rs/tests/popup_tab_compiles.rs` that boots the app with `iced::a
 
 `Cargo.toml` mirrors `overlay-rs/Cargo.toml`'s iced + zbus + tokio + serde_json + notify deps. Add `gio = { version = "0.20", features = ["v2_74"] }` for GSettings consumption.
 
-#### Task 3.2 — Window setup via the new `juhradial-window` crate
+#### Task 3.2 — Window setup via the new `oxidemx-window` crate
 
 ```rust
 // popup-rs/src/main.rs
-use juhradial_window::frameless_topmost;
-use juhradial_window::cursor_helper::move_overlay;
+use oxidemx_window::frameless_topmost;
+use oxidemx_window::cursor_helper::move_overlay;
 
-const APP_ID: &str = "org.juhradial.popup";
+const APP_ID: &str = "org.oxidemx.popup";
 const POPUP_W: f32 = 360.0;
 const POPUP_H: f32 = 480.0;
 
 let window = frameless_topmost(APP_ID, iced::Size::new(POPUP_W, POPUP_H));
 iced::application(boot, update, view)
-    .title("JuhRadial Popup")
+    .title("OxideMX Popup")
     .window(window)
     .style(transparent_style)
     .subscription(subscription)
@@ -922,12 +922,12 @@ Outer container: 14px radius, 1px `JR_FG @ 12%` border. Drop shadow as a slightl
 
 #### Task 3.3 — Config loading + watching
 
-Load `~/.config/juhradial/config.json` via `juhradial_shared::config::load()`, watch with `notify::recommended_watcher`, broadcast reloads as `Message::ConfigReloaded(AppConfig)`. Mirror `overlay-rs/src/config.rs`.
+Load `~/.config/oxidemx/config.json` via `oxidemx_shared::config::load()`, watch with `notify::recommended_watcher`, broadcast reloads as `Message::ConfigReloaded(AppConfig)`. Mirror `overlay-rs/src/config.rs`.
 
 #### Task 3.4 — GSettings consumption for thresholds + colors
 
 ```rust
-let settings = gio::Settings::new("org.gnome.shell.extensions.juhradial-indicator");
+let settings = gio::Settings::new("org.gnome.shell.extensions.oxidemx-indicator");
 let crit = settings.int("threshold-critical") as u8;
 let low  = settings.int("threshold-low")      as u8;
 let color_crit = settings.string("color-critical").to_string();
@@ -949,7 +949,7 @@ Focus-tracking: `window::events()` subscription gives us `window::Event::Focused
 
 #### Task 3.7 — `install.sh` updates
 
-Add `juhradial-popup` to the installed binaries (cargo build --release -p juhradial-popup-rs → /usr/local/bin/juhradial-popup, matching where the overlay lands).
+Add `oxidemx-popup` to the installed binaries (cargo build --release -p oxidemx-popup → /usr/local/bin/oxidemx-popup, matching where the overlay lands).
 
 **Phase 3 ships as PR #4.**
 
@@ -960,21 +960,21 @@ Add `juhradial-popup` to the installed binaries (cargo build --release -p juhrad
 Run from a fresh shell session after `dev-install-ext.sh`:
 
 1. Both extensions are enabled — `gnome-extensions list --enabled`.
-2. Daemon is running — `busctl --user introspect org.kde.juhradialmx /org/kde/juhradialmx/Daemon` shows `ShowPopup`, `GetActiveDeviceState`, `DeviceStateChanged`.
-3. Top-bar indicator at 30% battery shows yellow glyph + "30%" — visually compare with `design/juhradial-indicator/index.html#indicator-states`.
-4. Click → daemon spawns `juhradial-popup`, window appears tip-aligned under the icon. **Not** a GJS PopupMenu — verify via `gnome-extensions show juhradial-indicator@dev.juhlabs.com` debug log: "ShowPopup dispatched".
-5. Prefs window matches `ext-prefs-window` artboard. Drag threshold handle → `gsettings get org.gnome.shell.extensions.juhradial-indicator threshold-critical` reflects the new value.
-6. `Reset to defaults` writes every key back to the schema defaults — verify with `gsettings list-recursively org.gnome.shell.extensions.juhradial-indicator`.
-7. Sidebar in `juhradial-settings`: "Indicator Popup" appears between "Point & Scroll" and "Haptic Feedback".
+2. Daemon is running — `busctl --user introspect org.kde.oxidemx /org/kde/oxidemx/Daemon` shows `ShowPopup`, `GetActiveDeviceState`, `DeviceStateChanged`.
+3. Top-bar indicator at 30% battery shows yellow glyph + "30%" — visually compare with `design/oxidemx-indicator/index.html#indicator-states`.
+4. Click → daemon spawns `oxidemx-popup`, window appears tip-aligned under the icon. **Not** a GJS PopupMenu — verify via `gnome-extensions show oxidemx-indicator@dev.juhlabs.com` debug log: "ShowPopup dispatched".
+5. Prefs window matches `ext-prefs-window` artboard. Drag threshold handle → `gsettings get org.gnome.shell.extensions.oxidemx-indicator threshold-critical` reflects the new value.
+6. `Reset to defaults` writes every key back to the schema defaults — verify with `gsettings list-recursively org.gnome.shell.extensions.oxidemx-indicator`.
+7. Sidebar in `oxidemx-settings`: "Indicator Popup" appears between "Point & Scroll" and "Haptic Feedback".
 8. Switching to Power User reveals "Quick sliders" section.
-9. Up/down on a quick-toggle row reorders persistently — confirm by reading `~/.config/juhradial/config.json` `.popup.simple_toggles`.
+9. Up/down on a quick-toggle row reorders persistently — confirm by reading `~/.config/oxidemx/config.json` `.popup.simple_toggles`.
 10. With volume-on-scroll on, wheel-scroll while the popup is focused moves `wpctl get-volume @DEFAULT_AUDIO_SINK@`.
 
 ---
 
 ## SELF-REVIEW
 
-- **Spec coverage:** every section of the prompt (extension scope, prefs scope, settings tab scope, popup window scope, NON-GOALS, acceptance criteria) maps to a task above. Two prompt items — `juhradial-widgets` crate extraction and `juhradial-window` crate extraction — are *explicitly deferred* with rationale in the "Corrections" table.
+- **Spec coverage:** every section of the prompt (extension scope, prefs scope, settings tab scope, popup window scope, NON-GOALS, acceptance criteria) maps to a task above. Two prompt items — `oxidemx-widgets` crate extraction and `oxidemx-window` crate extraction — are *explicitly deferred* with rationale in the "Corrections" table.
 - **Placeholder scan:** none.
 - **Type consistency:** `PopupConfig` field names match between Phase 0 (defined), Phase 2 (consumed by settings UI), and Phase 3 (consumed by popup binary). D-Bus signature `(yybsss)` for `GetActiveDeviceState` and `(yysss)` for the `DeviceStateChanged` signal arguments are consistent across daemon impl + extension consumer + popup consumer.
 
@@ -984,10 +984,10 @@ Run from a fresh shell session after `dev-install-ext.sh`:
 
 | # | Decision |
 |---|---|
-| 1 | Subprocess popup binary (`juhradial-popup`) spawned by daemon's `ShowPopup` handler. |
-| 2 | **Rename to `org.juhradial.Daemon`** in Phase 0. Flag-day across daemon, overlay, settings, packaging, install scripts. |
+| 1 | Subprocess popup binary (`oxidemx-popup`) spawned by daemon's `ShowPopup` handler. |
+| 2 | **Rename to `org.oxidemx.Daemon`** in Phase 0. Flag-day across daemon, overlay, settings, packaging, install scripts. |
 | 3 | Popup config as a new field on existing `config.json`. |
-| 4 | **Extract both** `juhradial-widgets` and `juhradial-window` sibling crates in Phase A. |
+| 4 | **Extract both** `oxidemx-widgets` and `oxidemx-window` sibling crates in Phase A. |
 | 5 | **Migrate the cursor extension to TypeScript** alongside the new indicator in Phase 1. Shared tsconfig under `gnome-extension/`. |
 | 6 | **Emit critical-band notification once per crossing** (re-armable on charge / band exit). UX copy in §Phase 1 Task 1.4. |
 | 7 | Render unwired quick-toggles, log "not yet wired" on click. Full wiring as Phase 3.5 follow-up. |

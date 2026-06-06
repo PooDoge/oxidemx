@@ -36,25 +36,25 @@ jobs:
       - name: Build Rust workspace in release mode
         run: |
           cargo build --release \
-            -p juhradiald \
-            -p juhradial-overlay-rs \
-            -p juhradial-popup-rs \
-            -p juhradial-settings-rs
+            -p oxidemxd \
+            -p oxidemx-overlay \
+            -p oxidemx-popup \
+            -p oxidemx-settings
 
       - name: Package release binaries
         run: |
           mkdir -p dist
-          tar -czf dist/juhradial-mx-${{ github.ref_name }}-x86_64-linux.tar.gz \
+          tar -czf dist/oxidemx-${{ github.ref_name }}-x86_64-linux.tar.gz \
               -C target/release \
-              juhradiald juhradial-popup juhradial-overlay-rs juhradial-settings
+              oxidemxd oxidemx-popup oxidemx-overlay oxidemx-settings
           cd dist
-          sha256sum juhradial-mx-${{ github.ref_name }}-x86_64-linux.tar.gz > juhradial-mx-${{ github.ref_name }}-x86_64-linux.tar.gz.sha256
+          sha256sum oxidemx-${{ github.ref_name }}-x86_64-linux.tar.gz > oxidemx-${{ github.ref_name }}-x86_64-linux.tar.gz.sha256
 
       - name: Create Release and Upload Assets
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            dist/juhradial-mx-${{ github.ref_name }}-x86_64-linux.tar.gz
-            dist/juhradial-mx-${{ github.ref_name }}-x86_64-linux.tar.gz.sha256
+            dist/oxidemx-${{ github.ref_name }}-x86_64-linux.tar.gz
+            dist/oxidemx-${{ github.ref_name }}-x86_64-linux.tar.gz.sha256
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

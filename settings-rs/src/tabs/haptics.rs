@@ -5,12 +5,12 @@
 //! All edits go to `state.config.haptics`; the overlay's daemon
 //! reads the same JSON and re-applies on the next reload.
 
-use juhradial_widgets::widgets::{labeled_int_slider, section_header};
+use oxidemx_widgets::widgets::{labeled_int_slider, section_header};
 use crate::{Message, State};
-use juhradial_widgets::style;
+use oxidemx_widgets::style;
 use iced::widget::{column, container, pick_list, row, rule, text, toggler, Space};
 use iced::{Alignment, Element, Length};
-use juhradial_shared::HAPTIC_PATTERNS;
+use oxidemx_shared::HAPTIC_PATTERNS;
 
 pub fn view(state: &State) -> Element<'_, Message> {
     let pal = &state.palette;

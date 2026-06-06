@@ -4,7 +4,7 @@
 
 ### Symptom
 
-After enabling `juhradialmx-daemon.service`, the graphical login starts bouncing:
+After enabling `oxidemx-daemon.service`, the graphical login starts bouncing:
 you enter the **correct** password and are immediately thrown back to the user
 picker, without ever reaching the desktop. A TTY/console login
 (`Ctrl+Alt+F3`) still works fine. The problem **survives reboots**, and on
@@ -43,7 +43,7 @@ Podman / Quadlet containers 24/7). With lingering:
 A service that belongs to the graphical session must be **pulled up by** the
 target, never **push the target up** itself.
 
-### The fix (already applied to `juhradialmx-daemon.service`)
+### The fix (already applied to `oxidemx-daemon.service`)
 
 ```ini
 [Unit]
@@ -58,10 +58,10 @@ WantedBy=graphical-session.target   # NOT default.target
 If you installed an older copy, re-point the unit:
 
 ```bash
-systemctl --user disable juhradialmx-daemon.service   # removes default.target.wants symlink
+systemctl --user disable oxidemx-daemon.service   # removes default.target.wants symlink
 # (replace the unit file with the corrected version)
 systemctl --user daemon-reload
-systemctl --user enable juhradialmx-daemon.service    # creates graphical-session.target.wants symlink
+systemctl --user enable oxidemx-daemon.service    # creates graphical-session.target.wants symlink
 ```
 
 ### Emergency recovery (locked out right now)
@@ -70,7 +70,7 @@ From a TTY (`Ctrl+Alt+F3`), log in and clear the stuck target, then switch back
 to the greeter (`Ctrl+Alt+F1`) and log in:
 
 ```bash
-systemctl --user stop juhradialmx-daemon.service
+systemctl --user stop oxidemx-daemon.service
 systemctl --user stop graphical-session.target
 ```
 

@@ -1,0 +1,94 @@
+# OxideMX MX Daemon - systemd user service
+#
+# This service manages the OxideMX MX daemon which handles:
+# - MX Master 4 gesture button detection via evdev
+# - D-Bus communication with KWin overlay
+# - Profile management and action execution
+#
+# Installation:
+#   sudo install -Dm644 oxidemx-daemon.service /usr/lib/systemd/user/oxidemx-daemon.service
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now oxidemx-daemon.service
+#
+# Management:
+#   systemctl --user status oxidemx-daemon   # Check status
+#   systemctl --user restart oxidemx-daemon  # Restart service
+#   journalctl --user -u oxidemx-daemon -f   # View logs
+
+[Unit]
+Description=OxideMX MX Daemon - Radial menu for Logitech MX Master 4
+Documentation=https://github.com/juhhally/oxidemx
+After=graphical-session.target
+PartOf=graphical-session.target
+
+# Limit restart attempts to prevent infinite restart loops, but raise the
+# burst from 5 → 20 so a brief storm of HID++ reconnects (caused by Bolt
+# receiver hand-off during USB suspend/resume) doesn't permanently disable
+# the service.
+StartLimitIntervalSec=60
+StartLimitBurst=20
+
+# IMPORTANT: do NOT add `Wants=graphical-session.target` here, and keep the
+# [Install] WantedBy at `graphical-session.target` (NOT default.target).
+#
+# This unit is a *member* of the graphical session: it must be pulled UP by the
+# target when a real GUI session starts, and must never pull the target up
+# itself. A `Wants=graphical-session.target` line does the latter — it force-
+# activates the target whenever this daemon starts.
+#
+# That is catastrophic on systems with user lingering enabled
+# (`loginctl enable-linger`, common when the user also runs rootless Podman /
+# Quadlet services 24/7). With lingering, the user systemd manager starts at
+# BOOT and runs default.target. If this daemon is WantedBy=default.target *and*
+# Wants=graphical-session.target, then at boot it starts headless and force-
+# activates graphical-session.target with no real session behind it. When the
+# user then logs into GNOME, gnome-session sees the target already active,
+# prints "A graphical session is already running!", core-dumps, and GDM bounces
+# the user straight back to the login screen — an unbreakable login loop that
+# even survives reboots (lingering never restarts the user manager clean).
+# Console/TTY login still works, which is the tell-tale symptom.
+#
+# Correct wiring: After= + PartOf= here, WantedBy=graphical-session.target in
+# [Install]. See packaging/systemd/TROUBLESHOOTING.md.
+
+# D-Bus session is required for communication with KWin
+Requires=dbus.socket
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/oxidemxd
+# Restart on ANY exit reason (crashes, SIGTERM from rogue pkill, OOM kills,
+# watchdog timeouts, clean exits). Previously this was `on-abnormal`, which
+# excluded clean signals like SIGTERM — so a stray `pkill oxidemxd` (used
+# by the launcher script) would permanently take the daemon down on systems
+# where the launcher's daemon then exits, leading to no daemon owning the
+# `org.oxidemx.Daemon` D-Bus name and the overlay going deaf to button
+# events. `Restart=always` plus an idle backoff guarantees a single daemon
+# is always alive on the bus.
+Restart=always
+RestartSec=5s
+
+# Disable watchdog to prevent systemd drop-ins (e.g. 10-timeout-abort.conf
+# on Fedora) from killing the daemon when it doesn't send sd_notify heartbeats.
+WatchdogSec=0
+
+# Environment
+Environment=RUST_LOG=info
+Environment=RUST_BACKTRACE=1
+
+# Security hardening (user service, so limited options)
+NoNewPrivileges=yes
+# NOTE: PrivateTmp intentionally NOT set here. The daemon creates temporary
+# KWin script files and passes their paths to KWin via D-Bus. With PrivateTmp
+# the files would live in a private /tmp namespace invisible to KWin, causing
+# the loadScript D-Bus call to silently fail (file not found on KWin's side).
+
+# Resource limits
+MemoryMax=100M
+CPUQuota=50%
+
+# NOTE: WantedBy=graphical-session.target (NOT default.target). Under user
+# lingering, default.target runs at boot with no GUI; this daemon must only run
+# when an actual graphical session is up. See the [Unit] comment above.
+[Install]
+WantedBy=graphical-session.target

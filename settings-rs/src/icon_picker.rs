@@ -16,7 +16,7 @@
 
 use crate::radial_preview::{peek_icon_handle, peek_icon_handle_untinted};
 use crate::{Message};
-use juhradial_widgets::style;
+use oxidemx_widgets::style;
 use iced::widget::{button, column, container, image, pick_list, row, scrollable, text, text_input, Space};
 use iced::{Alignment, Element, Length};
 
@@ -463,7 +463,7 @@ pub fn view<'a>(state: &'a crate::State, picker: &'a IconPickerState) -> Element
             }
         }
         IconSource::Apps => {
-            let matched: Vec<&juhradial_shared::DesktopEntry> = state
+            let matched: Vec<&oxidemx_shared::DesktopEntry> = state
                 .installed_apps
                 .iter()
                 .filter(|a| picker.search.is_empty() || a.name.to_lowercase().contains(&lc))
@@ -531,7 +531,7 @@ where
 /// app's display name (much friendlier than `firefox-symbolic`).
 fn app_cell<'a>(
     state: &'a crate::State,
-    entry: &'a juhradial_shared::DesktopEntry,
+    entry: &'a oxidemx_shared::DesktopEntry,
 ) -> Element<'a, Message> {
     let pal = &state.palette;
     let pick_msg = Message::PickIcon(entry.icon.clone());

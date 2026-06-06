@@ -5,14 +5,14 @@ Tracked items deferred during the 25-commit `indicator-feature` integration (now
 Sibling docs:
 - [INDICATOR_DESIGN.md](../../INDICATOR_DESIGN.md) — architecture
 - [docs/plans/indicator-implementation.md](indicator-implementation.md) — the phased plan that shipped
-- [design/juhradial-indicator/SPEC_ADDENDUM.md](../../design/juhradial-indicator/SPEC_ADDENDUM.md) — deltas vs the original prompt
+- [design/oxidemx-indicator/SPEC_ADDENDUM.md](../../design/oxidemx-indicator/SPEC_ADDENDUM.md) — deltas vs the original prompt
 
 ---
 
 ## P1 — Blocks `cargo test --workspace`
 
 ### 1. `daemon/src/hidpp/tests.rs` `page_change` field initializers ✅ DONE (resolved by merge)
-The stash-pop-and-resolve cycle on `rust-gtk4-overlay` properly restored the user's in-flight `page_change` work — both `manager.rs` initializers and `tests.rs` fixtures have the field. Verified 2026-05-25 with `cargo test -p juhradiald --lib` → **266 passed, 0 failed, 7 ignored**.
+The stash-pop-and-resolve cycle on `rust-gtk4-overlay` properly restored the user's in-flight `page_change` work — both `manager.rs` initializers and `tests.rs` fixtures have the field. Verified 2026-05-25 with `cargo test -p oxidemxd --lib` → **266 passed, 0 failed, 7 ignored**.
 
 ---
 
@@ -30,14 +30,14 @@ The stash-pop-and-resolve cycle on `rust-gtk4-overlay` properly restored the use
 | `flow` | `Flow(bool)` | ⏳ PENDING. JuhFlow daemon is a separate process; the indicator popup needs to call into its D-Bus or shell out. Out of scope until JuhFlow gets a D-Bus surface. |
 | `highlight` | `Highlight(bool)` | ⏳ PENDING. Cursor-highlight on shake is a brand-new feature — would need a daemon-side motion detector + animator. Largest piece of new work. |
 
-For `Flow` and `Highlight` specifically — consider removing from `QUICK_TOGGLE_CATALOG` in `juhradial-shared/src/popup.rs` until the underlying features exist; both currently render as toggles that log "not yet wired" on click.
+For `Flow` and `Highlight` specifically — consider removing from `QUICK_TOGGLE_CATALOG` in `oxidemx-shared/src/popup.rs` until the underlying features exist; both currently render as toggles that log "not yet wired" on click.
 
 ---
 
 ## P3 — Indicator Phase 3.5 (UX polish)
 
 ### 3. Popup view: pixel-fidelity pass against the design
-`popup-rs/src/view.rs` is a functional first pass per the Phase 3 spec ("rough first pass acceptable"). Compare against `design/juhradial-indicator/popup.jsx` and `design/juhradial-indicator/index.html` for:
+`popup-rs/src/view.rs` is a functional first pass per the Phase 3 spec ("rough first pass acceptable"). Compare against `design/oxidemx-indicator/popup.jsx` and `design/oxidemx-indicator/index.html` for:
 - Battery-ring stroke width + caps
 - Device-pill header layout
 - Section spacing
@@ -52,7 +52,7 @@ Currently degrades to top-bar-only with a label hint (`Both panels (currently to
 ### 6. DeviceStateChanged empty-string race window
 `popup-rs` correctly merges empty `deviceName`/`connection`/`deviceId` fields from `_latest` cache so the tooltip doesn't blank between signal emit and the next poll. But when the popup first starts, `_latest` is null until the first `GetActiveDeviceState` call returns. If a `DeviceStateChanged` signal arrives BEFORE that initial call completes, the tooltip blanks for one refresh cycle. Two fixes:
 - (a) Force a synchronous initial `GetActiveDeviceState` before subscribing to the signal stream.
-- (b) Daemon emits the full payload on `DeviceStateChanged` (Task 0.2c that never landed — would require wiring `JuhRadialService` info into `BatteryHandler`).
+- (b) Daemon emits the full payload on `DeviceStateChanged` (Task 0.2c that never landed — would require wiring `OxideMXService` info into `BatteryHandler`).
 
 Pick whichever is the smaller diff.
 
@@ -72,14 +72,14 @@ Pick whichever is the smaller diff.
 ### 9. `normalise_connection_kind` → `normalize_connection_kind` ✅ DONE 2026-05-25
 Renamed in `daemon/src/dbus/interface.rs`. Single call site updated. US spelling now matches codebase norm.
 
-### 10. `org.juhlabs.juhradial.Settings` vs `org.juhradial.Settings` naming inconsistency ✅ DONE 2026-05-25
-Canonical name picked: `org.juhradial.Settings` (matches `org.juhradial.Daemon` pattern from Task 0.0). Rust side renamed in `singleton.rs` (`BUS_NAME` + `OBJECT_PATH` + `INTERFACE` + `#[interface]`), `raise.rs` (APP_ID), `cursor_helper.rs` (SETTINGS_APP_ID), `main.rs` (application_id). Python files were already using the new name post-Task-0.0. Aligned.
+### 10. `org.juhlabs.oxidemx.Settings` vs `org.oxidemx.Settings` naming inconsistency ✅ DONE 2026-05-25
+Canonical name picked: `org.oxidemx.Settings` (matches `org.oxidemx.Daemon` pattern from Task 0.0). Rust side renamed in `singleton.rs` (`BUS_NAME` + `OBJECT_PATH` + `INTERFACE` + `#[interface]`), `raise.rs` (APP_ID), `cursor_helper.rs` (SETTINGS_APP_ID), `main.rs` (application_id). Python files were already using the new name post-Task-0.0. Aligned.
 
 ### 11. Stale Phase comment in `lib/placement.ts` ✅ DONE 2026-05-25
 Replaced "deferred to Phase 2 if there is demand" with a reference to this very followups file (P3.4).
 
-### 12. `juhradial-cursor` extension `ListMonitors` tuple-arity bug ✅ DONE 2026-05-25
-Resolution: corrected the XML declaration to `a(iiiii)` (5 ints) to match the actual runtime contract — the existing Rust client at `juhradial-window/src/cursor_helper.rs:36` already expected 5-tuples. Updated XML, doc-comment, and dropped the `@ts-expect-error` annotation.
+### 12. `oxidemx-cursor` extension `ListMonitors` tuple-arity bug ✅ DONE 2026-05-25
+Resolution: corrected the XML declaration to `a(iiiii)` (5 ints) to match the actual runtime contract — the existing Rust client at `oxidemx-window/src/cursor_helper.rs:36` already expected 5-tuples. Updated XML, doc-comment, and dropped the `@ts-expect-error` annotation.
 
 ---
 
@@ -88,10 +88,10 @@ Resolution: corrected the XML declaration to `a(iiiii)` (5 ints) to match the ac
 These need live-session testing or substantial design work; deferred until next pass.
 
 ### P3.3 Popup view pixel-fidelity pass — DEFERRED
-Needs a running Wayland session + visual diff against `design/juhradial-indicator/index.html`. Tackle in a focused visual-polish session.
+Needs a running Wayland session + visual diff against `design/oxidemx-indicator/index.html`. Tackle in a focused visual-polish session.
 
 ### P3.4 `panel-target='both'` full implementation — DEFERRED
-Requires architectural design: shared-state subscription split across two `PanelMenu.Button` instances on different panels. The current schema lists `'both'` as an option; the user-facing dropdown label already flags "(currently top-bar only)" via `gnome-extension/juhradial-indicator@dev.juhlabs.com/prefs.ts`.
+Requires architectural design: shared-state subscription split across two `PanelMenu.Button` instances on different panels. The current schema lists `'both'` as an option; the user-facing dropdown label already flags "(currently top-bar only)" via `gnome-extension/oxidemx-indicator@dev.juhlabs.com/prefs.ts`.
 
 ### P3.5 Mouse-glyph tinting in prefs Preview group — DEFERRED
 Approximate `Gtk.CssProvider` rendering needs live verification in the prefs dialog. Defer to a sit-down session with the live extension.
@@ -115,7 +115,7 @@ The `[Unreleased]` block enumerates everything that landed. When `0.3.3` (or wha
 
 ### 16. GitHub Releases pipeline for pre-built binaries ⏳ PENDING
 
-`install.sh` today supports three build paths (host cargo, distrobox cargo, or `JUHRADIAL_SKIP_BUILD=1` with pre-built `target/release/*`). The third path is the right one for "I'm a user, not a developer" install on atomic Fedora — but today the user has to produce those binaries themselves.
+`install.sh` today supports three build paths (host cargo, distrobox cargo, or `OXIDEMX_SKIP_BUILD=1` with pre-built `target/release/*`). The third path is the right one for "I'm a user, not a developer" install on atomic Fedora — but today the user has to produce those binaries themselves.
 
 Wire up a CI pipeline that produces a signed, downloadable artifact per tag:
 
@@ -137,18 +137,18 @@ jobs:
                          libevdev-devel hidapi-devel git make
       - run: |
           cargo build --release \
-            -p juhradiald -p juhradial-overlay-rs \
-            -p juhradial-popup-rs -p juhradial-settings-rs
+            -p oxidemxd -p oxidemx-overlay \
+            -p oxidemx-popup -p oxidemx-settings
       - run: |
-          tar -czf juhradial-mx-${{ github.ref_name }}-x86_64-linux.tar.gz \
+          tar -czf oxidemx-${{ github.ref_name }}-x86_64-linux.tar.gz \
               -C target/release \
-              juhradiald juhradial-popup juhradial-overlay-rs juhradial-settings
-          sha256sum juhradial-mx-*.tar.gz > juhradial-mx-${{ github.ref_name }}-x86_64-linux.tar.gz.sha256
+              oxidemxd oxidemx-popup oxidemx-overlay oxidemx-settings
+          sha256sum oxidemx-*.tar.gz > oxidemx-${{ github.ref_name }}-x86_64-linux.tar.gz.sha256
       - uses: softprops/action-gh-release@v2
         with:
           files: |
-            juhradial-mx-${{ github.ref_name }}-x86_64-linux.tar.gz
-            juhradial-mx-${{ github.ref_name }}-x86_64-linux.tar.gz.sha256
+            oxidemx-${{ github.ref_name }}-x86_64-linux.tar.gz
+            oxidemx-${{ github.ref_name }}-x86_64-linux.tar.gz.sha256
 ```
 
 **`install.sh --from-release [vX.Y.Z]` flag:**
@@ -161,11 +161,11 @@ download_release_binaries() {
     arch="$(uname -m)"  # x86_64 or aarch64
     local url
     if [ "$tag" = "latest" ]; then
-        url="https://api.github.com/repos/JuhLabs/juhradial-mx/releases/latest"
+        url="https://api.github.com/repos/JuhLabs/oxidemx/releases/latest"
         tag=$(curl -s "$url" | grep -oP '"tag_name":\s*"\K[^"]+')
     fi
-    local archive="juhradial-mx-${tag}-${arch}-linux.tar.gz"
-    local base="https://github.com/JuhLabs/juhradial-mx/releases/download/${tag}"
+    local archive="oxidemx-${tag}-${arch}-linux.tar.gz"
+    local base="https://github.com/JuhLabs/oxidemx/releases/download/${tag}"
 
     log_info "Downloading $archive..."
     curl -fL --progress-bar -o "/tmp/$archive"        "$base/$archive"
@@ -184,7 +184,7 @@ Then user flow becomes:
 
 ```bash
 # On any Bazzite / Silverblue / Kinoite box, zero rpm-ostree / distrobox required:
-curl -fsSL https://raw.githubusercontent.com/JuhLabs/juhradial-mx/master/install.sh -o /tmp/install.sh
+curl -fsSL https://raw.githubusercontent.com/JuhLabs/oxidemx/master/install.sh -o /tmp/install.sh
 chmod +x /tmp/install.sh
 /tmp/install.sh --from-release             # latest tag
 /tmp/install.sh --from-release v0.3.3      # pinned tag
@@ -200,7 +200,7 @@ chmod +x /tmp/install.sh
 - Code signing: optional but worth doing. `cosign` is the modern tool; GitHub provides keyless signing via OIDC.
 - ARM64: Bazzite has an aarch64 spin (Fedora-Asahi). Build matrix should include `aarch64-unknown-linux-gnu`.
 - Provenance: SBOM via `cargo-cyclonedx` or `syft` if you want OCI-style attestation.
-- The download URL needs to handle `JuhLabs/juhradial-mx` vs forks — accept `JUHRADIAL_RELEASE_REPO` env override.
+- The download URL needs to handle `JuhLabs/oxidemx` vs forks — accept `OXIDEMX_RELEASE_REPO` env override.
 
 **Estimated effort:** half a day for the basic pipeline, full day with signing + ARM64 + glibc-compat docs.
 
@@ -214,7 +214,7 @@ chmod +x /tmp/install.sh
 040e3db merge(indicator-feature): resolve conflicts + restore in-flight work
 90e1517 fix: align popup-rs D-Bus proxy with real daemon interface
 38d563b fix(popup): build in install.sh + wire scroll/esc + tidy ownership
-c63c73f feat(popup): juhradial-popup binary - daemon-spawned indicator popup
+c63c73f feat(popup): oxidemx-popup binary - daemon-spawned indicator popup
 626fc39 fix(settings): correct misleading copy in Indicator Popup tab
 ed0cb4a feat(settings): Indicator Popup tab
 10f3d9f feat(indicator): stylesheet + four symbolic mouse-shape SVGs
@@ -225,14 +225,14 @@ c22e5da fix(indicator): clean up prefs.ts subscriptions + dead import
 bb0d050 fix(gnome-ext): silence two tsc errors with @ts-expect-error notes
 1b1b77e fix(gnome-ext): tsconfig moduleResolution + @girs/* version specs
 83b3cba feat(gnome-ext): TypeScript build pipeline + migrate cursor extension
-7de09b6 refactor: extract juhradial-window sibling crate
-0efc2c6 refactor: extract juhradial-widgets sibling crate
-5f01939 feat(indicator): GSettings schema for juhradial-indicator extension
+7de09b6 refactor: extract oxidemx-window sibling crate
+0efc2c6 refactor: extract oxidemx-widgets sibling crate
+5f01939 feat(indicator): GSettings schema for oxidemx-indicator extension
 6b920a5 feat(daemon): wire device info + emit DeviceStateChanged
 d937cf2 fix(daemon): reap popup zombie + cache DBusProxy in overlay_spawner
 e23a72a feat(daemon): add GetActiveDeviceState + ShowPopup + EnsureOverlayRunning + DeviceStateChanged
 7666d6c refactor(shared): consolidate PopupConfig default helpers
 74ddc9b feat(shared): add PopupConfig + quick-action catalogs
-bb62f85 rename(dbus): org.kde.juhradialmx -> org.juhradial.Daemon
+bb62f85 rename(dbus): org.kde.oxidemx -> org.oxidemx.Daemon
 deb2c0e docs: spec lock + implementation plan for indicator + popup + settings
 ```
