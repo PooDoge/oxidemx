@@ -4,7 +4,10 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-iced = { path = "../pop_os_iced", features = ["svg", "canvas", "advanced", "winit"] }
+iced = { path = "../pop_os_iced", features = ["svg", "canvas", "advanced", "winit", "lazy"] }
+iced_core = { path = "../pop_os_iced/core" }
+iced_widget = { path = "../pop_os_iced/widget" }
+iced_runtime = { path = "../pop_os_iced/runtime" }
 cssparser = "0.34"
 dirs = "5.0"
 csscolorparser = "0.8.3"

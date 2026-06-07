@@ -19,6 +19,7 @@ pub mod spinner;
 pub mod tab_bar;
 pub mod toaster;
 pub mod toggle_group;
+pub mod nav_bar;
 pub mod view_switcher;
 
 pub use action_row::action_row;
@@ -42,4 +43,10 @@ pub use spinner::spinner;
 pub use tab_bar::tab_bar;
 pub use toaster::{toaster, Toaster};
 pub use toggle_group::toggle_group;
+
+/// A stub for an icon widget.
+pub fn icon<'a>(name: impl Into<String>) -> iced::widget::Text<'a> {
+    iced::widget::text(name.into())
+}
+pub use nav_bar::nav_bar;
 pub use view_switcher::view_switcher;

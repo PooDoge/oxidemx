@@ -1,65 +1,96 @@
-use iced::{Element, Length, Alignment};
-use iced::widget::{row, column, button, text, scrollable, container};
+use iced::{Element, Length, Alignment, Padding};
+use iced::widget::{row, column, button, container, text};
 use crate::GtkTheme;
+use crate::widgets::icon;
 
-/// A GNOME-style View Switcher widget.
-///
-/// Designed to switch between main views, presenting an icon and a label.
-/// Handles horizontal scrolling when space is constrained.
-///
-/// # Example
-/// ```rust,no_run
-/// # use iced_gtk_themer::GtkTheme;
-/// # use iced_gtk_themer::widgets::view_switcher::view_switcher;
-/// # let theme = GtkTheme::load("adwaita").unwrap();
-/// let views = vec![
-///     ("Home".to_string(), "🏠".to_string(), Some(1)),
-/// ];
-/// let switcher = view_switcher(&theme, views, 0);
-/// ```
-pub fn view_switcher<'a, Message: Clone + 'a>(
-    gtk: &'a GtkTheme,
-    views: Vec<(String, String, Option<Message>)>,
-    selected_idx: usize,
-) -> Element<'a, Message> {
-    let mut switcher_row = row![].spacing(8).align_y(Alignment::Center);
+/// The policy dictating how the view switcher should lay out its buttons.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ViewSwitcherPolicy {
+    /// Icon and text are side-by-side
+    Wide,
+    /// Icon is above the text
+    Narrow,
+}
 
-    for (i, (label, icon_str, msg)) in views.into_iter().enumerate() {
-        let is_selected = i == selected_idx;
+/// An item for the ViewSwitcher.
+pub struct ViewSwitcherItem<V> {
+    pub value: V,
+    pub label: String,
+    pub icon_name: String,
+}
+
+impl<V> ViewSwitcherItem<V> {
+    pub fn new(value: V, label: impl Into<String>, icon_name: impl Into<String>) -> Self {
+        Self {
+            value,
+            label: label.into(),
+            icon_name: icon_name.into(),
+        }
+    }
+}
+
+/// An adaptive view switcher.
+pub fn view_switcher<'a, Message, V>(
+    _theme: &'a GtkTheme,
+    items: &'a [ViewSwitcherItem<V>],
+    selected: V,
+    on_select: impl Fn(V) -> Message + 'a,
+    policy: ViewSwitcherPolicy,
+) -> Element<'a, Message>
+where
+    V: Clone + PartialEq + 'a,
+    Message: Clone + 'a,
+{
+    let mut row_container = row!().spacing(0).align_y(Alignment::Center);
+
+    for item in items {
+        let is_selected = item.value == selected;
+        let value = item.value.clone();
         
-        let content = column![
-            text(icon_str).size(20),
-            text(label).size(12)
-        ]
-        .spacing(4)
-        .align_x(Alignment::Center);
+        let content: Element<'a, Message> = match policy {
+            ViewSwitcherPolicy::Wide => {
+                row![
+                    icon(&item.icon_name).size(16),
+                    text(&item.label).size(14),
+                ]
+                .spacing(8)
+                .align_y(Alignment::Center)
+                .into()
+            }
+            ViewSwitcherPolicy::Narrow => {
+                column![
+                    icon(&item.icon_name).size(16),
+                    text(&item.label).size(11),
+                ]
+                .spacing(4)
+                .align_x(Alignment::Center)
+                .into()
+            }
+        };
 
-        let mut b = button(content).padding([8, 16]);
+        let btn = button(
+            container(content)
+                .padding(match policy {
+                    ViewSwitcherPolicy::Wide => Padding::new(10.0).left(16.0).right(16.0),
+                    ViewSwitcherPolicy::Narrow => Padding::new(8.0).left(16.0).right(16.0),
+                })
+                .align_x(Alignment::Center)
+                .align_y(Alignment::Center)
+        )
+        .style(move |_: &iced::Theme, s| {
+            if is_selected {
+                _theme.button_view_switcher_active(s)
+            } else {
+                _theme.button_view_switcher(s)
+            }
+        })
+        .on_press(on_select(value));
 
-        if let Some(m) = msg {
-            b = b.on_press(m);
-        }
-
-        if is_selected {
-            b = b.style(|_: &iced::Theme, s| gtk.button_primary(s));
-        } else {
-            b = b.style(|_: &iced::Theme, s| gtk.button_secondary(s));
-        }
-
-        switcher_row = switcher_row.push(b);
+        row_container = row_container.push(btn);
     }
 
-    let scroll = scrollable(switcher_row)
-        .direction(scrollable::Direction::Horizontal(
-            scrollable::Scrollbar::new()
-                .width(4)
-                .margin(2)
-        ))
-        .width(Length::Fill);
-
-    container(scroll)
-        .width(Length::Fill)
-        .padding([4, 8])
-        .center_x(Length::Fill)
+    container(row_container)
+        .padding(0)
+        .align_x(Alignment::Center)
         .into()
 }

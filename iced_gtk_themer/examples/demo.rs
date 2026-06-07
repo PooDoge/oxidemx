@@ -1,9 +1,6 @@
 use iced::widget::{button, column, row, text, container, mouse_area, Space, scrollable, text_input, slider, toggler, checkbox, radio, pick_list, progress_bar};
 use iced::{Alignment, Element, Length, window, Size, Task, Event};
-use iced_gtk_themer::{
-    GtkTheme, HeaderBar, action_row, preferences_group, clamp::clamp, segmented_button, ext::*,
-    avatar, spinner, banner, spin_row, boxed_list, button_row
-};
+use iced_gtk_themer::prelude::*;
 use std::time::Instant;
 
 pub fn main() -> iced::Result {
@@ -40,6 +37,8 @@ struct Demo {
     system_themes: Vec<String>,
     selected_theme: Option<String>,
     segmented_selection: usize,
+    tabs: Vec<iced_gtk_themer::view_switcher::ViewSwitcherItem<usize>>,
+    nav_tabs: Vec<iced_gtk_themer::nav_bar::NavBarItem<usize>>,
 }
 
 #[derive(Debug, Clone)]
@@ -87,6 +86,18 @@ impl Default for Demo {
             system_themes: themes,
             selected_theme: Some(default_theme),
             segmented_selection: 0,
+            tabs: vec![
+                iced_gtk_themer::view_switcher::ViewSwitcherItem::new(0, "Basic", "⚙"),
+                iced_gtk_themer::view_switcher::ViewSwitcherItem::new(1, "Inputs", "📝"),
+                iced_gtk_themer::view_switcher::ViewSwitcherItem::new(2, "Indicators", "◴"),
+                iced_gtk_themer::view_switcher::ViewSwitcherItem::new(3, "Settings", "🖽"),
+            ],
+            nav_tabs: vec![
+                iced_gtk_themer::nav_bar::NavBarItem::new(0, "Basic").with_icon("⚙"),
+                iced_gtk_themer::nav_bar::NavBarItem::new(1, "Inputs").with_icon("📝"),
+                iced_gtk_themer::nav_bar::NavBarItem::new(2, "Indicators").with_icon("◴"),
+                iced_gtk_themer::nav_bar::NavBarItem::new(3, "Settings").with_icon("🖽"),
+            ],
         }
     }
 }
@@ -182,12 +193,13 @@ impl Demo {
                 Message::HeaderClicked,
             );
 
-            let tabs = row![
-                button("Basic Controls").on_press(Message::TabSelected(0)).style(|_: &iced::Theme, s| if self.active_tab == 0 { gtk.button_primary(s) } else { gtk.button_secondary(s) }),
-                button("Inputs & Pickers").on_press(Message::TabSelected(1)).style(|_: &iced::Theme, s| if self.active_tab == 1 { gtk.button_primary(s) } else { gtk.button_secondary(s) }),
-                button("Indicators").on_press(Message::TabSelected(2)).style(|_: &iced::Theme, s| if self.active_tab == 2 { gtk.button_primary(s) } else { gtk.button_secondary(s) }),
-                button("Layouts & Settings").on_press(Message::TabSelected(3)).style(|_: &iced::Theme, s| if self.active_tab == 3 { gtk.button_primary(s) } else { gtk.button_secondary(s) }),
-            ].spacing(10);
+            let tabs = view_switcher(
+                gtk,
+                &self.tabs,
+                self.active_tab,
+                Message::TabSelected,
+                iced_gtk_themer::view_switcher::ViewSwitcherPolicy::Wide,
+            );
 
             let tab_content: Element<Message> = match self.active_tab {
                 0 => column![
@@ -254,8 +266,10 @@ impl Demo {
                                 "Volume",
                                 Some("Adjust the system volume"),
                                 self.slider_value as f64,
-                                |v| Message::SliderChanged(v as f32),
+                                0.0,
+                                100.0,
                                 1.0,
+                                |v| Message::SliderChanged(v as f32),
                             ),
                         ],
                     );
@@ -273,12 +287,17 @@ impl Demo {
                 _ => iced::widget::space().into(),
             };
 
+            let nav = nav_bar(gtk, &self.nav_tabs, self.active_tab, Message::TabSelected);
+
             let content = column![
                 header,
-                container(column![tabs, scrollable(tab_content).height(Length::Fill)].spacing(20).padding(20))
-                    .card(gtk)
-                    .width(Length::Fill)
-                    .height(Length::Fill)
+                row![
+                    nav,
+                    container(column![tabs, scrollable(tab_content).height(Length::Fill)].spacing(20).padding(20))
+                        .card(gtk)
+                        .width(Length::Fill)
+                        .height(Length::Fill)
+                ].height(Length::Fill)
             ];
 
             let main_window = container(content)

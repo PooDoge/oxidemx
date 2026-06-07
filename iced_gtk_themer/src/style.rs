@@ -198,6 +198,90 @@ pub fn button_destructive(colors: &HashMap<String, Color>, _theme: &Theme, statu
     }
 }
 
+/// View Switcher Inactive Tab Style
+pub fn button_view_switcher(colors: &HashMap<String, Color>, _theme: &Theme, status: button::Status) -> button::Style {
+    let fg = get_fg(colors, &["headerbar_fg_color", "window_fg_color"], Color::BLACK);
+    let hover_bg = get_color(colors, &["headerbar_shade_color", "view_switcher_hover_bg"], Color::from_rgba(0.5, 0.5, 0.5, 0.15));
+    let active_bg = get_color(colors, &["headerbar_shade_color", "view_switcher_active_bg"], Color::from_rgba(0.5, 0.5, 0.5, 0.25));
+
+    match status {
+        button::Status::Active => button::Style {
+            background: None,
+            text_color: fg,
+            border: Border::default(),
+            shadow: Shadow::default(),
+            snap: false,
+            ..Default::default()
+        },
+        button::Status::Hovered => button::Style {
+            background: Some(Background::Color(hover_bg)),
+            text_color: fg,
+            border: Border {
+                color: Color::TRANSPARENT,
+                width: 0.0,
+                radius: 6.0.into(),
+            },
+            shadow: Shadow::default(),
+            snap: false,
+            ..Default::default()
+        },
+        button::Status::Pressed => button::Style {
+            background: Some(Background::Color(active_bg)),
+            text_color: fg,
+            border: Border {
+                color: Color::TRANSPARENT,
+                width: 0.0,
+                radius: 6.0.into(),
+            },
+            shadow: Shadow::default(),
+            snap: false,
+            ..Default::default()
+        },
+        button::Status::Disabled => button::Style {
+            background: None,
+            text_color: palette::darken(fg, 0.3),
+            border: Border::default(),
+            shadow: Shadow::default(),
+            snap: false,
+            ..Default::default()
+        },
+    }
+}
+
+/// View Switcher Active Tab Style
+pub fn button_view_switcher_active(colors: &HashMap<String, Color>, _theme: &Theme, status: button::Status) -> button::Style {
+    let bg = get_color(colors, &["headerbar_shade_color", "view_switcher_active_bg"], Color::from_rgba(0.5, 0.5, 0.5, 0.2));
+    let fg = get_fg(colors, &["headerbar_fg_color", "window_fg_color"], Color::BLACK);
+
+    let mut style = button::Style {
+        background: Some(Background::Color(bg)),
+        text_color: fg,
+        border: Border {
+            color: Color::TRANSPARENT,
+            width: 0.0,
+            radius: 6.0.into(),
+        },
+        shadow: Shadow::default(),
+        snap: false,
+        ..Default::default()
+    };
+
+    match status {
+        button::Status::Hovered => {
+            style.background = Some(Background::Color(palette::lighten(bg, 0.05)));
+        }
+        button::Status::Pressed => {
+            style.background = Some(Background::Color(palette::darken(bg, 0.05)));
+        }
+        button::Status::Disabled => {
+            style.text_color = palette::darken(fg, 0.3);
+            style.background = Some(Background::Color(palette::darken(bg, 0.3)));
+        }
+        _ => {}
+    }
+    style
+}
+
 /// GTK TextInput Style
 pub fn text_input_style(colors: &HashMap<String, Color>, _theme: &Theme, status: text_input::Status) -> text_input::Style {
     let bg = get_color(colors, &["view_bg_color", "window_bg_color"], Color::WHITE);

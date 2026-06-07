@@ -3,6 +3,7 @@ pub mod asset_pipeline;
 pub mod header_bar;
 pub mod style;
 pub mod ext;
+pub mod prelude;
 pub use ext::*;
 pub mod widgets;
 
@@ -99,6 +100,14 @@ impl GtkTheme {
 
     pub fn button_destructive(&self, status: iced::widget::button::Status) -> iced::widget::button::Style {
         crate::style::button_destructive(&self.colors, &self.theme, status)
+    }
+
+    pub fn button_view_switcher(&self, status: iced::widget::button::Status) -> iced::widget::button::Style {
+        crate::style::button_view_switcher(&self.colors, &self.theme, status)
+    }
+
+    pub fn button_view_switcher_active(&self, status: iced::widget::button::Status) -> iced::widget::button::Style {
+        crate::style::button_view_switcher_active(&self.colors, &self.theme, status)
     }
 
     pub fn text_input(&self, status: iced::widget::text_input::Status) -> iced::widget::text_input::Style {
