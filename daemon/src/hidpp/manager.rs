@@ -820,29 +820,14 @@ impl HapticManager {
     ///
     /// On IO error (stale fd), forces reconnect and retries once.
     pub fn query_battery(&mut self) -> Result<(u8, bool), HapticError> {
-        if self.device.is_none() {
-            let _ = self.connect();
-        }
-        match self.device.as_mut() {
-            Some(device) => match device.query_battery() {
-                Ok(v) => Ok(v),
-                Err(HapticError::IoError(_)) | Err(HapticError::CommunicationError) => {
-                    self.handle_disconnect();
-                    if let Ok(true) = self.connect() {
-                        match self.device.as_mut() {
-                            Some(dev) => dev.query_battery(),
-                            None => Err(HapticError::DeviceNotFound),
-                        }
-                    } else {
-                        Err(HapticError::DeviceNotFound)
-                    }
-                }
-                Err(e) => Err(e),
-            },
-            None => {
-                tracing::debug!("Cannot query battery: device not connected");
+        let device = self.device.as_mut().ok_or(HapticError::DeviceNotFound)?;
+        match device.query_battery() {
+            Ok(v) => Ok(v),
+            Err(HapticError::IoError(_)) | Err(HapticError::CommunicationError) => {
+                self.handle_disconnect();
                 Err(HapticError::DeviceNotFound)
             }
+            Err(e) => Err(e),
         }
     }
 

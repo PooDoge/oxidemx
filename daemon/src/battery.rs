@@ -607,8 +607,8 @@ pub async fn start_battery_updater_shared_with_dbus(
         }
     }
 
-    // Update every 2 seconds for instant charging status detection
-    let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(2));
+    // Update every 10 seconds for charging status detection
+    let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(10));
 
     loop {
         interval.tick().await;

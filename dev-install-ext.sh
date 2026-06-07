@@ -35,7 +35,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # ── Extension: indicator ───────────────────────────────────────────
-IND_UUID="oxidemx-indicator@dev.juhlabs.com"
+IND_UUID="oxidemx-indicator@dev.oxidemx.com"
 IND_SRC="$ROOT/gnome-extension/$IND_UUID"
 IND_DEST="$HOME/.local/share/gnome-shell/extensions/$IND_UUID"
 

@@ -1,0 +1,13 @@
+[package]
+name = "iced_gtk_themer"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+iced = { path = "../pop_os_iced", features = ["svg", "canvas", "advanced"] }
+cssparser = "0.34"
+dirs = "5.0"
+csscolorparser = "0.8.3"
+slotmap = "1.1.1"
+tokio = { version = "1.52.3", features = ["time"] }
+taffy = "0.9.2"

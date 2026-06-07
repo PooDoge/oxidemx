@@ -243,18 +243,8 @@ impl HidppDevice {
                     device_path: device_path.clone(),
                 };
 
-                // Try HID++ validation with retry for sleeping devices
-                // First attempt may fail if device is in deep sleep; second attempt
-                // gives it time to wake up after the first ping
-                let validated = hidpp.validate_hidpp20() || {
-                    tracing::debug!(
-                        path = %device_path.display(),
-                        device_index,
-                        "First HID++ ping failed, retrying after wake-up delay"
-                    );
-                    std::thread::sleep(std::time::Duration::from_millis(500));
-                    hidpp.validate_hidpp20()
-                };
+                // Try HID++ validation
+                let validated = hidpp.validate_hidpp20();
 
                 if !validated {
                     tracing::debug!(
@@ -452,11 +442,11 @@ impl HidppDevice {
             }
 
             attempts += 1;
-            if attempts > 100 {
+            if attempts > 50 {
                 tracing::debug!(
                     feature_index,
                     function,
-                    "HID++ request timeout after 100 attempts"
+                    "HID++ request timeout after 50 attempts"
                 );
                 return None;
             }

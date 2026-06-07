@@ -62,8 +62,7 @@
     ]
   },
   "include": [
-    "oxidemx-cursor@dev.juhlabs.com/**/*.ts",
-    "oxidemx-indicator@dev.juhlabs.com/**/*.ts"
+    "oxidemx-indicator@dev.oxidemx.com/**/*.ts"
   ],
   "exclude": [
     "node_modules",

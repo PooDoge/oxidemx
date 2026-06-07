@@ -36,7 +36,7 @@ impl Default for BatteryColors {
 /// Helper to run `gsettings get` CLI command to retrieve a key.
 fn get_gsettings_value(key: &str) -> Option<String> {
     let home = std::env::var("HOME").ok()?;
-    let schema_dir = format!("{}/.local/share/gnome-shell/extensions/oxidemx-indicator@dev.juhlabs.com/schemas", home);
+    let schema_dir = format!("{}/.local/share/gnome-shell/extensions/oxidemx-indicator@dev.oxidemx.com/schemas", home);
     let output = std::process::Command::new("gsettings")
         .env("GSETTINGS_SCHEMA_DIR", &schema_dir)
         .args(["get", "org.gnome.shell.extensions.oxidemx-indicator", key])

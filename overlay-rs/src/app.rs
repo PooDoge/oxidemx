@@ -14,14 +14,15 @@
 //! coordinates the way the gtk4-layer-shell prototype tried to.
 
 use iced::widget::canvas::Canvas;
-use iced::{Color, Element, Length, Size, Subscription, Task};
+use iced::widget::{column, row, container, scrollable, text, text_input, button, Space};
+use iced::{Color, Element, Length, Size, Subscription, Task, Alignment};
 use tracing::{debug, error, info, warn};
 
 use oxidemx_shared::AppConfig;
 
 use crate::dbus::OverlayEvent;
 use crate::geometry::WINDOW_SIZE;
-use crate::radial::{RadialState, Painter};
+use crate::radial::{RadialState, Painter, ChatMessage};
 
 const APP_ID: &str = "org.oxidemx.overlay";
 
@@ -58,6 +59,15 @@ pub enum Message {
     /// in the live state without restarting the overlay.
     ConfigReloaded(oxidemx_shared::AppConfig),
     WindowOpened(iced::window::Id),
+    /// Result of querying the monitor size for centering fallback.
+    CenterOverlay(Option<Size>),
+    
+    // AI Assistant Messages
+    AiInputChanged(String),
+    AiSubmitPrompt,
+    AiResponseReceived(Result<(String, Option<String>), String>),
+    AiChooseOption(String),
+    AiQuestionReceived(crate::ai_client::PendingQuestion),
 }
 
 pub fn run() -> iced::Result {
@@ -114,14 +124,18 @@ fn update(state: &mut RadialState, message: Message) -> Task<Message> {
             // motor pulse.
             state.trigger_ripple();
 
-            let move_task = if let Some(id) = state.window_id {
-                iced::window::move_to(id, iced::Point::new((x - half) as f32, (y - half) as f32))
+            let window_tasks = if let Some(id) = state.window_id {
+                Task::batch(vec![
+                    iced::window::move_to(id, iced::Point::new((x - half) as f32, (y - half) as f32)),
+                    iced::window::minimize(id, false),
+                    iced::window::gain_focus(id),
+                ])
             } else {
                 Task::none()
             };
 
             Task::batch(vec![
-                move_task,
+                window_tasks,
                 Task::perform(
                     oxidemx_window::cursor_helper::move_overlay(
                         APP_ID.to_string(),
@@ -194,13 +208,37 @@ fn update(state: &mut RadialState, message: Message) -> Task<Message> {
             ])
         }
         Message::Positioned(success) => {
+            info!("Positioned event received: success={}", success);
             if !success {
                 warn!(
                     "MoveOverlay failed — extension couldn't find window with app_id={}; \
-                     check that oxidemx-cursor extension is enabled",
+                     check that oxidemx-indicator extension is enabled. Querying monitor size for fallback centering.",
                     APP_ID
                 );
+                if let Some(id) = state.window_id {
+                    info!("Querying monitor size for window ID {:?}", id);
+                    iced::window::monitor_size(id).map(Message::CenterOverlay)
+                } else {
+                    warn!("MoveOverlay failed, but state.window_id is None!");
+                    Task::none()
+                }
+            } else {
+                Task::none()
             }
+        }
+        Message::CenterOverlay(Some(size)) => {
+            info!("CenterOverlay triggered with monitor size: {:?}", size);
+            if let Some(id) = state.window_id {
+                let x = (size.width - WINDOW_SIZE as f32) / 2.0;
+                let y = (size.height - WINDOW_SIZE as f32) / 2.0;
+                info!("Centering window on monitor: x={}, y={}", x, y);
+                iced::window::move_to(id, iced::Point::new(x, y))
+            } else {
+                Task::none()
+            }
+        }
+        Message::CenterOverlay(None) => {
+            warn!("Could not determine monitor size for fallback centering");
             Task::none()
         }
         Message::ToggleCursor { x, y } => {
@@ -270,7 +308,82 @@ fn update(state: &mut RadialState, message: Message) -> Task<Message> {
             Task::none()
         }
         Message::WindowOpened(id) => {
+            info!("WindowOpened event received: {:?}", id);
             state.window_id = Some(id);
+            Task::none()
+        }
+        Message::AiInputChanged(val) => {
+            state.ai_input = val;
+            Task::none()
+        }
+        Message::AiSubmitPrompt => {
+            let prompt = state.ai_input.trim().to_string();
+            if state.ai_loading || prompt.is_empty() {
+                return Task::none();
+            }
+            state.ai_input.clear();
+            state.ai_history.push(ChatMessage {
+                is_user: true,
+                text: prompt.clone(),
+            });
+            state.ai_loading = true;
+            let session_id = state.ai_session_id.clone();
+            Task::perform(
+                async move {
+                    match crate::ai_client::load_api_key() {
+                        Ok(key) => {
+                            let mode = crate::ai_client::AgentMode::SettingsCustomizer;
+                            crate::ai_client::ask_ai(&key, mode, &prompt, session_id).await
+                                .map_err(|e| e.to_string())
+                        }
+                        Err(e) => Err(e.to_string()),
+                    }
+                },
+                Message::AiResponseReceived,
+            )
+        }
+        Message::AiResponseReceived(res) => {
+            state.ai_loading = false;
+            match res {
+                Ok((reply, next_session_id)) => {
+                    state.ai_session_id = next_session_id;
+                    state.ai_history.push(ChatMessage {
+                        is_user: false,
+                        text: reply,
+                    });
+                }
+                Err(err) => {
+                    state.ai_history.push(ChatMessage {
+                        is_user: false,
+                        text: format!("Error: {}", err),
+                    });
+                }
+            }
+            state.trigger_ripple();
+            Task::none()
+        }
+        Message::AiChooseOption(choice) => {
+            if let Some(pending) = state.ai_pending_question.take() {
+                let tx = pending.response_tx;
+                state.ai_history.push(ChatMessage {
+                    is_user: true,
+                    text: choice.clone(),
+                });
+                state.ai_loading = true;
+                Task::perform(
+                    async move {
+                        let _ = tx.send(choice).await;
+                    },
+                    |_| Message::Noop,
+                )
+            } else {
+                Task::none()
+            }
+        }
+        Message::AiQuestionReceived(pending) => {
+            state.ai_pending_question = Some(pending);
+            state.ai_loading = false;
+            state.trigger_ripple();
             Task::none()
         }
     }
@@ -956,10 +1069,24 @@ fn view(state: &RadialState) -> Element<'_, Message> {
         }
     }
 
-    if layers.len() == 1 {
+    let main_stack = if layers.len() == 1 {
         layers.into_iter().next().unwrap()
     } else {
         iced::widget::Stack::with_children(layers).into()
+    };
+
+    let is_ai_page = state.pages.get(state.active_page)
+        .map(|p| p.name == "AI Assistant")
+        .unwrap_or(false);
+
+    if is_ai_page {
+        let ai_panel = build_ai_panel(state);
+        iced::widget::Stack::with_children(vec![
+            main_stack,
+            ai_panel,
+        ]).into()
+    } else {
+        main_stack
     }
 }
 
@@ -975,12 +1102,250 @@ fn subscription(_state: &RadialState) -> Subscription<Message> {
     Subscription::batch([
         Subscription::run(crate::dbus::stream).map(Message::Overlay),
         Subscription::run(crate::config::watch_stream).map(Message::ConfigReloaded),
+        Subscription::run(ai_question_stream),
         iced::time::every(std::time::Duration::from_millis(16)).map(|_| Message::Tick),
         iced::window::events().map(|(id, event)| match event {
             iced::window::Event::Opened { .. } => Message::WindowOpened(id),
+            iced::window::Event::Unfocused => Message::ToggleDismiss,
             _ => Message::Noop,
         }),
     ])
+}
+
+// =============================================================================
+// AI ASSISTANT PANEL DRAWING & HELPERS
+// =============================================================================
+
+fn to_iced_color(hex: &str, default: Color) -> Color {
+    oxidemx_shared::theme::parse_hex_rgba(hex)
+        .map(|(r, g, b, a)| Color::from_rgba(r as f32, g as f32, b as f32, a as f32))
+        .unwrap_or(default)
+}
+
+fn ai_question_stream() -> impl futures_util::stream::Stream<Item = Message> {
+    let (tx, rx) = async_channel::unbounded();
+    
+    let (q_tx, mut q_rx) = tokio::sync::mpsc::channel(10);
+    *crate::ai_client::QUESTION_TX.lock().unwrap() = Some(q_tx);
+    
+    tokio::task::spawn(async move {
+        while let Some(pending) = q_rx.recv().await {
+            let _ = tx.send(Message::AiQuestionReceived(pending)).await;
+        }
+    });
+    
+    rx
+}
+
+fn build_ai_panel(state: &RadialState) -> Element<'_, Message> {
+    let palette = &state.theme.theme.colors;
+    
+    let base_color = to_iced_color(&palette.base, Color::from_rgba(0.08, 0.08, 0.1, 0.95));
+    let surface_color = to_iced_color(&palette.surface0, Color::from_rgba(0.12, 0.12, 0.15, 0.9));
+    let text_color = to_iced_color(&palette.text, Color::WHITE);
+    let accent_color = to_iced_color(&palette.accent, Color::from_rgb(0.5, 0.5, 1.0));
+    
+    let sidebar_bg = Color::from_rgba(base_color.r, base_color.g, base_color.b, 0.85);
+    let border_color = Color::from_rgba(accent_color.r, accent_color.g, accent_color.b, 0.2);
+
+    let header = column![
+        text("OxideMX AI")
+            .size(20)
+            .font(iced::Font { weight: iced::font::Weight::Bold, ..Default::default() })
+            .color(text_color),
+        text("Settings & Chat Assistant")
+            .size(11)
+            .color(Color::from_rgba(text_color.r, text_color.g, text_color.b, 0.6)),
+        Space::new().height(Length::Fixed(8.0)),
+        container(Space::new().width(Length::Fill))
+            .height(1)
+            .style(move |_| container::Style {
+                background: Some(iced::Background::Color(Color::from_rgba(text_color.r, text_color.g, text_color.b, 0.1))),
+                ..Default::default()
+            })
+    ];
+
+    let mut chat_list = column![].spacing(8);
+    
+    if state.ai_history.is_empty() {
+        chat_list = chat_list.push(
+            text("Try asking:\n• 'Change slice colors to green'\n• 'Set animation speed to fast'\n• 'Switch to Dracula theme'\n• 'Show installed apps'")
+                .size(12)
+                .color(Color::from_rgba(text_color.r, text_color.g, text_color.b, 0.5))
+        );
+    } else {
+        for msg in &state.ai_history {
+            let bubble = if msg.is_user {
+                container(
+                    text(&msg.text)
+                        .size(12)
+                        .color(text_color)
+                )
+                .padding(8)
+                .max_width(200.0)
+                .style(move |_| container::Style {
+                    background: Some(iced::Background::Color(Color::from_rgba(accent_color.r, accent_color.g, accent_color.b, 0.25))),
+                    border: iced::border::Border {
+                        color: Color::from_rgba(accent_color.r, accent_color.g, accent_color.b, 0.4),
+                        width: 1.0,
+                        radius: 8.0.into(),
+                    },
+                    ..Default::default()
+                })
+            } else {
+                container(
+                    text(&msg.text)
+                        .size(12)
+                        .color(text_color)
+                )
+                .padding(8)
+                .max_width(200.0)
+                .style(move |_| container::Style {
+                    background: Some(iced::Background::Color(Color::from_rgba(surface_color.r, surface_color.g, surface_color.b, 0.4))),
+                    border: iced::border::Border {
+                        color: Color::from_rgba(text_color.r, text_color.g, text_color.b, 0.1),
+                        width: 1.0,
+                        radius: 8.0.into(),
+                    },
+                    ..Default::default()
+                })
+            };
+
+            let align_row = row![
+                if msg.is_user { Element::from(Space::new().width(Length::Fill)) } else { Element::from(text("")) },
+                bubble,
+                if msg.is_user { Element::from(text("")) } else { Element::from(Space::new().width(Length::Fill)) },
+            ];
+            chat_list = chat_list.push(align_row);
+        }
+    }
+
+    let history_scroll = scrollable(chat_list)
+        .height(Length::Fill);
+
+    let mut footer = column![].spacing(6);
+
+    if let Some(pending) = &state.ai_pending_question {
+        let mut question_col = column![
+            text(&pending.question)
+                .size(12)
+                .font(iced::Font { weight: iced::font::Weight::Bold, ..Default::default() })
+                .color(accent_color),
+            Space::new().height(Length::Fixed(4.0)),
+        ].spacing(4);
+
+        for opt in &pending.options {
+            let opt_clone = opt.clone();
+            question_col = question_col.push(
+                button(
+                    text(opt)
+                        .size(11)
+                        .color(text_color)
+                        .align_x(iced::alignment::Horizontal::Center)
+                )
+                .width(Length::Fill)
+                .padding(6)
+                .style(move |theme, status| {
+                    let mut s = button::primary(theme, status);
+                    s.background = Some(iced::Background::Color(Color::from_rgba(accent_color.r, accent_color.g, accent_color.b, 0.3)));
+                    s.border.color = accent_color;
+                    s.border.width = 1.0;
+                    s.border.radius = 6.0.into();
+                    s
+                })
+                .on_press(Message::AiChooseOption(opt_clone))
+            );
+        }
+
+        footer = footer.push(
+            container(question_col)
+                .padding(8)
+                .style(move |_| container::Style {
+                    background: Some(iced::Background::Color(Color::from_rgba(surface_color.r, surface_color.g, surface_color.b, 0.5))),
+                    border: iced::border::Border {
+                        color: accent_color,
+                        width: 1.0,
+                        radius: 8.0.into(),
+                    },
+                    ..Default::default()
+                })
+        );
+    }
+
+    if state.ai_loading {
+        footer = footer.push(
+            row![
+                text("Agent thinking...")
+                    .size(12)
+                    .font(iced::Font { style: iced::font::Style::Italic, ..Default::default() })
+                    .color(accent_color)
+            ]
+            .align_y(Alignment::Center)
+        );
+    } else {
+        let input_box = text_input("Ask AI...", &state.ai_input)
+            .size(12)
+            .on_input(Message::AiInputChanged)
+            .on_submit(Message::AiSubmitPrompt)
+            .style(move |theme, status| {
+                let mut s = text_input::default(theme, status);
+                s.background = iced::Background::Color(Color::from_rgba(surface_color.r, surface_color.g, surface_color.b, 0.6));
+                s.value = text_color;
+                s.placeholder = Color::from_rgba(text_color.r, text_color.g, text_color.b, 0.4);
+                s.border.color = Color::from_rgba(text_color.r, text_color.g, text_color.b, 0.15);
+                s.border.radius = 6.0.into();
+                s
+            });
+
+        let send_btn = button(
+            text("Send")
+                .size(11)
+                .font(iced::Font { weight: iced::font::Weight::Bold, ..Default::default() })
+                .color(text_color)
+        )
+        .padding(6)
+        .style(move |theme, status| {
+            let mut s = button::primary(theme, status);
+            s.background = Some(iced::Background::Color(accent_color));
+            s.border.radius = 6.0.into();
+            s
+        })
+        .on_press(Message::AiSubmitPrompt);
+
+        footer = footer.push(
+            row![input_box, send_btn].spacing(6).align_y(Alignment::Center)
+        );
+    }
+
+    let content_col = column![
+        header,
+        Space::new().height(Length::Fixed(8.0)),
+        history_scroll,
+        Space::new().height(Length::Fixed(8.0)),
+        footer
+    ]
+    .padding(12)
+    .spacing(4)
+    .height(Length::Fill);
+
+    row![
+        container(content_col)
+            .width(Length::Fixed(260.0))
+            .height(Length::Fill)
+            .style(move |_| container::Style {
+                background: Some(iced::Background::Color(sidebar_bg)),
+                border: iced::border::Border {
+                    color: border_color,
+                    width: 1.0,
+                    radius: 12.0.into(),
+                },
+                ..Default::default()
+            }),
+        Space::new().width(Length::Fill)
+    ]
+    .width(Length::Fill)
+    .height(Length::Fill)
+    .into()
 }
 
 #[allow(dead_code)]

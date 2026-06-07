@@ -1,5 +1,5 @@
 {
-    "uuid": "oxidemx-indicator@dev.juhlabs.com",
+    "uuid": "oxidemx-indicator@dev.oxidemx.com",
     "name": "OxideMX Indicator",
     "description": "Top-bar battery + quick-controls popup for Logitech MX devices. Sources battery state from the OxideMX daemon (org.oxidemx.Daemon); click opens the daemon-rendered popup.",
     "shell-version": ["45", "46", "47", "48", "49", "50", "51"],

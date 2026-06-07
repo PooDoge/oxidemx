@@ -31,7 +31,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TARGET="$ROOT/target/release"
 RUNDIR="${XDG_RUNTIME_DIR:-/tmp}/oxidemx-dev"
 DISTROBOX="${OXIDEMX_DISTROBOX:-claude_development}"
-LOG_LEVEL="${OXIDEMX_LOG:-info,oxidemx_overlay_rs=debug,oxidemx_settings=debug,usvg=error}"
+LOG_LEVEL="${OXIDEMX_LOG:-info,oxidemx_overlay=debug,oxidemx_settings=debug,usvg=error}"
 
 mkdir -p "$RUNDIR"
 
@@ -43,7 +43,7 @@ daemon_bin="$TARGET/oxidemxd"
 # Component → cargo crate name (-p flag)
 overlay_crate="oxidemx-overlay"
 settings_crate="oxidemx-settings"
-daemon_crate="oxidemxd"
+daemon_crate="oxidemx-daemon"
 
 bin_for() {
   case "$1" in

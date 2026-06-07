@@ -119,6 +119,12 @@ impl SubmenuState {
     }
 }
 
+#[derive(Clone, Debug)]
+pub struct ChatMessage {
+    pub is_user: bool,
+    pub text: String,
+}
+
 /// Top-level model for the iced app. Owns everything view() needs.
 pub struct RadialState {
     pub theme: ActiveTheme,
@@ -140,12 +146,19 @@ pub struct RadialState {
     /// scroll-wheel cycle (global pages + app-context pages with
     /// `include_in_scroll = true`). Rebuilt on every config reload
     /// so we don't recompute it per scroll event.
-    cycle_pages_cache: Vec<usize>,
+    pub cycle_pages_cache: Vec<usize>,
     /// Window class of the most recently focused window (or None).
     /// Set by the daemon's focus-tracking signal in Phase 2; today
     /// it stays None and `show()` falls back to the last-active
     /// page index.
     pub focused_class: Option<String>,
+
+    // AI Assistant state fields
+    pub ai_input: String,
+    pub ai_history: Vec<ChatMessage>,
+    pub ai_loading: bool,
+    pub ai_session_id: Option<String>,
+    pub ai_pending_question: Option<crate::ai_client::PendingQuestion>,
     /// User-tweakable animation parameters for menu / submenu /
     /// slice highlight. Reloaded by the inotify watcher so the
     /// user can iterate on feel without restarting.
@@ -309,7 +322,10 @@ impl RadialState {
     pub fn new(config: &AppConfig) -> Self {
         let theme = ActiveTheme::resolve(&config.theme);
         let pages = pages_from_config(config);
-        let cycle_pages_cache = config.radial_menu.cycle_pages();
+        let mut cycle_pages_cache = config.radial_menu.cycle_pages();
+        if !pages.is_empty() {
+            cycle_pages_cache.push(pages.len() - 1);
+        }
         let slices = pages.first().map(|p| p.slices.clone()).unwrap_or_default();
         let anim_config = config.radial_menu.animation.clone();
         let visuals = config.radial_menu.visuals.clone();
@@ -320,6 +336,11 @@ impl RadialState {
             active_page: 0,
             cycle_pages_cache,
             focused_class: None,
+            ai_input: String::new(),
+            ai_history: Vec::new(),
+            ai_loading: false,
+            ai_session_id: None,
+            ai_pending_question: None,
             anim_config,
             visuals,
             highlights: [Tween::at(0.0); 8],
@@ -1017,6 +1038,9 @@ impl RadialState {
         self.theme = ActiveTheme::resolve(&config.theme);
         self.pages = pages_from_config(config);
         self.cycle_pages_cache = config.radial_menu.cycle_pages();
+        if !self.pages.is_empty() {
+            self.cycle_pages_cache.push(self.pages.len() - 1);
+        }
         // Try to keep the same active page across reloads — if the
         // user just edited a slice on page 1, don't yank them back
         // to page 0. Falls back to 0 when the index is now stale
@@ -1061,6 +1085,39 @@ fn pages_from_config(config: &AppConfig) -> Vec<RadialPage> {
             pages.push(RadialPage::default());
         }
     }
+    // Append the AI page
+    pages.push(RadialPage {
+        name: "AI Assistant".into(),
+        slices: vec![
+            Slice {
+                action_id: None,
+                label: "Clear Chat".into(),
+                kind: ActionKind::Macro,
+                command: "ai_clear_history".into(),
+                color: "red".into(),
+                icon: "edit-clear-symbolic".into(),
+                icon_untinted: false,
+                description: String::new(),
+                submenu: vec![],
+                visible_if: None,
+            },
+            Slice {
+                action_id: None,
+                label: "Close Menu".into(),
+                kind: ActionKind::Macro,
+                command: "ai_close_menu".into(),
+                color: "peach".into(),
+                icon: "window-close-symbolic".into(),
+                icon_untinted: false,
+                description: String::new(),
+                submenu: vec![],
+                visible_if: None,
+            },
+        ],
+        app_classes: vec![],
+        include_in_scroll: true,
+        slot_count: 8,
+    });
     pages
 }
 

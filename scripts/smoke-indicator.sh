@@ -98,19 +98,13 @@ fi
 
 step 4 "GNOME extensions"
 
-cursor_state=$(gnome-extensions show oxidemx-cursor@dev.juhlabs.com 2>/dev/null | awk '/State:/ {print $2}')
-if [[ "$cursor_state" == "ENABLED" ]]; then
-  ok "oxidemx-cursor extension ENABLED"
-else
-  fail "oxidemx-cursor extension state = ${cursor_state:-MISSING}"
-fi
-
-indicator_state=$(gnome-extensions show oxidemx-indicator@dev.juhlabs.com 2>/dev/null | awk '/State:/ {print $2}')
+indicator_state=$(gnome-extensions show oxidemx-indicator@dev.oxidemx.com 2>/dev/null | awk '/State:/ {print $2}')
 if [[ "$indicator_state" == "ENABLED" ]]; then
   ok "oxidemx-indicator extension ENABLED"
 else
-  fail "oxidemx-indicator extension state = ${indicator_state:-MISSING}  (try: gnome-extensions enable oxidemx-indicator@dev.juhlabs.com; if that fails, re-login)"
+  fail "oxidemx-indicator extension state = ${indicator_state:-MISSING}  (try: gnome-extensions enable oxidemx-indicator@dev.oxidemx.com; if that fails, re-login)"
 fi
+
 
 # Cursor extension service must also be on the bus
 if busctl --user list 2>/dev/null | awk '{print $1}' | grep -qx 'org.oxidemx.CursorHelper'; then

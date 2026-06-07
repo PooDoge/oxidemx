@@ -26,8 +26,9 @@ members = [
     "overlay-rs",
     "popup-rs",
     "settings-rs",
-    "spike-iced",
+    "spike-iced", "iced_gtk_themer",
 ]
+exclude = ["pop_os_iced", "libcosmic"]
 
 [profile.release]
 # Match daemon/Cargo.toml's existing release profile so a `cargo build

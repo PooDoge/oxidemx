@@ -221,7 +221,7 @@ Dev-mode end-to-end test setup for oxidemx.
 
 What this script changes on your system:
   - Writes built binaries under ./target/release/ (cargo)
-  - Writes ~/.local/share/gnome-shell/extensions/oxidemx-cursor@dev.juhlabs.com/
+  - Writes ~/.local/share/gnome-shell/extensions/oxidemx-indicator@dev.oxidemx.com/
   - Toggles that extension via 'gnome-extensions disable/enable'
   - Starts processes whose PIDs/logs live under \$XDG_RUNTIME_DIR/oxidemx-dev/
 

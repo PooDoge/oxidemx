@@ -49,12 +49,12 @@ print_banner() {
     echo ""
     echo -e "${BCYAN}"
     cat << 'BANNER'
-    ___       _    ______          _ _       _  ___  ____  __
-   |_  |     | |   | ___ \        | (_)     | | |  \/  \ \ / /
-     | |_   _| |__ | |_/ /__ _  __| |_  __ _| | | .  . |\ V /
-     | | | | | '_ \|    // _` |/ _` | |/ _` | | | |\/| |/   \
- /\__/ | |_| | | | | |\ | (_| | (_| | | (_| | | | |  | / /^\ \
- \____/ \__,_|_| |_\_| \_\__,_|\__,_|_|\__,_|_| \_|  |_\/   \/
+ _____      _     _       ___  _____   __
+|  _  |    (_)   | |      |  \/  |\ \ / /
+| | | |_  ___  __| | ___  | .  . | \ V /
+| | | \ \/ / |/ _` |/ _ \ | |\/| | /   \
+\ \_/ />  <| | (_| |  __/ | |  | |/ /^\ \
+ \___//_/\_\_|\__,_|\___| \_|  |_/\/   \/
 BANNER
     echo -e "${RESET}"
     echo -e "                       ${CYAN}· Installer${RESET}"
@@ -937,7 +937,7 @@ build_project() {
             log_dim "  (cargo not on host PATH — this avoids layering rust via rpm-ostree)"
             distrobox enter "$container" -- bash -c \
                 "cd '$INSTALL_DIR' && cargo build --release \
-                 -p oxidemxd -p oxidemx-overlay \
+                 -p oxidemx-daemon -p oxidemx-overlay \
                  -p oxidemx-popup -p oxidemx-settings" || {
                 log_error "distrobox build failed."
                 log_dim "  If '$container' is missing the rust/devel deps, install them inside it:"
@@ -977,7 +977,7 @@ build_project() {
 do_workspace_build_host() {
     if [ -f Cargo.toml ] && grep -q '^\[workspace\]' Cargo.toml; then
         cargo build --release \
-            -p oxidemxd \
+            -p oxidemx-daemon \
             -p oxidemx-overlay \
             -p oxidemx-popup \
             -p oxidemx-settings
@@ -1013,7 +1013,7 @@ install_files() {
 
     # Install daemon binary (required)
     daemon_bin="$(pick_binary oxidemxd target/release/oxidemxd daemon/target/release/oxidemxd)" || {
-        log_error "oxidemxd not built — run ./dev.sh build daemon or cargo build --release -p oxidemxd"
+        log_error "oxidemxd not built — run ./dev.sh build daemon or cargo build --release -p oxidemx-daemon"
         exit 1
     }
     sudo install -Dm755 "$daemon_bin" "$BIN_DIR/oxidemxd"
@@ -1264,11 +1264,11 @@ configure_gnome() {
     log_info "Installing GNOME Shell extensions..."
 
     compile_gnome_extensions_ts
-    install_gnome_extension "oxidemx-indicator@dev.juhlabs.com"
+    install_gnome_extension "oxidemx-indicator@dev.oxidemx.com"
 
     # Per-extension state check
     local needs_restart=false
-    local uuid="oxidemx-indicator@dev.juhlabs.com"
+    local uuid="oxidemx-indicator@dev.oxidemx.com"
     local ext_state
     ext_state=$(gnome-extensions info "$uuid" 2>/dev/null | grep -oP '(?<=State: )\S+' || true)
     if [ "$ext_state" != "ACTIVE" ] && [ "$ext_state" != "ENABLED" ]; then
@@ -1411,7 +1411,11 @@ main() {
     else
         echo -e "  ${BOLD}Proceed with installation?${RESET} ${DIM}[Y/n]${RESET} \c"
     fi
-    read -n 1 -r < /dev/tty
+    if [ -t 0 ] && [ -c /dev/tty ] && { true < /dev/tty; } 2>/dev/null; then
+        read -n 1 -r < /dev/tty
+    else
+        REPLY="y"
+    fi
     echo ""
     if [[ ! $REPLY =~ ^[Yy]$ ]] && [[ ! -z $REPLY ]]; then
         echo ""

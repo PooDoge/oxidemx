@@ -17,6 +17,7 @@ pub fn frameless_topmost(app_id: &str, size: iced::Size) -> Settings {
     s.transparent = true;
     s.resizable = false;
     s.level = Level::AlwaysOnTop;
+    s.position = iced::window::Position::Centered;
     s.platform_specific.application_id = app_id.to_string();
     s.platform_specific.override_redirect = true;
     s

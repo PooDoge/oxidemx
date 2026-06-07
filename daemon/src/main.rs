@@ -445,7 +445,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         macro_engine,
         macro_recorder,
         trigger_map,
-        overlay_spawner,
+        overlay_spawner.clone(),
         thumb_wheel_state,
     )
     .await
@@ -570,6 +570,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .await
     });
 
+    let overlay_spawner_for_events = overlay_spawner.clone();
     // Spawn event processing task with D-Bus connection
     let event_handle = tokio::spawn(async move {
         process_gesture_events(
@@ -577,6 +578,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             &dbus_connection,
             trigger_map_for_events,
             macro_engine_for_events,
+            overlay_spawner_for_events,
         )
         .await
     });
@@ -791,9 +793,25 @@ async fn run_hidraw_loop(
 
                 // Run the event loop until error, or until input hotplug tells
                 // us the mouse may have returned from another Easy-Switch host.
+                let haptic_manager_clone = haptic_manager.clone();
                 let start_result = tokio::select! {
                     result = handler.start() => Some(result),
                     _ = hotplug.notified() => None,
+                    _ = async {
+                        loop {
+                            tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+                            let is_disconnected = {
+                                if let Ok(manager) = haptic_manager_clone.lock() {
+                                    manager.device_path().is_none()
+                                } else {
+                                    false
+                                }
+                            };
+                            if is_disconnected {
+                                break;
+                            }
+                        }
+                    } => Some(Err(HidrawError::DeviceNotFound)),
                 };
                 handler.close();
 
@@ -1048,6 +1066,7 @@ async fn process_gesture_events(
     dbus_connection: &zbus::Connection,
     trigger_map: Arc<std::sync::RwLock<oxidemxd::macros::TriggerMap>>,
     macro_engine: Arc<Mutex<oxidemxd::macros::MacroEngine>>,
+    overlay_spawner: Arc<oxidemxd::overlay_spawner::OverlaySpawner>,
 ) {
     while let Some(event) = event_rx.recv().await {
         match event {
@@ -1056,7 +1075,7 @@ async fn process_gesture_events(
                 info!(x, y, "Gesture button pressed - showing radial menu");
 
                 // Emit ShowMenu via D-Bus
-                if let Err(e) = emit_menu_requested(dbus_connection, x, y).await {
+                if let Err(e) = emit_menu_requested(dbus_connection, x, y, &overlay_spawner).await {
                     error!("Failed to emit ShowMenu signal: {}", e);
                 }
             }
@@ -1159,19 +1178,25 @@ async fn emit_menu_requested(
     connection: &zbus::Connection,
     x: i32,
     y: i32,
+    overlay_spawner: &oxidemxd::overlay_spawner::OverlaySpawner,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    use zbus::proxy::Proxy;
+    // 1. Ensure overlay is running directly (bypassing D-Bus self-call)
+    if let Err(e) = overlay_spawner.ensure_running(connection).await {
+        error!("Failed to ensure overlay is running: {}", e);
+    }
 
-    let proxy = Proxy::new(
-        connection,
-        DBUS_NAME,
-        DBUS_PATH,
-        "org.oxidemx.Daemon",
-    )
-    .await?;
+    // 2. Emit the MenuRequested signal directly
+    connection
+        .emit_signal(
+            None::<&str>,
+            DBUS_PATH,
+            "org.oxidemx.Daemon",
+            "MenuRequested",
+            &(x, y),
+        )
+        .await?;
 
-    proxy.call_method("ShowMenu", &(x, y)).await?;
-
+    info!("MenuRequested signal emitted x={} y={}", x, y);
     Ok(())
 }
 

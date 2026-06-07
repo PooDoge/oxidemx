@@ -188,13 +188,13 @@ export const OxideMXPopup = GObject.registerClass(
             });
 
             this._deviceLabel = new St.Label({
-                text: this._deviceName,
+                text: this._deviceName || '',
                 style_class: 'oxidemx-device-chip',
                 y_align: Clutter.ActorAlign.CENTER,
             });
 
             this._connectionLabel = new St.Label({
-                text: this._connectionType ? `● ${this._connectionType}` : '○ –',
+                text: (this._connectionType ? `● ${this._connectionType}` : '○ –') || '',
                 style_class: 'oxidemx-connection-status',
                 x_expand: true,
                 x_align: Clutter.ActorAlign.END,
@@ -273,12 +273,12 @@ export const OxideMXPopup = GObject.registerClass(
             });
 
             const title = new St.Label({
-                text: this._deviceName,
+                text: this._deviceName || '',
                 style_class: 'oxidemx-hero-title',
             });
 
             this._batteryTimeLabel = new St.Label({
-                text: this._estimateRemaining(this._batteryPct, this._charging),
+                text: this._estimateRemaining(this._batteryPct, this._charging) || '',
                 style_class: 'oxidemx-hero-subtitle',
             });
 
@@ -398,8 +398,8 @@ export const OxideMXPopup = GObject.registerClass(
             const list = popupCfg.mode === 'power' ? popupCfg.power_toggles : popupCfg.simple_toggles;
             
             for (const id of list) {
-                const entry = QUICK_TOGGLE_CATALOG[id];
-                if (!entry) continue;
+                const entry = Object.prototype.hasOwnProperty.call(QUICK_TOGGLE_CATALOG, id) ? QUICK_TOGGLE_CATALOG[id] : null;
+                if (!entry || !entry.label) continue;
 
                 let is_on = false;
                 if (id === 'gaming') is_on = this._gamingMode;
@@ -425,7 +425,7 @@ export const OxideMXPopup = GObject.registerClass(
                 });
                 
                 const title = new St.Label({
-                    text: entry.label,
+                    text: entry.label || '',
                     style_class: 'oxidemx-row-title',
                     x_expand: true,
                     y_align: Clutter.ActorAlign.CENTER,
@@ -487,8 +487,8 @@ export const OxideMXPopup = GObject.registerClass(
             this._slidersSection.add_child(label);
 
             for (const id of popupCfg.power_sliders) {
-                const entry = QUICK_SLIDER_CATALOG[id];
-                if (!entry) continue;
+                const entry = Object.prototype.hasOwnProperty.call(QUICK_SLIDER_CATALOG, id) ? QUICK_SLIDER_CATALOG[id] : null;
+                if (!entry || !entry.label) continue;
 
                 if (id === 'dpi') {
                     const sliderRow = new St.BoxLayout({
@@ -503,7 +503,7 @@ export const OxideMXPopup = GObject.registerClass(
                     });
                     
                     labelBox.add_child(new St.Label({
-                        text: entry.label,
+                        text: entry.label || '',
                         style_class: 'oxidemx-row-title',
                         x_expand: true,
                     }));
@@ -551,7 +551,7 @@ export const OxideMXPopup = GObject.registerClass(
                     });
 
                     labelBox.add_child(new St.Label({
-                        text: entry.label,
+                        text: entry.label || '',
                         style_class: 'oxidemx-row-title',
                         x_expand: true,
                     }));
