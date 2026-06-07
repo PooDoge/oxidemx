@@ -29,6 +29,8 @@ struct Demo {
     last_header_click: Option<Instant>,
     button_layout: iced_gtk_themer::header_bar::ButtonLayout,
     active_tab: usize,
+    active_carousel_page: usize,
+    banner_visible: bool,
     slider_value: f32,
     toggled: bool,
     checkbox_val: bool,
@@ -51,6 +53,9 @@ enum Message {
     WindowFocused,
     WindowUnfocused,
     TabSelected(usize),
+    SelectNavTab(usize),
+    SelectCarouselPage(usize),
+    DismissBanner,
     SliderChanged(f32),
     Toggled(bool),
     CheckboxToggled(bool),
@@ -98,6 +103,8 @@ impl Default for Demo {
                 iced_gtk_themer::nav_bar::NavBarItem::new(2, "Indicators").with_icon("◴"),
                 iced_gtk_themer::nav_bar::NavBarItem::new(3, "Settings").with_icon("🖽"),
             ],
+            active_carousel_page: 0,
+            banner_visible: true,
         }
     }
 }
@@ -147,6 +154,18 @@ impl Demo {
             }
             Message::TabSelected(idx) => {
                 self.active_tab = idx;
+                Task::none()
+            }
+            Message::SelectNavTab(i) => {
+                self.active_tab = i;
+                Task::none()
+            }
+            Message::SelectCarouselPage(i) => {
+                self.active_carousel_page = i;
+                Task::none()
+            }
+            Message::DismissBanner => {
+                self.banner_visible = false;
                 Task::none()
             }
             Message::SliderChanged(val) => {
@@ -216,16 +235,33 @@ impl Demo {
                     radio("Option B", "B", self.selected_option.as_deref(), |s| Message::OptionSelected(s.to_string())).gtk_style(gtk),
                     pick_list(vec!["Item 1".to_string(), "Item 2".to_string()], self.selected_option.clone(), Message::OptionSelected).gtk_style(gtk),
                 ].spacing(20).into(),
-                2 => column![
-                    slider(0.0..=100.0, self.slider_value, Message::SliderChanged).gtk_style(gtk),
-                    progress_bar(0.0..=100.0, self.slider_value),
-                    toggler(self.toggled).label("Toggle State").on_toggle(Message::Toggled),
-                    row![
-                        avatar("JT"),
-                        spinner(),
-                    ].spacing(20),
-                    banner(text("This is a GTK-styled banner!")),
-                ].spacing(20).into(),
+                2 => {
+                    let banner_widget: Element<Message> = if self.banner_visible {
+                        banner(text("Welcome to the Indicators tab! This is a banner.")).into()
+                    } else {
+                        iced::widget::space().into()
+                    };
+
+                    let spinner_widget = spinner();
+                    let avatar_widget = avatar("User Avatar");
+
+                    let pages = vec![
+                        container(text("Carousel Page 1").size(24)).center_x(Length::Fill).center_y(Length::Fill).into(),
+                        container(text("Carousel Page 2").size(24)).center_x(Length::Fill).center_y(Length::Fill).into(),
+                        container(text("Carousel Page 3").size(24)).center_x(Length::Fill).center_y(Length::Fill).into(),
+                    ];
+                    let carousel_widget = carousel(gtk, pages, self.active_carousel_page, Message::SelectCarouselPage);
+
+                    column![
+                        banner_widget,
+                        row![
+                            column![text("Spinner"), spinner_widget].spacing(10).align_x(Alignment::Center),
+                            column![text("Avatar"), avatar_widget].spacing(10).align_x(Alignment::Center),
+                        ].spacing(40),
+                        text("Carousel Component").size(18),
+                        carousel_widget
+                    ].spacing(20).into()
+                },
                 3 => {
                     let appearance_group = preferences_group(
                         gtk,
