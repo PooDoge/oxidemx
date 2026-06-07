@@ -27,7 +27,7 @@ pub fn spin_row<'a, Message: Clone + 'a>(
     let decrease_msg = on_change(value - step);
     let increase_msg = on_change(value + step);
 
-    let mut btn_minus = button(text("-").width(Length::Fill).horizontal_alignment(iced::alignment::Horizontal::Center))
+    let mut btn_minus = button(text("-").width(Length::Fill).align_x(iced::alignment::Horizontal::Center))
         .on_press(decrease_msg)
         .width(Length::Fixed(32.0))
         .padding(Padding::from([8, 0]));
@@ -38,20 +38,20 @@ pub fn spin_row<'a, Message: Clone + 'a>(
         style
     });
 
-    let val_text = container(text(format!("{}", value)).horizontal_alignment(iced::alignment::Horizontal::Center))
+    let val_text = container(text(format!("{}", value)).align_x(iced::alignment::Horizontal::Center))
         .width(Length::Fixed(48.0))
         .padding(Padding::from([8, 0]))
         .style(move |theme: &Theme| {
             let s = gtk.button_secondary(iced::widget::button::Status::Active);
             iced::widget::container::Style {
                 background: s.background,
-                text_color: s.text_color,
+                text_color: Some(s.text_color),
                 border: s.border,
                 ..Default::default()
             }
         });
 
-    let mut btn_plus = button(text("+").width(Length::Fill).horizontal_alignment(iced::alignment::Horizontal::Center))
+    let mut btn_plus = button(text("+").width(Length::Fill).align_x(iced::alignment::Horizontal::Center))
         .on_press(increase_msg)
         .width(Length::Fixed(32.0))
         .padding(Padding::from([8, 0]));

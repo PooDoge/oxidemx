@@ -102,6 +102,7 @@ where
                     radius: (self.size / 2.0).into(),
                 },
                 shadow: Default::default(),
+                snap: true,
             },
             custom_style.background,
         );
@@ -110,14 +111,16 @@ where
         let text_size = self.size * 0.4;
         renderer.fill_text(
             iced::advanced::text::Text {
-                content: &self.initials,
+                content: self.initials.clone(),
                 bounds: Size::new(bounds.width, bounds.height),
                 size: iced::Pixels(text_size),
                 line_height: iced::widget::text::LineHeight::default(),
-                font: iced::Font::default(),
-                horizontal_alignment: iced::alignment::Horizontal::Center,
-                vertical_alignment: iced::alignment::Vertical::Center,
+                font: renderer.default_font(),
+                align_x: iced::alignment::Horizontal::Center.into(),
+                align_y: iced::alignment::Vertical::Center.into(),
                 shaping: iced::advanced::text::Shaping::Basic,
+                wrapping: Default::default(),
+                ellipsize: Default::default(),
             },
             bounds.center(),
             custom_style.text_color,
@@ -136,3 +139,14 @@ where
         Self::new(avatar)
     }
 }
+
+pub fn avatar<'a, Theme, Renderer>(
+    initials: impl Into<String>,
+) -> Avatar<'a, Theme, Renderer>
+where
+    Theme: 'a,
+    Renderer: iced::advanced::text::Renderer,
+{
+    Avatar::new(initials)
+}
+

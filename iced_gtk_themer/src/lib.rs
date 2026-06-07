@@ -7,7 +7,7 @@ pub use ext::*;
 pub mod widgets;
 
 pub use parser::{parse_gtk_theme, create_theme};
-pub use widgets::{action_row, preferences_group, clamp, segmented_button};
+pub use widgets::*;
 pub use asset_pipeline::ThemeAssets;
 pub use header_bar::HeaderBar;
 

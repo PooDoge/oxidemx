@@ -60,6 +60,6 @@ pub fn view_switcher<'a, Message: Clone + 'a>(
     container(scroll)
         .width(Length::Fill)
         .padding([4, 8])
-        .center_x()
+        .center_x(Length::Fill)
         .into()
 }

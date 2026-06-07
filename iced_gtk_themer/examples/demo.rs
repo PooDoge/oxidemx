@@ -1,6 +1,9 @@
 use iced::widget::{button, column, row, text, container, mouse_area, Space, scrollable, text_input, slider, toggler, checkbox, radio, pick_list, progress_bar};
 use iced::{Alignment, Element, Length, window, Size, Task, Event};
-use iced_gtk_themer::{GtkTheme, HeaderBar, action_row, preferences_group, clamp::clamp, segmented_button, ext::*};
+use iced_gtk_themer::{
+    GtkTheme, HeaderBar, action_row, preferences_group, clamp::clamp, segmented_button, ext::*,
+    avatar, spinner, banner, spin_row, boxed_list, button_row
+};
 use std::time::Instant;
 
 pub fn main() -> iced::Result {
@@ -205,6 +208,11 @@ impl Demo {
                     slider(0.0..=100.0, self.slider_value, Message::SliderChanged).gtk_style(gtk),
                     progress_bar(0.0..=100.0, self.slider_value),
                     toggler(self.toggled).label("Toggle State").on_toggle(Message::Toggled),
+                    row![
+                        avatar("JT"),
+                        spinner(),
+                    ].spacing(20),
+                    banner(text("This is a GTK-styled banner!")),
                 ].spacing(20).into(),
                 3 => {
                     let appearance_group = preferences_group(
@@ -241,11 +249,24 @@ impl Demo {
                                     self.segmented_selection,
                                 ).into()),
                             ),
+                            spin_row(
+                                gtk,
+                                "Volume",
+                                Some("Adjust the system volume"),
+                                self.slider_value as f64,
+                                |v| Message::SliderChanged(v as f32),
+                                1.0,
+                            ),
                         ],
                     );
+                    
+                    let advanced_group = boxed_list(gtk)
+                        .push(action_row("Boxed Item 1", None, None::<Element<Message>>))
+                        .push(action_row("Boxed Item 2", None, None::<Element<Message>>))
+                        .push(button_row(gtk, "Click Me!", None, Message::HeaderClicked, None));
 
                     clamp(
-                        column![appearance_group, controls_group].spacing(24),
+                        column![appearance_group, controls_group, advanced_group].spacing(24),
                         500.0,
                     ).into()
                 },

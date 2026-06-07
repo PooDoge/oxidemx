@@ -33,8 +33,8 @@ pub fn carousel<'a, Message: Clone + 'a>(
         page_row = page_row.push(
             container(page)
                 .width(Length::Fixed(300.0)) // Approximating page width
-                .center_x()
-                .center_y()
+                .center_x(Length::Fill)
+                .center_y(Length::Fill)
         );
     }
 
@@ -65,7 +65,7 @@ pub fn carousel<'a, Message: Clone + 'a>(
 
     column![
         scroll,
-        container(dots_row).width(Length::Fill).center_x()
+        container(dots_row).width(Length::Fill).center_x(Length::Fill)
     ]
     .spacing(12)
     .into()
