@@ -1,6 +1,9 @@
 pub mod action_row;
 pub mod avatar;
 pub mod banner;
+
+pub mod wrapper;
+pub mod menu;
 pub mod button_row;
 pub mod carousel;
 pub mod clamp;

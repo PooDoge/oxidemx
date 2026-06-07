@@ -325,8 +325,26 @@ impl Demo {
 
             let nav = nav_bar(gtk, &self.nav_tabs, self.active_tab, Message::TabSelected);
 
+            let my_menu = iced_gtk_themer::widgets::menu::menu_bar::menu_bar(vec![
+                iced_gtk_themer::widgets::menu::menu_tree::MenuTree::with_children(
+                    Element::from(button("File").padding(4).on_press(Message::HeaderClicked)),
+                    vec![
+                        iced_gtk_themer::widgets::menu::menu_tree::MenuTree::new(Element::from(button("New").padding(4).on_press(Message::HeaderClicked))),
+                        iced_gtk_themer::widgets::menu::menu_tree::MenuTree::new(Element::from(button("Open").padding(4).on_press(Message::HeaderClicked))),
+                    ]
+                ),
+                iced_gtk_themer::widgets::menu::menu_tree::MenuTree::with_children(
+                    Element::from(button("Edit").padding(4).on_press(Message::HeaderClicked)),
+                    vec![
+                        iced_gtk_themer::widgets::menu::menu_tree::MenuTree::new(Element::from(button("Undo").padding(4).on_press(Message::HeaderClicked))),
+                        iced_gtk_themer::widgets::menu::menu_tree::MenuTree::new(Element::from(button("Redo").padding(4).on_press(Message::HeaderClicked))),
+                    ]
+                )
+            ]);
+
             let content = column![
                 header,
+                my_menu,
                 row![
                     nav,
                     container(column![tabs, scrollable(tab_content).height(Length::Fill)].spacing(20).padding(20))
