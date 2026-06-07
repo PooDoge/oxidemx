@@ -2,6 +2,8 @@ pub mod parser;
 pub mod asset_pipeline;
 pub mod header_bar;
 pub mod style;
+pub mod ext;
+pub use ext::*;
 pub mod widgets;
 
 pub use parser::{parse_gtk_theme, create_theme};
@@ -13,6 +15,7 @@ use iced::Theme;
 use iced::Color;
 use std::collections::HashMap;
 
+#[derive(Clone)]
 pub struct GtkTheme {
     pub theme: Theme,
     pub colors: HashMap<String, Color>,

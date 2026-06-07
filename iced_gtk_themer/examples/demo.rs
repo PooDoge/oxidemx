@@ -1,6 +1,6 @@
 use iced::widget::{button, column, row, text, container, mouse_area, Space, scrollable, text_input, slider, toggler, checkbox, radio, pick_list, progress_bar};
 use iced::{Alignment, Element, Length, window, Size, Task, Event};
-use iced_gtk_themer::{GtkTheme, HeaderBar, action_row, preferences_group, clamp, segmented_button};
+use iced_gtk_themer::{GtkTheme, HeaderBar, action_row, preferences_group, clamp::clamp, segmented_button, ext::*};
 use std::time::Instant;
 
 pub fn main() -> iced::Result {
@@ -16,6 +16,7 @@ pub fn main() -> iced::Result {
         .style(|_state: &Demo, theme: &iced::Theme| iced::theme::Style {
             background_color: iced::Color::TRANSPARENT,
             text_color: theme.palette().text,
+            icon_color: theme.palette().text,
         })
         .subscription(Demo::subscription)
         .run()
@@ -168,16 +169,6 @@ impl Demo {
 
     fn view(&self) -> Element<Message> {
         if let Some(gtk) = &self.gtk_theme {
-            let btn_primary = |_: &iced::Theme, s| gtk.button_primary(s);
-            let btn_secondary = |_: &iced::Theme, s| gtk.button_secondary(s);
-            let btn_danger = |_: &iced::Theme, s| gtk.button_destructive(s);
-            let text_input_style = |_: &iced::Theme, s| gtk.text_input(s);
-            let checkbox_style = |_: &iced::Theme, s| gtk.checkbox(s);
-            let radio_style = |_: &iced::Theme, s| gtk.radio(s);
-            let slider_style = |_: &iced::Theme, s| gtk.slider(s);
-            let pick_list_style = |_: &iced::Theme, s| gtk.pick_list(s);
-            let card_style = |_: &iced::Theme| gtk.container_card();
-
             let header = HeaderBar::view(
                 "GTK Widget Showcase",
                 &gtk.assets,
@@ -197,21 +188,21 @@ impl Demo {
 
             let tab_content: Element<Message> = match self.active_tab {
                 0 => column![
-                    button("Primary Button").style(btn_primary),
-                    button("Secondary Button").style(btn_secondary),
-                    button("Destructive Button").style(btn_danger),
-                    button("Success Button").style(btn_primary),
+                    button("Primary Button").primary(gtk),
+                    button("Secondary Button").secondary(gtk),
+                    button("Destructive Button").destructive(gtk),
+                    button("Success Button").primary(gtk),
                     text("A simple label"),
                 ].spacing(20).into(),
                 1 => column![
-                    text_input("Enter text...", &self.text_val).on_input(Message::TextChanged).style(text_input_style),
-                    checkbox(self.checkbox_val).label("Check me out").on_toggle(Message::CheckboxToggled).style(checkbox_style),
-                    radio("Option A", "A", self.selected_option.as_deref(), |s| Message::OptionSelected(s.to_string())).style(radio_style),
-                    radio("Option B", "B", self.selected_option.as_deref(), |s| Message::OptionSelected(s.to_string())).style(radio_style),
-                    pick_list(vec!["Item 1".to_string(), "Item 2".to_string()], self.selected_option.clone(), Message::OptionSelected).style(pick_list_style),
+                    text_input("Enter text...", &self.text_val).on_input(Message::TextChanged).gtk_style(gtk),
+                    checkbox(self.checkbox_val).label("Check me out").on_toggle(Message::CheckboxToggled).gtk_style(gtk),
+                    radio("Option A", "A", self.selected_option.as_deref(), |s| Message::OptionSelected(s.to_string())).gtk_style(gtk),
+                    radio("Option B", "B", self.selected_option.as_deref(), |s| Message::OptionSelected(s.to_string())).gtk_style(gtk),
+                    pick_list(vec!["Item 1".to_string(), "Item 2".to_string()], self.selected_option.clone(), Message::OptionSelected).gtk_style(gtk),
                 ].spacing(20).into(),
                 2 => column![
-                    slider(0.0..=100.0, self.slider_value, Message::SliderChanged).style(slider_style),
+                    slider(0.0..=100.0, self.slider_value, Message::SliderChanged).gtk_style(gtk),
                     progress_bar(0.0..=100.0, self.slider_value),
                     toggler(self.toggled).label("Toggle State").on_toggle(Message::Toggled),
                 ].spacing(20).into(),
@@ -228,7 +219,7 @@ impl Demo {
                             action_row(
                                 "Theme",
                                 Some("Select the active GTK theme"),
-                                Some(pick_list(self.system_themes.clone(), self.selected_theme.clone(), Message::ThemeChanged).style(pick_list_style.clone()).into()),
+                                Some(pick_list(self.system_themes.clone(), self.selected_theme.clone(), Message::ThemeChanged).gtk_style(gtk).into()),
                             ),
                         ],
                     );
@@ -264,7 +255,7 @@ impl Demo {
             let content = column![
                 header,
                 container(column![tabs, scrollable(tab_content).height(Length::Fill)].spacing(20).padding(20))
-                    .style(card_style)
+                    .card(gtk)
                     .width(Length::Fill)
                     .height(Length::Fill)
             ];
