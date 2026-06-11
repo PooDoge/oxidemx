@@ -119,10 +119,137 @@ impl SubmenuState {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct ChatMessage {
     pub is_user: bool,
     pub text: String,
+    /// Parsed markdown for AI messages — rebuilt on construction
+    /// and on load (never serialized), so the 60 fps view never
+    /// re-parses.
+    #[serde(skip)]
+    pub md: Vec<iced::widget::markdown::Item>,
+}
+
+impl ChatMessage {
+    pub fn user(text: String) -> Self {
+        ChatMessage {
+            is_user: true,
+            text,
+            md: Vec::new(),
+        }
+    }
+
+    pub fn assistant(text: String) -> Self {
+        let md = iced::widget::markdown::parse(&text).collect();
+        ChatMessage {
+            is_user: false,
+            text,
+            md,
+        }
+    }
+}
+
+/// One AI conversation thread. The chat shell can hold several and
+/// switch between them; non-empty threads persist to
+/// `~/.config/oxidemx/ai-chats.json` so conversations survive
+/// overlay restarts. `session_id` is the server-side
+/// `previous_interaction_id` thread — it may expire upstream, in
+/// which case the next prompt simply starts fresh server context
+/// (the visible history is display-only either way).
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct ChatThread {
+    /// First user prompt, truncated — shown in the thread list.
+    #[serde(default)]
+    pub title: String,
+    pub mode: crate::ai_client::AgentMode,
+    #[serde(default)]
+    pub history: Vec<ChatMessage>,
+    #[serde(default)]
+    pub session_id: Option<String>,
+    /// Gemini model id for this thread (Flash by default; the
+    /// toolbar pill can switch to Pro for harder prompts).
+    #[serde(default = "default_chat_model")]
+    pub model: String,
+    /// Unix seconds of the last message — drives the "2h ago"
+    /// labels in the thread list.
+    #[serde(default)]
+    pub updated_at: u64,
+}
+
+fn default_chat_model() -> String {
+    crate::ai_client::DEFAULT_MODEL.to_string()
+}
+
+/// Current unix time in whole seconds.
+pub fn now_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+impl Default for ChatThread {
+    fn default() -> Self {
+        ChatThread {
+            title: String::new(),
+            mode: crate::ai_client::AgentMode::SettingsCustomizer,
+            history: Vec::new(),
+            session_id: None,
+            model: default_chat_model(),
+            updated_at: 0,
+        }
+    }
+}
+
+/// Most threads kept on disk — oldest beyond this are dropped on save.
+const MAX_SAVED_CHATS: usize = 30;
+
+fn chats_path() -> std::path::PathBuf {
+    let home = std::env::var("HOME").unwrap_or_default();
+    std::path::Path::new(&home).join(".config/oxidemx/ai-chats.json")
+}
+
+/// Load persisted chat threads; always returns at least one (empty)
+/// thread so `RadialState::chat()` is total.
+pub fn load_chat_threads() -> Vec<ChatThread> {
+    let mut threads: Vec<ChatThread> = std::fs::read_to_string(chats_path())
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default();
+    threads.retain(|t: &ChatThread| !t.history.is_empty());
+    // Rebuild the serde-skipped parsed-markdown for AI messages.
+    for thread in &mut threads {
+        for msg in &mut thread.history {
+            if !msg.is_user {
+                msg.md = iced::widget::markdown::parse(&msg.text).collect();
+            }
+        }
+    }
+    threads.push(ChatThread::default());
+    threads
+}
+
+/// Best-effort persist of all non-empty threads (newest kept when
+/// over the cap). Small file, sync write — called on response /
+/// thread-management events, not per keystroke.
+pub fn save_chat_threads(threads: &[ChatThread]) {
+    let keep: Vec<&ChatThread> = threads
+        .iter()
+        .filter(|t| !t.history.is_empty())
+        .collect();
+    let start = keep.len().saturating_sub(MAX_SAVED_CHATS);
+    let path = chats_path();
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    match serde_json::to_string(&keep[start..]) {
+        Ok(json) => {
+            if let Err(e) = std::fs::write(&path, json) {
+                tracing::warn!(error = %e, "failed to persist AI chats");
+            }
+        }
+        Err(e) => tracing::warn!(error = %e, "failed to serialise AI chats"),
+    }
 }
 
 /// Top-level model for the iced app. Owns everything view() needs.
@@ -154,11 +281,30 @@ pub struct RadialState {
     pub focused_class: Option<String>,
 
     // AI Assistant state fields
-    pub ai_input: String,
-    pub ai_history: Vec<ChatMessage>,
+    /// Multi-line prompt editor contents (runtime-only).
+    pub ai_editor: iced::widget::text_editor::Content,
     pub ai_loading: bool,
-    pub ai_session_id: Option<String>,
+    /// All chat threads (always ≥ 1); `ai_active` indexes the one
+    /// the conversation view shows. Loaded from / persisted to
+    /// `~/.config/oxidemx/ai-chats.json`.
+    pub ai_threads: Vec<ChatThread>,
+    pub ai_active: usize,
+    /// True while the chat shell shows the thread list instead of
+    /// the active conversation.
+    pub ai_show_threads: bool,
     pub ai_pending_question: Option<crate::ai_client::PendingQuestion>,
+    /// In-flight streamed reply: `(thread idx, text so far)`. Only
+    /// one request can be in flight (`ai_loading` gates submit).
+    pub ai_stream: Option<(usize, String)>,
+    /// What the agent is doing right now, for the loading row.
+    pub ai_activity: Option<&'static str>,
+    /// Abort handle for the in-flight request (Stop button).
+    pub ai_abort: Option<iced::task::Handle>,
+    /// Index (within the active thread's history) of the bubble the
+    /// pointer is over — reveals its copy button.
+    pub ai_hover_msg: Option<usize>,
+    /// Thread-rename in progress: `(thread idx, draft title)`.
+    pub ai_renaming: Option<(usize, String)>,
     /// User-tweakable animation parameters for menu / submenu /
     /// slice highlight. Reloaded by the inotify watcher so the
     /// user can iterate on feel without restarting.
@@ -274,7 +420,24 @@ pub struct RadialState {
     /// "originating from the slice you just clicked".
     pub(crate) dispatch_origin: Option<usize>,
     pub window_id: Option<iced::window::Id>,
+
+    /// Disc ↔ AI-chat morph tween. 0.0 = round menu, 1.0 = the
+    /// arc-shell chat layout. Retargeted by `sync_ai_morph()`
+    /// whenever the active page changes; geometry + crossfade
+    /// ramps live in `crate::chat_shell`.
+    pub(crate) ai_morph: Tween,
+
+    /// Set when entering the AI page; the app layer's Tick consumes
+    /// it once the chat widgets are mounted in the tree and issues a
+    /// `focus_next()` so the text input is focused without a click
+    /// (iced 0.14 can't focus a widget that isn't in the tree yet,
+    /// and at page-change time the chat content hasn't faded in).
+    pub chat_focus_pending: bool,
 }
+
+/// Name of the auto-appended AI Assistant page. Shared between the
+/// page builder, the morph trigger, and the view layer.
+pub const AI_PAGE_NAME: &str = "AI Assistant";
 
 /// How long a haptic-ripple shader pass animates from trigger to
 /// fully-faded. ~400 ms feels physical without lingering past
@@ -328,6 +491,7 @@ impl RadialState {
         }
         let slices = pages.first().map(|p| p.slices.clone()).unwrap_or_default();
         let anim_config = config.radial_menu.animation.clone();
+        let ai_threads = load_chat_threads();
         let visuals = config.radial_menu.visuals.clone();
         RadialState {
             theme,
@@ -336,11 +500,19 @@ impl RadialState {
             active_page: 0,
             cycle_pages_cache,
             focused_class: None,
-            ai_input: String::new(),
-            ai_history: Vec::new(),
+            ai_editor: iced::widget::text_editor::Content::new(),
             ai_loading: false,
-            ai_session_id: None,
+            // Start on the freshly-appended empty thread (always
+            // last — load_chat_threads guarantees ≥ 1).
+            ai_active: ai_threads.len() - 1,
+            ai_threads,
+            ai_show_threads: false,
             ai_pending_question: None,
+            ai_stream: None,
+            ai_activity: None,
+            ai_abort: None,
+            ai_hover_msg: None,
+            ai_renaming: None,
             anim_config,
             visuals,
             highlights: [Tween::at(0.0); 8],
@@ -363,6 +535,8 @@ impl RadialState {
             dispatch_origin: None,
             page_name_flash: None,
             window_id: None,
+            ai_morph: Tween::at(0.0),
+            chat_focus_pending: false,
         }
     }
 
@@ -416,6 +590,10 @@ impl RadialState {
         self.menu.set_target(1.0, &self.anim_config.menu.enter);
         self.show_time = Some(Instant::now());
         self.toggle_mode = false;
+        // Every Show starts as a clean disc — any chat-shell morph
+        // from the previous session is hard-reset.
+        self.ai_morph = Tween::at(0.0);
+        self.chat_focus_pending = false;
         // Pick the page based on the current focused-class cache.
         // The cache is repopulated by `apply_focused_class` from
         // the GNOME-extension query that fires alongside Show, so
@@ -523,7 +701,105 @@ impl RadialState {
         }
         self.active_page = idx.min(self.pages.len() - 1);
         self.refresh_active_slices();
+        self.sync_ai_morph();
     }
+
+    /// The active chat thread. Total — `ai_threads` is never empty
+    /// and the index is clamped defensively.
+    pub fn chat(&self) -> &ChatThread {
+        let i = self.ai_active.min(self.ai_threads.len() - 1);
+        &self.ai_threads[i]
+    }
+
+    pub fn chat_mut(&mut self) -> &mut ChatThread {
+        let i = self.ai_active.min(self.ai_threads.len() - 1);
+        &mut self.ai_threads[i]
+    }
+
+    /// Start a fresh conversation. Reuses the current thread when
+    /// it's still empty (no stacking of blank threads); otherwise
+    /// appends a new one and switches to it.
+    pub fn ai_new_chat(&mut self) {
+        if !self.chat().history.is_empty() {
+            self.ai_threads.push(ChatThread::default());
+            self.ai_active = self.ai_threads.len() - 1;
+        }
+        self.ai_show_threads = false;
+        self.ai_pending_question = None;
+        self.ai_editor = iced::widget::text_editor::Content::new();
+        self.ai_hover_msg = None;
+        self.ai_renaming = None;
+    }
+
+    /// Switch the conversation view to thread `idx`.
+    pub fn ai_select_chat(&mut self, idx: usize) {
+        if idx < self.ai_threads.len() {
+            self.ai_active = idx;
+        }
+        self.ai_show_threads = false;
+        self.ai_pending_question = None;
+        self.ai_hover_msg = None;
+        self.ai_renaming = None;
+    }
+
+    /// Delete thread `idx`, keeping the invariant `ai_threads ≥ 1`
+    /// and a valid `ai_active` (deleting the active thread lands on
+    /// a fresh empty one).
+    pub fn ai_delete_thread(&mut self, idx: usize) {
+        if idx >= self.ai_threads.len() {
+            return;
+        }
+        self.ai_threads.remove(idx);
+        if self.ai_threads.is_empty() {
+            self.ai_threads.push(ChatThread::default());
+        }
+        if self.ai_active >= self.ai_threads.len() {
+            self.ai_active = self.ai_threads.len() - 1;
+        } else if idx < self.ai_active {
+            self.ai_active -= 1;
+        }
+        self.ai_renaming = None;
+        self.ai_hover_msg = None;
+    }
+
+    /// Retarget the disc ↔ chat morph to match the active page.
+    /// Entering the AI page also forces toggle mode — the chat
+    /// needs a real cursor and keyboard, and there's no slice to
+    /// drag-select anyway.
+    fn sync_ai_morph(&mut self) {
+        let on_ai = self.is_ai_page();
+        if on_ai && self.ai_morph.target < 0.5 {
+            self.ai_morph
+                .set_target(1.0, &self.anim_config.ai_morph.enter);
+            self.toggle_mode = true;
+            self.chat_focus_pending = true;
+        } else if !on_ai && self.ai_morph.target > 0.5 {
+            self.ai_morph
+                .set_target(0.0, &self.anim_config.ai_morph.exit);
+            self.chat_focus_pending = false;
+        }
+    }
+
+    /// True when the active page is the auto-appended AI Assistant
+    /// page (the one the chat shell morphs over).
+    pub fn is_ai_page(&self) -> bool {
+        self.pages
+            .get(self.active_page)
+            .map(|p| p.name == AI_PAGE_NAME)
+            .unwrap_or(false)
+    }
+
+    /// Current disc ↔ chat morph progress (0 = disc, 1 = chat).
+    pub fn ai_morph_progress(&self) -> f32 {
+        self.ai_morph.current
+    }
+
+    /// Whole-menu open/close alpha — multiplied into the chat
+    /// shell so dismiss-from-chat fades everything together.
+    pub fn menu_open_alpha(&self) -> f32 {
+        self.menu.current.clamp(0.0, 1.0)
+    }
+
 
     fn refresh_active_slices(&mut self) {
         self.slices = self
@@ -982,6 +1258,7 @@ impl RadialState {
             a.step(dt_ms);
         }
         self.menu.step(dt_ms);
+        self.ai_morph.step(dt_ms);
         // Page-transition tween advances independently of menu /
         // submenu / highlights. When it settles, drop the cached
         // outgoing slices so the renderer falls back to the
@@ -1054,6 +1331,10 @@ impl RadialState {
         self.refresh_active_slices();
         self.anim_config = config.radial_menu.animation.clone();
         self.visuals = config.radial_menu.visuals.clone();
+        // Keep the chat morph consistent with whatever page survived
+        // the reload (the AI page is re-appended by pages_from_config,
+        // so an open chat stays open across config edits).
+        self.sync_ai_morph();
         for a in &mut self.highlights {
             *a = Tween::at(0.0);
         }
@@ -1087,7 +1368,7 @@ fn pages_from_config(config: &AppConfig) -> Vec<RadialPage> {
     }
     // Append the AI page
     pages.push(RadialPage {
-        name: "AI Assistant".into(),
+        name: AI_PAGE_NAME.into(),
         slices: vec![
             Slice {
                 action_id: None,
@@ -1191,6 +1472,14 @@ impl<'a> canvas::Program<crate::app::Message> for Painter<'a> {
         if !self.state.is_open() || !self.state.is_toggle_mode() {
             return None;
         }
+        // While the chat shell is up (or in flight) the disc has no
+        // hit surface — clicks belong to the chat widgets and the
+        // caps painter. Without this gate a click on empty chat
+        // background would fall through to ToggleClickSelect and
+        // close the menu.
+        if self.state.ai_morph_progress() > 0.01 {
+            return None;
+        }
         match event {
             Event::Mouse(mouse::Event::CursorMoved { .. }) => {
                 let p = cursor.position_in(bounds)?;
@@ -1285,7 +1574,11 @@ impl<'a> canvas::Program<crate::app::Message> for Painter<'a> {
             &self.state.anim_config.menu.exit,
         );
         let mscale = menu_t.scale.max(0.0);
-        let mopacity = menu_t.alpha.clamp(0.0, 1.0);
+        // The disc cross-fades into the chat shell's caps at the
+        // start of the AI morph — same multiplier every shader
+        // layer applies in app.rs::view.
+        let mopacity = menu_t.alpha.clamp(0.0, 1.0)
+            * crate::chat_shell::disc_alpha(self.state.ai_morph_progress());
 
         // Apply the menu-level translate / rotate / flip-scale to
         // the frame BEFORE any drawing. Identity transforms (the

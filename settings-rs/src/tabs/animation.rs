@@ -26,6 +26,7 @@ pub fn view(state: &State) -> Element<'_, Message> {
     let elements = [
         AnimElement::Menu,
         AnimElement::Submenu,
+        AnimElement::AiMorph,
         AnimElement::SliceHighlight,
     ];
     let mut col = column![
@@ -349,6 +350,7 @@ fn element_section<'a>(
         AnimElement::SliceHighlight => {
             crate::animation_editor::AnimEditorElement::SliceHighlight
         }
+        AnimElement::AiMorph => crate::animation_editor::AnimEditorElement::AiMorph,
     };
     let is_custom =
         anim.enter.is_custom() || anim.exit.is_custom();

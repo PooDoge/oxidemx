@@ -333,6 +333,14 @@ pub struct Config {
     #[serde(default)]
     pub gaming: oxidemx_shared::GamingConfig,
 
+    /// Radial-menu block. The daemon only cares about the master
+    /// `enabled` gate (the indicator popup's "Radial Overlay" quick
+    /// toggle gating ShowMenu); every other key under `radial_menu`
+    /// belongs to the overlay and is preserved via the struct's own
+    /// flatten catch-all.
+    #[serde(default)]
+    pub radial_menu: RadialMenuConfig,
+
     /// Catch-all for extra config fields to preserve them when writing back
     #[serde(flatten)]
     pub other_fields: std::collections::BTreeMap<String, serde_json::Value>,
@@ -340,6 +348,26 @@ pub struct Config {
     /// Configuration file path (not serialized)
     #[serde(skip)]
     pub config_path: Option<PathBuf>,
+}
+
+/// Radial-menu settings persisted under `radial_menu` in config.json.
+/// Only `enabled` is daemon-relevant; the overlay's visual knobs stay
+/// untyped in `other` so they round-trip on save.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RadialMenuConfig {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    #[serde(flatten)]
+    pub other: std::collections::BTreeMap<String, serde_json::Value>,
+}
+
+impl Default for RadialMenuConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            other: std::collections::BTreeMap::new(),
+        }
+    }
 }
 
 /// Pointer settings persisted under `pointer` in config.json. The
@@ -424,6 +452,7 @@ impl Default for Config {
             pointer: PointerConfig::default(),
             scroll: ScrollConfig::default(),
             gaming: oxidemx_shared::GamingConfig::default(),
+            radial_menu: RadialMenuConfig::default(),
             config_path: None,
             other_fields: std::collections::BTreeMap::new(),
         }

@@ -23,6 +23,7 @@ mod actions;
 mod ai_client;
 mod anim;
 mod app;
+mod chat_shell;
 mod config;
 mod dbus;
 mod fonts;

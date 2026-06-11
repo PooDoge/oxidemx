@@ -286,6 +286,16 @@ pub enum Message {
     /// concrete Message to dispatch back so iced has a typed
     /// completion; the handler is a no-op.
     LastTabPersisted,
+    /// AI Assistant: the Gemini API key draft text changed
+    /// (Settings tab — the field is write-only; the stored key is
+    /// never loaded back into the UI).
+    AiKeyDraftChanged(String),
+    /// AI Assistant: persist the drafted key to
+    /// `~/.config/oxidemx/gemini.key` (created 0600). The overlay
+    /// re-reads the file on every prompt, so no restart is needed.
+    AiKeySave,
+    /// AI Assistant: delete the stored key file.
+    AiKeyRemove,
     /// Open a save dialog to write the current config to a JSON
     /// file. Useful for backups, sharing setups, or migrating
     /// between machines.
@@ -862,6 +872,7 @@ pub enum AnimElement {
     Menu,
     Submenu,
     SliceHighlight,
+    AiMorph,
 }
 
 impl AnimElement {
@@ -870,6 +881,7 @@ impl AnimElement {
             AnimElement::Menu => "Menu",
             AnimElement::Submenu => "Submenu",
             AnimElement::SliceHighlight => "Slice highlight",
+            AnimElement::AiMorph => "AI chat morph",
         }
     }
 
@@ -881,6 +893,11 @@ impl AnimElement {
             }
             AnimElement::SliceHighlight => {
                 "Per-slice hover glow — fades in when the cursor enters a slice."
+            }
+            AnimElement::AiMorph => {
+                "Disc → AI chat transform — the wheel splits into the arc shell \
+                 and the conversation fades in. Duration + easing control the \
+                 whole timeline."
             }
         }
     }
@@ -894,6 +911,7 @@ impl AnimElement {
             AnimElement::Menu => &anim.menu,
             AnimElement::Submenu => &anim.submenu,
             AnimElement::SliceHighlight => &anim.slice_highlight,
+            AnimElement::AiMorph => &anim.ai_morph,
         }
     }
 
@@ -902,6 +920,7 @@ impl AnimElement {
             AnimElement::Menu => &mut anim.menu,
             AnimElement::Submenu => &mut anim.submenu,
             AnimElement::SliceHighlight => &mut anim.slice_highlight,
+            AnimElement::AiMorph => &mut anim.ai_morph,
         }
     }
 
@@ -910,6 +929,7 @@ impl AnimElement {
             AnimElement::Menu => ElementAnimation::menu_default(),
             AnimElement::Submenu => ElementAnimation::submenu_default(),
             AnimElement::SliceHighlight => ElementAnimation::slice_highlight_default(),
+            AnimElement::AiMorph => ElementAnimation::ai_morph_default(),
         }
     }
 }
@@ -1082,6 +1102,22 @@ pub struct State {
     /// the Gaming tab after the user clicks "Diagnose". `None` until
     /// the first diagnose; refreshed on each subsequent click.
     pub haptic_diagnosis: Option<String>,
+    /// In-flight Gemini API key text (Settings tab → AI Assistant).
+    /// Write-only: the stored key is never loaded back into the
+    /// field, only a "configured" indicator is shown.
+    pub ai_key_draft: String,
+    /// Whether `~/.config/oxidemx/gemini.key` exists. Checked at
+    /// boot and updated on save/remove.
+    pub ai_key_present: bool,
+}
+
+/// Where the AI Assistant's Gemini API key lives. Mirrors the
+/// lookup in `overlay-rs/src/ai_client.rs::load_api_key` (which
+/// also honours `GEMINI_API_KEY` and the legacy juhradial path —
+/// this app only manages the canonical file).
+pub fn ai_key_path() -> std::path::PathBuf {
+    let home = std::env::var("HOME").unwrap_or_default();
+    std::path::Path::new(&home).join(".config/oxidemx/gemini.key")
 }
 
 impl Default for State {
@@ -1148,6 +1184,8 @@ impl Default for State {
                     .collect(),
             ),
             haptic_diagnosis: None,
+            ai_key_draft: String::new(),
+            ai_key_present: ai_key_path().exists(),
         }
     }
 }
@@ -2013,6 +2051,50 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                 }
                 state.capturing_shortcut = None;
                 state.status = format!("Captured: {chord}");
+            }
+            Task::none()
+        }
+        Message::AiKeyDraftChanged(v) => {
+            state.ai_key_draft = v;
+            Task::none()
+        }
+        Message::AiKeySave => {
+            let key = state.ai_key_draft.trim().to_string();
+            if key.is_empty() {
+                state.status = "AI key field is empty — nothing saved".into();
+                return Task::none();
+            }
+            let path = ai_key_path();
+            let result = (|| -> std::io::Result<()> {
+                if let Some(dir) = path.parent() {
+                    std::fs::create_dir_all(dir)?;
+                }
+                std::fs::write(&path, &key)?;
+                // Secret on disk — owner read/write only.
+                use std::os::unix::fs::PermissionsExt;
+                let mut perms = std::fs::metadata(&path)?.permissions();
+                perms.set_mode(0o600);
+                std::fs::set_permissions(&path, perms)?;
+                Ok(())
+            })();
+            match result {
+                Ok(()) => {
+                    state.ai_key_draft.clear();
+                    state.ai_key_present = true;
+                    state.status =
+                        "AI API key saved — the assistant uses it from the next message".into();
+                }
+                Err(e) => state.status = format!("AI key save failed: {e}"),
+            }
+            Task::none()
+        }
+        Message::AiKeyRemove => {
+            match std::fs::remove_file(ai_key_path()) {
+                Ok(()) => {
+                    state.ai_key_present = false;
+                    state.status = "AI API key removed".into();
+                }
+                Err(e) => state.status = format!("AI key remove failed: {e}"),
             }
             Task::none()
         }

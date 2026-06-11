@@ -35,9 +35,16 @@ struct CacheKey {
 
 /// Per-instance icon cache. Single-threaded (interior `RefCell`) —
 /// callers running on the iced main thread don't need a Mutex.
+///
+/// Failures are cached too (`None` entries): a nonexistent icon
+/// name otherwise re-runs the FULL miss path — a `gsettings`
+/// subprocess + recursive walks of every icon theme directory —
+/// on every render frame, which visibly lags both the overlay and
+/// settings-rs (first hit: an AI-generated page using the made-up
+/// `folder-code-symbolic` on 5 slices).
 #[derive(Default)]
 pub struct IconCache {
-    cache: RefCell<HashMap<CacheKey, RasterIcon>>,
+    cache: RefCell<HashMap<CacheKey, Option<RasterIcon>>>,
 }
 
 impl IconCache {
@@ -47,7 +54,8 @@ impl IconCache {
 
     /// Resolve `source` (XDG icon name OR absolute path) at `size`
     /// pixels, tinted by `color_rgba`. Returns `None` if the source
-    /// can't be loaded — caller falls back to a placeholder.
+    /// can't be loaded — caller falls back to a placeholder. Both
+    /// outcomes are cached.
     pub fn resolve(
         &self,
         source: &str,
@@ -62,17 +70,15 @@ impl IconCache {
             size,
             color: pack_color(color_rgba),
         };
-        if let Some(h) = self.cache.borrow().get(&key) {
-            return Some(h.clone());
+        if let Some(cached) = self.cache.borrow().get(&key) {
+            return cached.clone();
         }
-        let raw = load_raw_rgba(source, size)?;
-        let tinted = tint_alpha_mask(&raw, color_rgba);
-        let icon = RasterIcon {
+        let icon = load_raw_rgba(source, size).map(|raw| RasterIcon {
             size,
-            rgba: tinted,
-        };
+            rgba: tint_alpha_mask(&raw, color_rgba),
+        });
         self.cache.borrow_mut().insert(key, icon.clone());
-        Some(icon)
+        icon
     }
 
     /// Same as `resolve` but skips tinting — returns the icon's
@@ -89,16 +95,12 @@ impl IconCache {
             size,
             color: 0,
         };
-        if let Some(h) = self.cache.borrow().get(&key) {
-            return Some(h.clone());
+        if let Some(cached) = self.cache.borrow().get(&key) {
+            return cached.clone();
         }
-        let raw = load_raw_rgba(source, size)?;
-        let icon = RasterIcon {
-            size,
-            rgba: raw,
-        };
+        let icon = load_raw_rgba(source, size).map(|raw| RasterIcon { size, rgba: raw });
         self.cache.borrow_mut().insert(key, icon.clone());
-        Some(icon)
+        icon
     }
 }
 
@@ -266,16 +268,24 @@ fn walk_for(theme_dir: &Path, filename: &str) -> Option<PathBuf> {
 }
 
 fn current_icon_theme() -> String {
-    std::process::Command::new("gsettings")
-        .args(["get", "org.gnome.desktop.interface", "icon-theme"])
-        .output()
-        .ok()
-        .map(|o| {
-            let raw = String::from_utf8_lossy(&o.stdout);
-            raw.trim().trim_matches('\'').to_string()
+    // One subprocess per PROCESS, not per lookup — this used to
+    // spawn `gsettings` on every cache miss, which multiplied with
+    // the missing-icon retry storm into visible frame drops.
+    static THEME: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    THEME
+        .get_or_init(|| {
+            std::process::Command::new("gsettings")
+                .args(["get", "org.gnome.desktop.interface", "icon-theme"])
+                .output()
+                .ok()
+                .map(|o| {
+                    let raw = String::from_utf8_lossy(&o.stdout);
+                    raw.trim().trim_matches('\'').to_string()
+                })
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| DEFAULT_THEME.to_string())
         })
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| DEFAULT_THEME.to_string())
+        .clone()
 }
 
 fn icon_search_dirs() -> Vec<PathBuf> {

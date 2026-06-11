@@ -74,6 +74,31 @@ pub async fn list_monitors() -> zbus::Result<Vec<(i32, i32, i32, i32, i32)>> {
     proxy.list_monitors().await
 }
 
+/// Ask the extension to raise AND activate our window. On Wayland a
+/// client can't take keyboard focus itself (`gain_focus` needs an
+/// xdg-activation token the daemon-spawned overlay never has), but
+/// the extension runs inside Mutter and can call
+/// `Meta.Window.activate()` directly — this is how the AI chat shell
+/// gets real keyboard focus for its text input.
+pub async fn raise_overlay(app_id: String) -> bool {
+    match try_raise_overlay(&app_id).await {
+        Ok(success) => success,
+        Err(e) => {
+            warn!(
+                "RaiseOverlay D-Bus call failed: {e} \
+                 (extension {HELPER_SERVICE} not enabled?)"
+            );
+            false
+        }
+    }
+}
+
+async fn try_raise_overlay(app_id: &str) -> zbus::Result<bool> {
+    let conn = Connection::session().await?;
+    let proxy = CursorHelperProxy::new(&conn).await?;
+    proxy.raise_overlay(app_id).await
+}
+
 /// Ask the GNOME extension for the currently-focused window's
 /// application class. `ignore_app_id` is the overlay's own app_id —
 /// the extension skips that window so toggle-mode focus on the

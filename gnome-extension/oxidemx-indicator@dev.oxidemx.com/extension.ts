@@ -98,31 +98,34 @@ function monitorIndexForPoint(x: number, y: number): number {
     return display.get_primary_monitor();
 }
 
-function findWindowByAppId(appId: string): MetaWindow | null {
-    const actors: MetaWindowActor[] = global.get_window_actors();
-    
+function windowMatchesAppId(win: MetaWindow, appId: string): boolean {
     let alternativeNames: string[] = [];
     if (appId === "org.oxidemx.overlay") {
         alternativeNames = ["oxidemx-overlay", "oxidemx-overlay"];
     } else if (appId === "org.oxidemx.popup") {
         alternativeNames = ["oxidemx-popup", "oxidemx-popup"];
     }
+    const candidates: Array<string | null | undefined> = [
+        win.get_gtk_application_id?.(),
+        win.get_wm_class?.(),
+        win.get_wm_class_instance?.(),
+        win.get_sandboxed_app_id?.(),
+    ];
+    for (const c of candidates) {
+        if (c && (c === appId || alternativeNames.includes(c))) {
+            return true;
+        }
+    }
+    return false;
+}
 
+function findWindowByAppId(appId: string): MetaWindow | null {
+    const actors: MetaWindowActor[] = global.get_window_actors();
     for (const actor of actors) {
         const win: MetaWindow | null | undefined = actor.get_meta_window?.();
         if (!win) continue;
-        const candidates: Array<string | null | undefined> = [
-            win.get_gtk_application_id?.(),
-            win.get_wm_class?.(),
-            win.get_wm_class_instance?.(),
-            win.get_sandboxed_app_id?.(),
-        ];
-        for (const c of candidates) {
-            if (c) {
-                if (c === appId || alternativeNames.includes(c)) {
-                    return win;
-                }
-            }
+        if (windowMatchesAppId(win, appId)) {
+            return win;
         }
     }
     return null;
@@ -330,6 +333,11 @@ export default class OxideMXIndicatorExtension extends Extension {
     private _registrationId: number | null = null;
     private _connection: Gio.DBusConnection | null = null;
 
+    // window-demands-attention / window-marked-urgent listeners —
+    // the focus-stealing-prevention safety net for the overlay's AI
+    // chat window (the "stealmyfocus" pattern, scoped to our window).
+    private _attentionSignalIds: number[] = [];
+
     override enable(): void {
         this._cancellable = new Gio.Cancellable();
 
@@ -463,6 +471,25 @@ export default class OxideMXIndicatorExtension extends Extension {
         // Start data services — they begin emitting state asynchronously.
         this._battery.start();
         this._supervisor.start();
+
+        // Safety net: if Mutter ever demotes an overlay activation to
+        // "window is ready" (demands-attention) instead of focusing,
+        // re-activate immediately — but ONLY for our own overlay
+        // window, so normal apps keep standard focus-stealing
+        // prevention.
+        const display: any = (global as any).display;
+        if (display?.connect) {
+            for (const signal of ['window-demands-attention', 'window-marked-urgent']) {
+                this._attentionSignalIds.push(
+                    display.connect(signal, (_d: unknown, win: any) => {
+                        if (win && windowMatchesAppId(win, 'org.oxidemx.overlay')) {
+                            log(`[oxidemx-indicator] overlay ${signal} — re-activating`);
+                            Main.activateWindow(win);
+                        }
+                    }),
+                );
+            }
+        }
     }
 
     override disable(): void {
@@ -471,6 +498,13 @@ export default class OxideMXIndicatorExtension extends Extension {
             try { unsub(); } catch { /* ignore */ }
         }
         this._unsubs = [];
+
+        // Disconnect the demands-attention safety net.
+        const display: any = (global as any).display;
+        for (const id of this._attentionSignalIds) {
+            try { display?.disconnect?.(id); } catch { /* ignore */ }
+        }
+        this._attentionSignalIds = [];
 
         // Stop data services.
         this._battery?.stop();
@@ -521,8 +555,10 @@ export default class OxideMXIndicatorExtension extends Extension {
             indicator.setHealth(health);
         }
 
-        // Initialize the custom settings popup and add it to the main menu
-        const popup = new OxideMXPopup(this._battery.proxy, this._settings);
+        // Initialize the custom settings popup and add it to the main menu.
+        // Pass the whole BatteryClient — its D-Bus proxy is created
+        // asynchronously and would still be null here.
+        const popup = new OxideMXPopup(this._battery, this._settings);
         indicator.menu.addMenuItem(popup);
         indicator._juhPopup = popup;
 
@@ -536,10 +572,15 @@ export default class OxideMXIndicatorExtension extends Extension {
             return this._onIndicatorCapturedEvent(indicator, event);
         });
 
-        // Close context menu if main popup opens
+        // On open: close a lingering context menu and re-query the daemon
+        // so the popup always shows live state (covers keyboard/other open
+        // paths, not just the left-click dispatch below).
         indicator.menu.connect('open-state-changed', (_menu: object, open: boolean) => {
             if (open && indicator._contextMenu.isOpen) {
                 indicator._contextMenu.close(BoxPointer.PopupAnimation.FADE);
+            }
+            if (open && indicator._juhPopup) {
+                indicator._juhPopup.refreshState();
             }
         });
 
@@ -590,10 +631,8 @@ export default class OxideMXIndicatorExtension extends Extension {
 
         switch (behavior) {
             case 'popup':
-                if (indicator._juhPopup) {
-                    indicator._juhPopup.refreshState();
-                }
-                // Let the primary click propagate to open indicator.menu containing our popup
+                // Let the primary click propagate to open indicator.menu;
+                // the open-state-changed handler refreshes the popup state.
                 return Clutter.EVENT_PROPAGATE;
 
             case 'settings':
@@ -675,7 +714,13 @@ export default class OxideMXIndicatorExtension extends Extension {
                 const [appId]: [string] = params.deep_unpack() as [string];
                 const win: MetaWindow | null = findWindowByAppId(appId);
                 if (win) {
-                    const ts: number = global.get_current_time();
+                    // Inside an idle D-Bus handler there's no current
+                    // event, so get_current_time() can return 0 — the
+                    // roundtrip variant asks the server for a real
+                    // timestamp, which matters for focus transfer.
+                    const display: any = global.display;
+                    const ts: number = global.get_current_time() ||
+                        (display?.get_current_time_roundtrip?.() ?? 0);
                     if (win.minimized) {
                         win.unminimize();
                     }
@@ -685,8 +730,12 @@ export default class OxideMXIndicatorExtension extends Extension {
                     if (typeof win.hide_from_window_list === 'function') {
                         win.hide_from_window_list();
                     }
-                    win.raise();
-                    win.activate(ts);
+                    // Main.activateWindow handles raise + unminimize +
+                    // cross-workspace focus + hiding the overview;
+                    // extension-initiated activation runs as a trusted
+                    // PAGER source so focus-stealing prevention doesn't
+                    // demote it.
+                    Main.activateWindow(win as any, ts);
                     invocation.return_value(new GLib.Variant('(b)', [true]));
                 } else {
                     invocation.return_value(new GLib.Variant('(b)', [false]));

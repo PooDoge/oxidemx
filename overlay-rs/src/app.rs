@@ -63,17 +63,74 @@ pub enum Message {
     CenterOverlay(Option<Size>),
     
     // AI Assistant Messages
-    AiInputChanged(String),
+    AiEditorAction(iced::widget::text_editor::Action),
     AiSubmitPrompt,
-    AiResponseReceived(Result<(String, Option<String>), String>),
+    /// Live event from the in-flight agent turn: text delta or
+    /// tool-activity label, tagged with the requesting thread.
+    AiStream((usize, crate::ai_client::StreamEvent)),
+    /// Stop button — abort the in-flight request, keep the partial.
+    AiStopRequest,
+    /// A link inside a rendered markdown bubble was clicked.
+    AiLinkClicked(String),
+    /// Copy arbitrary text (bubble ⧉ button / Copy chat).
+    AiCopyText(String),
+    /// Pointer entered/left a chat bubble (reveals its copy button).
+    AiBubbleHover(Option<usize>),
+    /// Cycle the active thread's model Flash ↔ Pro.
+    AiModelToggled,
+    AiRenameStart(usize),
+    AiRenameInput(String),
+    AiRenameCommit,
+    AiDeleteThread(usize),
+    /// Copy the whole active conversation as markdown.
+    AiCopyChat,
+    /// Reply for the prompt sent from thread `.0` — indexed so a
+    /// response landing after the user switched/created threads
+    /// still files into the conversation that asked.
+    AiResponseReceived(usize, Result<(String, Option<String>), String>),
     AiChooseOption(String),
     AiQuestionReceived(crate::ai_client::PendingQuestion),
+    /// Agent-mode pill clicked (Menu Setup ↔ General). Switching
+    /// resets the server-side session thread — the two modes'
+    /// tool configurations can't share one Interactions thread —
+    /// but keeps the visible history.
+    AiModeSelected(crate::ai_client::AgentMode),
+    /// "+ New" — start a fresh conversation thread.
+    AiNewChat,
+    /// Toggle the previous-conversations list.
+    AiToggleThreads,
+    /// Open thread `.0` from the list.
+    AiSelectThread(usize),
+    /// Mouse-down on the chat shell's header arc (outside the ×) —
+    /// starts a native compositor window move, like grabbing a
+    /// titlebar.
+    ChatHeaderPressed,
+    /// The overlay window lost keyboard focus. Dismisses the disc
+    /// (click-elsewhere-to-close), but is IGNORED while the chat
+    /// shell is up: Mutter drops keyboard focus the moment an
+    /// interactive move grab starts, so dismissing here would close
+    /// the chat the instant the user tries to drag it.
+    WindowUnfocused,
+    /// The overlay window gained keyboard focus. Diagnostic only —
+    /// confirms the extension's RaiseOverlay activation actually
+    /// landed (a Wayland client can't observe this any other way).
+    WindowFocused,
 }
 
 pub fn run() -> iced::Result {
+    // The window is created at the CHAT height from the start and
+    // never resized: programmatic xdg resizes on Wayland (winit
+    // 0.30 + Mutter + fractional scaling) progressively desync the
+    // wgpu surface size from the layout/pointer space — squashed
+    // disc, stretched chat, hit-boxes offset from visuals. The disc
+    // renders in the top WINDOW_SIZE×WINDOW_SIZE square; the strip
+    // below is transparent until the AI chat morph uses it.
     let window = oxidemx_window::frameless_topmost(
         APP_ID,
-        Size::new(WINDOW_SIZE as f32, WINDOW_SIZE as f32),
+        Size::new(
+            WINDOW_SIZE as f32,
+            crate::chat_shell::CHAT_WINDOW_HEIGHT as f32,
+        ),
     );
 
     iced::application(boot, update, view)
@@ -102,6 +159,17 @@ fn update(state: &mut RadialState, message: Message) -> Task<Message> {
     match message {
         Message::Tick => {
             state.advance_animations();
+            // Focus the chat's text input as soon as its widgets are
+            // actually mounted in the tree (they fade in mid-morph —
+            // a focus operation issued at page-change time would
+            // find nothing focusable).
+            if state.chat_focus_pending
+                && crate::chat_shell::chat_alpha(state.ai_morph_progress()) > 0.05
+            {
+                state.chat_focus_pending = false;
+                info!("chat shell mounted — focusing text input");
+                return iced::widget::operation::focus_next();
+            }
             Task::none()
         }
         Message::Noop => Task::none(),
@@ -289,13 +357,61 @@ fn update(state: &mut RadialState, message: Message) -> Task<Message> {
             state.cycle_page(direction);
             if state.active_page != before {
                 state.trigger_ripple();
-                Task::perform(
+                let mut tasks = vec![Task::perform(
                     crate::haptic_client::trigger_haptic("page_change".to_string()),
                     |_| Message::Noop,
-                )
+                )];
+                // Landing on the AI page: keyboard focus for the
+                // chat's text input. A Wayland client can't take
+                // focus itself, but the cursor extension runs
+                // inside Mutter and can `Meta.Window.activate()`
+                // us. (The window needs no resize — it's created
+                // at chat height and the morph only uses drawing
+                // space that was always there.)
+                if state.is_ai_page() {
+                    tasks.push(Task::perform(
+                        oxidemx_window::cursor_helper::raise_overlay(APP_ID.to_string()),
+                        |ok| {
+                            if !ok {
+                                warn!(
+                                    "RaiseOverlay failed — chat input may not \
+                                     receive keystrokes (is the oxidemx-cursor \
+                                     extension enabled?)"
+                                );
+                            }
+                            Message::Noop
+                        },
+                    ));
+                }
+                Task::batch(tasks)
             } else {
                 Task::none()
             }
+        }
+        Message::ChatHeaderPressed => {
+            debug!("chat header pressed — starting compositor move");
+            if let Some(id) = state.window_id {
+                iced::window::drag(id)
+            } else {
+                Task::none()
+            }
+        }
+        Message::WindowUnfocused => {
+            if state.ai_morph_progress() > 0.5 {
+                // Chat shell is a persistent draggable window —
+                // focus loss is routine (move grab, clicking another
+                // app). Close it with ×, Escape, or the wheel.
+                info!("window unfocused — chat shell active, staying open");
+                Task::none()
+            } else {
+                debug!("window unfocused — dismissing disc");
+                state.dismiss();
+                Task::none()
+            }
+        }
+        Message::WindowFocused => {
+            info!("window gained keyboard focus");
+            Task::none()
         }
         Message::FocusedClassResolved(class) => {
             debug!(?class, "Focused window class resolved");
@@ -312,63 +428,201 @@ fn update(state: &mut RadialState, message: Message) -> Task<Message> {
             state.window_id = Some(id);
             Task::none()
         }
-        Message::AiInputChanged(val) => {
-            state.ai_input = val;
+        Message::AiEditorAction(action) => {
+            state.ai_editor.perform(action);
             Task::none()
         }
         Message::AiSubmitPrompt => {
-            let prompt = state.ai_input.trim().to_string();
+            let prompt = state.ai_editor.text().trim().to_string();
             if state.ai_loading || prompt.is_empty() {
                 return Task::none();
             }
-            state.ai_input.clear();
-            state.ai_history.push(ChatMessage {
-                is_user: true,
-                text: prompt.clone(),
-            });
+            state.ai_editor = iced::widget::text_editor::Content::new();
+            let now = crate::radial::now_secs();
+            let chat = state.chat_mut();
+            if chat.history.is_empty() {
+                // First prompt names the thread for the history list.
+                chat.title = prompt.chars().take(48).collect();
+            }
+            chat.history.push(ChatMessage::user(prompt.clone()));
+            chat.updated_at = now;
             state.ai_loading = true;
-            let session_id = state.ai_session_id.clone();
-            Task::perform(
+            state.ai_activity = Some("Thinking…");
+            // Server-side conversation state: the Interactions API
+            // replays context from previous_interaction_id, so only
+            // the new prompt travels (the local history is
+            // display-only).
+            let session_id = state.chat().session_id.clone();
+            let mode = state.chat().mode;
+            let model = state.chat().model.clone();
+            let thread_idx = state.ai_active;
+            let sink = crate::ai_client::StreamSink::for_thread(thread_idx);
+            let (task, handle) = Task::perform(
                 async move {
                     match crate::ai_client::load_api_key() {
                         Ok(key) => {
-                            let mode = crate::ai_client::AgentMode::SettingsCustomizer;
-                            crate::ai_client::ask_ai(&key, mode, &prompt, session_id).await
+                            crate::ai_client::ask_ai(&key, mode, &model, &prompt, session_id, sink)
+                                .await
                                 .map_err(|e| e.to_string())
                         }
                         Err(e) => Err(e.to_string()),
                     }
                 },
-                Message::AiResponseReceived,
+                move |res| Message::AiResponseReceived(thread_idx, res),
             )
+            .abortable();
+            state.ai_abort = Some(handle);
+            Task::batch([task, scroll_chat_to_end()])
         }
-        Message::AiResponseReceived(res) => {
+        Message::AiResponseReceived(thread_idx, res) => {
             state.ai_loading = false;
+            state.ai_activity = None;
+            state.ai_stream = None;
+            state.ai_abort = None;
+            let Some(chat) = state.ai_threads.get_mut(thread_idx) else {
+                return Task::none();
+            };
             match res {
                 Ok((reply, next_session_id)) => {
-                    state.ai_session_id = next_session_id;
-                    state.ai_history.push(ChatMessage {
-                        is_user: false,
-                        text: reply,
-                    });
+                    chat.session_id = next_session_id;
+                    chat.history.push(ChatMessage::assistant(reply));
                 }
                 Err(err) => {
-                    state.ai_history.push(ChatMessage {
-                        is_user: false,
-                        text: format!("Error: {}", err),
-                    });
+                    chat.history.push(ChatMessage::assistant(format!("Error: {}", err)));
                 }
             }
+            chat.updated_at = crate::radial::now_secs();
+            crate::radial::save_chat_threads(&state.ai_threads);
             state.trigger_ripple();
+            scroll_chat_to_end()
+        }
+        Message::AiStream((thread_idx, event)) => {
+            match event {
+                crate::ai_client::StreamEvent::Activity(label) => {
+                    state.ai_activity = Some(label);
+                    Task::none()
+                }
+                crate::ai_client::StreamEvent::Delta(text) => {
+                    match &mut state.ai_stream {
+                        Some((idx, buf)) if *idx == thread_idx => buf.push_str(&text),
+                        _ => state.ai_stream = Some((thread_idx, text)),
+                    }
+                    scroll_chat_to_end()
+                }
+            }
+        }
+        Message::AiStopRequest => {
+            if let Some(handle) = state.ai_abort.take() {
+                handle.abort();
+            }
+            state.ai_loading = false;
+            state.ai_activity = None;
+            if let Some((idx, partial)) = state.ai_stream.take() {
+                if !partial.trim().is_empty() {
+                    if let Some(chat) = state.ai_threads.get_mut(idx) {
+                        chat.history.push(ChatMessage::assistant(format!(
+                            "{partial}\n\n*(stopped)*"
+                        )));
+                        chat.updated_at = crate::radial::now_secs();
+                    }
+                    crate::radial::save_chat_threads(&state.ai_threads);
+                }
+            }
+            Task::none()
+        }
+        Message::AiLinkClicked(url) => {
+            // Only open real web links — markdown can contain
+            // arbitrary URIs.
+            if url.starts_with("http://") || url.starts_with("https://") {
+                if let Err(e) = std::process::Command::new("xdg-open").arg(&url).spawn() {
+                    warn!(error = %e, url, "failed to open link");
+                }
+            }
+            Task::none()
+        }
+        Message::AiCopyText(text) => iced::clipboard::write(text),
+        Message::AiBubbleHover(idx) => {
+            state.ai_hover_msg = idx;
+            Task::none()
+        }
+        Message::AiModelToggled => {
+            let chat = state.chat_mut();
+            chat.model = if chat.model == crate::ai_client::PRO_MODEL {
+                crate::ai_client::DEFAULT_MODEL.to_string()
+            } else {
+                crate::ai_client::PRO_MODEL.to_string()
+            };
+            crate::radial::save_chat_threads(&state.ai_threads);
+            Task::none()
+        }
+        Message::AiRenameStart(idx) => {
+            let draft = state
+                .ai_threads
+                .get(idx)
+                .map(|t| t.title.clone())
+                .unwrap_or_default();
+            state.ai_renaming = Some((idx, draft));
+            Task::none()
+        }
+        Message::AiRenameInput(text) => {
+            if let Some((_, draft)) = &mut state.ai_renaming {
+                *draft = text;
+            }
+            Task::none()
+        }
+        Message::AiRenameCommit => {
+            if let Some((idx, draft)) = state.ai_renaming.take() {
+                if let Some(thread) = state.ai_threads.get_mut(idx) {
+                    let trimmed = draft.trim();
+                    if !trimmed.is_empty() {
+                        thread.title = trimmed.to_string();
+                    }
+                }
+                crate::radial::save_chat_threads(&state.ai_threads);
+            }
+            Task::none()
+        }
+        Message::AiDeleteThread(idx) => {
+            state.ai_delete_thread(idx);
+            crate::radial::save_chat_threads(&state.ai_threads);
+            Task::none()
+        }
+        Message::AiCopyChat => {
+            let chat = state.chat();
+            let mut out = String::new();
+            for msg in &chat.history {
+                out.push_str(if msg.is_user { "**You:**\n" } else { "**AI:**\n" });
+                out.push_str(&msg.text);
+                out.push_str("\n\n");
+            }
+            iced::clipboard::write(out)
+        }
+        Message::AiModeSelected(mode) => {
+            let chat = state.chat_mut();
+            if chat.mode != mode {
+                chat.mode = mode;
+                // New tool configuration → new server-side thread.
+                chat.session_id = None;
+                crate::radial::save_chat_threads(&state.ai_threads);
+            }
+            Task::none()
+        }
+        Message::AiNewChat => {
+            state.ai_new_chat();
+            Task::none()
+        }
+        Message::AiToggleThreads => {
+            state.ai_show_threads = !state.ai_show_threads;
+            Task::none()
+        }
+        Message::AiSelectThread(idx) => {
+            state.ai_select_chat(idx);
             Task::none()
         }
         Message::AiChooseOption(choice) => {
             if let Some(pending) = state.ai_pending_question.take() {
                 let tx = pending.response_tx;
-                state.ai_history.push(ChatMessage {
-                    is_user: true,
-                    text: choice.clone(),
-                });
+                state.chat_mut().history.push(ChatMessage::user(choice.clone()));
                 state.ai_loading = true;
                 Task::perform(
                     async move {
@@ -538,7 +792,13 @@ fn view(state: &RadialState) -> Element<'_, Message> {
     // Closed/dismissed menus skip the shader entirely so the
     // overlay window costs zero GPU when idle.
     let intensity = state.visuals.aurora_intensity.clamp(0.0, 1.0);
-    let menu_alpha = state.menu.current.clamp(0.0, 1.0);
+    // Every disc layer (shaders + canvas) fades out at the start of
+    // the AI-chat morph — the painted caps take over visually. By
+    // multiplying here, none of the 12 shader programs need to know
+    // a split is happening; they just see the menu going to alpha 0.
+    let morph = state.ai_morph_progress();
+    let menu_alpha =
+        state.menu.current.clamp(0.0, 1.0) * crate::chat_shell::disc_alpha(morph);
     let palette = &state.theme.theme.colors;
     let accent_rgba = oxidemx_shared::theme::parse_hex_rgba(&palette.accent)
         .map(|(r, g, b, a)| [r as f32, g as f32, b as f32, a as f32])
@@ -1075,16 +1335,24 @@ fn view(state: &RadialState) -> Element<'_, Message> {
         iced::widget::Stack::with_children(layers).into()
     };
 
-    let is_ai_page = state.pages.get(state.active_page)
-        .map(|p| p.name == "AI Assistant")
-        .unwrap_or(false);
-
-    if is_ai_page {
-        let ai_panel = build_ai_panel(state);
-        iced::widget::Stack::with_children(vec![
-            main_stack,
-            ai_panel,
-        ]).into()
+    // Chat shell composition: while the disc ↔ chat morph is in
+    // flight (or parked at the chat end), stack the caps painter
+    // over the (fading) disc layers, and the chat widgets over the
+    // caps once the arcs are nearly parked. Outside the morph this
+    // branch costs nothing — the disc path is exactly as before.
+    if morph > 0.001 {
+        let caps = Canvas::new(crate::chat_shell::CapsPainter::new(state))
+            .width(Length::Fill)
+            .height(Length::Fill);
+        let chat_a = crate::chat_shell::chat_alpha(morph) * state.menu_open_alpha();
+        let mut children: Vec<Element<'_, Message>> = vec![main_stack, caps.into()];
+        if chat_a > 0.01 {
+            children.push(build_ai_panel(state, chat_a));
+        }
+        iced::widget::Stack::with_children(children)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into()
     } else {
         main_stack
     }
@@ -1103,10 +1371,15 @@ fn subscription(_state: &RadialState) -> Subscription<Message> {
         Subscription::run(crate::dbus::stream).map(Message::Overlay),
         Subscription::run(crate::config::watch_stream).map(Message::ConfigReloaded),
         Subscription::run(ai_question_stream),
+        Subscription::run(ai_stream_stream),
         iced::time::every(std::time::Duration::from_millis(16)).map(|_| Message::Tick),
         iced::window::events().map(|(id, event)| match event {
             iced::window::Event::Opened { .. } => Message::WindowOpened(id),
-            iced::window::Event::Unfocused => Message::ToggleDismiss,
+            // Routed through its own message (not ToggleDismiss)
+            // so update() can ignore focus loss while the chat
+            // shell is up — see Message::WindowUnfocused.
+            iced::window::Event::Unfocused => Message::WindowUnfocused,
+            iced::window::Event::Focused => Message::WindowFocused,
             _ => Message::Noop,
         }),
     ])
@@ -1124,113 +1397,353 @@ fn to_iced_color(hex: &str, default: Color) -> Color {
 
 fn ai_question_stream() -> impl futures_util::stream::Stream<Item = Message> {
     let (tx, rx) = async_channel::unbounded();
-    
+
     let (q_tx, mut q_rx) = tokio::sync::mpsc::channel(10);
     *crate::ai_client::QUESTION_TX.lock().unwrap() = Some(q_tx);
-    
+
     tokio::task::spawn(async move {
         while let Some(pending) = q_rx.recv().await {
             let _ = tx.send(Message::AiQuestionReceived(pending)).await;
         }
     });
-    
+
     rx
 }
 
-fn build_ai_panel(state: &RadialState) -> Element<'_, Message> {
+/// Registers the global stream-event channel and forwards
+/// `(thread, StreamEvent)` pairs — text deltas + tool-activity
+/// labels — into the iced message loop. Same pattern as
+/// `ai_question_stream`.
+fn ai_stream_stream() -> impl futures_util::stream::Stream<Item = Message> {
+    let (tx, rx) = async_channel::unbounded();
+
+    let (s_tx, mut s_rx) = tokio::sync::mpsc::channel(64);
+    *crate::ai_client::STREAM_TX.lock().unwrap() = Some(s_tx);
+
+    tokio::task::spawn(async move {
+        while let Some(event) = s_rx.recv().await {
+            let _ = tx.send(Message::AiStream(event)).await;
+        }
+    });
+
+    rx
+}
+
+/// Scrollable id for the conversation history + a task that snaps
+/// it to the newest message.
+const CHAT_SCROLL_ID: &str = "ai-chat-history";
+
+fn scroll_chat_to_end() -> Task<Message> {
+    iced::widget::operation::snap_to_end(CHAT_SCROLL_ID)
+}
+
+/// "2h ago"-style label for the thread list.
+fn rel_time(ts: u64) -> String {
+    if ts == 0 {
+        return "earlier".to_string();
+    }
+    let now = crate::radial::now_secs();
+    let delta = now.saturating_sub(ts);
+    match delta {
+        0..=59 => "just now".to_string(),
+        60..=3599 => format!("{}m ago", delta / 60),
+        3600..=86_399 => format!("{}h ago", delta / 3600),
+        _ => format!("{}d ago", delta / 86_400),
+    }
+}
+
+/// Chat content for the arc-shell layout: a translucent card with
+/// the conversation history (+ pending multiple-choice question),
+/// and an input row that visually sits on the footer arc. `alpha`
+/// (0..1) fades the whole panel in lockstep with
+/// `chat_shell::chat_alpha` — iced has no opacity wrapper, so every
+/// colour is scaled instead.
+fn build_ai_panel(state: &RadialState, alpha: f32) -> Element<'_, Message> {
     let palette = &state.theme.theme.colors;
-    
+    let fade = move |c: Color, k: f32| Color {
+        a: c.a * (alpha * k).clamp(0.0, 1.0),
+        ..c
+    };
+
     let base_color = to_iced_color(&palette.base, Color::from_rgba(0.08, 0.08, 0.1, 0.95));
     let surface_color = to_iced_color(&palette.surface0, Color::from_rgba(0.12, 0.12, 0.15, 0.9));
     let text_color = to_iced_color(&palette.text, Color::WHITE);
     let accent_color = to_iced_color(&palette.accent, Color::from_rgb(0.5, 0.5, 1.0));
-    
-    let sidebar_bg = Color::from_rgba(base_color.r, base_color.g, base_color.b, 0.85);
-    let border_color = Color::from_rgba(accent_color.r, accent_color.g, accent_color.b, 0.2);
 
-    let header = column![
-        text("OxideMX AI")
-            .size(20)
-            .font(iced::Font { weight: iced::font::Weight::Bold, ..Default::default() })
-            .color(text_color),
-        text("Settings & Chat Assistant")
-            .size(11)
-            .color(Color::from_rgba(text_color.r, text_color.g, text_color.b, 0.6)),
-        Space::new().height(Length::Fixed(8.0)),
-        container(Space::new().width(Length::Fill))
-            .height(1)
-            .style(move |_| container::Style {
-                background: Some(iced::Background::Color(Color::from_rgba(text_color.r, text_color.g, text_color.b, 0.1))),
+    let card_bg = fade(Color::from_rgba(base_color.r, base_color.g, base_color.b, 0.92), 1.0);
+    let card_border = fade(accent_color, 0.25);
+    let body_text = fade(text_color, 1.0);
+    let dim_text = fade(text_color, 0.55);
+
+    let active_mode = state.chat().mode;
+
+    // ---- toolbar: new chat / thread list / mode pills ----
+    let tool_btn = move |label: &'static str, msg: Message, highlighted: bool| {
+        button(text(label).size(11).color(body_text))
+            .padding([4, 10])
+            .style(move |_, _status| button::Style {
+                background: Some(iced::Background::Color(if highlighted {
+                    fade(accent_color, 0.45)
+                } else {
+                    fade(surface_color, 0.6)
+                })),
+                border: iced::border::Border {
+                    color: if highlighted {
+                        fade(accent_color, 0.9)
+                    } else {
+                        fade(text_color, 0.12)
+                    },
+                    width: 1.0,
+                    radius: 9.0.into(),
+                },
+                text_color: body_text,
                 ..Default::default()
             })
-    ];
+            .on_press(msg)
+    };
+
+    let saved_count = state.ai_threads.iter().filter(|t| !t.history.is_empty()).count();
+    let mut toolbar = row![
+        tool_btn("＋ New", Message::AiNewChat, false),
+        tool_btn(
+            if state.ai_show_threads { "‹ Back" } else { "Chats" },
+            Message::AiToggleThreads,
+            state.ai_show_threads,
+        ),
+    ]
+    .spacing(6)
+    .align_y(Alignment::Center);
+    if !state.ai_show_threads && saved_count > 0 {
+        toolbar = toolbar.push(
+            text(format!("{saved_count} saved"))
+                .size(10)
+                .color(fade(text_color, 0.35)),
+        );
+    }
+    toolbar = toolbar.push(Space::new().width(Length::Fill));
+    for mode in [
+        crate::ai_client::AgentMode::SettingsCustomizer,
+        crate::ai_client::AgentMode::GeneralChat,
+    ] {
+        toolbar = toolbar.push(tool_btn(
+            mode.label(),
+            Message::AiModeSelected(mode),
+            mode == active_mode,
+        ));
+    }
+    let is_pro = state.chat().model == crate::ai_client::PRO_MODEL;
+    toolbar = toolbar.push(tool_btn(
+        if is_pro { "Pro" } else { "Flash" },
+        Message::AiModelToggled,
+        is_pro,
+    ));
+    if !state.chat().history.is_empty() {
+        toolbar = toolbar.push(tool_btn("⧉", Message::AiCopyChat, false));
+    }
 
     let mut chat_list = column![].spacing(8);
-    
-    if state.ai_history.is_empty() {
-        chat_list = chat_list.push(
-            text("Try asking:\n• 'Change slice colors to green'\n• 'Set animation speed to fast'\n• 'Switch to Dracula theme'\n• 'Show installed apps'")
-                .size(12)
-                .color(Color::from_rgba(text_color.r, text_color.g, text_color.b, 0.5))
-        );
-    } else {
-        for msg in &state.ai_history {
-            let bubble = if msg.is_user {
-                container(
-                    text(&msg.text)
-                        .size(12)
-                        .color(text_color)
-                )
-                .padding(8)
-                .max_width(200.0)
-                .style(move |_| container::Style {
-                    background: Some(iced::Background::Color(Color::from_rgba(accent_color.r, accent_color.g, accent_color.b, 0.25))),
-                    border: iced::border::Border {
-                        color: Color::from_rgba(accent_color.r, accent_color.g, accent_color.b, 0.4),
-                        width: 1.0,
-                        radius: 8.0.into(),
-                    },
-                    ..Default::default()
-                })
-            } else {
-                container(
-                    text(&msg.text)
-                        .size(12)
-                        .color(text_color)
-                )
-                .padding(8)
-                .max_width(200.0)
-                .style(move |_| container::Style {
-                    background: Some(iced::Background::Color(Color::from_rgba(surface_color.r, surface_color.g, surface_color.b, 0.4))),
-                    border: iced::border::Border {
-                        color: Color::from_rgba(text_color.r, text_color.g, text_color.b, 0.1),
-                        width: 1.0,
-                        radius: 8.0.into(),
-                    },
-                    ..Default::default()
-                })
-            };
 
-            let align_row = row![
-                if msg.is_user { Element::from(Space::new().width(Length::Fill)) } else { Element::from(text("")) },
-                bubble,
-                if msg.is_user { Element::from(text("")) } else { Element::from(Space::new().width(Length::Fill)) },
-            ];
+    if state.chat().history.is_empty() {
+        let suggestions = match active_mode {
+            crate::ai_client::AgentMode::SettingsCustomizer => {
+                "Try asking:\n• 'Change slice colors to green'\n• 'Set animation speed to fast'\n• 'Switch to Dracula theme'\n• 'Show installed apps'"
+            }
+            crate::ai_client::AgentMode::GeneralChat => {
+                "General assistant with live Google search.\nTry asking:\n• 'What's new in GNOME 50?'\n• 'Explain Wayland fractional scaling'\n• 'Best Rust crate for HID devices?'"
+            }
+        };
+        chat_list = chat_list.push(text(suggestions).size(13).color(dim_text));
+    } else {
+        // One bubble-style factory so user/AI styles share a type.
+        let bubble_style = move |is_user: bool| {
+            move |_: &iced::Theme| container::Style {
+                background: Some(iced::Background::Color(if is_user {
+                    fade(accent_color, 0.25)
+                } else {
+                    fade(surface_color, 0.5)
+                })),
+                border: iced::border::Border {
+                    color: if is_user {
+                        fade(accent_color, 0.4)
+                    } else {
+                        fade(text_color, 0.1)
+                    },
+                    width: 1.0,
+                    radius: 10.0.into(),
+                },
+                ..Default::default()
+            }
+        };
+
+        for (i, msg) in state.chat().history.iter().enumerate() {
+            // AI replies render as markdown (links map to opener
+            // messages); user prompts stay plain text.
+            let content: Element<'_, Message> = if msg.is_user || msg.md.is_empty() {
+                text(&msg.text).size(13).color(body_text).into()
+            } else {
+                iced::widget::markdown::view(&msg.md, iced::Theme::CatppuccinMocha)
+                    .map(|url| Message::AiLinkClicked(url.to_string()))
+            };
+            let bubble = container(content)
+                .padding(9)
+                .max_width(360.0)
+                .style(bubble_style(msg.is_user));
+
+            // Hovering a bubble reveals its copy button; a fixed-
+            // width placeholder keeps the layout from shifting.
+            let hovered = state.ai_hover_msg == Some(i);
+            let copy_btn: Element<'_, Message> = if hovered {
+                button(text("⧉").size(13).color(dim_text))
+                    .padding([2, 4])
+                    .style(|_, _| button::Style::default())
+                    .on_press(Message::AiCopyText(msg.text.clone()))
+                    .into()
+            } else {
+                Space::new().width(Length::Fixed(25.0)).into()
+            };
+            let wrapped = iced::widget::mouse_area(bubble)
+                .on_enter(Message::AiBubbleHover(Some(i)))
+                .on_exit(Message::AiBubbleHover(None));
+
+            let align_row = if msg.is_user {
+                row![Space::new().width(Length::Fill), copy_btn, wrapped]
+            } else {
+                row![wrapped, copy_btn, Space::new().width(Length::Fill)]
+            }
+            .spacing(4)
+            .align_y(Alignment::Center);
             chat_list = chat_list.push(align_row);
+        }
+
+        // In-flight streamed reply for this thread — plain text with
+        // a cursor; switches to rendered markdown on completion.
+        if let Some((idx, partial)) = &state.ai_stream {
+            if *idx == state.ai_active && !partial.is_empty() {
+                chat_list = chat_list.push(row![
+                    container(text(format!("{partial}▌")).size(13).color(body_text))
+                        .padding(9)
+                        .max_width(360.0)
+                        .style(bubble_style(false)),
+                    Space::new().width(Length::Fill),
+                ]);
+            }
         }
     }
 
-    let history_scroll = scrollable(chat_list)
-        .height(Length::Fill);
+    // Card body: the conversation (history + optional pending
+    // multiple-choice question) — or the previous-chats list when
+    // the toolbar's "Chats" toggle is on.
+    let card_body: Element<'_, Message> = if state.ai_show_threads {
+        let mut list = column![].spacing(6);
+        if saved_count == 0 {
+            list = list.push(
+                text("No previous chats yet.")
+                    .size(12)
+                    .color(dim_text),
+            );
+        }
+        // Newest first; skip never-used empty threads.
+        for (idx, thread) in state.ai_threads.iter().enumerate().rev() {
+            if thread.history.is_empty() {
+                continue;
+            }
+            let is_active = idx == state.ai_active;
+            let renaming = matches!(state.ai_renaming, Some((r, _)) if r == idx);
 
-    let mut footer = column![].spacing(6);
+            let title_el: Element<'_, Message> = if renaming {
+                let draft = state
+                    .ai_renaming
+                    .as_ref()
+                    .map(|(_, d)| d.as_str())
+                    .unwrap_or("");
+                text_input("Thread name…", draft)
+                    .size(12)
+                    .padding(4)
+                    .on_input(Message::AiRenameInput)
+                    .on_submit(Message::AiRenameCommit)
+                    .into()
+            } else {
+                let title = if thread.title.is_empty() {
+                    "Untitled chat".to_string()
+                } else {
+                    thread.title.clone()
+                };
+                text(title).size(12).color(body_text).into()
+            };
+
+            let meta = format!(
+                "{} · {} messages · {}",
+                thread.mode.label(),
+                thread.history.len(),
+                rel_time(thread.updated_at),
+            );
+
+            let open_btn = button(
+                column![title_el, text(meta).size(10).color(fade(text_color, 0.45))].spacing(2),
+            )
+            .width(Length::Fill)
+            .padding(8)
+            .style(move |_, _status| button::Style {
+                background: Some(iced::Background::Color(if is_active {
+                    fade(accent_color, 0.22)
+                } else {
+                    fade(surface_color, 0.45)
+                })),
+                border: iced::border::Border {
+                    color: if is_active {
+                        fade(accent_color, 0.7)
+                    } else {
+                        fade(text_color, 0.08)
+                    },
+                    width: 1.0,
+                    radius: 9.0.into(),
+                },
+                text_color: body_text,
+                ..Default::default()
+            })
+            .on_press(Message::AiSelectThread(idx));
+
+            let small_btn = |label: &'static str, msg: Message| {
+                button(text(label).size(12).color(dim_text))
+                    .padding([4, 6])
+                    .style(|_, _| button::Style::default())
+                    .on_press(msg)
+            };
+            let rename_btn = if renaming {
+                small_btn("✓", Message::AiRenameCommit)
+            } else {
+                small_btn("✎", Message::AiRenameStart(idx))
+            };
+
+            list = list.push(
+                row![
+                    open_btn,
+                    rename_btn,
+                    small_btn("🗑", Message::AiDeleteThread(idx)),
+                ]
+                .spacing(4)
+                .align_y(Alignment::Center),
+            );
+        }
+        // Right padding keeps the overlay scrollbar off the rows.
+        scrollable(container(list).padding(iced::Padding::default().right(14.0)))
+            .height(Length::Fill)
+            .into()
+    } else {
+        scrollable(container(chat_list).padding(iced::Padding::default().right(14.0)))
+            .id(CHAT_SCROLL_ID)
+            .height(Length::Fill)
+            .into()
+    };
+
+    let mut card_col = column![card_body].spacing(8);
 
     if let Some(pending) = &state.ai_pending_question {
         let mut question_col = column![
             text(&pending.question)
                 .size(12)
                 .font(iced::Font { weight: iced::font::Weight::Bold, ..Default::default() })
-                .color(accent_color),
+                .color(fade(accent_color, 1.0)),
             Space::new().height(Length::Fixed(4.0)),
         ].spacing(4);
 
@@ -1240,15 +1753,15 @@ fn build_ai_panel(state: &RadialState) -> Element<'_, Message> {
                 button(
                     text(opt)
                         .size(11)
-                        .color(text_color)
+                        .color(body_text)
                         .align_x(iced::alignment::Horizontal::Center)
                 )
                 .width(Length::Fill)
                 .padding(6)
                 .style(move |theme, status| {
                     let mut s = button::primary(theme, status);
-                    s.background = Some(iced::Background::Color(Color::from_rgba(accent_color.r, accent_color.g, accent_color.b, 0.3)));
-                    s.border.color = accent_color;
+                    s.background = Some(iced::Background::Color(fade(accent_color, 0.3)));
+                    s.border.color = fade(accent_color, 1.0);
                     s.border.width = 1.0;
                     s.border.radius = 6.0.into();
                     s
@@ -1257,13 +1770,13 @@ fn build_ai_panel(state: &RadialState) -> Element<'_, Message> {
             );
         }
 
-        footer = footer.push(
+        card_col = card_col.push(
             container(question_col)
                 .padding(8)
                 .style(move |_| container::Style {
-                    background: Some(iced::Background::Color(Color::from_rgba(surface_color.r, surface_color.g, surface_color.b, 0.5))),
+                    background: Some(iced::Background::Color(fade(surface_color, 0.5))),
                     border: iced::border::Border {
-                        color: accent_color,
+                        color: fade(accent_color, 1.0),
                         width: 1.0,
                         radius: 8.0.into(),
                     },
@@ -1272,80 +1785,127 @@ fn build_ai_panel(state: &RadialState) -> Element<'_, Message> {
         );
     }
 
-    if state.ai_loading {
-        footer = footer.push(
-            row![
-                text("Agent thinking...")
-                    .size(12)
-                    .font(iced::Font { style: iced::font::Style::Italic, ..Default::default() })
-                    .color(accent_color)
-            ]
-            .align_y(Alignment::Center)
-        );
-    } else {
-        let input_box = text_input("Ask AI...", &state.ai_input)
-            .size(12)
-            .on_input(Message::AiInputChanged)
-            .on_submit(Message::AiSubmitPrompt)
-            .style(move |theme, status| {
-                let mut s = text_input::default(theme, status);
-                s.background = iced::Background::Color(Color::from_rgba(surface_color.r, surface_color.g, surface_color.b, 0.6));
-                s.value = text_color;
-                s.placeholder = Color::from_rgba(text_color.r, text_color.g, text_color.b, 0.4);
-                s.border.color = Color::from_rgba(text_color.r, text_color.g, text_color.b, 0.15);
-                s.border.radius = 6.0.into();
-                s
-            });
+    let card = container(card_col)
+        .padding(12)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .style(move |_| container::Style {
+            background: Some(iced::Background::Color(card_bg)),
+            border: iced::border::Border {
+                color: card_border,
+                width: 1.0,
+                radius: 14.0.into(),
+            },
+            ..Default::default()
+        });
 
-        let send_btn = button(
-            text("Send")
+    // Input row — sits below the card so it lands on the footer
+    // arc, "inside" the flattened bottom half of the disc.
+    // Multi-line editor: Enter sends, Shift+Enter inserts a newline.
+    let editor = iced::widget::text_editor(&state.ai_editor)
+        .placeholder("Ask AI…  (Shift+Enter for newline)")
+        .size(13)
+        .padding(10)
+        .height(Length::Fixed(58.0))
+        .on_action(Message::AiEditorAction)
+        .key_binding(|key_press| {
+            use iced::widget::text_editor::Binding;
+            if matches!(
+                key_press.key,
+                iced::keyboard::Key::Named(iced::keyboard::key::Named::Enter)
+            ) && !key_press.modifiers.shift()
+            {
+                return Some(Binding::Custom(Message::AiSubmitPrompt));
+            }
+            Binding::from_key_press(key_press)
+        })
+        .style(move |theme, status| {
+            let mut s = iced::widget::text_editor::default(theme, status);
+            s.background = iced::Background::Color(fade(surface_color, 0.75));
+            s.value = body_text;
+            s.placeholder = fade(text_color, 0.4);
+            s.border.color = fade(text_color, 0.15);
+            s.border.radius = 9.0.into();
+            s
+        });
+
+    // Send flips to Stop while a turn is in flight.
+    let action_btn = if state.ai_loading {
+        button(
+            text("Stop")
                 .size(11)
                 .font(iced::Font { weight: iced::font::Weight::Bold, ..Default::default() })
-                .color(text_color)
+                .color(body_text),
         )
         .padding(6)
         .style(move |theme, status| {
             let mut s = button::primary(theme, status);
-            s.background = Some(iced::Background::Color(accent_color));
-            s.border.radius = 6.0.into();
+            s.background = Some(iced::Background::Color(fade(
+                Color::from_rgb(0.85, 0.35, 0.4),
+                1.0,
+            )));
+            s.border.radius = 9.0.into();
             s
         })
-        .on_press(Message::AiSubmitPrompt);
+        .on_press(Message::AiStopRequest)
+    } else {
+        button(
+            text("Send")
+                .size(11)
+                .font(iced::Font { weight: iced::font::Weight::Bold, ..Default::default() })
+                .color(body_text),
+        )
+        .padding(6)
+        .style(move |theme, status| {
+            let mut s = button::primary(theme, status);
+            s.background = Some(iced::Background::Color(fade(accent_color, 1.0)));
+            s.border.radius = 9.0.into();
+            s
+        })
+        .on_press(Message::AiSubmitPrompt)
+    };
 
-        footer = footer.push(
-            row![input_box, send_btn].spacing(6).align_y(Alignment::Center)
+    let mut input_col = column![].spacing(4);
+    if state.ai_loading {
+        input_col = input_col.push(
+            text(state.ai_activity.unwrap_or("Working…"))
+                .size(11)
+                .font(iced::Font { style: iced::font::Style::Italic, ..Default::default() })
+                .color(fade(accent_color, 1.0)),
         );
     }
+    input_col = input_col.push(
+        row![editor, action_btn]
+            .spacing(6)
+            .align_y(Alignment::End),
+    );
+    let input_area: Element<'_, Message> = input_col.into();
 
-    let content_col = column![
-        header,
-        Space::new().height(Length::Fixed(8.0)),
-        history_scroll,
-        Space::new().height(Length::Fixed(8.0)),
-        footer
-    ]
-    .padding(12)
-    .spacing(4)
-    .height(Length::Fill);
+    let content_col = column![toolbar, card, input_area].spacing(10);
 
-    row![
-        container(content_col)
-            .width(Length::Fixed(260.0))
-            .height(Length::Fill)
-            .style(move |_| container::Style {
-                background: Some(iced::Background::Color(sidebar_bg)),
-                border: iced::border::Border {
-                    color: border_color,
-                    width: 1.0,
-                    radius: 12.0.into(),
-                },
-                ..Default::default()
-            }),
-        Space::new().width(Length::Fill)
-    ]
-    .width(Length::Fill)
-    .height(Length::Fill)
-    .into()
+    // Region between the parked arcs: below the header
+    // (EDGE_PAD + HEADER_H + breathing room), with the input row's
+    // bottom padding placing it over the footer arc.
+    container(content_col)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .padding(iced::Padding {
+            // Slight downward offset that releases as the content
+            // fades in — reads as the chat rising into place.
+            top: crate::chat_shell::EDGE_PAD
+                + crate::chat_shell::HEADER_H
+                + 8.0
+                + (1.0 - alpha) * 18.0,
+            right: 20.0,
+            // Tucks the editor row inside the (taller) footer arc —
+            // arc top sits at win_h − EDGE_PAD − FOOTER_H, and the
+            // editor + activity label must land below it. The extra
+            // bottom space lets the editor's corners breathe inside
+            // the arc's large rounded corners.
+            bottom: 30.0,
+            left: 20.0,
+        })
+        .into()
 }
 
 #[allow(dead_code)]

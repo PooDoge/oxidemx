@@ -305,6 +305,18 @@ fn apply_thumb_wheel_invert(
     Ok(())
 }
 
+impl OxideMXService {
+    /// Master radial-overlay gate from config. Read on every
+    /// ShowMenu/ShowMenuAtCursor; a poisoned lock fails open so a
+    /// panicked writer can't permanently kill the menu.
+    fn radial_enabled(&self) -> bool {
+        self.config
+            .read()
+            .map(|c| c.radial_menu.enabled)
+            .unwrap_or(true)
+    }
+}
+
 #[interface(name = "org.oxidemx.Daemon")]
 impl OxideMXService {
     // =========================================================================
@@ -323,6 +335,10 @@ impl OxideMXService {
                 tracing::debug!(x, y, "ShowMenu suppressed - gaming mode active");
                 return Ok(());
             }
+        }
+        if !self.radial_enabled() {
+            tracing::debug!(x, y, "ShowMenu suppressed - radial overlay disabled");
+            return Ok(());
         }
 
         tracing::info!(x, y, "ShowMenu called - ensuring overlay is running");
@@ -637,6 +653,10 @@ impl OxideMXService {
         x: i32,
         y: i32,
     ) -> fdo::Result<()> {
+        if !self.radial_enabled() {
+            tracing::debug!(x, y, "ShowMenuAtCursor suppressed - radial overlay disabled");
+            return Ok(());
+        }
         tracing::info!(x, y, "ShowMenuAtCursor called from KWin script - ensuring overlay is running");
         let _ = self.ensure_overlay_running().await;
 
@@ -1345,6 +1365,37 @@ impl OxideMXService {
             Ok(gm) => Ok(gm.is_enabled()),
             Err(_) => Ok(false),
         }
+    }
+
+    /// Master enable for the radial overlay menu. Backs the indicator
+    /// popup's "Radial Overlay" quick toggle.
+    async fn get_radial_enabled(&self) -> fdo::Result<bool> {
+        Ok(self.radial_enabled())
+    }
+
+    /// Toggle the radial overlay menu. Gates ShowMenu/ShowMenuAtCursor
+    /// the same way gaming-mode suppression does, and persists to
+    /// config.json so the choice survives daemon restarts. Mirrors the
+    /// SetHapticsEnabled persist contract: in-memory state is
+    /// authoritative for the session, disk persist is best-effort.
+    async fn set_radial_enabled(&self, enabled: bool) -> fdo::Result<()> {
+        tracing::info!(enabled, "SetRadialEnabled called");
+
+        match self.config.write() {
+            Ok(mut config) => config.radial_menu.enabled = enabled,
+            Err(e) => {
+                tracing::error!(error = %e, "Failed to lock config for SetRadialEnabled");
+                return Err(fdo::Error::Failed(format!("Lock error: {}", e)));
+            }
+        }
+
+        if let Ok(snapshot) = self.config.read() {
+            if let Err(e) = snapshot.save() {
+                tracing::warn!(error = %e, "SetRadialEnabled disk persist failed; in-memory state still updated");
+            }
+        }
+
+        Ok(())
     }
 
     async fn cycle_gaming_dpi(&self) -> fdo::Result<String> {

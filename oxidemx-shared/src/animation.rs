@@ -754,6 +754,48 @@ impl ElementAnimation {
             chain: None,
         }
     }
+
+    /// Disc → AI-chat "arc shell" morph. The tween's eased value
+    /// drives the entire split/flatten/reveal timeline inside
+    /// `overlay-rs::chat_shell`, so only `duration_ms` / `easing`
+    /// / `delay_ms` are read for this element — kind/opacity
+    /// fields are ignored. A soft, well-damped spring gives the
+    /// caps a slight settle without overshooting past the window
+    /// edges; the exit is a quicker symmetric ease so going back
+    /// to the disc feels snappy.
+    pub fn ai_morph_default() -> Self {
+        ElementAnimation {
+            enter: TransitionConfig {
+                kind: TransitionKind::Fade,
+                // Long enough to read as a deliberate transform: the
+                // disc dissolves into the caps (~150 ms), the caps
+                // glide apart (~400 ms), the chat fades in last. A
+                // stiffer spring here settles in the first third of
+                // the window and the whole morph reads as a blink.
+                duration_ms: 700,
+                easing: Easing::Spring {
+                    stiffness: 95.0,
+                    damping: 14.0,
+                },
+                delay_ms: 0,
+                initial_scale: 1.0,
+                initial_opacity: 0.0,
+                final_opacity: 1.0,
+                custom_tracks: Vec::new(),
+            },
+            exit: TransitionConfig {
+                kind: TransitionKind::Fade,
+                duration_ms: 400,
+                easing: Easing::EaseInOut,
+                delay_ms: 0,
+                initial_scale: 1.0,
+                initial_opacity: 0.0,
+                final_opacity: 1.0,
+                custom_tracks: Vec::new(),
+            },
+            chain: None,
+        }
+    }
 }
 
 // ============================================================================
@@ -776,6 +818,10 @@ pub struct AnimationConfig {
     /// closes the overlay — the ring contents swap in place.
     #[serde(default = "PageTransitionConfig::default")]
     pub page_transition: PageTransitionConfig,
+    /// Disc ↔ AI-chat morph (split / arc-shell / reveal). See
+    /// `ElementAnimation::ai_morph_default` for the semantics.
+    #[serde(default = "ElementAnimation::ai_morph_default")]
+    pub ai_morph: ElementAnimation,
 }
 
 impl Default for AnimationConfig {
@@ -785,6 +831,7 @@ impl Default for AnimationConfig {
             submenu: ElementAnimation::submenu_default(),
             slice_highlight: ElementAnimation::slice_highlight_default(),
             page_transition: PageTransitionConfig::default(),
+            ai_morph: ElementAnimation::ai_morph_default(),
         }
     }
 }

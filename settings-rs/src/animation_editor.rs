@@ -37,6 +37,7 @@ pub enum AnimEditorElement {
     Submenu,
     SliceHighlight,
     PageTransition,
+    AiMorph,
 }
 
 impl AnimEditorElement {
@@ -46,6 +47,7 @@ impl AnimEditorElement {
             AnimEditorElement::Submenu => "Submenu pop-out",
             AnimEditorElement::SliceHighlight => "Slice highlight (per-slot hover)",
             AnimEditorElement::PageTransition => "Page transition (page-cycle)",
+            AnimEditorElement::AiMorph => "AI chat morph (disc → chat)",
         }
     }
 }
@@ -88,6 +90,7 @@ pub fn element_animation<'a>(
         AnimEditorElement::Submenu => &cfg.submenu,
         AnimEditorElement::SliceHighlight => &cfg.slice_highlight,
         AnimEditorElement::PageTransition => &cfg.page_transition.animation,
+        AnimEditorElement::AiMorph => &cfg.ai_morph,
     }
 }
 
@@ -101,6 +104,7 @@ pub fn element_animation_mut<'a>(
         AnimEditorElement::Submenu => &mut cfg.submenu,
         AnimEditorElement::SliceHighlight => &mut cfg.slice_highlight,
         AnimEditorElement::PageTransition => &mut cfg.page_transition.animation,
+        AnimEditorElement::AiMorph => &mut cfg.ai_morph,
     }
 }
 

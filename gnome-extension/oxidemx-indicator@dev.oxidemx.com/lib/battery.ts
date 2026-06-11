@@ -66,8 +66,8 @@ const IFACE_XML = `
       <arg type="y" direction="out" name="threshold"/>
     </method>
     <method name="GetEasySwitchInfo">
-      <arg type="y" direction="out" name="current"/>
       <arg type="y" direction="out" name="count"/>
+      <arg type="y" direction="out" name="current"/>
     </method>
     <method name="GetHostNames">
       <arg type="as" direction="out" name="names"/>
@@ -82,6 +82,16 @@ const IFACE_XML = `
     <method name="SetThumbWheelInvert">
       <arg type="b" direction="in" name="invert"/>
     </method>
+    <method name="GetRadialEnabled">
+      <arg type="b" direction="out" name="enabled"/>
+    </method>
+    <method name="SetRadialEnabled">
+      <arg type="b" direction="in" name="enabled"/>
+    </method>
+    <property name="HapticsEnabled" type="b" access="read"/>
+    <property name="GamingModeEnabled" type="b" access="read"/>
+    <property name="DaemonVersion" type="s" access="read"/>
+    <property name="DeviceName" type="s" access="read"/>
     <signal name="DeviceStateChanged">
       <arg type="y" name="battery"/>
       <arg type="b" name="charging"/>
@@ -150,20 +160,24 @@ export interface DaemonProxy {
         hostIndex: number,
         cb: (result: boolean | null, err: unknown | null) => void,
     ): void;
+    // NOTE: every reply below is an ARRAY of out-args, even for
+    // single-value methods — GetDpi resolves to [dpi], GetHostNames to
+    // [names[]]. Unwrap with res[0] at the call site.
     GetDpiAsync(
-        cb: (result: number | null, err: unknown | null) => void,
+        cb: (result: [number] | null, err: unknown | null) => void,
     ): void;
     GetSmartShiftAsync(
         cb: (result: [boolean, number] | null, err: unknown | null) => void,
     ): void;
+    /** Returns (num_hosts, current_host) — count FIRST, matching the daemon. */
     GetEasySwitchInfoAsync(
         cb: (result: [number, number] | null, err: unknown | null) => void,
     ): void;
     GetHostNamesAsync(
-        cb: (result: string[] | null, err: unknown | null) => void,
+        cb: (result: [string[]] | null, err: unknown | null) => void,
     ): void;
     GetGamingModeAsync(
-        cb: (result: boolean | null, err: unknown | null) => void,
+        cb: (result: [boolean] | null, err: unknown | null) => void,
     ): void;
     GetThumbWheelStatusAsync(
         cb: (result: [boolean, boolean] | null, err: unknown | null) => void,
@@ -172,6 +186,19 @@ export interface DaemonProxy {
         invert: boolean,
         cb: (result: unknown | null, err: unknown | null) => void,
     ): void;
+    GetRadialEnabledAsync(
+        cb: (result: [boolean] | null, err: unknown | null) => void,
+    ): void;
+    SetRadialEnabledAsync(
+        enabled: boolean,
+        cb: (result: unknown | null, err: unknown | null) => void,
+    ): void;
+    // Cached D-Bus properties (declared in IFACE_XML) — read directly,
+    // no round-trip.
+    readonly HapticsEnabled?: boolean;
+    readonly GamingModeEnabled?: boolean;
+    readonly DaemonVersion?: string;
+    readonly DeviceName?: string;
 }
 
 // ---------------------------------------------------------------------------

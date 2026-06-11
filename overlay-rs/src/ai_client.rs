@@ -1,9 +1,8 @@
-use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tokio::sync::mpsc;
 use std::sync::Mutex;
 use once_cell::sync::Lazy;
-use tracing::{info, warn, error};
+use tracing::{error, info};
 
 // =============================================================================
 // GLOBAL CHANNELS FOR ASYNC TOOL-TO-UI COMMUNICATION
@@ -22,68 +21,55 @@ pub static QUESTION_TX: Lazy<Mutex<Option<mpsc::Sender<PendingQuestion>>>> = Laz
 /// Channel to notify the UI loop of configuration changes made by the agent.
 pub static CONFIG_CHANGED_TX: Lazy<Mutex<Option<mpsc::Sender<String>>>> = Lazy::new(|| Mutex::new(None));
 
-// =============================================================================
-// REST REQUEST/RESPONSE DATA MODELS FOR THE INTERACTIONS API
-// =============================================================================
-
-#[derive(Serialize, Clone, Debug)]
-pub struct CreateInteractionRequest {
-    pub model: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub previous_interaction_id: Option<String>,
-    pub input: InteractionInput,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub tools: Option<Vec<serde_json::Value>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub system_instruction: Option<String>,
+/// Live progress events for an in-flight agent turn, tagged with the
+/// chat-thread index that issued the request so late events file
+/// into the right conversation.
+#[derive(Debug, Clone)]
+pub enum StreamEvent {
+    /// A chunk of the model's text reply, in order.
+    Delta(String),
+    /// What the agent is doing right now ("Searching the web…").
+    Activity(&'static str),
 }
 
-#[derive(Serialize, Clone, Debug)]
-#[serde(untagged)]
-pub enum InteractionInput {
-    Text(String),
-    FunctionResult(FunctionResultInput),
+/// Channel to push (thread_idx, StreamEvent) into the UI loop.
+/// Registered by app.rs's stream subscription at boot.
+pub static STREAM_TX: Lazy<Mutex<Option<mpsc::Sender<(usize, StreamEvent)>>>> =
+    Lazy::new(|| Mutex::new(None));
+
+/// Per-request handle for forwarding stream events. Cheap to clone.
+#[derive(Clone)]
+pub struct StreamSink {
+    pub thread: usize,
+    pub tx: mpsc::Sender<(usize, StreamEvent)>,
 }
 
-#[derive(Serialize, Clone, Debug)]
-pub struct FunctionResultInput {
-    pub r#type: String, // Always "function_result"
-    pub call_id: String,
-    pub name: String,
-    pub result: Vec<FunctionResultBlock>,
+impl StreamSink {
+    /// Build a sink for `thread` from the globally-registered
+    /// channel, if the subscription has installed one.
+    pub fn for_thread(thread: usize) -> Option<StreamSink> {
+        STREAM_TX
+            .lock()
+            .unwrap()
+            .clone()
+            .map(|tx| StreamSink { thread, tx })
+    }
+
+    async fn send(&self, event: StreamEvent) {
+        let _ = self.tx.send((self.thread, event)).await;
+    }
 }
 
-#[derive(Serialize, Clone, Debug)]
-pub struct FunctionResultBlock {
-    pub r#type: String, // Always "text"
-    pub text: String,
-}
-
-#[derive(Deserialize, Debug, Clone)]
-pub struct InteractionResponse {
-    pub id: String,
-    pub status: String, // "completed", "requires_action", etc.
-    pub steps: Vec<InteractionStep>,
-}
-
-#[derive(Deserialize, Debug, Clone)]
-pub struct InteractionStep {
-    pub r#type: String, // "user_input", "thought", "model_output", "function_call", "function_result"
-    pub status: String, // "done", "waiting"
-    #[serde(default)]
-    pub id: Option<String>, // Present on "function_call" (matches call_id)
-    #[serde(default)]
-    pub name: Option<String>, // Present on "function_call" / "function_result"
-    #[serde(default)]
-    pub arguments: Option<serde_json::Value>, // JSON arguments present on "function_call"
-    #[serde(default)]
-    pub content: Option<Vec<StepContent>>, // Present on text/thought steps
-}
-
-#[derive(Deserialize, Debug, Clone)]
-pub struct StepContent {
-    pub r#type: String, // "text"
-    pub text: String,
+/// Human label for a tool the agent is about to run.
+fn activity_for_tool(name: &str) -> &'static str {
+    match name {
+        "google_search" => "Searching the web…",
+        "get_menu_config" => "Reading menu config…",
+        "set_menu_config" => "Writing config…",
+        "list_system_apps" => "Listing installed apps…",
+        "ask_multiple_choice_question" => "Waiting for your choice…",
+        _ => "Running tool…",
+    }
 }
 
 // =============================================================================
@@ -128,13 +114,22 @@ pub fn load_api_key() -> Result<String, Box<dyn std::error::Error + Send + Sync>
 // AGENT MODES & PROMPT DEFS
 // =============================================================================
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum AgentMode {
     GeneralChat,
     SettingsCustomizer,
 }
 
 impl AgentMode {
+    /// Short label for the chat shell's mode pills.
+    pub fn label(&self) -> &'static str {
+        match self {
+            AgentMode::GeneralChat => "General",
+            AgentMode::SettingsCustomizer => "Menu Setup",
+        }
+    }
+
     pub fn system_instruction(&self) -> &'static str {
         match self {
             AgentMode::GeneralChat => {
@@ -149,16 +144,32 @@ impl AgentMode {
                  you can output structures in JSON matching the specified schemas. \
                  If you need to make changes, call the set_menu_config tool. \
                  If you have questions with multiple choice options, call the ask_multiple_choice_question tool. \
+                 Slice `icon` fields MUST be icon names that actually exist: either a standard \
+                 Adwaita/freedesktop symbolic name (e.g. utilities-terminal-symbolic, \
+                 text-editor-symbolic, applications-engineering-symbolic, folder-symbolic, \
+                 system-run-symbolic, applications-games-symbolic, web-browser-symbolic, \
+                 audio-volume-high-symbolic, camera-photo-symbolic, preferences-system-symbolic) \
+                 or an Icon= value taken from list_system_apps output. NEVER invent icon names — \
+                 a nonexistent name renders as a blank placeholder. When binding launchers, prefer \
+                 calling list_system_apps and reusing each app's real exec and icon. \
                  Keep your text replies clean, direct, and focused on layout modification."
             }
         }
     }
 
+    /// Tool declarations for the Interactions API. NOTE: the API
+    /// rejects requests mixing built-in tools (`{"type":
+    /// "google_search"}`) with custom function declarations
+    /// ("cannot be combined in the same request"), so for modes
+    /// that need both, `google_search` is declared as a CUSTOM
+    /// function here and its executor runs a nested, search-only
+    /// Interactions call (see `grounded_search`). Same API key, no
+    /// third-party service.
     pub fn tools(&self) -> Vec<serde_json::Value> {
-        let search_tool = json!({
+        let search_fn = json!({
             "type": "function",
             "name": "google_search",
-            "description": "Search the web for real-time information using DuckDuckGo. Returns a list of titles, links, and snippets.",
+            "description": "Search the web with Google for real-time information. Returns a grounded, sourced summary of current facts for the query.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -172,7 +183,10 @@ impl AgentMode {
         });
 
         match self {
-            AgentMode::GeneralChat => vec![search_tool],
+            // Chat-only mode has no custom functions, so it can use
+            // the built-in tool directly — grounding citations and
+            // all, in a single round-trip.
+            AgentMode::GeneralChat => vec![json!({ "type": "google_search" })],
             AgentMode::SettingsCustomizer => vec![
                 json!({
                     "type": "function",
@@ -207,7 +221,7 @@ impl AgentMode {
                         "properties": {}
                     }
                 }),
-                search_tool,
+                search_fn,
                 json!({
                     "type": "function",
                     "name": "ask_multiple_choice_question",
@@ -239,116 +253,400 @@ impl AgentMode {
 // MAIN ASYNC API CLIENT FUNCTION (AGENT LOOP)
 // =============================================================================
 
+/// Hard cap on model⇄tool round-trips within one `ask_ai` call so a
+/// confused model can't loop the agent forever.
+const MAX_TOOL_ROUNDS: usize = 8;
+
+const INTERACTIONS_URL: &str = "https://generativelanguage.googleapis.com/v1beta/interactions";
+/// Default + fallback model; the chat toolbar can switch threads to
+/// `PRO_MODEL` for harder prompts.
+pub const DEFAULT_MODEL: &str = "gemini-2.5-flash";
+pub const PRO_MODEL: &str = "gemini-2.5-pro";
+
+/// POST one Interactions-API request and return the parsed body,
+/// surfacing the API's own error message on non-2xx (it names
+/// quota/key/safety problems precisely).
+async fn post_interaction(
+    client: &reqwest::Client,
+    api_key: &str,
+    body: &serde_json::Value,
+) -> Result<serde_json::Value, Box<dyn std::error::Error + Send + Sync>> {
+    let res = client
+        .post(INTERACTIONS_URL)
+        .header("x-goog-api-key", api_key)
+        .json(body)
+        .send()
+        .await?;
+    let status = res.status();
+    if !status.is_success() {
+        let error_text = res.text().await.unwrap_or_default();
+        error!(%status, "Interactions API returned error: {}", error_text);
+        let detail = serde_json::from_str::<serde_json::Value>(&error_text)
+            .ok()
+            .and_then(|v| v["error"]["message"].as_str().map(String::from))
+            .unwrap_or(error_text);
+        return Err(format!("API error ({status}): {detail}").into());
+    }
+    Ok(res.json().await?)
+}
+
+/// Concatenated text of every `model_output` step.
+fn collect_output_text(body: &serde_json::Value) -> String {
+    let mut out = String::new();
+    for step in body["steps"].as_array().into_iter().flatten() {
+        if step["type"] == "model_output" {
+            for content in step["content"].as_array().into_iter().flatten() {
+                if content["type"] == "text" {
+                    if let Some(t) = content["text"].as_str() {
+                        if !out.is_empty() {
+                            out.push('\n');
+                        }
+                        out.push_str(t);
+                    }
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Everything one request/response round yields, whether it came in
+/// over SSE or as a single JSON body.
+#[derive(Debug, Default)]
+struct RoundOutcome {
+    id: Option<String>,
+    status: String,
+    text: String,
+    /// `(call_id, name, arguments)` for every function_call step.
+    calls: Vec<(String, String, serde_json::Value)>,
+}
+
+/// Drain complete SSE blocks (separated by a blank line) from `buf`,
+/// returning `(event, data)` pairs. Incomplete trailing data stays
+/// in the buffer for the next network chunk.
+fn split_sse_events(buf: &mut String) -> Vec<(String, String)> {
+    let mut events = Vec::new();
+    while let Some(pos) = buf.find("\n\n") {
+        let block: String = buf.drain(..pos + 2).collect();
+        let mut event = String::new();
+        let mut data = String::new();
+        for line in block.lines() {
+            if let Some(rest) = line.strip_prefix("event:") {
+                event = rest.trim().to_string();
+            } else if let Some(rest) = line.strip_prefix("data:") {
+                if !data.is_empty() {
+                    data.push('\n');
+                }
+                data.push_str(rest.trim_start());
+            }
+        }
+        if !event.is_empty() || !data.is_empty() {
+            events.push((event, data));
+        }
+    }
+    events
+}
+
+/// Fold one parsed SSE event into the round outcome, forwarding text
+/// deltas to the sink as they arrive.
+async fn apply_sse_event(
+    event: &str,
+    data: &str,
+    out: &mut RoundOutcome,
+    sink: &Option<StreamSink>,
+) {
+    match event {
+        "interaction.created" | "interaction.completed" => {
+            if let Ok(v) = serde_json::from_str::<serde_json::Value>(data) {
+                if let Some(id) = v["interaction"]["id"].as_str() {
+                    out.id = Some(id.to_string());
+                }
+                if let Some(status) = v["interaction"]["status"].as_str() {
+                    out.status = status.to_string();
+                }
+            }
+        }
+        "step.start" => {
+            if let Ok(v) = serde_json::from_str::<serde_json::Value>(data) {
+                let step = &v["step"];
+                if step["type"] == "function_call" {
+                    out.calls.push((
+                        step["id"].as_str().unwrap_or_default().to_string(),
+                        step["name"].as_str().unwrap_or_default().to_string(),
+                        step.get("arguments").cloned().unwrap_or(json!({})),
+                    ));
+                }
+            }
+        }
+        "step.delta" => {
+            if let Ok(v) = serde_json::from_str::<serde_json::Value>(data) {
+                if v["delta"]["type"] == "text" {
+                    if let Some(t) = v["delta"]["text"].as_str() {
+                        out.text.push_str(t);
+                        if let Some(s) = sink {
+                            s.send(StreamEvent::Delta(t.to_string())).await;
+                        }
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+/// One request round over SSE. Hard API errors (non-2xx) propagate;
+/// a stream that ends without a final status is an error the caller
+/// retries via the blocking path.
+async fn stream_round(
+    client: &reqwest::Client,
+    api_key: &str,
+    req_body: &serde_json::Value,
+    sink: &Option<StreamSink>,
+) -> Result<RoundOutcome, Box<dyn std::error::Error + Send + Sync>> {
+    use futures_util::StreamExt;
+
+    let mut body = req_body.clone();
+    body["stream"] = json!(true);
+    let res = client
+        .post(INTERACTIONS_URL)
+        .header("x-goog-api-key", api_key)
+        .json(&body)
+        .send()
+        .await?;
+    let status = res.status();
+    if !status.is_success() {
+        let error_text = res.text().await.unwrap_or_default();
+        let detail = serde_json::from_str::<serde_json::Value>(&error_text)
+            .ok()
+            .and_then(|v| v["error"]["message"].as_str().map(String::from))
+            .unwrap_or(error_text);
+        return Err(format!("API error ({status}): {detail}").into());
+    }
+
+    let mut out = RoundOutcome::default();
+    let mut buf = String::new();
+    let mut stream = res.bytes_stream();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk?;
+        buf.push_str(&String::from_utf8_lossy(&chunk));
+        for (event, data) in split_sse_events(&mut buf) {
+            apply_sse_event(&event, &data, &mut out, sink).await;
+        }
+    }
+    if out.status.is_empty() {
+        return Err("SSE stream ended without a final interaction status".into());
+    }
+    Ok(out)
+}
+
+/// One request round as a single blocking JSON exchange. Used when
+/// no sink is attached and as the fallback when SSE parsing fails.
+async fn blocking_round(
+    client: &reqwest::Client,
+    api_key: &str,
+    req_body: &serde_json::Value,
+) -> Result<RoundOutcome, Box<dyn std::error::Error + Send + Sync>> {
+    let body = post_interaction(client, api_key, req_body).await?;
+    let mut out = RoundOutcome {
+        id: body["id"].as_str().map(String::from),
+        status: body["status"].as_str().unwrap_or_default().to_string(),
+        text: collect_output_text(&body),
+        calls: Vec::new(),
+    };
+    for step in body["steps"].as_array().into_iter().flatten() {
+        if step["type"] == "function_call" && step["status"] == "waiting" {
+            out.calls.push((
+                step["id"].as_str().unwrap_or_default().to_string(),
+                step["name"].as_str().unwrap_or_default().to_string(),
+                step.get("arguments").cloned().unwrap_or(json!({})),
+            ));
+        }
+    }
+    Ok(out)
+}
+
+/// One agent turn against the Gemini **Interactions API**
+/// (`v1beta/interactions`). Server-side conversation state: pass
+/// the `session_id` returned by the previous turn as
+/// `previous_interaction_id` and the API replays the full context —
+/// no client-side history shipping.
+///
+/// With a `sink`, responses stream over SSE — text deltas and
+/// tool-activity labels are forwarded live; if SSE parsing ever
+/// fails mid-round, the round transparently retries as a blocking
+/// call (the UI just sees the text arrive at once). Function calls
+/// surface as `requires_action`; each is executed locally and fed
+/// back as a `function_result` input until the model answers with
+/// plain text.
+///
+/// History note: the original Antigravity-era client targeted this
+/// API at `v1beta2` (404) and was temporarily ported to stateless
+/// `generateContent`; this is the proper `v1beta` transport.
 pub async fn ask_ai(
     api_key: &str,
     mode: AgentMode,
+    model: &str,
     prompt: &str,
     mut session_id: Option<String>,
+    sink: Option<StreamSink>,
 ) -> Result<(String, Option<String>), Box<dyn std::error::Error + Send + Sync>> {
     let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(30))
+        .timeout(std::time::Duration::from_secs(120))
         .build()?;
 
-    let model = "models/gemini-2.5-flash";
     let tools = mode.tools();
-    let sys_prompt = mode.system_instruction();
+    let mut input: serde_json::Value = json!(prompt);
+    let mut full_text = String::new();
 
-    // Start with the initial user prompt as text input
-    let mut current_input = InteractionInput::Text(prompt.to_string());
+    if let Some(s) = &sink {
+        s.send(StreamEvent::Activity("Thinking…")).await;
+    }
 
-    loop {
-        // Construct the request payload
-        let req_body = CreateInteractionRequest {
-            model: model.to_string(),
-            previous_interaction_id: session_id.clone(),
-            input: current_input,
-            tools: Some(tools.clone()),
-            system_instruction: Some(sys_prompt.to_string()),
+    for round in 0..MAX_TOOL_ROUNDS {
+        let mut req_body = json!({
+            "model": model,
+            "input": input,
+            "tools": tools,
+            "system_instruction": mode.system_instruction(),
+        });
+        if let Some(prev) = &session_id {
+            req_body["previous_interaction_id"] = json!(prev);
+        }
+
+        info!(round, model, prev = ?session_id, "Sending Interactions API request");
+        let outcome = if sink.is_some() {
+            match stream_round(&client, api_key, &req_body, &sink).await {
+                Ok(o) => o,
+                Err(e) if e.to_string().starts_with("API error") => return Err(e),
+                Err(e) => {
+                    // SSE hiccup — retry the round as a plain JSON
+                    // exchange so the turn still completes.
+                    tracing::warn!(error = %e, "SSE round failed; falling back to blocking call");
+                    blocking_round(&client, api_key, &req_body).await?
+                }
+            }
+        } else {
+            blocking_round(&client, api_key, &req_body).await?
         };
 
-        let url = format!(
-            "https://generativelanguage.googleapis.com/v1beta2/interactions?key={}",
-            api_key
-        );
-
-        info!("Sending request to Interactions API. session_id={:?}", session_id);
-        let res = client
-            .post(&url)
-            .json(&req_body)
-            .send()
-            .await?;
-
-        if !res.status().is_success() {
-            let error_text = res.text().await.unwrap_or_default();
-            error!("Interactions API returned error: {}", error_text);
-            return Err(format!("API error: {}", error_text).into());
+        info!(status = %outcome.status, id = ?outcome.id, "Interaction response");
+        session_id = outcome.id.or(session_id);
+        if !outcome.text.is_empty() {
+            if !full_text.is_empty() {
+                full_text.push('\n');
+            }
+            full_text.push_str(&outcome.text);
         }
 
-        let resp_body: InteractionResponse = res.json().await?;
-        info!("Received response: status='{}', id='{}'", resp_body.status, resp_body.id);
-
-        // Update the session ID for subsequent turns (if any)
-        session_id = Some(resp_body.id.clone());
-
-        match resp_body.status.as_str() {
+        match outcome.status.as_str() {
             "completed" => {
-                // Collect all text from model outputs
-                let mut accumulated_text = String::new();
-                for step in resp_body.steps {
-                    if step.r#type == "model_output" {
-                        if let Some(contents) = step.content {
-                            for content in contents {
-                                if content.r#type == "text" {
-                                    if !accumulated_text.is_empty() {
-                                        accumulated_text.push('\n');
-                                    }
-                                    accumulated_text.push_str(&content.text);
-                                }
-                            }
-                        }
-                    }
+                if full_text.is_empty() {
+                    return Err("Model returned an empty reply".into());
                 }
-                return Ok((accumulated_text, session_id));
+                return Ok((full_text, session_id));
             }
             "requires_action" => {
-                // Find the waiting function call
-                let mut found_call = None;
-                for step in &resp_body.steps {
-                    if step.r#type == "function_call" && step.status == "waiting" {
-                        if let (Some(id), Some(name), Some(args)) = (&step.id, &step.name, &step.arguments) {
-                            found_call = Some((id.clone(), name.clone(), args.clone()));
-                            break;
-                        }
-                    }
+                let Some((call_id, name, args)) = outcome.calls.into_iter().next() else {
+                    return Err("requires_action with no pending function call".into());
+                };
+                info!("Executing local tool '{}' (call_id={})", name, call_id);
+                if let Some(s) = &sink {
+                    s.send(StreamEvent::Activity(activity_for_tool(&name))).await;
                 }
-
-                if let Some((call_id, name, args)) = found_call {
-                    info!("Executing local tool '{}' (call_id={})", name, call_id);
-                    let result_text = execute_local_tool(&name, args).await?;
-                    
-                    // Set up the next request's input to feed this function result back to the model
-                    current_input = InteractionInput::FunctionResult(FunctionResultInput {
-                        r#type: "function_result".to_string(),
-                        call_id,
-                        name,
-                        result: vec![FunctionResultBlock {
-                            r#type: "text".to_string(),
-                            text: result_text,
-                        }],
-                    });
-
-                    // Continue loop to submit function result
-                    continue;
-                } else {
-                    warn!("Interactions status was 'requires_action' but no waiting function call was found!");
-                    return Err("requires_action status with no pending function call".into());
+                let result_text = match execute_local_tool(&name, args).await {
+                    Ok(t) => t,
+                    // Feed tool failures back to the model instead
+                    // of aborting the turn — it can usually recover
+                    // or explain.
+                    Err(e) => format!("Tool error: {e}"),
+                };
+                if let Some(s) = &sink {
+                    s.send(StreamEvent::Activity("Thinking…")).await;
                 }
+                input = json!({
+                    "type": "function_result",
+                    "call_id": call_id,
+                    "name": name,
+                    "result": [{ "type": "text", "text": result_text }],
+                });
+            }
+            "failed" | "cancelled" | "incomplete" | "budget_exceeded" => {
+                return Err(format!("Interaction ended with status '{}'", outcome.status).into());
             }
             other => {
-                error!("Unrecognized interaction status: '{}'", other);
-                return Err(format!("Unrecognized interaction status: {}", other).into());
+                return Err(format!("Unrecognized interaction status: {other}").into());
             }
         }
+    }
+
+    Err(format!("Agent exceeded {MAX_TOOL_ROUNDS} tool rounds without a final answer").into())
+}
+
+#[cfg(test)]
+mod sse_tests {
+    use super::split_sse_events;
+
+    #[test]
+    fn drains_complete_blocks_and_keeps_partials() {
+        let mut buf = String::from(
+            "event: step.delta\ndata: {\"a\":1}\n\nevent: done\ndata: [DONE]\n\nevent: partial\nda",
+        );
+        let events = split_sse_events(&mut buf);
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0], ("step.delta".into(), "{\"a\":1}".into()));
+        assert_eq!(events[1], ("done".into(), "[DONE]".into()));
+        assert_eq!(buf, "event: partial\nda");
+    }
+
+    #[test]
+    fn partial_then_completion_across_chunks() {
+        let mut buf = String::from("event: x\ndata: {\"t\":");
+        assert!(split_sse_events(&mut buf).is_empty());
+        buf.push_str("\"hi\"}\n\n");
+        let events = split_sse_events(&mut buf);
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].1, "{\"t\":\"hi\"}");
+        assert!(buf.is_empty());
+    }
+
+    #[test]
+    fn multiline_data_joined() {
+        let mut buf = String::from("event: e\ndata: line1\ndata: line2\n\n");
+        let events = split_sse_events(&mut buf);
+        assert_eq!(events[0].1, "line1\nline2");
+    }
+}
+
+/// Grounded web search via a NESTED, search-only interaction: the
+/// Interactions API refuses to mix built-in tools with custom
+/// function declarations in one request, so the settings agent
+/// declares `google_search` as a custom function and this executor
+/// satisfies it with a second interaction that uses Google's
+/// built-in search grounding. Same API key, no third-party search
+/// service.
+async fn grounded_search(
+    query: &str,
+) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+    let api_key = load_api_key()?;
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(45))
+        .build()?;
+    let req = json!({
+        "model": DEFAULT_MODEL,
+        "input": format!(
+            "Search the web and summarize current, factual information for this query. \
+             Include key facts and source names. Query: {query}"
+        ),
+        "tools": [{ "type": "google_search" }],
+        // One-shot lookup — no need to persist it server-side.
+        "store": false,
+    });
+    let body = post_interaction(&client, &api_key, &req).await?;
+    let text = collect_output_text(&body);
+    if text.is_empty() {
+        Ok("No search results found.".to_string())
+    } else {
+        Ok(text)
     }
 }
 
@@ -454,23 +752,7 @@ async fn execute_local_tool(
             let query = args["query"]
                 .as_str()
                 .ok_or("query argument missing or not a string")?;
-            
-            let client = reqwest::Client::builder()
-                .user_agent("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-                .timeout(std::time::Duration::from_secs(8))
-                .build()?;
-            
-            let encoded_query = url::form_urlencoded::byte_serialize(query.as_bytes()).collect::<String>();
-            let url = format!("https://html.duckduckgo.com/html/?q={}", encoded_query);
-            
-            let response = client.get(&url).send().await?.text().await?;
-            let results = parse_ddg_html(&response);
-            
-            if results.is_empty() {
-                Ok("No search results found.".to_string())
-            } else {
-                Ok(serde_json::to_string_pretty(&results)?)
-            }
+            grounded_search(query).await
         }
         "ask_multiple_choice_question" => {
             let question = args["question"]
@@ -508,101 +790,4 @@ async fn execute_local_tool(
         }
         other => Err(format!("Unknown tool: {}", other).into()),
     }
-}
-
-// =============================================================================
-// DDG HTML PARSER HELPERS
-// =============================================================================
-
-fn parse_ddg_html(html: &str) -> Vec<serde_json::Value> {
-    let mut results = Vec::new();
-    let parts: Vec<&str> = html.split("class=\"result").collect();
-    
-    for part in parts.iter().skip(1) {
-        let a_class = "result__a";
-        if let Some(a_pos) = part.find(a_class) {
-            let sub = &part[a_pos..];
-            if let Some(href_pos) = sub.find("href=\"") {
-                let href_start = href_pos + 6;
-                if let Some(href_end) = sub[href_start..].find('"') {
-                    let mut url = sub[href_start..href_start + href_end].to_string();
-                    
-                    if url.contains("uddg=") {
-                        if let Some(uddg_pos) = url.find("uddg=") {
-                            let uddg_param = &url[uddg_pos + 5..];
-                            let amp_pos = uddg_param.find('&').unwrap_or(uddg_param.len());
-                            let encoded = &uddg_param[..amp_pos];
-                            if let Ok(decoded) = percent_encoding::percent_decode_str(encoded).decode_utf8() {
-                                url = decoded.to_string();
-                            }
-                        }
-                    }
-                    
-                    if let Some(close_tag_pos) = sub[href_start + href_end..].find('>') {
-                        let title_start = href_start + href_end + close_tag_pos + 1;
-                        if let Some(close_a_pos) = sub[title_start..].find("</a>") {
-                            let raw_title = &sub[title_start..title_start + close_a_pos];
-                            let title = clean_html_tags(raw_title);
-                            
-                            let mut snippet = String::new();
-                            let snippet_class = "result__snippet";
-                            if let Some(snippet_pos) = sub.find(snippet_class) {
-                                let snip_sub = &sub[snippet_pos..];
-                                if let Some(snip_open) = snip_sub.find('>') {
-                                    let snip_start = snip_open + 1;
-                                    if let Some(snip_close) = snip_sub[snip_start..].find("</a>") {
-                                        let end_tags = vec!["</div>", "</p>", "</a>"];
-                                        let mut min_close = snip_close;
-                                        for tag in end_tags {
-                                            if let Some(pos) = snip_sub[snip_start..].find(tag) {
-                                                if pos < min_close {
-                                                    min_close = pos;
-                                                }
-                                            }
-                                        }
-                                        let raw_snippet = &snip_sub[snip_start..snip_start + min_close];
-                                        snippet = clean_html_tags(raw_snippet);
-                                    }
-                                }
-                            }
-                            
-                            if !title.is_empty() && !url.is_empty() {
-                                results.push(json!({
-                                    "title": title,
-                                    "url": url,
-                                    "snippet": snippet
-                                }));
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        if results.len() >= 5 {
-            break;
-        }
-    }
-    results
-}
-
-fn clean_html_tags(input: &str) -> String {
-    let mut output = String::new();
-    let mut in_tag = false;
-    for c in input.chars() {
-        if c == '<' {
-            in_tag = true;
-        } else if c == '>' {
-            in_tag = false;
-        } else if !in_tag {
-            output.push(c);
-        }
-    }
-    output = output
-        .replace("&amp;", "&")
-        .replace("&lt;", "<")
-        .replace("&gt;", ">")
-        .replace("&quot;", "\"")
-        .replace("&#x27;", "'")
-        .replace("&nbsp;", " ");
-    output.trim().to_string()
 }
