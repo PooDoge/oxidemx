@@ -1,9 +1,9 @@
-# OxideMX MX — GNOME Shell extensions
+# OxideMX — GNOME Shell extensions
 
 Two extensions live here:
 
-- **`oxidemx-cursor@dev.juhlabs.com/`** — cursor + window-positioning helper for the radial overlay and popup. Exposes `org.oxidemx.CursorHelper`.
-- **`oxidemx-indicator@dev.juhlabs.com/`** — top-bar battery indicator + libadwaita prefs + stack-supervisor surface for the MX device.
+- **`oxidemx-cursor@dev.oxidemx.com/`** — cursor + window-positioning helper for the radial overlay and popup. Exposes `org.oxidemx.CursorHelper`.
+- **`oxidemx-indicator@dev.oxidemx.com/`** — top-bar battery indicator + libadwaita prefs + stack-supervisor surface for the MX device.
 
 Both extensions are written in **TypeScript**. GNOME Shell loads `.js`, so `.ts` is compiled to `.js` alongside each source file. The `.js` files are gitignored — `.ts` is the source of truth.
 

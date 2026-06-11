@@ -17,7 +17,7 @@ This addendum records the deltas between the original `CLAUDE_CODE_PROMPT.md` sp
 | 2 | D-Bus name | `org.oxidemx.Daemon` | **Confirmed `org.oxidemx.Daemon`** — but this requires a flag-day rename from the legacy `org.kde.oxidemx`. Rename scope: 5 daemon files, 4 overlay-rs files, settings-rs, packaging desktop file (rename), 3 install scripts, 2 root design docs. Done atomically in Phase 0. |
 | 3 | Popup preferences storage | New `~/.config/oxidemx/config.toml` (TOML, serde) | **New `popup` field on existing `config.json`** (serde_json, reuses overlay's inotify watcher and `settings-rs/persist.rs` debounce). One file = one reload. |
 | 4 | Crate extractions | "Extract `oxidemx-widgets` and `oxidemx-window`" | **Confirmed — extract both.** New workspace members `oxidemx-widgets/` (moves `widgets.rs + style.rs + palette.rs` out of settings-rs) and `oxidemx-window/` (moves `ext_positioner.rs` out of overlay-rs and adds `frameless_topmost()` helper from the inlined overlay window setup). Done in Phase A. |
-| 5 | GNOME extension language | TypeScript for the new indicator | **TypeScript for *both* extensions.** Existing `oxidemx-cursor@dev.juhlabs.com` migrates from plain JS to TS at the same time. Shared `gnome-extension/tsconfig.json`. |
+| 5 | GNOME extension language | TypeScript for the new indicator | **TypeScript for *both* extensions.** Existing `oxidemx-cursor@dev.oxidemx.com` migrates from plain JS to TS at the same time. Shared `gnome-extension/tsconfig.json`. |
 | 6 | Critical-battery notification | Not specified | **Emit one-shot `Gio.Notification`** when device first crosses into critical band (not charging). Re-armable on band exit or charging start. Body: `"<deviceName> at <pct>% — connect charging cable"`. Implemented in `lib/battery.ts`. |
 | 7 | Unwired quick-action ids (`highlight`, `flow`) | Implicit — assumed all daemon methods exist | **Render the toggle, log "not yet wired" on click.** Catalog stays complete per the design. Wiring tracked as a Phase 3.5 follow-up. |
 | 8 | `ShowPopup(panel_rect)` coordinate space | Implicit | **Stage-absolute logical pixels** (whatever `actor.get_transformed_extents()` returns natively). Popup forwards `monitor=-1` to `MoveOverlay`; cursor extension resolves the monitor. |
@@ -37,7 +37,7 @@ This addendum records the deltas between the original `CLAUDE_CODE_PROMPT.md` sp
 | Radial overlay process | When `Radial Overlay` toggle goes ON: D-Bus probe for `org.oxidemx.overlay`. If missing: call new daemon method `EnsureOverlayRunning()` which wraps the spawn. | Daemon handles the actual spawn — extension never spawns long-lived processes itself. |
 | Gaming-mode bridges | Daemon's `GetGamingState()` confirms active + gamepad-haptic bridge thread running inside daemon | Daemon-internal; no supervision needed. |
 | Haptic feedback | Daemon's `haptic_supported()` returns true | Daemon-internal; no supervision needed. |
-| Cursor-helper extension | `Main.extensionManager.lookup('oxidemx-cursor@dev.juhlabs.com')` enabled | Popup footer shows one-time warning if missing. |
+| Cursor-helper extension | `Main.extensionManager.lookup('oxidemx-cursor@dev.oxidemx.com')` enabled | Popup footer shows one-time warning if missing. |
 
 **Architectural rules baked in:**
 - Extension **never** spawns long-lived processes directly. Use `systemctl --user start <unit>` or new daemon-side methods (`EnsureOverlayRunning`).

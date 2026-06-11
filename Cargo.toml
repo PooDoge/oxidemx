@@ -1,19 +1,15 @@
-# Cargo workspace for the OxideMX MX project.
+# Cargo workspace for the OxideMX project.
 #
 # Members:
 #   * daemon/             — oxidemxd, the HID++ + D-Bus + KWin daemon.
 #                           Pre-existing; not touched by this rewrite.
 #   * oxidemx-shared/   — types shared between daemon and overlay
 #                           (config.json structs, theme names, action enums).
-#   * overlay-rs/         — Rust + iced overlay. Replacement for the
-#                           Python overlay/ tree.
+#   * overlay-rs/         — Rust + iced overlay.
 #   * settings-rs/        — Rust + iced settings GUI. Edits the same
 #                           config.json the overlay watches via inotify,
 #                           so changes preview live with no IPC.
 #
-# The legacy Python overlay/ stays in place during the migration; both
-# overlays talk to the same daemon over the same D-Bus interface, and a
-# config flag selects which one autostarts.
 
 [workspace]
 resolver = "2"

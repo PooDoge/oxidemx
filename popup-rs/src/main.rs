@@ -1,4 +1,4 @@
-//! OxideMX MX indicator popup.
+//! OxideMX indicator popup.
 //!
 //! Spawned by `oxidemxd` when it handles a `ShowPopup(x, y, w, h)`
 //! D-Bus call from the GNOME Shell indicator. Opens a frameless,

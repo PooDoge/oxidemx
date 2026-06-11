@@ -3,8 +3,8 @@
 **Status:** Phases 0–3 shipped on `rust-gtk4-overlay` (merge commit `040e3db`, 2026-05-25). Post-merge follow-ups tracked in [`docs/plans/followups.md`](docs/plans/followups.md). Implementation plan: [`docs/plans/indicator-implementation.md`](docs/plans/indicator-implementation.md). Original UI spec: [`design/oxidemx-indicator/CLAUDE_CODE_PROMPT.md`](design/oxidemx-indicator/CLAUDE_CODE_PROMPT.md). Deltas from that spec: [`design/oxidemx-indicator/SPEC_ADDENDUM.md`](design/oxidemx-indicator/SPEC_ADDENDUM.md).
 **Date:** 2026-05-24 (spec) · 2026-05-25 (shipped)
 **Owners:**
-- `gnome-extension/oxidemx-indicator@dev.juhlabs.com/` (new)
-- `gnome-extension/oxidemx-cursor@dev.juhlabs.com/` (TS migration in scope)
+- `gnome-extension/oxidemx-indicator@dev.oxidemx.com/` (new)
+- `gnome-extension/oxidemx-cursor@dev.oxidemx.com/` (TS migration in scope)
 - `popup-rs/` (new sibling workspace member)
 - `settings-rs/src/tabs/indicator_popup.rs` (new tab)
 - `oxidemx-widgets/` (new sibling crate — extracted from settings-rs)
@@ -174,7 +174,7 @@ Health probes (run on extension `enable()`, on every popup open, and on every `r
 | **Radial overlay process** | When the user toggles `Radial Overlay` to ON: D-Bus probe for `org.oxidemx.overlay` name. If missing, spawn `oxidemx-overlay` via `Gio.Subprocess` (or call a new daemon method `EnsureOverlayRunning()` that wraps the spawn — preferred, since the daemon already owns the overlay-lifecycle decision). When toggled OFF: send `HideMenu` and leave the process (low cost). |
 | **Gaming-mode bridges** | Gaming mode toggle ON: confirm daemon's `GetGamingState()` reports active and the gamepad-haptic bridge thread is running inside the daemon (already daemon-internal per `HAPTIC_GAMEPAD_BRIDGE_DESIGN.md` §2 — no separate process to supervise). |
 | **Haptic feedback** | Toggle ON: daemon's `haptic_supported()` returns true and the HID++ haptic feature index is cached. No process supervision needed — daemon-internal. |
-| **GNOME cursor helper extension** | `Main.extensionManager.lookup('oxidemx-cursor@dev.juhlabs.com')` returns an enabled extension. Required by overlay positioning. | If missing, indicator surfaces a one-time warning in the popup footer. |
+| **GNOME cursor helper extension** | `Main.extensionManager.lookup('oxidemx-cursor@dev.oxidemx.com')` returns an enabled extension. Required by overlay positioning. | If missing, indicator surfaces a one-time warning in the popup footer. |
 
 **Architectural rules:**
 - The extension **never** spawns long-lived processes itself. It either calls `systemctl --user start <unit>` or asks the daemon to do the spawn via a new D-Bus method. This keeps the Shell process lean and the daemon's job tree consistent with what `journalctl --user` shows.
@@ -288,10 +288,10 @@ oxidemx/
 ├── gnome-extension/
 │   ├── tsconfig.json                  [NEW shared]
 │   ├── package.json                   [NEW shared dev deps]
-│   ├── oxidemx-cursor@dev.juhlabs.com/
+│   ├── oxidemx-cursor@dev.oxidemx.com/
 │   │   ├── metadata.json              [unchanged]
 │   │   └── extension.ts               [Phase 1 — migrated from .js]
-│   └── oxidemx-indicator@dev.juhlabs.com/   [NEW]
+│   └── oxidemx-indicator@dev.oxidemx.com/   [NEW]
 │       ├── metadata.json
 │       ├── extension.ts
 │       ├── prefs.ts

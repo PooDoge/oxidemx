@@ -23,7 +23,7 @@ use oxidemx_shared::{ProfileResolver, Theme};
 fn main() {
     let focused_class = std::env::args().nth(1);
 
-    println!("== OxideMX MX — headless menu dump ==");
+    println!("== OxideMX — headless menu dump ==");
     println!();
 
     let resolver = match ProfileResolver::load_default() {

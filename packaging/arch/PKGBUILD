@@ -1,90 +1,73 @@
-# Maintainer: JuhLabs (Julian Hermstad) <juhlabs@example.com>
-# Arch Linux PKGBUILD for JuhRadial MX
+# Maintainer: PooDoge <dev@chewyswap.dog>
+# Contributor: JuhLabs (Julian Hermstad) — original JuhRadial MX project
+# Arch Linux PKGBUILD for OxideMX
 
-pkgname=juhradial-mx
-pkgver=0.2.5
+pkgname=oxidemx
+pkgver=0.3.2
 pkgrel=1
-pkgdesc="Beautiful radial menu for Logitech MX Master mice on Linux"
+pkgdesc="Radial menu, DPI control and haptics for Logitech MX Master mice on Linux"
 arch=('x86_64')
-url="https://github.com/JuhLabs/juhradial-mx"
+url="https://github.com/PooDoge/oxidemx"
 license=('GPL3')
 depends=(
     'gtk4'
     'gtk4-layer-shell'
-    'python'
-    'python-gobject'
-    'python-cairo'
-    'python-cryptography'
+    'libadwaita'
     'dbus'
+    'libevdev'
+    'hidapi'
 )
 makedepends=(
     'rust'
     'cargo'
-    'nodejs'
-    'npm'
     'git'
 )
 optdepends=(
-    'ydotool: for cursor capture on Wayland'
+    'ydotool: for cursor capture and input injection on Wayland'
 )
 provides=("$pkgname")
-conflicts=("$pkgname-git")
+conflicts=("$pkgname-git" 'juhradial-mx')
 source=("$pkgname-$pkgver.tar.gz::$url/archive/v$pkgver.tar.gz")
 sha256sums=('SKIP')
 
 build() {
     cd "$pkgname-$pkgver"
 
-    # Build Rust daemon
-    cd daemon
-    cargo build --release --locked
-    cd ..
-
-    # Build KWin script (optional)
-    if [ -d "kwin-script" ]; then
-        cd kwin-script
-        npm ci --legacy-peer-deps 2>/dev/null || npm install --legacy-peer-deps
-        npm run build 2>/dev/null || true
-        cd ..
-    fi
+    # Build the whole Rust workspace (daemon, overlay, settings, popup)
+    cargo build --release --locked --workspace \
+        --exclude spike-iced --exclude iced_gtk_themer
 }
 
 package() {
     cd "$pkgname-$pkgver"
 
-    # Install daemon binary
-    install -Dm755 daemon/target/release/juhradiald "$pkgdir/usr/bin/juhradiald"
+    # Install binaries
+    install -Dm755 target/release/oxidemxd "$pkgdir/usr/bin/oxidemxd"
+    install -Dm755 target/release/oxidemx-overlay "$pkgdir/usr/bin/oxidemx-overlay"
+    install -Dm755 target/release/oxidemx-settings "$pkgdir/usr/bin/oxidemx-settings"
+    install -Dm755 target/release/oxidemx-popup "$pkgdir/usr/bin/oxidemx-popup"
 
     # Install launcher script
-    install -Dm755 scripts/juhradial-mx.sh "$pkgdir/usr/bin/juhradial-mx"
-
-    # Install overlay Python files
-    install -dm755 "$pkgdir/usr/share/juhradial"
-    install -Dm644 overlay/*.py "$pkgdir/usr/share/juhradial/"
-
-    # Install flow module
-    cp -r overlay/flow "$pkgdir/usr/share/juhradial/flow"
-
-    # Install locales
-    if [ -d "overlay/locales" ]; then
-        cp -r overlay/locales "$pkgdir/usr/share/juhradial/"
-    fi
+    install -Dm755 scripts/oxidemx.sh "$pkgdir/usr/bin/oxidemx"
 
     # Install assets
-    install -dm755 "$pkgdir/usr/share/juhradial/assets"
-    cp -r assets/* "$pkgdir/usr/share/juhradial/assets/"
+    install -dm755 "$pkgdir/usr/share/oxidemx/assets"
+    cp -r assets/* "$pkgdir/usr/share/oxidemx/assets/"
 
-    # Install desktop file
-    install -Dm644 packaging/juhradial-mx.desktop "$pkgdir/usr/share/applications/juhradial-mx.desktop"
+    # Install desktop files
+    install -Dm644 packaging/oxidemx.desktop "$pkgdir/usr/share/applications/oxidemx.desktop"
+    install -Dm644 packaging/org.oxidemx.settings.desktop "$pkgdir/usr/share/applications/org.oxidemx.settings.desktop"
 
     # Install icon
-    install -Dm644 assets/juhradial-mx.svg "$pkgdir/usr/share/icons/hicolor/scalable/apps/juhradial-mx.svg"
+    install -Dm644 assets/oxidemx.svg "$pkgdir/usr/share/icons/hicolor/scalable/apps/oxidemx.svg"
 
     # Install systemd user service
-    install -Dm644 packaging/systemd/juhradialmx-daemon.service "$pkgdir/usr/lib/systemd/user/juhradialmx-daemon.service"
+    install -Dm644 packaging/systemd/oxidemx-daemon.service "$pkgdir/usr/lib/systemd/user/oxidemx-daemon.service"
 
     # Install udev rules
-    install -Dm644 packaging/udev/99-logitech-hidpp.rules "$pkgdir/usr/lib/udev/rules.d/99-logitech-hidpp.rules"
+    install -Dm644 packaging/udev/99-oxidemx.rules "$pkgdir/usr/lib/udev/rules.d/99-oxidemx.rules"
+    install -Dm644 packaging/udev/70-oxidemx-haptic-pad.rules "$pkgdir/usr/lib/udev/rules.d/70-oxidemx-haptic-pad.rules"
+    install -Dm644 packaging/udev/60-ydotool-uinput.rules "$pkgdir/usr/lib/udev/rules.d/60-ydotool-uinput.rules"
 
     # Install license
     install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
@@ -95,11 +78,11 @@ package() {
 }
 
 post_install() {
-    echo ">>> To start JuhRadial MX:"
-    echo "    systemctl --user enable --now juhradialmx-daemon"
-    echo "    juhradial-mx"
+    echo ">>> To start OxideMX:"
+    echo "    systemctl --user enable --now oxidemx-daemon"
+    echo "    oxidemx"
     echo ""
-    echo ">>> Or find 'JuhRadial MX' in your application menu"
+    echo ">>> Or find 'OxideMX' in your application menu"
 }
 
 post_upgrade() {

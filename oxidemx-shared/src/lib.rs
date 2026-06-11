@@ -1,4 +1,4 @@
-//! Types shared between the OxideMX MX daemon and the Rust overlay.
+//! Types shared between the OxideMX daemon and the Rust overlay.
 //!
 //! The user-facing configuration lives in `~/.config/oxidemx/config.json`.
 //! The daemon writes it (via the settings GUI), watches it via inotify, and

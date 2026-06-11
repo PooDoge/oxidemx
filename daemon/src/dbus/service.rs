@@ -1,4 +1,4 @@
-//! OxideMX MX D-Bus service struct and constructors
+//! OxideMX D-Bus service struct and constructors
 
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::Instant;
@@ -28,7 +28,7 @@ pub(crate) struct EasySwitchCache {
 pub(crate) const EASY_SWITCH_TTL: std::time::Duration =
     std::time::Duration::from_secs(30);
 
-/// OxideMX MX D-Bus service
+/// OxideMX D-Bus service
 ///
 /// Implements the D-Bus interface for IPC between daemon, KWin overlay, and Plasma widget.
 pub struct OxideMXService {

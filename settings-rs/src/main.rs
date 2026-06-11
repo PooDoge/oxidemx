@@ -1,4 +1,4 @@
-//! OxideMX MX settings GUI.
+//! OxideMX settings GUI.
 //!
 //! Layout mirrors the legacy oxidemx settings dialog: a left
 //! sidebar with the 9 top-level sections (Buttons by default), a
@@ -4753,7 +4753,7 @@ fn footer_view(state: &State) -> Element<'_, Message> {
 
     container(
         row![
-            text("JuhLabs · Free & open source software")
+            text("OxideMX · Free & open source software · original concept by JuhLabs")
                 .size(11)
                 .style(style::text_dim(pal)),
             Space::new().width(Length::Fixed(16.0)),

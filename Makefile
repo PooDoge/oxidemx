@@ -1,9 +1,9 @@
-# OxideMX MX - Build System
+# OxideMX - Build System
 #
 # Usage:
 #   make build   - Build the Rust daemon
 #   make clean   - Clean build artifacts
-#   make run     - Run OxideMX MX (daemon + overlay)
+#   make run     - Run OxideMX (daemon + overlay)
 
 .PHONY: all build clean run help
 
@@ -22,19 +22,19 @@ clean:
 	cd daemon && cargo clean
 	@echo "✓ Clean complete"
 
-# Run OxideMX MX
+# Run OxideMX
 run: build
-	@echo "Starting OxideMX MX..."
+	@echo "Starting OxideMX..."
 	./scripts/oxidemx.sh
 
 # Help
 help:
-	@echo "OxideMX MX Build System"
+	@echo "OxideMX Build System"
 	@echo ""
 	@echo "Usage: make [target]"
 	@echo ""
 	@echo "Targets:"
 	@echo "  build  - Build the Rust daemon (default)"
 	@echo "  clean  - Clean build artifacts"
-	@echo "  run    - Build and run OxideMX MX"
+	@echo "  run    - Build and run OxideMX"
 	@echo "  help   - Show this help"

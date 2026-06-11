@@ -1,6 +1,6 @@
 /* global React, Icon, BatteryGlyph, DEVICES */
 
-// Shared chrome for the OxideMX MX Settings app — header, sidebar nav,
+// Shared chrome for the OxideMX Settings app — header, sidebar nav,
 // status bar. Pages plug into the content slot.
 
 const APP_NAV = [
@@ -54,7 +54,7 @@ const JRAppShell = ({ activeNavId, activeDevice, children, statusText = "Idle." 
     </div>
 
     <div className="jr-app-statusbar">
-      <span>JuhLabs · Free &amp; open source software</span>
+      <span>OxideMX · Free &amp; open source software</span>
       <span style={{ color: "var(--jr-fg-dim)" }}>/home/jim/.config/oxidemx/config.json</span>
       <span className="jr-status-right">{statusText}</span>
     </div>

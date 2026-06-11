@@ -260,7 +260,7 @@ fn about_panel(state: &State) -> Element<'_, Message> {
 
     let about_col = column![
         row![
-            text("OxideMX MX").size(15),
+            text("OxideMX").size(15),
             text(format!("v{version}"))
                 .size(11)
                 .style(style::text_dim(pal)),
@@ -301,7 +301,7 @@ fn about_panel(state: &State) -> Element<'_, Message> {
 
     let links_col = column![
         text("Resources").size(13),
-        text("• Project repo: https://github.com/juhlabs/oxidemx")
+        text("• Project repo: https://github.com/PooDoge/oxidemx")
             .size(11)
             .style(style::text_dim(pal)),
         text("• Daemon logs: journalctl --user -u oxidemxd -f")

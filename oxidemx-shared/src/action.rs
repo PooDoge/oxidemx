@@ -18,7 +18,7 @@ pub enum ActionKind {
     Macro,
     /// Switch the MX Master's Easy-Switch host (1, 2, or 3).
     EasySwitch,
-    /// Open the OxideMX MX settings window.
+    /// Open the OxideMX settings window.
     Settings,
     /// Open the OS emoji picker (e.g. `ibus emoji`, `gnome-characters`).
     /// Treated like Exec on the overlay side; kept as a distinct kind

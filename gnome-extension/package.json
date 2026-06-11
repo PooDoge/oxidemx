@@ -2,7 +2,7 @@
   "name": "oxidemx-gnome-extensions",
   "version": "0.0.1",
   "private": true,
-  "description": "Build target for the OxideMX MX GNOME shell extensions (oxidemx-cursor, oxidemx-indicator).",
+  "description": "Build target for the OxideMX GNOME shell extensions (oxidemx-cursor, oxidemx-indicator).",
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "watch": "tsc -p tsconfig.json --watch",

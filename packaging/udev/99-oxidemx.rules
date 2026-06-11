@@ -1,11 +1,11 @@
-# JuhRadial MX - udev rules for Logitech MX Master 4
+# OxideMX - udev rules for Logitech MX Master 4
 #
 # These rules allow non-root access to Logitech input devices,
-# enabling the JuhRadial MX daemon to read gesture button events
+# enabling the OxideMX daemon to read gesture button events
 # without requiring elevated privileges.
 #
 # Installation:
-#   sudo cp 99-juhradialmx.rules /etc/udev/rules.d/
+#   sudo cp 99-oxidemx.rules /etc/udev/rules.d/
 #   sudo udevadm control --reload-rules
 #   sudo udevadm trigger
 #   sudo usermod -aG input $USER
@@ -45,7 +45,7 @@ SUBSYSTEM=="hidraw", ATTRS{idVendor}=="046d", ATTRS{idProduct}=="c548", MODE="06
 SUBSYSTEM=="input", ATTRS{idVendor}=="046d", TAG+="uaccess"
 SUBSYSTEM=="hidraw", ATTRS{idVendor}=="046d", TAG+="uaccess"
 
-# Auto-restart JuhRadial MX daemon when a Logitech HID device appears (e.g. Easy-Switch)
+# Auto-restart OxideMX daemon when a Logitech HID device appears (e.g. Easy-Switch)
 # The daemon monitors hidraw devices, so when a mouse reconnects after being
 # on another computer, the daemon picks it up automatically via udev events.
 ACTION=="add", SUBSYSTEM=="hid", ATTRS{idVendor}=="046d", TAG+="systemd"

@@ -1,6 +1,6 @@
-# Contributing to OxideMX MX
+# Contributing to OxideMX
 
-First off, thank you for considering contributing to OxideMX MX! It's people like you that make this project better for everyone.
+First off, thank you for considering contributing to OxideMX! It's people like you that make this project better for everyone.
 
 ## Code of Conduct
 
@@ -10,7 +10,7 @@ By participating in this project, you agree to maintain a welcoming, inclusive, 
 
 ### Reporting Bugs
 
-Before creating a bug report, please check the [existing issues](https://github.com/JuhLabs/oxidemx/issues) to avoid duplicates.
+Before creating a bug report, please check the [existing issues](https://github.com/PooDoge/oxidemx/issues) to avoid duplicates.
 
 When reporting a bug, include:
 
@@ -21,7 +21,7 @@ When reporting a bug, include:
   - Linux distribution and version
   - Desktop environment (KDE Plasma version)
   - Logitech mouse model
-  - OxideMX MX version
+  - OxideMX version
 
 ### Suggesting Features
 
@@ -91,7 +91,7 @@ sudo apt install \
 
 ```bash
 # Clone the repository
-git clone https://github.com/JuhLabs/oxidemx
+git clone https://github.com/PooDoge/oxidemx
 cd oxidemx
 
 # Build the entire workspace
@@ -176,8 +176,8 @@ oxidemx/
 
 ## Getting Help
 
-- **Questions**: Open a [Discussion](https://github.com/JuhLabs/oxidemx/discussions)
-- **Bugs**: Open an [Issue](https://github.com/JuhLabs/oxidemx/issues)
+- **Questions**: Open a [Discussion](https://github.com/PooDoge/oxidemx/discussions)
+- **Bugs**: Open an [Issue](https://github.com/PooDoge/oxidemx/issues)
 
 ## Recognition
 
@@ -185,8 +185,8 @@ Contributors will be recognized in:
 - The project README
 - Release notes
 
-Thank you for helping make OxideMX MX better!
+Thank you for helping make OxideMX better!
 
 ---
 
-*JuhLabs - Julian Hermstad*
+*PooDoge — based on JuhRadial MX by JuhLabs (Julian Hermstad)*

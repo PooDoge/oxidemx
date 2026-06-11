@@ -1,7 +1,7 @@
-# Flatpak manifest for OxideMX MX
-# https://github.com/JuhLabs/oxidemx
+# Flatpak manifest for OxideMX
+# https://github.com/PooDoge/oxidemx
 
-app-id: org.juhlabs.OxideMXMX
+app-id: org.oxidemx.OxideMX
 runtime: org.gnome.Platform
 runtime-version: '47'
 sdk: org.gnome.Sdk
@@ -35,7 +35,7 @@ finish-args:
 build-options:
   append-path: /usr/lib/sdk/rust-stable/bin
   env:
-    CARGO_HOME: /run/build/oxidemxd/cargo
+    CARGO_HOME: /run/build/oxidemx/cargo
 
 modules:
   # GTK4 Layer Shell for Wayland overlay support
@@ -51,36 +51,24 @@ modules:
         tag: v1.0.3
         commit: be85ee0e898bc43b3c6d6e9ed5b4c0aae6d8c22b
 
-  # Rust daemon
-  - name: oxidemxd
+  # Rust workspace: daemon, overlay, settings, popup
+  - name: oxidemx
     buildsystem: simple
     build-options:
       env:
-        CARGO_HOME: /run/build/oxidemxd/cargo
+        CARGO_HOME: /run/build/oxidemx/cargo
     build-commands:
       - cargo --offline fetch --manifest-path Cargo.toml --verbose
-      - cargo --offline build --release --verbose
+      - cargo --offline build --release --workspace --exclude spike-iced --exclude iced_gtk_themer --verbose
       - install -Dm755 target/release/oxidemxd /app/bin/oxidemxd
-    sources:
-      - type: git
-        url: https://github.com/JuhLabs/oxidemx.git
-        branch: master
-        dest: .
-      - packaging/cargo-sources.json
-
-  # Main application with Python overlay
-  - name: oxidemx
-    buildsystem: simple
-    build-commands:
-      # Install Python overlay
-      - mkdir -p /app/share/oxidemx
-      - install -Dm755 overlay/oxidemx-overlay.py /app/share/oxidemx/
-      - install -Dm755 overlay/settings_dashboard.py /app/share/oxidemx/
+      - install -Dm755 target/release/oxidemx-overlay /app/bin/oxidemx-overlay
+      - install -Dm755 target/release/oxidemx-settings /app/bin/oxidemx-settings
+      - install -Dm755 target/release/oxidemx-popup /app/bin/oxidemx-popup
 
       # Install assets
       - mkdir -p /app/share/oxidemx/assets
       - cp -r assets/* /app/share/oxidemx/assets/
-      - install -Dm644 assets/oxidemx.svg /app/share/icons/hicolor/scalable/apps/org.juhlabs.OxideMXMX.svg
+      - install -Dm644 assets/oxidemx.svg /app/share/icons/hicolor/scalable/apps/org.oxidemx.OxideMX.svg
 
       # Create launcher script
       - |
@@ -91,20 +79,21 @@ modules:
             /app/bin/oxidemxd &
             sleep 1
         fi
-        # Start settings dashboard
-        python3 /app/share/oxidemx/settings_dashboard.py "$@"
+        # Start the overlay; settings GUI is available as oxidemx-settings
+        exec /app/bin/oxidemx-overlay "$@"
         LAUNCHER
       - chmod +x /app/bin/oxidemx
 
       # Install desktop file
-      - install -Dm644 packaging/oxidemx.desktop /app/share/applications/org.juhlabs.OxideMXMX.desktop
-      - sed -i 's|Exec=.*|Exec=oxidemx|g' /app/share/applications/org.juhlabs.OxideMXMX.desktop
-      - sed -i 's|Icon=.*|Icon=org.juhlabs.OxideMXMX|g' /app/share/applications/org.juhlabs.OxideMXMX.desktop
+      - install -Dm644 packaging/oxidemx.desktop /app/share/applications/org.oxidemx.OxideMX.desktop
+      - sed -i 's|Exec=.*|Exec=oxidemx|g' /app/share/applications/org.oxidemx.OxideMX.desktop
+      - sed -i 's|Icon=.*|Icon=org.oxidemx.OxideMX|g' /app/share/applications/org.oxidemx.OxideMX.desktop
 
       # Install AppStream metadata
-      - install -Dm644 packaging/org.juhlabs.OxideMXMX.metainfo.xml /app/share/metainfo/org.juhlabs.OxideMXMX.metainfo.xml
+      - install -Dm644 packaging/org.oxidemx.OxideMX.metainfo.xml /app/share/metainfo/org.oxidemx.OxideMX.metainfo.xml
 
     sources:
       - type: git
-        url: https://github.com/JuhLabs/oxidemx.git
+        url: https://github.com/PooDoge/oxidemx.git
         branch: master
+      - packaging/cargo-sources.json

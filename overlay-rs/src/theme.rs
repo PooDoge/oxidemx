@@ -69,7 +69,7 @@ mod tests {
     fn unknown_theme_falls_back() {
         let active = ActiveTheme::resolve(&ThemeName::Custom("does-not-exist".into()));
         assert!(active.fell_back);
-        assert_eq!(active.theme.name, "OxideMX MX");
+        assert_eq!(active.theme.name, "OxideMX");
     }
 
     #[test]

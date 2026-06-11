@@ -1,4 +1,4 @@
-//! Configuration management for OxideMX MX
+//! Configuration management for OxideMX
 //!
 //! Handles loading, validation, and hot-reload of JSON configuration files.
 //! Configuration is stored at `~/.config/oxidemx/config.json`.

@@ -12,7 +12,7 @@ We release patches for security vulnerabilities for the following versions:
 | 0.1.x   | :x: Upgrade required (critical security fixes in 0.2.1+) |
 | < 0.1   | :x:                |
 
-**Note:** OxideMX MX is in active development. Security updates are provided for the latest release on the master branch. Always run the latest version.
+**Note:** OxideMX is in active development. Security updates are provided for the latest release on the master branch. Always run the latest version.
 
 ### Recent Security Updates
 
@@ -40,7 +40,7 @@ We release patches for security vulnerabilities for the following versions:
 
 ## Reporting a Vulnerability
 
-We take the security of OxideMX MX seriously. If you believe you have found a security vulnerability, please report it to us as described below.
+We take the security of OxideMX seriously. If you believe you have found a security vulnerability, please report it to us as described below.
 
 ### Preferred Reporting Method: Private Vulnerability Reporting
 
@@ -55,7 +55,7 @@ We take the security of OxideMX MX seriously. If you believe you have found a se
    - This allows security researchers to privately report vulnerabilities
 
 2. **Security Researchers**:
-   - Go to the [Security tab](https://github.com/JuhLabs/oxidemx/security)
+   - Go to the [Security tab](https://github.com/PooDoge/oxidemx/security)
    - Click **"Report a vulnerability"**
    - Fill in the vulnerability details using the private advisory draft
    - Submit the report
@@ -100,9 +100,9 @@ When you report a vulnerability, we commit to:
    - **Medium/Low severity:** 90 days
 5. **Credit:** We'll acknowledge your contribution (unless you prefer to remain anonymous)
 
-## Security Considerations for OxideMX MX
+## Security Considerations for OxideMX
 
-OxideMX MX is a Linux desktop application that:
+OxideMX is a Linux desktop application that:
 
 - **Runs with user privileges** (no elevated permissions required for normal operation)
 - **Communicates via D-Bus** for IPC between daemon and overlay
@@ -146,7 +146,6 @@ The following are generally considered out of scope:
 
 This automatically:
 - Scans Rust dependencies (Cargo.toml)
-- Scans Python dependencies (requirements files)
 - Creates pull requests for security updates
 - Provides severity scores and vulnerability details
 
@@ -157,8 +156,8 @@ This automatically:
 We use GitHub's CodeQL to automatically scan for security vulnerabilities:
 
 - **Triggers:** Every push to master and all pull requests
-- **Languages:** Python (overlay) and Rust (daemon)
-- **Results:** Available in the [Security tab](https://github.com/JuhLabs/oxidemx/security/code-scanning)
+- **Languages:** Rust (daemon, overlay, settings, popup) and TypeScript (GNOME extension)
+- **Results:** Available in the [Security tab](https://github.com/PooDoge/oxidemx/security/code-scanning)
 
 CodeQL helps identify:
 - SQL injection (not applicable to this project)
@@ -186,7 +185,7 @@ We request that reporters:
 
 ## Security Best Practices for Contributors
 
-If you're contributing code to OxideMX MX:
+If you're contributing code to OxideMX:
 
 - Never commit secrets, API keys, or credentials
 - Use parameterized queries for any database operations
@@ -207,7 +206,7 @@ If you're contributing code to OxideMX MX:
 
 For general security questions or concerns (non-vulnerabilities):
 
-- Open a [GitHub Discussion](https://github.com/JuhLabs/oxidemx/discussions)
+- Open a [GitHub Discussion](https://github.com/PooDoge/oxidemx/discussions)
 - Tag with `security` label
 
 For security vulnerabilities, **always use Private Vulnerability Reporting or direct email** as described above.
@@ -220,4 +219,4 @@ We recognize security researchers who have responsibly disclosed vulnerabilities
 
 ---
 
-**Thank you for helping keep OxideMX MX and its users safe!**
+**Thank you for helping keep OxideMX and its users safe!**

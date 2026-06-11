@@ -1,100 +1,85 @@
-# Fedora RPM Spec for JuhRadial MX
-# Build: rpmbuild -ba juhradial-mx.spec
+# Fedora RPM Spec for OxideMX
+# Build: rpmbuild -ba oxidemx.spec
 
-Name:           juhradial-mx
+Name:           oxidemx
 Version:        0.3.2
 Release:        1%{?dist}
-Summary:        Beautiful radial menu for Logitech MX Master mice on Linux
+Summary:        Radial menu, DPI control and haptics for Logitech MX Master mice on Linux
 
 License:        GPL-3.0-or-later
-URL:            https://github.com/JuhLabs/juhradial-mx
+URL:            https://github.com/PooDoge/oxidemx
 Source0:        %{url}/archive/v%{version}/%{name}-%{version}.tar.gz
 
 BuildRequires:  rust
 BuildRequires:  cargo
-BuildRequires:  nodejs
-BuildRequires:  npm
 BuildRequires:  gtk4-devel
 BuildRequires:  gtk4-layer-shell-devel
+BuildRequires:  libadwaita-devel
 BuildRequires:  dbus-devel
 BuildRequires:  systemd-devel
 BuildRequires:  libevdev-devel
+BuildRequires:  hidapi-devel
 
 Requires:       gtk4
 Requires:       gtk4-layer-shell
-Requires:       python3
-Requires:       python3-gobject
-Requires:       python3-cairo
-Requires:       python3-cryptography
+Requires:       libadwaita
 Requires:       dbus
 
 Recommends:     ydotool
 
+Obsoletes:      juhradial-mx < 0.3.3
+
 %description
-JuhRadial MX brings a Logi Options+ inspired radial menu experience to Linux.
-Hold the gesture button on your MX Master mouse to open a beautiful glassmorphic
+OxideMX brings a Logi Options+ inspired experience to Linux, written
+entirely in Rust. Hold the gesture button on your MX Master mouse to open a
 radial menu overlay, then move to select actions.
 
 Features:
-- Glassmorphic radial menu with smooth animations
+- Radial menu overlay with smooth animations (Rust + iced + layer-shell)
 - Per-application profiles for context-aware actions
 - Real-time battery status monitoring via HID++ protocol
 - Visual DPI control with presets (400-8000 DPI)
-- SmartShift scroll wheel configuration
-- Native KDE Plasma and Wayland integration
+- SmartShift scroll wheel and haptics configuration
+- GNOME Shell battery indicator extension
+- Native Wayland integration (GNOME, KDE Plasma, Hyprland)
+
+OxideMX began as a fork of JuhRadial MX by Julian Hermstad (JuhLabs).
 
 %prep
 %autosetup -n %{name}-%{version}
 
 %build
-# Build Rust daemon
-cd daemon
-cargo build --release
-cd ..
-
-# Build KWin script (optional)
-if [ -d kwin-script ]; then
-    cd kwin-script
-    npm ci --legacy-peer-deps 2>/dev/null || npm install --legacy-peer-deps
-    npm run build 2>/dev/null || true
-    cd ..
-fi
+# Build the whole Rust workspace (daemon, overlay, settings, popup)
+cargo build --release --workspace --exclude spike-iced --exclude iced_gtk_themer
 
 %install
-# Install daemon binary
-install -Dm755 daemon/target/release/juhradiald %{buildroot}%{_bindir}/juhradiald
+# Install binaries
+install -Dm755 target/release/oxidemxd %{buildroot}%{_bindir}/oxidemxd
+install -Dm755 target/release/oxidemx-overlay %{buildroot}%{_bindir}/oxidemx-overlay
+install -Dm755 target/release/oxidemx-settings %{buildroot}%{_bindir}/oxidemx-settings
+install -Dm755 target/release/oxidemx-popup %{buildroot}%{_bindir}/oxidemx-popup
 
 # Install launcher script
-install -Dm755 scripts/juhradial-mx.sh %{buildroot}%{_bindir}/juhradial-mx
-
-# Install overlay Python files
-install -dm755 %{buildroot}%{_datadir}/juhradial
-install -Dm644 overlay/*.py %{buildroot}%{_datadir}/juhradial/
-
-# Install flow module
-cp -r overlay/flow %{buildroot}%{_datadir}/juhradial/flow
-
-# Install locales
-if [ -d overlay/locales ]; then
-    cp -r overlay/locales %{buildroot}%{_datadir}/juhradial/
-fi
+install -Dm755 scripts/oxidemx.sh %{buildroot}%{_bindir}/oxidemx
 
 # Install assets
-install -dm755 %{buildroot}%{_datadir}/juhradial/assets
-cp -r assets/* %{buildroot}%{_datadir}/juhradial/assets/
+install -dm755 %{buildroot}%{_datadir}/oxidemx/assets
+cp -r assets/* %{buildroot}%{_datadir}/oxidemx/assets/
 
-# Install desktop file
-install -Dm644 packaging/juhradial-mx.desktop %{buildroot}%{_datadir}/applications/juhradial-mx.desktop
+# Install desktop files
+install -Dm644 packaging/oxidemx.desktop %{buildroot}%{_datadir}/applications/oxidemx.desktop
+install -Dm644 packaging/org.oxidemx.settings.desktop %{buildroot}%{_datadir}/applications/org.oxidemx.settings.desktop
 
 # Install icon
-install -Dm644 assets/juhradial-mx.svg %{buildroot}%{_datadir}/icons/hicolor/scalable/apps/juhradial-mx.svg
+install -Dm644 assets/oxidemx.svg %{buildroot}%{_datadir}/icons/hicolor/scalable/apps/oxidemx.svg
 
 # Install systemd user service
-install -Dm644 packaging/systemd/juhradialmx-daemon.service %{buildroot}%{_userunitdir}/juhradialmx-daemon.service
+install -Dm644 packaging/systemd/oxidemx-daemon.service %{buildroot}%{_userunitdir}/oxidemx-daemon.service
 
 # Install udev rules
-install -Dm644 packaging/udev/99-logitech-hidpp.rules %{buildroot}%{_udevrulesdir}/99-logitech-hidpp.rules
-
+install -Dm644 packaging/udev/99-oxidemx.rules %{buildroot}%{_udevrulesdir}/99-oxidemx.rules
+install -Dm644 packaging/udev/70-oxidemx-haptic-pad.rules %{buildroot}%{_udevrulesdir}/70-oxidemx-haptic-pad.rules
+install -Dm644 packaging/udev/60-ydotool-uinput.rules %{buildroot}%{_udevrulesdir}/60-ydotool-uinput.rules
 
 %post
 # Update icon cache
@@ -111,15 +96,21 @@ install -Dm644 packaging/udev/99-logitech-hidpp.rules %{buildroot}%{_udevrulesdi
 %files
 %license LICENSE
 %doc README.md CONTRIBUTING.md
-%{_bindir}/juhradiald
-%{_bindir}/juhradial-mx
-%{_datadir}/juhradial/
-%{_datadir}/applications/juhradial-mx.desktop
-%{_datadir}/icons/hicolor/scalable/apps/juhradial-mx.svg
-%{_userunitdir}/juhradialmx-daemon.service
-%{_udevrulesdir}/99-logitech-hidpp.rules
+%{_bindir}/oxidemxd
+%{_bindir}/oxidemx-overlay
+%{_bindir}/oxidemx-settings
+%{_bindir}/oxidemx-popup
+%{_bindir}/oxidemx
+%{_datadir}/oxidemx/
+%{_datadir}/applications/oxidemx.desktop
+%{_datadir}/applications/org.oxidemx.settings.desktop
+%{_datadir}/icons/hicolor/scalable/apps/oxidemx.svg
+%{_userunitdir}/oxidemx-daemon.service
+%{_udevrulesdir}/99-oxidemx.rules
+%{_udevrulesdir}/70-oxidemx-haptic-pad.rules
+%{_udevrulesdir}/60-ydotool-uinput.rules
 %changelog
-* Mon Apr 27 2026 JuhLabs (Julian Hermstad) <julianhermstad@icloud.com> - 0.3.2-1
-- Promote 0.3.x release line with reconnect-safe Easy-Switch handling
-- Add generated settings artwork to installed assets
-- Refresh GitHub/desktop branding for official release
+* Thu Jun 11 2026 PooDoge <dev@chewyswap.dog> - 0.3.2-1
+- Rebrand to OxideMX under new maintainership
+- All-Rust stack: daemon, overlay, settings, popup (Python overlay removed)
+- Credit to JuhLabs (Julian Hermstad) for the original JuhRadial MX

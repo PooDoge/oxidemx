@@ -4,7 +4,7 @@ version = "0.0.1"
 edition = "2021"
 description = "OxideMX radial-menu overlay (Rust + iced + xdg-shell)"
 license = "GPL-3.0"
-repository = "https://github.com/JuhLabs/oxidemx"
+repository = "https://github.com/PooDoge/oxidemx"
 
 [[bin]]
 name = "oxidemx-overlay"

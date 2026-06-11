@@ -1,4 +1,4 @@
-# JuhRadial MX - ydotool uinput access rules
+# OxideMX - ydotool uinput access rules
 # Allows non-root users to inject input events via ydotool
 #
 # Installation:

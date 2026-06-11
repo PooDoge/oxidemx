@@ -5,7 +5,7 @@
 //!   2. The thread connects to the session bus and tries to claim
 //!      `org.oxidemx.Settings` with `DoNotQueue`.
 //!   3a. If we get the name → register a `Focus` method handler at
-//!       `/org/juhlabs/oxidemx/Settings`. Each call writes `()`
+//!       `/org/oxidemx/Settings`. Each call writes `()`
 //!       into an async-channel that iced consumes via a
 //!       `Subscription::run` stream. The thread parks forever to
 //!       keep the connection + service alive.

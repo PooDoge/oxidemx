@@ -1,6 +1,6 @@
 # Rust build artefacts
 /target/
-/Cargo.lock
+# Root Cargo.lock IS tracked (binary releases need --locked reproducibility)
 
 # Editor / OS
 .idea/
@@ -14,3 +14,12 @@ __pycache__/
 /CONTRIBUTING-BAZZITE-PR.md
 /local-test-install.sh
 docs/iced-reference/
+
+# Build artifacts anywhere
+target/
+
+# Local agent/tooling state
+.superpowers/
+
+# Scratch scripts
+*.py

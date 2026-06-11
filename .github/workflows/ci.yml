@@ -1,4 +1,4 @@
-# OxideMX MX CI Pipeline
+# OxideMX CI Pipeline
 name: CI
 
 on:
@@ -52,6 +52,7 @@ jobs:
         run: |
           echo "Validating project structure..."
           test -f daemon/src/main.rs
-          test -f overlay/oxidemx-overlay.py
-          test -f overlay/settings_dashboard.py
+          test -f overlay-rs/src/main.rs
+          test -f settings-rs/src/main.rs
+          test -f popup-rs/src/main.rs
           echo "✓ Structure valid"

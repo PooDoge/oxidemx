@@ -586,7 +586,7 @@ iced = { version = "0.14", features = ["wayland", "x11"] }
 
 `oxidemx-widgets/src/lib.rs`:
 ```rust
-//! Shared UI primitives for OxideMX MX (settings, overlay, popup).
+//! Shared UI primitives for OxideMX (settings, overlay, popup).
 //!
 //! Three modules:
 //!   * [`widgets`] — small composite widgets (labeled sliders, section

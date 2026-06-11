@@ -4,7 +4,7 @@ version = "0.0.1"
 edition = "2021"
 license = "GPL-3.0"
 description = "OxideMX indicator-popup (Rust + iced) - spawned by oxidemxd on ShowPopup"
-repository = "https://github.com/JuhLabs/oxidemx"
+repository = "https://github.com/PooDoge/oxidemx"
 
 [[bin]]
 name = "oxidemx-popup"

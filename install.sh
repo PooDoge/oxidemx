@@ -1,14 +1,14 @@
 #!/bin/bash
 #
-# OxideMX MX Universal Installer
-# https://github.com/JuhLabs/oxidemx
+# OxideMX Universal Installer
+# https://github.com/PooDoge/oxidemx
 #
-# Usage: curl -fsSL https://raw.githubusercontent.com/JuhLabs/oxidemx/master/install.sh | bash
+# Usage: curl -fsSL https://raw.githubusercontent.com/PooDoge/oxidemx/master/install.sh | bash
 #
 # This script will:
 # 1. Detect your Linux distribution
 # 2. Install required dependencies
-# 3. Clone and build OxideMX MX
+# 3. Clone and build OxideMX
 # 4. Install and enable the systemd service
 #
 
@@ -27,7 +27,7 @@ WHITE='\033[1;37m'
 GRAY='\033[0;90m'
 
 # ── Configuration ────────────────────────────────────────────────────
-REPO_URL="https://github.com/JuhLabs/oxidemx"
+REPO_URL="https://github.com/PooDoge/oxidemx"
 INSTALL_DIR="/opt/oxidemx"
 BIN_DIR="/usr/local/bin"
 SYSTEMD_USER_DIR="$HOME/.config/systemd/user"
@@ -381,17 +381,17 @@ configure_hyprland() {
 
     HYPR_CONFIG_DIR="$HOME/.config/hypr"
     RULES_CONTENT='
-# ######## OxideMX MX - Radial Menu Overlay ########
+# ######## OxideMX - Radial Menu Overlay ########
 # These rules ensure the radial menu appears correctly as an overlay
-windowrulev2 = float, title:^(OxideMX MX)$
-windowrulev2 = noblur, title:^(OxideMX MX)$
-windowrulev2 = noborder, title:^(OxideMX MX)$
-windowrulev2 = noshadow, title:^(OxideMX MX)$
-windowrulev2 = pin, title:^(OxideMX MX)$
-windowrulev2 = noanim, title:^(OxideMX MX)$'
+windowrulev2 = float, title:^(OxideMX)$
+windowrulev2 = noblur, title:^(OxideMX)$
+windowrulev2 = noborder, title:^(OxideMX)$
+windowrulev2 = noshadow, title:^(OxideMX)$
+windowrulev2 = pin, title:^(OxideMX)$
+windowrulev2 = noanim, title:^(OxideMX)$'
 
     # Check if rules already exist
-    if grep -q "OxideMX MX" "$HYPR_CONFIG_DIR"/*.conf "$HYPR_CONFIG_DIR"/**/*.conf 2>/dev/null; then
+    if grep -q "OxideMX" "$HYPR_CONFIG_DIR"/*.conf "$HYPR_CONFIG_DIR"/**/*.conf 2>/dev/null; then
         log_dim "Hyprland rules already configured"
         return 0
     fi
@@ -428,8 +428,8 @@ windowrulev2 = noanim, title:^(OxideMX MX)$'
 #
 # DEFAULT BEHAVIOUR: do NOT layer packages. The base image already ships
 # every runtime shared library oxidemxd links against (libdbus, libudev,
-# libsystemd, libevdev, libhidapi) plus ydotool, python3, gtk4, libadwaita,
-# python3-gobject — which is everything the running stack needs. Build deps
+# libsystemd, libevdev, libhidapi) plus ydotool, gtk4, and libadwaita —
+# which is everything the running stack needs. Build deps
 # (rust + *-devel headers) live in the user's distrobox / toolbox; they
 # never need to touch the host image.
 #
@@ -550,16 +550,13 @@ install_deps_fedora_atomic() {
 }
 
 # Opt-in legacy path. Only reachable when OXIDEMX_USE_RPM_OSTREE=1.
-# Layers the FULL dependency set (build + runtime + python overlay deps)
+# Layers the FULL dependency set (build + runtime deps)
 # via rpm-ostree, prompts for the required reboot.
 install_deps_fedora_atomic_rpm_ostree() {
     local packages=(
         rust cargo
-        python3 python3-pip
-        python3-pyqt6 qt6-qtsvg
-        python3-gobject gtk4 libadwaita
+        gtk4 libadwaita
         gtk4-layer-shell
-        python3-cryptography
         dbus-devel systemd-devel
         libevdev-devel hidapi-devel
         ydotool
@@ -625,11 +622,8 @@ install_deps_fedora_atomic_rpm_ostree() {
 install_deps_fedora() {
     sudo dnf install -y \
         rust cargo \
-        python3 python3-pip \
-        python3-pyqt6 qt6-qtsvg \
-        python3-gobject gtk4 libadwaita \
+        gtk4 libadwaita \
         gtk4-layer-shell \
-        python3-cryptography \
         dbus-devel systemd-devel \
         libevdev-devel hidapi-devel \
         ydotool \
@@ -639,11 +633,8 @@ install_deps_fedora() {
 install_deps_arch() {
     sudo pacman -S --noconfirm --needed \
         rust \
-        python python-pip \
-        python-pyqt6 qt6-svg \
-        python-gobject gtk4 libadwaita \
+        gtk4 libadwaita \
         gtk4-layer-shell \
-        python-cryptography \
         dbus systemd-libs \
         libevdev hidapi \
         ydotool \
@@ -654,10 +645,7 @@ install_deps_debian() {
     sudo apt-get update
     sudo apt-get install -y \
         rustc cargo \
-        python3 python3-pip python3-venv \
-        python3-pyqt6 python3-pyqt6.qtsvg \
-        python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 \
-        python3-cryptography \
+        libgtk-4-1 libadwaita-1-0 \
         libdbus-1-dev libsystemd-dev \
         libevdev-dev libhidapi-dev \
         ydotool \
@@ -671,10 +659,7 @@ install_deps_debian() {
 install_deps_opensuse() {
     sudo zypper install -y \
         rust cargo \
-        python3 python3-pip \
-        python3-qt6 python3-qt6-svg \
-        python3-gobject gtk4 libadwaita-devel \
-        python3-cryptography \
+        gtk4 libadwaita-devel \
         dbus-1-devel systemd-devel \
         libevdev-devel libhidapi-devel \
         ydotool \
@@ -701,8 +686,7 @@ install_dependencies() {
         transactional-update)
             log_error "openSUSE MicroOS / Aeon / Kalpa detected (transactional-update)."
             log_dim "Automated layering for MicroOS isn't wired yet. Install manually:"
-            log_dim "  sudo transactional-update pkg install rust cargo python3 python3-qt6 \\"
-            log_dim "       python3-gobject gtk4 libadwaita-devel python3-cryptography \\"
+            log_dim "  sudo transactional-update pkg install rust cargo gtk4 libadwaita-devel \\"
             log_dim "       libevdev-devel libhidapi-devel ydotool git make"
             log_dim "Then reboot and re-run this installer with OXIDEMX_SKIP_DEPS=1."
             exit 1
@@ -847,7 +831,7 @@ download_release_binaries() {
 
     step "Downloading pre-built binaries ($tag)"
 
-    local repo="${OXIDEMX_RELEASE_REPO:-JuhLabs/oxidemx}"
+    local repo="${OXIDEMX_RELEASE_REPO:-PooDoge/oxidemx}"
 
     if [ "$tag" = "latest" ]; then
         log_info "Querying latest release tag..."
@@ -1080,8 +1064,7 @@ install_files() {
 
     # Install launcher scripts. NOTE: the Rust oxidemx-settings binary
     # installed above (when present) wins on $PATH; the shell launcher
-    # remains as a fallback for installs that built only the Python
-    # overlay tree.
+    # remains as a fallback when only the workspace tree is present.
     sudo install -Dm755 scripts/oxidemx.sh "$BIN_DIR/oxidemx"
     if [ -z "${settings_bin:-}" ]; then
         sudo install -Dm755 scripts/oxidemx-settings.sh "$BIN_DIR/oxidemx-settings"
@@ -1110,7 +1093,7 @@ install_files() {
     cat > "$AUTOSTART_DIR/oxidemx-overlay.desktop" <<EOF
 [Desktop Entry]
 Type=Application
-Name=OxideMX MX Overlay
+Name=OxideMX Overlay
 Comment=Radial menu overlay for Logitech MX Master mice
 Exec=$BIN_DIR/oxidemx-overlay
 Icon=oxidemx
@@ -1323,9 +1306,9 @@ print_success() {
     echo -e "  ${GREEN}${BOLD}╭──────────────────────────────────────────╮${RESET}"
     echo -e "  ${GREEN}${BOLD}│                                          │${RESET}"
     if [ "$INSTALL_MODE" = "upgrade" ]; then
-        echo -e "  ${GREEN}${BOLD}│   ✓  OxideMX MX updated!               │${RESET}"
+        echo -e "  ${GREEN}${BOLD}│   ✓  OxideMX updated!               │${RESET}"
     else
-        echo -e "  ${GREEN}${BOLD}│   ✓  OxideMX MX installed!             │${RESET}"
+        echo -e "  ${GREEN}${BOLD}│   ✓  OxideMX installed!             │${RESET}"
     fi
     echo -e "  ${GREEN}${BOLD}│                                          │${RESET}"
     echo -e "  ${GREEN}${BOLD}╰──────────────────────────────────────────╯${RESET}"
@@ -1342,9 +1325,9 @@ print_success() {
     echo -e "  ${DIM}Status${RESET}   systemctl --user status oxidemx-daemon"
     echo -e "  ${DIM}Logs${RESET}     journalctl --user -u oxidemx-daemon -f"
     echo ""
-    echo -e "  ${GRAY}github.com/JuhLabs/oxidemx${RESET}"
+    echo -e "  ${GRAY}github.com/PooDoge/oxidemx${RESET}"
     echo ""
-    echo -e "  ${CYAN}Enjoying OxideMX MX?${RESET} Leave a ${YELLOW}★${RESET} on GitHub!"
+    echo -e "  ${CYAN}Enjoying OxideMX?${RESET} Leave a ${YELLOW}★${RESET} on GitHub!"
     echo -e "  ${DIM}Found a bug? Open an issue - we'd love to hear from you.${RESET}"
     echo ""
 

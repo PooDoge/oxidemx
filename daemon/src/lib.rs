@@ -1,4 +1,4 @@
-//! OxideMX MX Daemon Library
+//! OxideMX Daemon Library
 //!
 //! Public API for testing and integration.
 

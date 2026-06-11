@@ -1,25 +1,24 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <component type="desktop-application">
-  <id>org.juhlabs.OxideMXMX</id>
+  <id>org.oxidemx.OxideMX</id>
 
-  <name>OxideMX MX</name>
+  <name>OxideMX</name>
   <summary>Beautiful radial menu for Logitech MX Master mice on Linux</summary>
 
-  <developer id="org.juhlabs">
-    <name>JuhLabs (Julian Hermstad)</name>
+  <developer id="org.oxidemx">
+    <name>PooDoge</name>
   </developer>
 
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>GPL-3.0-or-later</project_license>
 
-  <url type="homepage">https://github.com/JuhLabs/oxidemx</url>
-  <url type="bugtracker">https://github.com/JuhLabs/oxidemx/issues</url>
-  <url type="donation">https://paypal.me/LangbachHermstad</url>
-  <url type="vcs-browser">https://github.com/JuhLabs/oxidemx</url>
+  <url type="homepage">https://github.com/PooDoge/oxidemx</url>
+  <url type="bugtracker">https://github.com/PooDoge/oxidemx/issues</url>
+  <url type="vcs-browser">https://github.com/PooDoge/oxidemx</url>
 
   <description>
     <p>
-      OxideMX MX brings a Logi Options+ inspired radial menu experience to Linux.
+      OxideMX brings a Logi Options+ inspired radial menu experience to Linux.
       Hold the gesture button on your MX Master mouse to open a beautiful glassmorphic
       radial menu overlay, then move to select actions.
     </p>
@@ -35,16 +34,20 @@
       <li>Native KDE Plasma and Wayland integration</li>
     </ul>
     <p>
-      OxideMX MX never modifies your mouse's onboard memory, ensuring 100%
+      OxideMX never modifies your mouse's onboard memory, ensuring 100%
       compatibility with Logi Options+ on Windows and macOS.
+    </p>
+    <p>
+      OxideMX began as a fork of JuhRadial MX by Julian Hermstad (JuhLabs)
+      and has since been rewritten in Rust.
     </p>
   </description>
 
-  <launchable type="desktop-id">org.juhlabs.OxideMXMX.desktop</launchable>
+  <launchable type="desktop-id">org.oxidemx.OxideMX.desktop</launchable>
 
   <screenshots>
     <screenshot type="default">
-      <caption>Radial menu overlay with OxideMX MX theme</caption>
+      <caption>Radial menu overlay with OxideMX theme</caption>
       <image>https://raw.githubusercontent.com/JuhLabs/oxidemx/master/assets/screenshots/RadialWheel.png</image>
     </screenshot>
     <screenshot>
@@ -176,7 +179,7 @@
     </release>
     <release version="0.1.0" date="2024-12-13">
       <description>
-        <p>Initial release of OxideMX MX</p>
+        <p>Initial release of OxideMX</p>
         <ul>
           <li>Glassmorphic radial menu overlay</li>
           <li>Battery status monitoring</li>

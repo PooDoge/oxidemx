@@ -165,7 +165,7 @@ download_release_binaries() {
         tag=$(curl -s "$url" | grep -oP '"tag_name":\s*"\K[^"]+')
     fi
     local archive="oxidemx-${tag}-${arch}-linux.tar.gz"
-    local base="https://github.com/JuhLabs/oxidemx/releases/download/${tag}"
+    local base="https://github.com/PooDoge/oxidemx/releases/download/${tag}"
 
     log_info "Downloading $archive..."
     curl -fL --progress-bar -o "/tmp/$archive"        "$base/$archive"

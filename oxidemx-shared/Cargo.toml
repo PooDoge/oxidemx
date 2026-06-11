@@ -4,7 +4,7 @@ version = "0.0.1"
 edition = "2021"
 description = "Shared types between the OxideMX daemon and the Rust overlay"
 license = "GPL-3.0"
-repository = "https://github.com/JuhLabs/oxidemx"
+repository = "https://github.com/PooDoge/oxidemx"
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }

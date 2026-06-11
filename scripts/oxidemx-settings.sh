@@ -1,7 +1,7 @@
 #!/bin/bash
 #
-# OxideMX MX Settings Launcher
-# https://github.com/JuhLabs/oxidemx
+# OxideMX Settings Launcher
+# https://github.com/PooDoge/oxidemx
 #
 
 # Try installed location first, then fall back to local development.

@@ -1,4 +1,4 @@
-//! Gaming mode for OxideMX MX
+//! Gaming mode for OxideMX
 //!
 //! When gaming mode is enabled:
 //! - The overlay (radial menu) is suppressed (no MenuRequested signals)

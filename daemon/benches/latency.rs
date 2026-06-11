@@ -1,4 +1,4 @@
-//! Latency benchmarks for OxideMX MX
+//! Latency benchmarks for OxideMX
 //!
 //! Validates NFR-001: <50ms menu appearance, <10ms action execution
 

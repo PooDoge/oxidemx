@@ -1,4 +1,4 @@
-//! D-Bus IPC server for OxideMX MX
+//! D-Bus IPC server for OxideMX
 //!
 //! Implements the org.oxidemx.Daemon interface for communication
 //! with the overlay, settings UI, and Plasma widget.

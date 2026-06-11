@@ -1,27 +1,27 @@
 <div align="center">
-  <img src="assets/oxidemx.svg" width="128" alt="OxideMX MX Logo">
-  <h1>OxideMX MX</h1>
+  <img src="assets/oxidemx.svg" width="128" alt="OxideMX Logo">
+  <h1>OxideMX</h1>
   <p><strong>The ultimate Logitech MX Master experience on Linux</strong></p>
   <p>Radial menu, DPI control, haptic feedback, AI settings - all native on Wayland</p>
 
   <p>
-    <a href="https://github.com/JuhLabs/oxidemx/releases">
+    <a href="https://github.com/PooDoge/oxidemx/releases">
       <img src="https://img.shields.io/badge/version-0.3.2-cyan.svg" alt="Version 0.3.2">
     </a>
-    <a href="https://github.com/JuhLabs/oxidemx/actions/workflows/ci.yml">
-      <img src="https://github.com/JuhLabs/oxidemx/actions/workflows/ci.yml/badge.svg?branch=master" alt="Build Status">
+    <a href="https://github.com/PooDoge/oxidemx/actions/workflows/ci.yml">
+      <img src="https://github.com/PooDoge/oxidemx/actions/workflows/ci.yml/badge.svg?branch=master" alt="Build Status">
     </a>
-    <a href="https://github.com/JuhLabs/oxidemx/actions/workflows/security.yml">
-      <img src="https://github.com/JuhLabs/oxidemx/actions/workflows/security.yml/badge.svg?branch=master" alt="Security Scan">
+    <a href="https://github.com/PooDoge/oxidemx/actions/workflows/security.yml">
+      <img src="https://github.com/PooDoge/oxidemx/actions/workflows/security.yml/badge.svg?branch=master" alt="Security Scan">
     </a>
     <a href="LICENSE">
       <img src="https://img.shields.io/badge/license-GPL--3.0-blue.svg" alt="License: GPL-3.0">
     </a>
-    <a href="https://github.com/JuhLabs/oxidemx/stargazers">
-      <img src="https://img.shields.io/github/stars/JuhLabs/oxidemx?style=flat&color=yellow" alt="GitHub Stars">
+    <a href="https://github.com/PooDoge/oxidemx/stargazers">
+      <img src="https://img.shields.io/github/stars/PooDoge/oxidemx?style=flat&color=yellow" alt="GitHub Stars">
     </a>
-    <a href="https://github.com/JuhLabs/oxidemx/issues">
-      <img src="https://img.shields.io/github/issues/JuhLabs/oxidemx?color=green" alt="Open Issues">
+    <a href="https://github.com/PooDoge/oxidemx/issues">
+      <img src="https://img.shields.io/github/issues/PooDoge/oxidemx?color=green" alt="Open Issues">
     </a>
   </p>
 </div>
@@ -29,7 +29,7 @@
 <br>
 
 <div align="center">
-  <img src="assets/github/githubheader.png" width="100%" alt="OxideMX MX Banner">
+  <img src="assets/github/githubheader.png" width="100%" alt="OxideMX Banner">
 </div>
 
 <br>
@@ -44,7 +44,7 @@
 ## Release Highlights
 
 <div align="center">
-  <img src="assets/github/hero-v3.png" width="100%" alt="OxideMX MX control center">
+  <img src="assets/github/hero-v3.png" width="100%" alt="OxideMX control center">
 </div>
 
 <table>
@@ -80,7 +80,7 @@
 > **One-Line Install (Recommended)** - Detects your distro, installs dependencies, builds from source, and configures everything.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/JuhLabs/oxidemx/master/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/PooDoge/oxidemx/master/install.sh | bash
 ```
 
 <details>
@@ -91,7 +91,7 @@ curl -fsSL https://raw.githubusercontent.com/JuhLabs/oxidemx/master/install.sh |
 sudo dnf install rust cargo dbus-devel systemd-devel libevdev-devel hidapi-devel gtk4-devel libadwaita-devel
 
 # 2. Clone and build
-git clone https://github.com/JuhLabs/oxidemx.git
+git clone https://github.com/PooDoge/oxidemx.git
 cd oxidemx
 cargo build --release
 
@@ -109,7 +109,7 @@ cargo build --release
 sudo pacman -S rust dbus systemd-libs libevdev hidapi gtk4 libadwaita
 
 # 2. Clone and build
-git clone https://github.com/JuhLabs/oxidemx.git
+git clone https://github.com/PooDoge/oxidemx.git
 cd oxidemx
 cargo build --release
 
@@ -196,7 +196,7 @@ cargo build --release
     <td>
       <strong>AI Quick Access</strong> - Claude, ChatGPT, Gemini, Perplexity in a submenu<br>
       <strong>Native Wayland</strong> - GNOME, KDE Plasma 6, Hyprland, COSMIC, Sway & more<br>
-      <strong>Multiple Themes</strong> - OxideMX MX, Catppuccin, Nord, Dracula, Solarized & more
+      <strong>Multiple Themes</strong> - OxideMX, Catppuccin, Nord, Dracula, Solarized & more
     </td>
   </tr>
 </table>
@@ -293,7 +293,7 @@ Open Settings and select a theme:
 
 | Theme | Description |
 |-------|-------------|
-| **OxideMX MX** (default) | Premium dark theme with vibrant cyan accents |
+| **OxideMX** (default) | Premium dark theme with vibrant cyan accents |
 | Catppuccin Mocha | Soothing pastel theme with lavender accents |
 | Catppuccin Latte | Light pastel theme |
 | Nord | Arctic, north-bluish palette |
@@ -324,13 +324,13 @@ sed -i "s|Exec=.*|Exec=$(pwd)/scripts/oxidemx.sh|" ~/.config/autostart/oxidemx.d
 Add these rules to your `hyprland.conf` or `custom/rules.conf`:
 
 ```conf
-# OxideMX MX overlay window rules
-windowrulev2 = float, title:^(OxideMX MX)$
-windowrulev2 = noblur, title:^(OxideMX MX)$
-windowrulev2 = noborder, title:^(OxideMX MX)$
-windowrulev2 = noshadow, title:^(OxideMX MX)$
-windowrulev2 = pin, title:^(OxideMX MX)$
-windowrulev2 = noanim, title:^(OxideMX MX)$
+# OxideMX overlay window rules
+windowrulev2 = float, title:^(OxideMX)$
+windowrulev2 = noblur, title:^(OxideMX)$
+windowrulev2 = noborder, title:^(OxideMX)$
+windowrulev2 = noshadow, title:^(OxideMX)$
+windowrulev2 = pin, title:^(OxideMX)$
+windowrulev2 = noanim, title:^(OxideMX)$
 ```
 
 </details>
@@ -344,8 +344,8 @@ windowrulev2 = noanim, title:^(OxideMX MX)$
 | Problem | Solution |
 |---------|----------|
 | Menu doesn't appear | Check daemon is running: `pgrep oxidemxd` or restart via the desktop launcher |
-| Menu stops after Easy-Switch | Update to v0.3.2 or newer, then restart OxideMX MX so the HID++ reconnect and evdev fallback fixes are active |
-| Menu at top-left corner | Log out/in to load GNOME extension, or run `gnome-extensions enable oxidemx-cursor@dev.juhlabs.com` |
+| Menu stops after Easy-Switch | Update to v0.3.2 or newer, then restart OxideMX so the HID++ reconnect and evdev fallback fixes are active |
+| Menu at top-left corner | Log out/in to load GNOME extension, or run `gnome-extensions enable oxidemx-indicator@dev.oxidemx.com` |
 | Mouse not detected | Check HID permissions: ensure your user is in the `input` group |
 | Build fails | Install dev packages: `hidapi-devel`, `dbus-devel` |
 | Hyprland: Menu hidden | Add window rules from Hyprland Setup section above |
@@ -415,16 +415,24 @@ GNU General Public License v3.0 - see [LICENSE](LICENSE)
 ## Star History
 
 <div align="center">
-  <a href="https://star-history.com/#JuhLabs/oxidemx&Date">
+  <a href="https://star-history.com/#PooDoge/oxidemx&Date">
     <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=JuhLabs/oxidemx&type=Date&theme=dark" />
-      <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=JuhLabs/oxidemx&type=Date" />
-      <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=JuhLabs/oxidemx&type=Date" width="600" />
+      <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=PooDoge/oxidemx&type=Date&theme=dark" />
+      <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=PooDoge/oxidemx&type=Date" />
+      <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=PooDoge/oxidemx&type=Date" width="600" />
     </picture>
   </a>
 </div>
 
-> If you find OxideMX MX useful, consider giving it a star - it helps others discover the project!
+> If you find OxideMX useful, consider giving it a star - it helps others discover the project!
+
+<br>
+
+## Credits
+
+OxideMX began as a fork of [JuhRadial MX](https://github.com/JuhLabs/juhradial-mx) by **Julian Hermstad ([JuhLabs](https://github.com/JuhLabs))**, who created the original radial-menu concept, HID++ daemon, and Logi Options+-inspired experience this project grew from. The application has since been rewritten in Rust (daemon, overlay, settings, popup, and widgets), but it would not exist without his work. Thank you, Julian!
+
+Licensed under [GPL-3.0](LICENSE), preserving the original copyright.
 
 <br>
 
@@ -437,7 +445,7 @@ This project is **not affiliated with, endorsed by, or associated with Logitech*
 <div align="center">
   <img src="assets/github/radial.png" width="48" alt="">
   <br><br>
-  <strong>Made with love by <a href="https://github.com/JuhLabs">JuhLabs</a></strong>
+  <strong>Made with love by <a href="https://github.com/PooDoge">PooDoge</a> · original concept by <a href="https://github.com/JuhLabs">JuhLabs</a></strong>
   <br><br>
-  <a href="https://github.com/JuhLabs/oxidemx/issues">Report Bug</a> - <a href="https://github.com/JuhLabs/oxidemx/issues">Request Feature</a> - <a href="https://github.com/JuhLabs/oxidemx/discussions">Discussions</a>
+  <a href="https://github.com/PooDoge/oxidemx/issues">Report Bug</a> - <a href="https://github.com/PooDoge/oxidemx/issues">Request Feature</a> - <a href="https://github.com/PooDoge/oxidemx/discussions">Discussions</a>
 </div>

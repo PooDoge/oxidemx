@@ -1,5 +1,5 @@
 #!/bin/bash
-# OxideMX MX Launcher
+# OxideMX Launcher
 # Starts the daemon and overlay for the radial menu.
 #
 # When the systemd user service `oxidemx-daemon` is active, this script
@@ -70,7 +70,7 @@ if [ "$SYSTEMD_OWNED" = true ]; then
 
     DAEMON_PID=$(systemctl --user show -p MainPID --value oxidemx-daemon 2>/dev/null)
 
-    echo "OxideMX MX started (daemon managed by systemd)"
+    echo "OxideMX started (daemon managed by systemd)"
     echo "  Overlay PID: $OVERLAY_PID"
     echo "  Daemon PID:  $DAEMON_PID (oxidemx-daemon.service)"
 
@@ -91,7 +91,7 @@ else
         DAEMON_PID=""
     fi
 
-    echo "OxideMX MX started"
+    echo "OxideMX started"
     echo "  Overlay PID: $OVERLAY_PID"
     echo "  Daemon PID:  ${DAEMON_PID:-<not started>}"
 

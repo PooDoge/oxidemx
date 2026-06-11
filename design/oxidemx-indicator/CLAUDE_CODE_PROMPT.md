@@ -1,4 +1,4 @@
-# Claude Code prompt — Implement OxideMX MX indicator + popup + settings
+# Claude Code prompt — Implement OxideMX indicator + popup + settings
 
 > Paste the contents of this file as the **opening message** to Claude Code in the OxideMX repository. It is structured as a directive role + scoped plan request + acceptance criteria, not as a code dump. **Do not delete sections** — each one is load-bearing for getting the plan right.
 
@@ -30,7 +30,7 @@ You **never start writing code before producing a written plan** the human appro
 OxideMX is a Logitech MX-family configuration utility for Linux:
 
 - **OxideMX daemon** (long-running, **Rust**) — talks to mice over HID/Bluetooth via `hidapi` / `bluer`, exposes state on D-Bus via `zbus`. Owns the in-process Iced popup window too.
-- **OxideMX MX Settings** (existing desktop app, **Rust + Iced**, dark themed, orange/cyan accent) — lives at `settings-rs/` in this repo. Full configuration UI.
+- **OxideMX Settings** (existing desktop app, **Rust + Iced**, dark themed, orange/cyan accent) — lives at `settings-rs/` in this repo. Full configuration UI.
 - **OxideMX Radial Menu Overlay** (separate overlay app, **Rust + Iced**) — lives at `overlay-rs/`. The on-screen radial.
 - **OxideMX GNOME Indicator** (this PR's new shell extension, **GJS/TypeScript**) — small status icon in the top panel. Required to be GJS because GNOME Shell extensions cannot be written in any other language.
 
@@ -38,7 +38,7 @@ This work delivers three coupled deliverables:
 
 1. **A GNOME Shell extension** (`gnome-shell-extension-oxidemx-indicator/`, **GJS/TypeScript**) that puts a battery/mouse icon in the top bar. Click behavior opens the OxideMX daemon's popup — the popup itself is NOT rendered by GJS.
 2. **An extension preferences dialog** (the cog in GNOME Extensions app, **GJS/TypeScript + libadwaita**) — single-page libadwaita prefs, **icon-only options** because of GJS popup-styling limitations.
-3. **A new "Indicator Popup" tab inside `settings-rs/`** (the existing OxideMX MX Settings app, **Rust + Iced**) — sits in the sidebar **directly under "Point & Scroll"** — owns every preference for what the popup displays.
+3. **A new "Indicator Popup" tab inside `settings-rs/`** (the existing OxideMX Settings app, **Rust + Iced**) — sits in the sidebar **directly under "Point & Scroll"** — owns every preference for what the popup displays.
 4. **A new daemon-side popup window** (**Rust + Iced**, lives next to or inside `settings-rs/` and shares its widget library) — the actual visual popup the indicator click opens. Reads the same config the "Indicator Popup" tab writes.
 
 > **Critical architectural rule:** The popup is rendered by the OxideMX daemon (a small Iced window opened on demand) so its theming, accent colors, and quick-settings catalog stay consistent with the rest of OxideMX — because it literally **shares Rust + Iced widget code with `settings-rs/`**. The GNOME extension only renders the panel indicator icons and proxies clicks over D-Bus.
@@ -146,7 +146,7 @@ gnome-shell-extension-oxidemx-indicator/
 - "Battery level colors" group: stacked layout with a 3-band horizontal bar (custom drawing on a `Gtk.DrawingArea`) and three `Adw.ActionRow`s with `Gtk.ColorButton` and editable threshold spin buttons.
 - "About" group: version, GNOME version compat, license, "Open daemon", "Report issue".
 
-### Part 2 · Settings app changes (existing OxideMX MX Settings repo / dir)
+### Part 2 · Settings app changes (existing OxideMX Settings repo / dir)
 
 ```
 oxidemx-settings/

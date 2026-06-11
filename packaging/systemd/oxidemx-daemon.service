@@ -1,6 +1,6 @@
-# OxideMX MX Daemon - systemd user service
+# OxideMX Daemon - systemd user service
 #
-# This service manages the OxideMX MX daemon which handles:
+# This service manages the OxideMX daemon which handles:
 # - MX Master 4 gesture button detection via evdev
 # - D-Bus communication with KWin overlay
 # - Profile management and action execution
@@ -16,8 +16,8 @@
 #   journalctl --user -u oxidemx-daemon -f   # View logs
 
 [Unit]
-Description=OxideMX MX Daemon - Radial menu for Logitech MX Master 4
-Documentation=https://github.com/juhhally/oxidemx
+Description=OxideMX Daemon - Radial menu for Logitech MX Master 4
+Documentation=https://github.com/PooDoge/oxidemx
 After=graphical-session.target
 PartOf=graphical-session.target
 

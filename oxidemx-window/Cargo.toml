@@ -4,7 +4,7 @@ version = "0.0.1"
 edition = "2021"
 license = "GPL-3.0"
 description = "Frameless topmost xdg-shell window helpers + GNOME cursor-helper D-Bus client"
-repository = "https://github.com/JuhLabs/oxidemx"
+repository = "https://github.com/PooDoge/oxidemx"
 
 [dependencies]
 iced = { version = "0.14", features = ["wayland", "x11"] }

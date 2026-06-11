@@ -1,5 +1,5 @@
 {
-  description = "OxideMX MX - Radial menu and device manager for Logitech MX Master (and any mouse) on Linux";
+  description = "OxideMX - Radial menu and device manager for Logitech MX Master (and any mouse) on Linux";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
@@ -48,7 +48,7 @@
             buildInputs = with pkgs; [ dbus systemd ];
 
             meta = with pkgs.lib; {
-              description = "OxideMX MX daemon - HID++/evdev listener and D-Bus bridge";
+              description = "OxideMX daemon - HID++/evdev listener and D-Bus bridge";
               license = licenses.gpl3Only;
               platforms = platforms.linux;
             };
@@ -121,7 +121,7 @@
               # Launcher scripts - write Nix-aware versions
               cat > $out/bin/oxidemx <<LAUNCHER
               #!/bin/bash
-              # OxideMX MX Launcher (Nix)
+              # OxideMX Launcher (Nix)
               pkill -f "oxidemxd" 2>/dev/null
               pkill -f "oxidemx-overlay" 2>/dev/null
               sleep 0.3
@@ -129,7 +129,7 @@
               OVERLAY_PID=\$!
               $out/bin/oxidemxd &
               DAEMON_PID=\$!
-              echo "OxideMX MX started"
+              echo "OxideMX started"
               echo "  Overlay PID: \$OVERLAY_PID"
               echo "  Daemon PID: \$DAEMON_PID"
               wait \$DAEMON_PID
@@ -138,7 +138,7 @@
 
               cat > $out/bin/oxidemx-settings <<LAUNCHER
               #!/bin/bash
-              # OxideMX MX Settings (Nix)
+              # OxideMX Settings (Nix)
               exec ${pythonEnv}/bin/python3 $out/share/oxidemx/settings_dashboard.py "\$@"
               LAUNCHER
               chmod 755 $out/bin/oxidemx-settings
@@ -171,7 +171,7 @@
 
             meta = with pkgs.lib; {
               description = "Radial menu and device manager for Logitech MX Master (and any mouse) on Linux";
-              homepage = "https://github.com/JuhLabs/oxidemx";
+              homepage = "https://github.com/PooDoge/oxidemx";
               license = licenses.gpl3Only;
               platforms = platforms.linux;
               maintainers = [ ];
@@ -188,13 +188,13 @@
         in
         {
           options.services.oxidemx = {
-            enable = lib.mkEnableOption "OxideMX MX radial menu for Logitech MX Master";
+            enable = lib.mkEnableOption "OxideMX radial menu for Logitech MX Master";
 
             package = lib.mkOption {
               type = lib.types.package;
               default = self.packages.${pkgs.system}.default;
               defaultText = lib.literalExpression "oxidemx.packages.\${pkgs.system}.default";
-              description = "The OxideMX MX package to use.";
+              description = "The OxideMX package to use.";
             };
           };
 

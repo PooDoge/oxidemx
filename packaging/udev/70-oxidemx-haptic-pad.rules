@@ -1,4 +1,4 @@
-# JuhRadial MX — gamepad-rumble → haptic bridge
+# OxideMX — gamepad-rumble → haptic bridge
 #
 # Installed to /usr/lib/udev/rules.d/ (or /etc/udev/rules.d/). See
 # HAPTIC_GAMEPAD_BRIDGE_DESIGN.md §5.3.

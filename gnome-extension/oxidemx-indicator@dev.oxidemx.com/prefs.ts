@@ -39,7 +39,7 @@ import { bandFor, colorForBand } from './lib/format.js';
 // ---------------------------------------------------------------------------
 
 const VERSION = '0.0.1';
-const ISSUE_URL = 'https://github.com/JuhLabs/oxidemx/issues';
+const ISSUE_URL = 'https://github.com/PooDoge/oxidemx/issues';
 const MOCK_BATTERY = 42;
 
 // Map panel-target enum values → display labels (and back by index).

@@ -1,4 +1,4 @@
-//! OxideMX MX overlay (Rust + iced + xdg-shell).
+//! OxideMX overlay (Rust + iced + xdg-shell).
 //!
 //! Replacement for the legacy Python overlay/. Same daemon, same
 //! D-Bus contract (`org.oxidemx.Daemon`). Mutter doesn't advertise

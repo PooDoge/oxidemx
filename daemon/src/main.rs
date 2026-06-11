@@ -1,4 +1,4 @@
-//! OxideMX MX Daemon
+//! OxideMX Daemon
 //!
 //! A daemon for Linux that provides radial menu functionality for the
 //! Logitech MX Master 4 mouse via evdev input and KWin overlay.
@@ -140,7 +140,7 @@ fn spawn_device_hotplug_watcher() -> Arc<tokio::sync::Notify> {
     hotplug
 }
 
-/// OxideMX MX Daemon - Radial menu for Logitech MX Master 4
+/// OxideMX Daemon - Radial menu for Logitech MX Master 4
 #[derive(Parser, Debug)]
 #[command(name = "oxidemxd")]
 #[command(version, about, long_about = None)]
@@ -171,7 +171,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let subscriber = FmtSubscriber::builder().with_max_level(level).finish();
     tracing::subscriber::set_global_default(subscriber)?;
 
-    info!("OxideMX MX Daemon starting...");
+    info!("OxideMX Daemon starting...");
 
     // Handle --list-devices flag
     if args.list_devices {
@@ -586,7 +586,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // TODO: Initialize remaining components
     // 4. Initialize HID++ haptic subsystem
 
-    info!("OxideMX MX Daemon ready");
+    info!("OxideMX Daemon ready");
 
     // Wait for shutdown signal
     tokio::select! {

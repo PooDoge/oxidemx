@@ -1,6 +1,6 @@
 ---
 name: Bug Report
-about: Report a bug to help us improve OxideMX MX
+about: Report a bug to help us improve OxideMX
 title: '[BUG] '
 labels: bug
 assignees: ''
@@ -39,7 +39,7 @@ Paste output of: journalctl --user -u oxidemx-daemon -n 50
 - **Desktop Environment**: [e.g., KDE Plasma 6.2]
 - **Display Server**: [Wayland / X11]
 - **Mouse Model**: [e.g., MX Master 4, MX Master 3S]
-- **OxideMX MX Version**: [e.g., 1.0.0]
+- **OxideMX Version**: [e.g., 1.0.0]
 - **Installation Method**: [Flatpak / RPM / AUR / Source]
 
 ## Additional Context

@@ -5,7 +5,7 @@ edition = "2021"
 description = "OxideMX daemon - Radial menu for Logitech MX Master 4 on Linux"
 license = "GPL-3.0"
 authors = ["Julian Hermstad"]
-repository = "https://github.com/JuhLabs/oxidemx"
+repository = "https://github.com/PooDoge/oxidemx"
 
 [[bin]]
 name = "oxidemxd"

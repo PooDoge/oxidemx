@@ -55,4 +55,4 @@ cp "$DEV_DIR"/assets/settings-generated/easyswitch.png "$SHARE_DIR/assets/settin
 cp "$DEV_DIR"/assets/settings-generated/haptics.png "$SHARE_DIR/assets/settings-generated/" 2>/dev/null || true
 
 echo ""
-echo "Done! Use your keyboard shortcut to start OxideMX MX."
+echo "Done! Use your keyboard shortcut to start OxideMX."

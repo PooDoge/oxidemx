@@ -134,7 +134,7 @@ pub fn run() -> iced::Result {
     );
 
     iced::application(boot, update, view)
-        .title("OxideMX MX")
+        .title("OxideMX")
         .window(window)
         .style(|_state, _theme| iced::theme::Style {
             background_color: Color::TRANSPARENT,
