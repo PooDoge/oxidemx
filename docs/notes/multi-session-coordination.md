@@ -69,3 +69,15 @@ their author believed.
    test (`cargo test -p oxidemx-overlay all_wgsl`).
 4. Re-run the vision harness for radial + chat + weather popup
    before installing.
+
+## Worktree setup gotcha
+
+A fresh linked worktree contains only the GITLINK for the vendored
+`pop_os_iced` / `libcosmic` dirs — `iced_gtk_themer` then fails to
+resolve its `iced` path dependency. Symlink them from the main
+checkout after `git worktree add`:
+
+```bash
+ln -s ../juhradial-mx/pop_os_iced pop_os_iced
+ln -s ../juhradial-mx/libcosmic libcosmic
+```
