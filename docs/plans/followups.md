@@ -245,7 +245,19 @@ Deferred from the widget-plugin plans (runtime + CLI + settings UI,
 - **Keyboard nav for the behavior picker** — roving focus across the
   tile grid, Esc closes the panel, Enter applies the focused tile.
   iced 0.14's focus APIs make this a sizeable chunk; explicitly
-  deferred from Plan 3 Task 1.
+  deferred from Plan 3 Task 1. The slice editor's reorder rows
+  (plan 5) inherit the same gap: rows are mouse-only today.
+- **Drag-reorder for the slice editor rows** — the reorder-row list
+  (plan 5) moves slices with up/down chevrons only, like the
+  design's reorder handles. True drag-and-drop between rows needs a
+  drag overlay + drop-target hit-testing that iced doesn't give us
+  for free (the radial preview's canvas drag-to-swap already covers
+  the common case).
+- **Scroll-to-expanded slice card** — clicking a wedge in the radial
+  preview expands that slot's card inline in the list below, but
+  the page doesn't scroll to it (iced's `scrollable` has no
+  scroll-to-child API; `scroll_to` needs a hand-computed offset).
+  Revisit if users report losing the expansion off-screen.
 - **Live picker-tile mini-previews (1 fps)** — picker widget tiles
   currently show canned design-mockup values; the options-card live
   preview (Task 5) proved the worker-embedding pattern, the picker
