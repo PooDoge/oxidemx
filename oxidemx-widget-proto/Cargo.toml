@@ -1,0 +1,16 @@
+[package]
+name = "oxidemx-widget-proto"
+version = "0.1.0"
+edition = "2021"
+description = "Wire types shared by the OxideMX widget host and widget guests"
+
+[features]
+default = ["manifest"]
+# widget.json parsing — host/settings only; guests build with
+# default-features = false to keep the wasm small.
+manifest = ["dep:serde_json"]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+postcard = { version = "1", features = ["alloc"] }
+serde_json = { version = "1", optional = true }
