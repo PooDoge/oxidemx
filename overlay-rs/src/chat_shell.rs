@@ -131,6 +131,31 @@ pub fn cap_rects(t: f32, win_w: f32, win_h: f32) -> CapRects {
     CapRects { top, bottom }
 }
 
+/// Centre + radius of the travelling page puck at morph progress
+/// `t`. The puck is the disc's centre circle surviving the morph:
+/// it starts at the disc centre (radius `CENTER_ZONE_RADIUS`) and
+/// flies into the header arc's left slot, shrinking to the 32 px
+/// header puck. Driven by the same tween as `cap_rects` so the
+/// whole shell reads as one object rearranging.
+pub fn puck_geom(t: f32, win_w: f32, win_h: f32) -> (Point, f32) {
+    let t = t.clamp(0.0, 1.0);
+    let parked = cap_rects(1.0, win_w, win_h);
+    let end = Point::new(
+        parked.top.x + 14.0 + crate::handoff::HEADER_PUCK_R,
+        parked.top.y + parked.top.height / 2.0,
+    );
+    let start = Point::new(CENTER as f32, CENTER as f32);
+    let r = lerp(
+        crate::geometry::CENTER_ZONE_RADIUS as f32,
+        crate::handoff::HEADER_PUCK_R,
+        t,
+    );
+    (
+        Point::new(lerp(start.x, end.x, t), lerp(start.y, end.y, t)),
+        r,
+    )
+}
+
 /// Centre of the × close button inside the header arc.
 pub fn close_center(top: &Rectangle) -> Point {
     Point::new(
@@ -151,10 +176,17 @@ pub fn hit_drag(p: Point, top: &Rectangle) -> bool {
     top.contains(p) && !hit_close(p, top)
 }
 
-/// True when the point sits on either arc — the wheel-back region.
-/// (Wheel over the chat middle scrolls the conversation instead.)
-pub fn in_caps(p: Point, rects: &CapRects) -> bool {
-    rects.top.contains(p) || rects.bottom.contains(p)
+/// Resolve a wheel delta to a page-cycle direction (+1 next, -1
+/// previous), or `None` for a pure-horizontal / zero scroll.
+fn wheel_direction(delta: &mouse::ScrollDelta) -> Option<i32> {
+    let dy = match delta {
+        mouse::ScrollDelta::Lines { y, .. } => *y,
+        mouse::ScrollDelta::Pixels { y, .. } => *y,
+    };
+    if dy.abs() < f32::EPSILON {
+        return None;
+    }
+    Some(if dy > 0.0 { 1 } else { -1 })
 }
 
 /// Canvas painter for the two caps + header furniture. Stacked above
@@ -187,18 +219,22 @@ impl<'a> canvas::Program<crate::app::Message> for CapsPainter<'a> {
         cursor: mouse::Cursor,
     ) -> Option<Action<crate::app::Message>> {
         let t = self.state.ai_morph_progress();
-        if t < INTERACTIVE_T || !self.state.is_open() {
+        let armed = self.state.ai_handoff.is_armed();
+        if !self.state.is_open() || t <= 0.001 {
             return None;
         }
 
-        // Escape works regardless of cursor position — mirrors the
-        // main painter's dismiss path (which is gated off while the
-        // chat shell is up).
+        // Escape closes the chat at any morph stage once the shell
+        // owns the page (armed or parked) — mirrors the main
+        // painter's dismiss path, which is gated off during the
+        // morph.
         if let Event::Keyboard(iced::keyboard::Event::KeyPressed { key, .. }) = event {
-            if matches!(
-                key,
-                iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape)
-            ) {
+            if (armed || t >= INTERACTIVE_T)
+                && matches!(
+                    key,
+                    iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape)
+                )
+            {
                 return Some(Action::publish(crate::app::Message::ToggleDismiss));
             }
             return None;
@@ -206,40 +242,84 @@ impl<'a> canvas::Program<crate::app::Message> for CapsPainter<'a> {
 
         let p = cursor.position_in(bounds)?;
         let rects = cap_rects(t, bounds.width, bounds.height);
-        match event {
-            Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
-                if hit_close(p, &rects.top) {
-                    // × dismisses the overlay entirely — same path
-                    // as Escape / right-click on the disc.
-                    Some(Action::publish(crate::app::Message::ToggleDismiss))
-                } else if hit_drag(p, &rects.top) {
-                    // Native compositor move, like grabbing a
-                    // titlebar.
-                    Some(Action::publish(crate::app::Message::ChatHeaderPressed))
-                } else {
-                    None
+
+        // While the puck is armed the chat renders but isn't the
+        // interaction target yet: wheel input anywhere keeps cycling
+        // pages (scrolling away reverses the morph), pointer motion
+        // feeds the deliberate-travel activation rule, and a click
+        // outside the puck activates the chat.
+        if armed {
+            return match event {
+                Event::Mouse(mouse::Event::CursorMoved { .. }) => {
+                    Some(Action::publish(crate::app::Message::HandoffPointer {
+                        x: p.x as f64,
+                        y: p.y as f64,
+                    }))
                 }
-            }
-            Event::Mouse(mouse::Event::WheelScrolled { delta }) => {
-                // Wheel over either arc cycles back toward the disc
-                // (the same gesture that brought the user here).
-                // Wheel over the middle belongs to the conversation
-                // scrollable, which sits above this canvas.
-                if !in_caps(p, &rects) {
-                    return None;
+                Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
+                    if t >= INTERACTIVE_T && hit_close(p, &rects.top) {
+                        // × still closes outright — activation isn't
+                        // a prerequisite for closing.
+                        Some(Action::publish(crate::app::Message::ToggleDismiss))
+                    } else {
+                        Some(Action::publish(crate::app::Message::HandoffClick {
+                            x: p.x as f64,
+                            y: p.y as f64,
+                        }))
+                    }
                 }
-                let dy = match delta {
-                    mouse::ScrollDelta::Lines { y, .. } => *y,
-                    mouse::ScrollDelta::Pixels { y, .. } => *y,
-                };
-                if dy.abs() < f32::EPSILON {
-                    return None;
+                Event::Mouse(mouse::Event::WheelScrolled { delta }) => {
+                    let direction = wheel_direction(delta)?;
+                    Some(Action::publish(crate::app::Message::CyclePage(direction)))
                 }
-                let direction = if dy > 0.0 { 1 } else { -1 };
-                Some(Action::publish(crate::app::Message::CyclePage(direction)))
-            }
-            _ => None,
+                _ => None,
+            };
         }
+
+        if self.state.ai_handoff.is_chat_active() && t >= INTERACTIVE_T {
+            return match event {
+                Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
+                    if hit_close(p, &rects.top) {
+                        Some(Action::publish(crate::app::Message::ToggleDismiss))
+                    } else if hit_drag(p, &rects.top) {
+                        // Native compositor move, like grabbing a
+                        // titlebar.
+                        Some(Action::publish(crate::app::Message::ChatHeaderPressed))
+                    } else {
+                        None
+                    }
+                }
+                Event::Mouse(mouse::Event::WheelScrolled { delta }) => {
+                    // After activation only the header puck keeps
+                    // cycling pages — wheel over the body belongs to
+                    // the conversation scrollable above this canvas.
+                    let (puck_c, puck_r) = puck_geom(t, bounds.width, bounds.height);
+                    let (dx, dy) = (p.x - puck_c.x, p.y - puck_c.y);
+                    let hit_r = puck_r + crate::handoff::HEADER_PUCK_HIT_SLOP;
+                    if dx * dx + dy * dy > hit_r * hit_r {
+                        return None;
+                    }
+                    let direction = wheel_direction(delta)?;
+                    Some(Action::publish(crate::app::Message::CyclePage(direction)))
+                }
+                _ => None,
+            };
+        }
+
+        // Morph in flight without an armed puck (reversing toward
+        // the disc after cycling away): keep the old disc-centre
+        // wheel zone live so continued scrolling keeps stepping
+        // through pages.
+        if let Event::Mouse(mouse::Event::WheelScrolled { delta }) = event {
+            let cx = CENTER as f32;
+            let (dx, dy) = (p.x - cx, p.y - cx);
+            let zone = crate::geometry::CENTER_ZONE_RADIUS as f32;
+            if dx * dx + dy * dy <= zone * zone {
+                let direction = wheel_direction(delta)?;
+                return Some(Action::publish(crate::app::Message::CyclePage(direction)));
+            }
+        }
+        None
     }
 
     fn mouse_interaction(
@@ -257,8 +337,17 @@ impl<'a> canvas::Program<crate::app::Message> for CapsPainter<'a> {
         };
         let rects = cap_rects(t, bounds.width, bounds.height);
         if hit_close(p, &rects.top) {
-            mouse::Interaction::Pointer
-        } else if hit_drag(p, &rects.top) {
+            return mouse::Interaction::Pointer;
+        }
+        // The header puck is a wheel target in every phase — show a
+        // pointer so it reads as interactive.
+        let (puck_c, puck_r) = puck_geom(t, bounds.width, bounds.height);
+        let (dx, dy) = (p.x - puck_c.x, p.y - puck_c.y);
+        let hit_r = puck_r + crate::handoff::HEADER_PUCK_HIT_SLOP;
+        if dx * dx + dy * dy <= hit_r * hit_r {
+            return mouse::Interaction::Pointer;
+        }
+        if self.state.ai_handoff.is_chat_active() && hit_drag(p, &rects.top) {
             mouse::Interaction::Grab
         } else {
             mouse::Interaction::default()
@@ -284,7 +373,7 @@ impl<'a> canvas::Program<crate::app::Message> for CapsPainter<'a> {
         // the disc would.
         let open_alpha = self.state.menu_open_alpha();
         let shell_alpha = cap_alpha(t) * open_alpha;
-        if shell_alpha <= 0.001 {
+        if shell_alpha <= 0.001 && open_alpha <= 0.001 {
             return vec![frame.into_geometry()];
         }
 
@@ -436,6 +525,28 @@ impl<'a> canvas::Program<crate::app::Message> for CapsPainter<'a> {
             }
         }
 
+        // The travelling page puck — the disc's centre circle
+        // surviving the morph. Drawn last so it rides above the
+        // caps; deliberately NOT multiplied by `cap_alpha`, only by
+        // the whole-menu open fade: the puck must stay solid while
+        // the disc fades out underneath it.
+        let (puck_c, puck_r) = puck_geom(t, bounds.width, bounds.height);
+        let ring = if self.state.ai_handoff.is_armed() {
+            crate::render::slices::PuckRing::Armed
+        } else {
+            crate::render::slices::PuckRing::Dimmed
+        };
+        crate::render::slices::draw_puck(
+            &mut frame,
+            puck_c,
+            puck_r,
+            palette,
+            open_alpha,
+            ring,
+            self.state.cycle_page_count(),
+            self.state.cycle_page_position(),
+        );
+
         vec![frame.into_geometry()]
     }
 }
@@ -514,7 +625,7 @@ mod tests {
         // Outside both caps: neither.
         let mid = Point::new(W / 2.0, H / 2.0);
         assert!(!hit_drag(mid, &r.top));
-        assert!(!in_caps(mid, &r) || r.top.contains(mid) || r.bottom.contains(mid));
+        assert!(!r.top.contains(mid) && !r.bottom.contains(mid));
     }
 
     #[test]

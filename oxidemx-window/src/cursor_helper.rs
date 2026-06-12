@@ -23,6 +23,10 @@ const HELPER_SERVICE: &str = "org.oxidemx.CursorHelper";
 #[allow(dead_code)]
 const HELPER_PATH: &str = "/org/oxidemx/CursorHelper";
 
+/// One monitor rectangle as reported by the extension's
+/// `ListMonitors`: `(x, y, width, height, physical_index)`.
+type MonitorRect = (i32, i32, i32, i32, i32);
+
 #[proxy(
     interface = "org.oxidemx.CursorHelper",
     default_service = "org.oxidemx.CursorHelper",
@@ -33,7 +37,7 @@ trait CursorHelper {
     #[allow(dead_code)]
     fn raise_overlay(&self, app_id: &str) -> zbus::Result<bool>;
     #[allow(dead_code)]
-    fn list_monitors(&self) -> zbus::Result<Vec<(i32, i32, i32, i32, i32)>>;
+    fn list_monitors(&self) -> zbus::Result<Vec<MonitorRect>>;
     fn get_focused_window_class(&self, ignore_app_id: &str) -> zbus::Result<String>;
 }
 
@@ -56,19 +60,14 @@ pub async fn move_overlay(app_id: String, x: i32, y: i32, monitor: i32) -> bool 
     }
 }
 
-async fn try_move_overlay(
-    app_id: &str,
-    x: i32,
-    y: i32,
-    monitor: i32,
-) -> zbus::Result<bool> {
+async fn try_move_overlay(app_id: &str, x: i32, y: i32, monitor: i32) -> zbus::Result<bool> {
     let conn = Connection::session().await?;
     let proxy = CursorHelperProxy::new(&conn).await?;
     proxy.move_overlay(app_id, x, y, monitor).await
 }
 
 #[allow(dead_code)]
-pub async fn list_monitors() -> zbus::Result<Vec<(i32, i32, i32, i32, i32)>> {
+pub async fn list_monitors() -> zbus::Result<Vec<MonitorRect>> {
     let conn = Connection::session().await?;
     let proxy = CursorHelperProxy::new(&conn).await?;
     proxy.list_monitors().await

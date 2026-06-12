@@ -11,13 +11,15 @@
 use iced::window::{Level, Settings};
 
 pub fn frameless_topmost(app_id: &str, size: iced::Size) -> Settings {
-    let mut s = Settings::default();
-    s.size = size;
-    s.decorations = false;
-    s.transparent = true;
-    s.resizable = false;
-    s.level = Level::AlwaysOnTop;
-    s.position = iced::window::Position::Centered;
+    let mut s = Settings {
+        size,
+        decorations: false,
+        transparent: true,
+        resizable: false,
+        level: Level::AlwaysOnTop,
+        position: iced::window::Position::Centered,
+        ..Settings::default()
+    };
     s.platform_specific.application_id = app_id.to_string();
     s.platform_specific.override_redirect = true;
     s

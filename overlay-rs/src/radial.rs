@@ -396,6 +396,7 @@ pub struct RadialState {
     ///   * page cycle (scroll wheel) — direction = ±1
     ///   * show() when target page != 0 — direction = 0
     ///   * apply_focused_class on mid-open swap — direction = 0
+    ///
     /// Hover labels still take precedence — the transition only
     /// renders when the user isn't pointing at a slice.
     pub(crate) page_name_flash: Option<PageNameTransition>,
@@ -424,6 +425,12 @@ pub struct RadialState {
     /// (iced 0.14 can't focus a widget that isn't in the tree yet,
     /// and at page-change time the chat content hasn't faded in).
     pub chat_focus_pending: bool,
+
+    /// Center-puck handoff phase. Armed when the page cycle lands
+    /// on the AI page (wheel keeps cycling, chat is render-only);
+    /// disarmed to `ChatActive` by a deliberate click / mouse-out
+    /// gesture. Transition rules + tests live in `crate::handoff`.
+    pub ai_handoff: crate::handoff::AiHandoff,
 }
 
 /// Name of the auto-appended AI Assistant page. Shared between the
@@ -528,6 +535,7 @@ impl RadialState {
             window_id: None,
             ai_morph: Tween::at(0.0),
             chat_focus_pending: false,
+            ai_handoff: crate::handoff::AiHandoff::Inactive,
         }
     }
 
@@ -536,6 +544,7 @@ impl RadialState {
     ///   * direction = ±1: incoming slides in from `±slide`,
     ///     outgoing slides out to `∓slide`.
     ///   * direction = 0: no slide; incoming just fades in.
+    ///
     /// Reads the current page's name from `self.pages`.
     fn flash_page_name(&mut self, previous_name: Option<String>, direction: i32) {
         let current_name = self
@@ -585,6 +594,7 @@ impl RadialState {
         // from the previous session is hard-reset.
         self.ai_morph = Tween::at(0.0);
         self.chat_focus_pending = false;
+        self.ai_handoff.reset();
         // Pick the page based on the current focused-class cache.
         // The cache is repopulated by `apply_focused_class` from
         // the GNOME-extension query that fires alongside Show, so
@@ -763,11 +773,68 @@ impl RadialState {
             self.ai_morph
                 .set_target(1.0, &self.anim_config.ai_morph.enter);
             self.toggle_mode = true;
-            self.chat_focus_pending = true;
+            // Landing on the AI page arms the puck instead of
+            // activating the chat: wheel input keeps cycling pages
+            // and the chat must not grab keyboard focus (no caret).
+            // `chat_focus_pending` is set by `activate_chat()` when
+            // the user disarms with a deliberate click / mouse-out.
+            self.ai_handoff = crate::handoff::AiHandoff::armed(Instant::now());
+            self.chat_focus_pending = false;
         } else if !on_ai && self.ai_morph.target > 0.5 {
             self.ai_morph
                 .set_target(0.0, &self.anim_config.ai_morph.exit);
             self.chat_focus_pending = false;
+            self.ai_handoff.reset();
+        }
+    }
+
+    /// Disarm the puck → the chat becomes the real interaction
+    /// target: keyboard focus moves to the input (via the Tick
+    /// consumer of `chat_focus_pending`), wheel over the body
+    /// scrolls the conversation, and only the header puck keeps
+    /// cycling pages.
+    pub fn activate_chat(&mut self) {
+        if self.ai_handoff.is_armed() {
+            self.ai_handoff.activate();
+            self.chat_focus_pending = true;
+        }
+    }
+
+    /// Feed a window-local click into the armed handoff. Clicks
+    /// outside the travelling puck's hit circle activate the chat;
+    /// clicks on the puck leave it armed (it's the page-cycle
+    /// affordance).
+    pub fn handoff_click(&mut self, x: f64, y: f64) {
+        use crate::handoff::{HEADER_PUCK_HIT_SLOP, P};
+        let (pc, pr) = crate::chat_shell::puck_geom(
+            self.ai_morph_progress(),
+            crate::geometry::WINDOW_SIZE as f32,
+            crate::chat_shell::CHAT_WINDOW_HEIGHT as f32,
+        );
+        if self.ai_handoff.on_click(
+            P::new(x as f32, y as f32),
+            P::new(pc.x, pc.y),
+            pr + HEADER_PUCK_HIT_SLOP,
+        ) {
+            self.chat_focus_pending = true;
+        }
+    }
+
+    /// Feed a window-local pointer position into the armed handoff.
+    /// Activates the chat when the motion satisfies the deliberate-
+    /// travel rule (see `crate::handoff`).
+    pub fn handoff_pointer(&mut self, x: f64, y: f64) {
+        use crate::handoff::P;
+        let disc_center = P::new(
+            crate::geometry::CENTER as f32,
+            crate::geometry::CENTER as f32,
+        );
+        if self.ai_handoff.on_pointer(
+            P::new(x as f32, y as f32),
+            disc_center,
+            crate::geometry::CENTER_ZONE_RADIUS as f32,
+        ) {
+            self.chat_focus_pending = true;
         }
     }
 
@@ -978,6 +1045,8 @@ impl RadialState {
         }
         self.menu.set_target(0.0, &self.anim_config.menu.exit);
         self.toggle_mode = false;
+        self.ai_handoff.reset();
+        self.chat_focus_pending = false;
         // Trigger the submenu's exit fade rather than dropping it
         // immediately, so any in-flight pop-out gets to play out.
         // `begin_exit` extends the tween duration to cover the full
@@ -1813,13 +1882,10 @@ impl<'a> canvas::Program<crate::app::Message> for Painter<'a> {
                 elapsed < total_ms
             })
             .unwrap_or(false);
-        let center_label: Option<String> = if let Some(s) = hovered_slice {
-            Some(s.label.clone())
-        } else if page_name_active {
-            None
-        } else {
-            None
-        };
+        // Hover labels take precedence; with nothing hovered the
+        // puck label stays empty (the page-name flash below paints
+        // the centre itself while it is active).
+        let center_label: Option<String> = hovered_slice.map(|s| s.label.clone());
         let center_label_alpha_mul: f32 = 1.0;
         // Description used to render as a centre-puck subtitle;
         // moved to an arced tooltip around the outer ring (see

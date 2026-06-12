@@ -60,7 +60,7 @@ pub enum Message {
     FocusedClassResolved(Option<String>),
     /// Config reload from inotify watcher — replace theme + slices
     /// in the live state without restarting the overlay.
-    ConfigReloaded(oxidemx_shared::AppConfig),
+    ConfigReloaded(Box<oxidemx_shared::AppConfig>),
     WindowOpened(iced::window::Id),
     /// Result of querying the monitor size for centering fallback.
     CenterOverlay(Option<Size>),
@@ -108,6 +108,19 @@ pub enum Message {
     /// starts a native compositor window move, like grabbing a
     /// titlebar.
     ChatHeaderPressed,
+    /// Pointer motion over the chat shell while the puck is armed —
+    /// feeds the deliberate-travel activation rule (see
+    /// `crate::handoff`).
+    HandoffPointer {
+        x: f64,
+        y: f64,
+    },
+    /// Click over the chat shell while the puck is armed — activates
+    /// the chat unless it landed on the puck's hit circle.
+    HandoffClick {
+        x: f64,
+        y: f64,
+    },
     /// The overlay window lost keyboard focus. Dismisses the disc
     /// (click-elsewhere-to-close), but is IGNORED while the chat
     /// shell is up: Mutter drops keyboard focus the moment an
@@ -159,6 +172,31 @@ fn boot() -> RadialState {
 }
 
 fn update(state: &mut RadialState, message: Message) -> Task<Message> {
+    // A chat-widget interaction arriving while the puck is armed is
+    // a click the caps canvas never saw (the widget captured it) —
+    // it still counts as "clicked in the chat outside the puck", so
+    // disarm before processing. Hover/stream messages don't count.
+    if state.ai_handoff.is_armed()
+        && matches!(
+            message,
+            Message::AiEditorAction(_)
+                | Message::AiSubmitPrompt
+                | Message::AiModelToggled
+                | Message::AiRenameStart(_)
+                | Message::AiDeleteThread(_)
+                | Message::AiCopyChat
+                | Message::AiModeSelected(_)
+                | Message::AiNewChat
+                | Message::AiToggleThreads
+                | Message::AiSelectThread(_)
+                | Message::AiChooseOption(_)
+                | Message::AiStopRequest
+                | Message::AiLinkClicked(_)
+                | Message::AiCopyText(_)
+        )
+    {
+        state.activate_chat();
+    }
     match message {
         Message::Tick => {
             state.advance_animations();
@@ -397,6 +435,14 @@ fn update(state: &mut RadialState, message: Message) -> Task<Message> {
             } else {
                 Task::none()
             }
+        }
+        Message::HandoffPointer { x, y } => {
+            state.handoff_pointer(x, y);
+            Task::none()
+        }
+        Message::HandoffClick { x, y } => {
+            state.handoff_click(x, y);
+            Task::none()
         }
         Message::WindowUnfocused => {
             if state.ai_morph_progress() > 0.5 {
@@ -1340,7 +1386,8 @@ fn subscription(_state: &RadialState) -> Subscription<Message> {
     //     update() returns Task::none() immediately.)
     Subscription::batch([
         Subscription::run(crate::dbus::stream).map(Message::Overlay),
-        Subscription::run(crate::config::watch_stream).map(Message::ConfigReloaded),
+        Subscription::run(crate::config::watch_stream)
+            .map(|cfg| Message::ConfigReloaded(Box::new(cfg))),
         Subscription::run(ai_question_stream),
         Subscription::run(ai_stream_stream),
         iced::time::every(std::time::Duration::from_millis(16)).map(|_| Message::Tick),

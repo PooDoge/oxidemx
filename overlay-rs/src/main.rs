@@ -34,6 +34,7 @@ mod editor {
     pub mod window;
 }
 mod geometry;
+mod handoff;
 mod haptic_client;
 mod input;
 mod radial;

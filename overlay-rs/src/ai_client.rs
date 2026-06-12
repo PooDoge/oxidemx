@@ -36,8 +36,11 @@ pub enum StreamEvent {
 
 /// Channel to push (thread_idx, StreamEvent) into the UI loop.
 /// Registered by app.rs's stream subscription at boot.
-pub static STREAM_TX: Lazy<Mutex<Option<mpsc::Sender<(usize, StreamEvent)>>>> =
-    Lazy::new(|| Mutex::new(None));
+/// Channel type for thread-tagged stream events flowing into the
+/// iced subscription.
+pub type StreamEventTx = mpsc::Sender<(usize, StreamEvent)>;
+
+pub static STREAM_TX: Lazy<Mutex<Option<StreamEventTx>>> = Lazy::new(|| Mutex::new(None));
 
 /// Per-request handle for forwarding stream events. Cheap to clone.
 #[derive(Clone)]
@@ -585,41 +588,6 @@ pub async fn ask_ai(
     Err(format!("Agent exceeded {MAX_TOOL_ROUNDS} tool rounds without a final answer").into())
 }
 
-#[cfg(test)]
-mod sse_tests {
-    use super::split_sse_events;
-
-    #[test]
-    fn drains_complete_blocks_and_keeps_partials() {
-        let mut buf = String::from(
-            "event: step.delta\ndata: {\"a\":1}\n\nevent: done\ndata: [DONE]\n\nevent: partial\nda",
-        );
-        let events = split_sse_events(&mut buf);
-        assert_eq!(events.len(), 2);
-        assert_eq!(events[0], ("step.delta".into(), "{\"a\":1}".into()));
-        assert_eq!(events[1], ("done".into(), "[DONE]".into()));
-        assert_eq!(buf, "event: partial\nda");
-    }
-
-    #[test]
-    fn partial_then_completion_across_chunks() {
-        let mut buf = String::from("event: x\ndata: {\"t\":");
-        assert!(split_sse_events(&mut buf).is_empty());
-        buf.push_str("\"hi\"}\n\n");
-        let events = split_sse_events(&mut buf);
-        assert_eq!(events.len(), 1);
-        assert_eq!(events[0].1, "{\"t\":\"hi\"}");
-        assert!(buf.is_empty());
-    }
-
-    #[test]
-    fn multiline_data_joined() {
-        let mut buf = String::from("event: e\ndata: line1\ndata: line2\n\n");
-        let events = split_sse_events(&mut buf);
-        assert_eq!(events[0].1, "line1\nline2");
-    }
-}
-
 /// Grounded web search via a NESTED, search-only interaction: the
 /// Interactions API refuses to mix built-in tools with custom
 /// function declarations in one request, so the settings agent
@@ -788,5 +756,40 @@ async fn execute_local_tool(
             }
         }
         other => Err(format!("Unknown tool: {}", other).into()),
+    }
+}
+
+#[cfg(test)]
+mod sse_tests {
+    use super::split_sse_events;
+
+    #[test]
+    fn drains_complete_blocks_and_keeps_partials() {
+        let mut buf = String::from(
+            "event: step.delta\ndata: {\"a\":1}\n\nevent: done\ndata: [DONE]\n\nevent: partial\nda",
+        );
+        let events = split_sse_events(&mut buf);
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0], ("step.delta".into(), "{\"a\":1}".into()));
+        assert_eq!(events[1], ("done".into(), "[DONE]".into()));
+        assert_eq!(buf, "event: partial\nda");
+    }
+
+    #[test]
+    fn partial_then_completion_across_chunks() {
+        let mut buf = String::from("event: x\ndata: {\"t\":");
+        assert!(split_sse_events(&mut buf).is_empty());
+        buf.push_str("\"hi\"}\n\n");
+        let events = split_sse_events(&mut buf);
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].1, "{\"t\":\"hi\"}");
+        assert!(buf.is_empty());
+    }
+
+    #[test]
+    fn multiline_data_joined() {
+        let mut buf = String::from("event: e\ndata: line1\ndata: line2\n\n");
+        let events = split_sse_events(&mut buf);
+        assert_eq!(events[0].1, "line1\nline2");
     }
 }

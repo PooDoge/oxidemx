@@ -149,6 +149,7 @@ pub fn draw_ring_transformed(
 /// icon for slot `index`. `slice = None` means the slot is unused
 /// (we still draw an empty wedge so the ring stays visually
 /// continuous — same as the Python overlay).
+#[allow(clippy::too_many_arguments)] // mirrors the painter's full per-wedge parameter surface
 pub fn draw_slice(
     frame: &mut Frame,
     center: Point,
@@ -485,6 +486,7 @@ pub fn draw_page_name_transition(
 ///   * Faster fade-in (item_t × 2.5) so items are readable while
 ///     still travelling.
 ///   * Highlighted item gets a glow ring + brighter background.
+#[allow(clippy::too_many_arguments)] // mirrors the painter's full submenu parameter surface
 pub fn draw_submenu(
     frame: &mut Frame,
     center: Point,
@@ -1051,6 +1053,79 @@ pub fn draw_page_indicator(
         };
         frame.fill(&path, color);
     }
+}
+
+/// Ring treatment for the travelling page puck.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PuckRing {
+    /// Accent stroke + outer glow — the puck is armed (page cycle
+    /// live, chat render-only).
+    Armed,
+    /// Subtle inactive stroke — the chat owns input; the puck is
+    /// still a wheel target but visually parked.
+    Dimmed,
+}
+
+/// Draw the centre puck as a standalone object: dome-ish fill, ring
+/// stroke per handoff phase, live page dots. Used by the chat
+/// shell's `CapsPainter` to keep the puck visible (and travelling)
+/// through the disc → chat morph; visually consistent with
+/// `draw_center` + `draw_page_indicator` at the morph's t = 0
+/// boundary so there's no pop when the painters swap.
+#[allow(clippy::too_many_arguments)]
+pub fn draw_puck(
+    frame: &mut Frame,
+    center: Point,
+    radius: f32,
+    palette: &ThemeColors,
+    alpha: f32,
+    ring: PuckRing,
+    page_count: usize,
+    active: Option<usize>,
+) {
+    let a = alpha.clamp(0.0, 1.0);
+    if a <= 0.001 || radius <= 1.0 {
+        return;
+    }
+    let body = Path::circle(center, radius);
+    // Dome fill: crust base + an offset surface2 highlight fakes the
+    // design's "radial-gradient(circle at 36% 30%, surface2, crust)"
+    // within the canvas API's solid fills.
+    frame.fill(&body, rgba(&palette.crust, 0.96 * a));
+    let highlight = Path::circle(
+        Point::new(center.x - radius * 0.28, center.y - radius * 0.40),
+        radius * 0.50,
+    );
+    frame.fill(&highlight, rgba(&palette.surface2, 0.30 * a));
+
+    match ring {
+        PuckRing::Armed => {
+            // Outer glow first so the crisp ring paints over it.
+            let glow = Path::circle(center, radius + 2.5);
+            frame.stroke(
+                &glow,
+                Stroke::default()
+                    .with_color(rgba(&palette.accent, 0.30 * a))
+                    .with_width(5.0),
+            );
+            frame.stroke(
+                &body,
+                Stroke::default()
+                    .with_color(rgba(&palette.accent, a))
+                    .with_width(2.5),
+            );
+        }
+        PuckRing::Dimmed => {
+            frame.stroke(
+                &body,
+                Stroke::default()
+                    .with_color(rgba(&palette.overlay0, 0.9 * a))
+                    .with_width(1.5),
+            );
+        }
+    }
+
+    draw_page_indicator(frame, center, radius, palette, a, page_count, active);
 }
 
 // =============================================================================
