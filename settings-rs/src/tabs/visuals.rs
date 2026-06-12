@@ -95,8 +95,8 @@ pub fn view(state: &State) -> Element<'_, Message> {
                     font_row,
                     tooltip_card,
                     page_name_card,
-                    shaders_card,
-                    ai_fx_card
+                    ai_fx_card,
+                    shaders_card
                 ]
                 .spacing(20),
             )
