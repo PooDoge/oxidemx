@@ -147,36 +147,65 @@ pub(super) fn update(state: &mut RadialState, message: Message) -> Task<Message>
             // menu_appear haptic always fires on Show → kick the
             // ripple too so visual feedback synchronises with the
             // motor pulse.
-            state.trigger_ripple();
+            if !std::env::var("OXIDEMX_SHOW_SKIP")
+                .unwrap_or_default()
+                .contains("ripple")
+            {
+                state.trigger_ripple();
+            }
 
+            // OXIDEMX_SHOW_SKIP bisect gate (comma list:
+            // move_to,minimize,focus,ext) — lets us isolate which
+            // Show step flips the Wayland surface opaque.
+            let skip = std::env::var("OXIDEMX_SHOW_SKIP").unwrap_or_default();
             let window_tasks = if let Some(id) = state.window_id {
-                Task::batch(vec![
-                    iced::window::move_to(
+                let mut v: Vec<Task<Message>> = Vec::new();
+                if !skip.contains("move_to") {
+                    v.push(iced::window::move_to(
                         id,
                         iced::Point::new((x - half_x) as f32, (y - half_y) as f32),
-                    ),
-                    iced::window::minimize(id, false),
-                    iced::window::gain_focus(id),
-                ])
+                    ));
+                }
+                if !skip.contains("minimize") {
+                    v.push(iced::window::minimize(id, false));
+                }
+                if !skip.contains("focus") {
+                    v.push(iced::window::gain_focus(id));
+                }
+                Task::batch(v)
             } else {
                 Task::none()
             };
 
             Task::batch(vec![
                 window_tasks,
-                Task::perform(
-                    oxidemx_window::cursor_helper::move_overlay(
-                        APP_ID.to_string(),
-                        x - half_x,
-                        y - half_y,
-                        -1,
-                    ),
-                    Message::Positioned,
-                ),
-                Task::perform(
-                    oxidemx_window::cursor_helper::get_focused_window_class(APP_ID.to_string()),
-                    Message::FocusedClassResolved,
-                ),
+                if std::env::var("OXIDEMX_SHOW_SKIP")
+                    .unwrap_or_default()
+                    .contains("ext")
+                {
+                    Task::none()
+                } else {
+                    Task::perform(
+                        oxidemx_window::cursor_helper::move_overlay(
+                            APP_ID.to_string(),
+                            x - half_x,
+                            y - half_y,
+                            -1,
+                        ),
+                        Message::Positioned,
+                    )
+                },
+                if std::env::var("OXIDEMX_SHOW_SKIP")
+                    .unwrap_or_default()
+                    .contains("class")
+                {
+                    Task::none()
+                } else {
+                    Task::perform(
+                        oxidemx_window::cursor_helper::get_focused_window_class(APP_ID.to_string()),
+                        Message::FocusedClassResolved,
+                    )
+                },
                 Task::perform(
                     crate::haptic_client::trigger_haptic("menu_appear".to_string()),
                     |_| Message::Noop,
@@ -481,7 +510,9 @@ pub(super) fn update(state: &mut RadialState, message: Message) -> Task<Message>
             // a window screenshot after OXIDEMX_VISION_DELAY_MS.
             // Used by the design-comparison loop; inert in normal
             // runs.
-            if std::env::var("OXIDEMX_VISION_SHOT").is_ok() {
+            if std::env::var("OXIDEMX_VISION_SHOT").is_ok()
+                && std::env::var_os("OXIDEMX_VISION_NOSHOW").is_none()
+            {
                 state.show();
                 if let Some(page) = std::env::var("OXIDEMX_START_PAGE")
                     .ok()

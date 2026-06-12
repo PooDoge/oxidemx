@@ -421,21 +421,23 @@ impl<'a> canvas::Program<crate::app::Message> for CapsPainter<'a> {
         _cursor: mouse::Cursor,
     ) -> Vec<Geometry> {
         let mut frame = Frame::new(renderer, bounds.size());
-        let t = self.state.ai_morph_progress();
-        if t <= 0.001 || !self.state.is_drawable() {
-            return vec![frame.into_geometry()];
-        }
 
-        // Cache-buster: iced 0.14's layer diffing can keep
-        // presenting a STALE mesh buffer once a canvas's geometry
-        // stops changing (the parked caps showed frozen mid-morph
-        // triangles under fresh text layers). An invisible
-        // sub-pixel vertex that alternates every frame forces the
-        // mesh layer to register as changed and re-upload.
+        // Cache-buster FIRST — even for "empty" frames: iced 0.14's
+        // layer diffing keeps presenting STALE buffers for layers
+        // that stop changing, and re-draws remnants of layers that
+        // left the tree (the dismissed chat's body quad showed as a
+        // lingering black box). An invisible sub-pixel vertex that
+        // alternates every frame keeps this mesh layer alive and
+        // fresh so the stale present can never win.
         frame.fill(
             &Path::circle(Point::new((1.0 - cache_epsilon()) * 250.0, 0.0), 0.1),
             Color::from_rgba(0.0, 0.0, 0.0, 0.004),
         );
+
+        let t = self.state.ai_morph_progress();
+        if t <= 0.001 || !self.state.is_drawable() {
+            return vec![frame.into_geometry()];
+        }
 
         // Everything fades with the whole-menu tween too, so a
         // dismiss from chat mode fades the shell out exactly like

@@ -144,13 +144,10 @@ impl<'a> canvas::Program<crate::app::Message> for Painter<'a> {
     ) -> Vec<Geometry> {
         let mut frame = Frame::new(renderer, bounds.size());
 
-        if !self.state.is_drawable() {
-            // Fully closed (no in-flight exit fade) — render a clear
-            // frame and bail.
-            return vec![frame.into_geometry()];
-        }
-
-        // Layer cache-buster — see chat_shell::cache_epsilon.
+        // Layer cache-buster BEFORE the early return — the layer
+        // must stay alive and changing even while the menu is
+        // closed, or iced's stale cache resurrects old frames in
+        // the window. See chat_shell::cache_epsilon.
         frame.fill(
             &Path::circle(
                 Point::new((1.0 - crate::chat_shell::cache_epsilon()) * 250.0, 0.0),
@@ -158,6 +155,12 @@ impl<'a> canvas::Program<crate::app::Message> for Painter<'a> {
             ),
             Color::from_rgba(0.0, 0.0, 0.0, 0.004),
         );
+
+        if !self.state.is_drawable() {
+            // Fully closed (no in-flight exit fade) — render a clear
+            // frame and bail.
+            return vec![frame.into_geometry()];
+        }
 
         let geom = RadialGeometry::default();
         let center = Point::new(geom.cx as f32, geom.cy as f32);

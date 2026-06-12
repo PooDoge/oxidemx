@@ -153,3 +153,39 @@ which forces a wgpu 27→29 port of our shader stack anyway.
   has an open double-init bug ([#3226](https://github.com/iced-rs/iced/issues/3226));
   canvas `draw_image` >2 MiB RGBA was broken until [#3256](https://github.com/iced-rs/iced/issues/3256)/
   [#3336](https://github.com/iced-rs/iced/pull/3336) (master-only fixes).
+
+
+## Addendum (2026-06-12, late): full bisect results — the shell, not the layers
+
+Controlled single-instance bisects (daemon stopped, signal-driven Show,
+portal captures) eliminated every app-level suspect:
+
+| Case | Result |
+|---|---|
+| Boot-time self-show, idle 20 s | disc visible, window transparent ✓ |
+| Boot show + signal re-show (full Show flow) | disc fresh, window surround OPAQUE BLACK |
+| …with iced window tasks skipped (move_to/minimize/focus) | still black |
+| …with extension MoveOverlay skipped | still black |
+| …with ripple + focused-class query also skipped (bare `state.show()`) | still black |
+| Signal-only show (no boot show), Vulkan | ENTIRE window black, disc never composited |
+| Signal-only show, **GL backend** | identical — rules out NVIDIA/Vulkan WSI and the empty-damage theory |
+
+Conclusion: content rendered around map time reaches the compositor;
+content first rendered on an already-idle window often never does, and
+"empty" idle windows composite opaque black rather than transparent.
+Combined with the (separately confirmed and mitigated) stale layer
+caches, this is a defect cluster in iced 0.14's winit shell + present
+path for our window lifecycle (long-lived, transparent, always-on-top,
+show/hide cycles) — not in our painting, not in the driver, not in the
+GNOME extension (pure `move_frame`/`raise`).
+
+App-level mitigation is exhausted. The remaining paths are owning the
+shell/renderer: (a) fork iced 0.14 in-repo, rip out conditional
+rendering and layer caching (unconditional full prepare+draw+present
+each RedrawRequested — we run 60 Hz anyway), wire via
+`[patch.crates-io]`; (b) evaluate waycrate's exwlshelleventloop
+architecture (their `layershellev`/`iced_layershell` replace winit
+outright — layer-shell itself is a no-go on GNOME/Mutter, but their
+event-loop-owning shell pattern is the blueprint if (a) doesn't
+suffice). The `OXIDEMX_SHOW_SKIP` / `OXIDEMX_VISION_NOSHOW` gates used
+for the bisect are kept in-tree for regression testing the fork.
