@@ -9,6 +9,7 @@
 //! entry) so the radial-menu editor gets the full window width
 //! to work in.
 
+pub mod card;
 pub mod picker;
 pub mod rows;
 pub mod widget_options;
@@ -445,7 +446,7 @@ fn slice_editor_section(state: &State) -> Element<'_, Message> {
         match (state.selected_slice == Some(idx), slice) {
             // Expanded: the full slice card replaces the row.
             (true, Some(s)) => {
-                col = col.push(slice_editor_row(state, idx, s, last_idx));
+                col = col.push(card::slice_card(state, idx, s, last_idx));
             }
             // Collapsed (also covers a selected-but-missing slot —
             // transient, since SelectSlice pads the list in update).
@@ -483,191 +484,9 @@ fn easy_switch_panel(state: &State) -> Element<'_, Message> {
     .into()
 }
 
-// ============================================================================
-// Per-slice editor row (used by selected_slice_editor above).
-// ============================================================================
-
-fn slice_editor_row<'a>(
-    state: &'a State,
-    idx: usize,
-    slice: &'a Slice,
-    last_idx: usize,
-) -> Element<'a, Message> {
-    let pal = &state.palette;
-    let label_input = text_input("Label", slice.label.as_str())
-        .on_input(move |s| Message::SetSliceLabel(idx, s))
-        .padding(6)
-        .size(12);
-    let desc_input = text_input(
-        "Description (notes / tooltip — optional)",
-        slice.description.as_str(),
-    )
-    .on_input(move |s| Message::SetSliceDescription(idx, s))
-    .padding(5)
-    .size(11);
-    // Action-kind-specific value editor. The slice's `command`
-    // field carries different things depending on `kind`:
-    //   * Exec / Settings / Emoji  → shell command
-    //   * Macro                    → macro id (we render a pick_list
-    //                                of saved macros for usability)
-    //   * Shortcut                 → key chord ("ctrl+shift+v")
-    //   * EasySwitch               → 1-based host index ("1", "2", "3")
-    let cmd_input: Element<Message> = action_value_editor(state, idx, slice);
-    // "Pick app…" only makes sense for shell-command kinds; hiding
-    // it for Macro / Shortcut / EasySwitch keeps the row tidy and
-    // avoids tempting the user with a control that would overwrite
-    // their carefully-set macro id with a flatpak run command.
-    let needs_app_pick = matches!(
-        slice.kind,
-        ActionKind::Exec | ActionKind::Emoji | ActionKind::Settings
-    );
-    let app_pick_btn: Element<Message> = if needs_app_pick {
-        button(text("Pick app…").size(11))
-            .style(style::btn_secondary(pal))
-            .on_press(Message::OpenAppCommandPicker(
-                crate::app_picker::AppCommandTarget::Slice(idx),
-            ))
-            .into()
-    } else {
-        Space::new().width(Length::Shrink).into()
-    };
-
-    // Behavior chip + inline picker panel — replaces the legacy
-    // kind pick_list (see picker.rs). The colour picker and the
-    // kind-specific value editor below stay.
-    let behavior = picker::behavior_section(state, idx, slice);
-
-    // Schema-driven options card (spec §10d) — renders under the
-    // chip when the slice hosts a Ready custom widget that declares
-    // options; collapses to nothing otherwise (widget_options.rs
-    // decides internally).
-    let options_card = widget_options::options_section(state, idx, slice);
-
-    // Selected colour: "Full colour" sentinel takes priority when
-    // icon_untinted is set; otherwise the slice's actual palette
-    // key (defaulting to "accent" for legacy / empty values).
-    let selected_color = if slice.icon_untinted {
-        ColorOption(FULL_COLOR_KEY.to_string())
-    } else if slice.color.is_empty() {
-        ColorOption("accent".to_string())
-    } else {
-        ColorOption(slice.color.clone())
-    };
-    let color_picker = pick_list(color_options(), Some(selected_color), move |opt| {
-        Message::SetSliceColor(idx, opt.0)
-    })
-    .style(style::pick_list_style(pal))
-    .text_size(12);
-
-    // Icon name + a "Browse" button that opens the visual picker.
-    // Text input still works for icons outside the curated
-    // catalogue (paste any freedesktop name or absolute path).
-    let icon_input = text_input(
-        "Icon (e.g. \"system-run-symbolic\" or /path/to/icon.svg)",
-        slice.icon.as_str(),
-    )
-    .on_input(move |s| Message::SetSliceIcon(idx, s))
-    .padding(6)
-    .size(12)
-    .width(Length::Fill);
-    let icon_browse_target = crate::icon_picker::IconPickerTarget::Slice(idx);
-    let icon_browse = button(text("Browse…").size(11))
-        .style(style::btn_secondary(pal))
-        .on_press(Message::OpenIconPicker(icon_browse_target));
-    let icon_file_btn = button(text("From file…").size(11))
-        .style(style::btn_secondary(pal))
-        .on_press(Message::BrowseIconFile(icon_browse_target));
-    // Widget slices draw their own slice content, so the icon input
-    // is hidden for them (colour + visibility stay, spec §10d).
-    let icon_row: Element<Message> = if slice.kind == ActionKind::Widget {
-        text("The widget draws its own slice content — no icon needed. Colour and visibility still apply.")
-            .size(11)
-            .style(style::text_faint(pal))
-            .into()
-    } else {
-        row![icon_input, icon_browse, icon_file_btn]
-            .align_y(Alignment::Center)
-            .spacing(8)
-            .into()
-    };
-
-    // (Original-colour toggle moved into the colour pick_list as
-    // the "Full colour" option — saves vertical space and ties
-    // the rendering mode to the colour choice that drives it.)
-
-    let mut up_btn = button(text("↑").size(11)).style(style::btn_secondary(pal));
-    if idx > 0 {
-        up_btn = up_btn.on_press(Message::MoveSliceUp(idx));
-    }
-    let mut down_btn = button(text("↓").size(11)).style(style::btn_secondary(pal));
-    if idx < last_idx {
-        down_btn = down_btn.on_press(Message::MoveSliceDown(idx));
-    }
-    let del_btn = button(text("✕").size(11))
-        .style(style::btn_danger(pal))
-        .on_press(Message::DeleteSlice(idx));
-
-    // Test button — only meaningful for Exec slices, and only
-    // when there's actually a command to spawn. We always render
-    // the button so users have a stable UI; the handler reports
-    // a hint when the slice isn't testable.
-    let test_btn = button(text("▶ Test").size(11))
-        .style(style::btn_secondary(pal))
-        .on_press(Message::TestSliceAction(idx));
-
-    let header = row![
-        text(format!("Slot {}", idx + 1))
-            .size(11)
-            .style(style::text_faint(pal)),
-        Space::new().width(Length::Fill),
-        test_btn,
-        up_btn,
-        down_btn,
-        del_btn,
-    ]
-    .align_y(Alignment::Center)
-    .spacing(6);
-
-    let mut col = column![
-        header,
-        behavior,
-        options_card,
-        label_input,
-        desc_input,
-        row![
-            color_picker,
-            iced::widget::container(cmd_input).width(Length::Fill),
-            app_pick_btn,
-        ]
-        .align_y(Alignment::Center)
-        .spacing(8),
-        icon_row,
-        visibility_editor(
-            state,
-            VisibilityTarget::Slice { idx },
-            slice.visible_if.as_ref(),
-        ),
-    ]
-    .spacing(6);
-
-    // (Pickers used to render inline here, but now they take
-    // over the entire content area as a full panel — see the
-    // shell view() in main.rs which short-circuits when any
-    // picker state is Some.)
-
-    // Submenu editor — only when this slice's kind is Submenu.
-    // Lists each sub-item with a label / command / colour picker
-    // and reorder + delete buttons. "+ Add item" appends a new
-    // Exec sub-item to the end.
-    if slice.kind == ActionKind::Submenu {
-        col = col.push(submenu_editor(state, idx, &slice.submenu));
-    }
-
-    container(col)
-        .padding(10)
-        .style(style::card_quiet(pal))
-        .into()
-}
+// (The legacy `slice_editor_row` lived here; the expanded card is
+// now `card::slice_card`, which reuses this module's value /
+// visibility / submenu editors and picker::behavior_section.)
 
 // =============================================================================
 // Visibility predicate editor (slice.visible_if)
@@ -820,6 +639,30 @@ fn visibility_editor<'a>(
     current: Option<&'a Condition>,
 ) -> Element<'a, Message> {
     let pal = &state.palette;
+    let header = row![
+        text("Visibility").size(11).style(style::text_dim(pal)),
+        Space::new().width(Length::Fixed(10.0)),
+        visibility_picker(state, target, current),
+    ]
+    .align_y(Alignment::Center)
+    .spacing(6);
+
+    match visibility_args(state, target, current) {
+        Some(args) => column![header, args].spacing(4).into(),
+        None => header.into(),
+    }
+}
+
+/// Just the visibility variant pick_list — used standalone by the
+/// slice card's Appearance row (the design right-aligns it there)
+/// and composed with the header + args by `visibility_editor` for
+/// the sub-item rows.
+fn visibility_picker<'a>(
+    state: &'a State,
+    target: VisibilityTarget,
+    current: Option<&'a Condition>,
+) -> Element<'a, Message> {
+    let pal = &state.palette;
     let kind = VisKind::from_condition(current);
 
     let mut options: Vec<VisKind> = VisKind::ALL_SIMPLE.to_vec();
@@ -829,25 +672,27 @@ fn visibility_editor<'a>(
 
     let prev_clone = current.cloned();
     let target_for_kind = target;
-    let kind_picker = pick_list(options, Some(kind), move |new_kind| {
+    pick_list(options, Some(kind), move |new_kind| {
         if new_kind == VisKind::Compound {
             return target_for_kind.make_message(prev_clone.clone());
         }
         target_for_kind.make_message(condition_for_kind(new_kind, prev_clone.as_ref()))
     })
     .style(style::pick_list_style(pal))
-    .text_size(11);
+    .text_size(11)
+    .into()
+}
 
-    let header = row![
-        text("Visibility").size(11).style(style::text_dim(pal)),
-        Space::new().width(Length::Fixed(10.0)),
-        kind_picker,
-    ]
-    .align_y(Alignment::Center)
-    .spacing(6);
-
-    // Per-variant arg inputs. We always emit a *replacement*
-    // Condition on every keystroke — no draft state needed.
+/// The visibility variant's argument inputs — `None` for variants
+/// without args (Always / Never), so callers can skip the row
+/// entirely. We always emit a *replacement* Condition on every
+/// keystroke — no draft state needed.
+fn visibility_args<'a>(
+    state: &'a State,
+    target: VisibilityTarget,
+    current: Option<&'a Condition>,
+) -> Option<Element<'a, Message>> {
+    let pal = &state.palette;
     let args: Element<Message> = match current {
         Some(Condition::Executable { name }) => {
             let owned_name = name.clone();
@@ -955,10 +800,10 @@ fn visibility_editor<'a>(
         .size(10)
         .style(style::text_faint(pal))
         .into(),
-        _ => Space::new().height(Length::Fixed(0.0)).into(),
+        _ => return None,
     };
 
-    column![header, args].spacing(4).into()
+    Some(args)
 }
 
 fn submenu_editor<'a>(state: &'a State, parent: usize, items: &'a [Slice]) -> Element<'a, Message> {
