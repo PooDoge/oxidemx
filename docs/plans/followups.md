@@ -276,3 +276,25 @@ Deferred from the widget-plugin plans (runtime + CLI + settings UI,
   lists permissions, but `exec` in particular deserves a louder,
   per-permission explanation (and possibly a first-use prompt)
   rather than one bullet in the sideload dialog.
+
+## Gap-sweep triage (2026-06-12 evening)
+
+Full-workspace stub sweep (session 89b684a1). DONE this pass:
+heartbeat tick (+systemd timer armed, 30 min), SmartShift button
+action (HID++ toggle via existing 0x2110 path). Remaining, in
+priority order, with deferral reasons verified in-code:
+
+1. Popup quick-actions (radial/flow/highlight/scroll/haptic_i/
+   accel) — blocked on missing daemon D-Bus surfaces + three open
+   DESIGN decisions (scroll 1-10 knob vs mode/threshold; haptic
+   intensity vs discrete patterns; accel bool vs curve). Consider
+   hiding Flow/Highlight toggles until their features exist.
+2. DeviceStateChanged empty device fields (battery.rs TODO) —
+   blocked on a device-cache module; indicator falls back to a
+   second poll today.
+3. ButtonAction::Custom — needs a config payload field (what
+   command/keys?) before it can mean anything; stub now says so.
+4. tracing-log bridge for widget host logs — S effort, unblocked.
+5. Editor-crate TODOs (icon_picker, editor window, tray SNI) —
+   superseded in practice by settings-rs; decide deprecate-vs-
+   finish before investing.
