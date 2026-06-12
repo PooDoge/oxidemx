@@ -102,7 +102,9 @@ impl GamingMode {
                     handle.clone(),
                 ));
             } else {
-                tracing::error!("Gaming mode: cannot start haptic redirect, no tokio runtime handle available");
+                tracing::error!(
+                    "Gaming mode: cannot start haptic redirect, no tokio runtime handle available"
+                );
             }
         }
 

@@ -338,7 +338,7 @@ impl Theme {
             EffectiveColors {
                 base: self.colors.base.clone(),
                 surface: self.colors.surface.clone(),
-                text: hc.text_color.clone(),         // Override to white
+                text: hc.text_color.clone(), // Override to white
                 text_secondary: hc.text_color.clone(), // Override to white
                 accent: self.colors.accent.clone(),
                 accent_secondary: self.colors.accent_secondary.clone(),
@@ -375,11 +375,11 @@ impl Theme {
         if high_contrast {
             let hc = HighContrastSettings::default();
             EffectiveGlassmorphism {
-                blur_radius: hc.blur_radius,           // 0 - disabled
+                blur_radius: hc.blur_radius,               // 0 - disabled
                 background_opacity: hc.background_opacity, // 0.95
-                saturation: 1.0,                       // Normal saturation
-                border_opacity: hc.border_opacity,     // 0.60
-                noise_opacity: 0.0,                    // Disabled for clarity
+                saturation: 1.0,                           // Normal saturation
+                border_opacity: hc.border_opacity,         // 0.60
+                noise_opacity: 0.0,                        // Disabled for clarity
             }
         } else {
             EffectiveGlassmorphism {
@@ -401,8 +401,7 @@ impl Theme {
     ///
     /// Used by bundled_themes to parse embedded JSON.
     pub fn from_json(json: &str) -> Result<Self, ThemeError> {
-        let mut theme: Theme =
-            serde_json::from_str(json).map_err(ThemeError::ParseError)?;
+        let mut theme: Theme = serde_json::from_str(json).map_err(ThemeError::ParseError)?;
 
         // Set display_name from name if not provided
         if theme.display_name.is_empty() {

@@ -164,7 +164,11 @@ impl PerformanceMonitor {
     /// Get the current FPS estimate
     pub fn estimated_fps(&self) -> f64 {
         let avg_ms = self.average_frame_time_ms();
-        if avg_ms > 0.0 { 1000.0 / avg_ms } else { 0.0 }
+        if avg_ms > 0.0 {
+            1000.0 / avg_ms
+        } else {
+            0.0
+        }
     }
 
     /// Get the number of frames in the buffer

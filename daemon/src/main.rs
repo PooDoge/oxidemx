@@ -7,14 +7,14 @@ use clap::Parser;
 use std::collections::HashSet;
 use std::path::PathBuf;
 use tokio::sync::mpsc;
-use tokio::time::{Duration, sleep};
-use tracing::{Level, debug, error, info, warn};
+use tokio::time::{sleep, Duration};
+use tracing::{debug, error, info, warn, Level};
 use tracing_subscriber::FmtSubscriber;
 
 use oxidemxd::{
     battery::{new_shared_state, start_battery_updater_shared_with_dbus},
     config::load_shared_config,
-    dbus::{DBUS_NAME, DBUS_PATH, init_dbus_service_with_device},
+    dbus::{init_dbus_service_with_device, DBUS_PATH},
     evdev::{EvdevError, EvdevHandler, GestureEvent},
     gaming::new_shared_gaming_mode,
     hidpp::SharedHapticManager,
@@ -235,19 +235,31 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             // ButtonActionEvent through execute_button_action.
             let non_gesture_diverted: Vec<u16> = if matches!(connect_result, Ok(true)) {
                 let mut diverted = Vec::new();
-                let candidates: &[(u16, oxidemxd::config::ButtonAction, oxidemxd::config::ButtonAction)] = &[
-                    (oxidemxd::hidraw::button_cid::MIDDLE_BUTTON,
-                     buttons_snapshot.middle,
-                     oxidemxd::config::ButtonAction::MiddleClick),
-                    (oxidemxd::hidraw::button_cid::BACK_BUTTON,
-                     buttons_snapshot.back,
-                     oxidemxd::config::ButtonAction::Back),
-                    (oxidemxd::hidraw::button_cid::FORWARD_BUTTON,
-                     buttons_snapshot.forward,
-                     oxidemxd::config::ButtonAction::Forward),
-                    (oxidemxd::hidraw::button_cid::SMART_SHIFT,
-                     buttons_snapshot.shift_wheel,
-                     oxidemxd::config::ButtonAction::Smartshift),
+                let candidates: &[(
+                    u16,
+                    oxidemxd::config::ButtonAction,
+                    oxidemxd::config::ButtonAction,
+                )] = &[
+                    (
+                        oxidemxd::hidraw::button_cid::MIDDLE_BUTTON,
+                        buttons_snapshot.middle,
+                        oxidemxd::config::ButtonAction::MiddleClick,
+                    ),
+                    (
+                        oxidemxd::hidraw::button_cid::BACK_BUTTON,
+                        buttons_snapshot.back,
+                        oxidemxd::config::ButtonAction::Back,
+                    ),
+                    (
+                        oxidemxd::hidraw::button_cid::FORWARD_BUTTON,
+                        buttons_snapshot.forward,
+                        oxidemxd::config::ButtonAction::Forward,
+                    ),
+                    (
+                        oxidemxd::hidraw::button_cid::SMART_SHIFT,
+                        buttons_snapshot.shift_wheel,
+                        oxidemxd::config::ButtonAction::Smartshift,
+                    ),
                 ];
                 for (cid, configured, default_for_button) in candidates {
                     if configured != default_for_button {
@@ -264,7 +276,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             };
             let path = manager.device_path();
             let name = manager.get_device_name_string();
-            (connect_result, divert_result, path, name, non_gesture_diverted)
+            (
+                connect_result,
+                divert_result,
+                path,
+                name,
+                non_gesture_diverted,
+            )
         })
         .await
         .expect("HID++ probe task panicked");
@@ -1248,7 +1266,7 @@ async fn emit_cursor_moved(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use oxidemxd::cursor::{CursorPosition, EDGE_MARGIN, MENU_RADIUS, ScreenBounds};
+    use oxidemxd::cursor::{CursorPosition, ScreenBounds, EDGE_MARGIN, MENU_RADIUS};
 
     #[test]
     fn test_device_poll_interval() {

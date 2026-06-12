@@ -78,18 +78,10 @@ impl ActionExecutor {
     /// Returns within 10ms for keyboard shortcuts (NFR-001)
     pub async fn execute(action: &Action) -> Result<(), ActionError> {
         match &action.action_type {
-            ActionType::Shortcut(keys) => {
-                Self::execute_shortcut(keys).await
-            }
-            ActionType::Command(cmd) => {
-                Self::execute_command(cmd).await
-            }
-            ActionType::DBus(call) => {
-                Self::execute_dbus(call).await
-            }
-            ActionType::KWin(script) => {
-                Self::execute_kwin(script).await
-            }
+            ActionType::Shortcut(keys) => Self::execute_shortcut(keys).await,
+            ActionType::Command(cmd) => Self::execute_command(cmd).await,
+            ActionType::DBus(call) => Self::execute_dbus(call).await,
+            ActionType::KWin(script) => Self::execute_kwin(script).await,
             ActionType::None => Ok(()),
         }
     }
@@ -110,9 +102,7 @@ impl ActionExecutor {
         let xdotool_keys = keys.to_lowercase();
 
         // Try xdotool first (works on X11)
-        let result = Command::new("xdotool")
-            .args(["key", &xdotool_keys])
-            .spawn();
+        let result = Command::new("xdotool").args(["key", &xdotool_keys]).spawn();
 
         match result {
             Ok(mut child) => {
@@ -132,9 +122,7 @@ impl ActionExecutor {
                 // xdotool not available, try ydotool for Wayland
                 tracing::debug!("xdotool failed: {}, trying ydotool", e);
 
-                let ydotool_result = Command::new("ydotool")
-                    .args(["key", &xdotool_keys])
-                    .spawn();
+                let ydotool_result = Command::new("ydotool").args(["key", &xdotool_keys]).spawn();
 
                 if let Err(e) = ydotool_result {
                     tracing::error!("Both xdotool and ydotool failed: {}", e);
@@ -175,9 +163,7 @@ impl ActionExecutor {
         tracing::info!(cmd, "Executing shell command");
 
         // Use sh -c for shell interpretation (handles pipes, redirects, etc.)
-        let result = Command::new("sh")
-            .args(["-c", cmd])
-            .spawn();
+        let result = Command::new("sh").args(["-c", cmd]).spawn();
 
         match result {
             Ok(_child) => {
@@ -194,10 +180,7 @@ impl ActionExecutor {
         }
 
         let elapsed = start.elapsed();
-        tracing::info!(
-            latency_us = elapsed.as_micros(),
-            "Shell command spawned"
-        );
+        tracing::info!(latency_us = elapsed.as_micros(), "Shell command spawned");
 
         // AC1: Verify <10ms to spawn
         if elapsed.as_millis() > 10 {
@@ -287,7 +270,10 @@ impl ActionExecutor {
             Ok(status) if status.success() => Ok(()),
             Ok(_) => {
                 tracing::warn!("kglobalaccel invokeShortcut failed for: {}", script);
-                Err(ActionError::ExecutionFailed(format!("KWin shortcut '{}' failed", script)))
+                Err(ActionError::ExecutionFailed(format!(
+                    "KWin shortcut '{}' failed",
+                    script
+                )))
             }
             Err(e) => {
                 tracing::error!(error = %e, "Failed to invoke KWin shortcut");
@@ -554,7 +540,10 @@ async fn execute_virtual_desktops() -> Result<(), ActionError> {
             ActionExecutor::execute(&act).await
         }
         _ => {
-            tracing::warn!(desktop, "Virtual desktops not supported on this desktop environment");
+            tracing::warn!(
+                desktop,
+                "Virtual desktops not supported on this desktop environment"
+            );
             Ok(())
         }
     }

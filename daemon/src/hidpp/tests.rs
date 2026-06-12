@@ -82,21 +82,15 @@ fn test_connection_type_display() {
 
 #[test]
 fn test_haptic_error_display() {
-    assert!(
-        HapticError::DeviceNotFound
-            .to_string()
-            .contains("not connected")
-    );
-    assert!(
-        HapticError::PermissionDenied
-            .to_string()
-            .contains("Permission")
-    );
-    assert!(
-        HapticError::UnsupportedDevice
-            .to_string()
-            .contains("not support")
-    );
+    assert!(HapticError::DeviceNotFound
+        .to_string()
+        .contains("not connected"));
+    assert!(HapticError::PermissionDenied
+        .to_string()
+        .contains("Permission"));
+    assert!(HapticError::UnsupportedDevice
+        .to_string()
+        .contains("not support"));
 }
 
 #[test]

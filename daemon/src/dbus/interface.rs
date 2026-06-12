@@ -3,12 +3,12 @@
 //! All methods, signals, and properties for org.oxidemx.Daemon.
 //! This must be a single `#[interface]` impl block per zbus requirements.
 
-use zbus::{interface, object_server::SignalEmitter, fdo};
+use super::service::OxideMXService;
 use crate::config::{Config, PointerConfig, ScrollConfig};
 use crate::hidpp::{HapticEvent, HapticManager, SharedHapticManager};
 use crate::macros::events_to_actions;
 use crate::thumb_wheel::{SharedThumbWheelState, ThumbWheelForwarder};
-use super::service::OxideMXService;
+use zbus::{fdo, interface, object_server::SignalEmitter};
 
 /// True iff any field that actually drives the HID++ SmartShift
 /// write differs between the two configs.
@@ -72,7 +72,11 @@ fn apply_pointer_to_gnome(pointer: &PointerConfig) {
         "speed",
         &format!("{speed:.3}"),
     );
-    let accel_profile = if pointer.acceleration { "default" } else { "flat" };
+    let accel_profile = if pointer.acceleration {
+        "default"
+    } else {
+        "flat"
+    };
     run_gsettings(
         "org.gnome.desktop.peripherals.mouse",
         "accel-profile",
@@ -128,19 +132,27 @@ fn sync_non_gesture_diverts(
     let pairs: &[(u16, ButtonAction, ButtonAction, ButtonAction)] = &[
         (
             crate::hidraw::button_cid::MIDDLE_BUTTON,
-            prev.middle, next.middle, ButtonAction::MiddleClick,
+            prev.middle,
+            next.middle,
+            ButtonAction::MiddleClick,
         ),
         (
             crate::hidraw::button_cid::BACK_BUTTON,
-            prev.back, next.back, ButtonAction::Back,
+            prev.back,
+            next.back,
+            ButtonAction::Back,
         ),
         (
             crate::hidraw::button_cid::FORWARD_BUTTON,
-            prev.forward, next.forward, ButtonAction::Forward,
+            prev.forward,
+            next.forward,
+            ButtonAction::Forward,
         ),
         (
             crate::hidraw::button_cid::SMART_SHIFT,
-            prev.shift_wheel, next.shift_wheel, ButtonAction::Smartshift,
+            prev.shift_wheel,
+            next.shift_wheel,
+            ButtonAction::Smartshift,
         ),
     ];
     let prev_diverted = |a: ButtonAction, default_for: ButtonAction| a != default_for;
@@ -189,9 +201,7 @@ fn sync_non_gesture_diverts(
 /// device, or currently disconnected).
 fn apply_scroll_to_device(manager: &mut HapticManager, scroll: &ScrollConfig) {
     if !manager.smartshift_supported() {
-        tracing::debug!(
-            "SmartShift not supported on this device — skipping scroll apply"
-        );
+        tracing::debug!("SmartShift not supported on this device — skipping scroll apply");
         return;
     }
 
@@ -571,7 +581,7 @@ impl OxideMXService {
                         // identical HID++ writes wedged the device
                         // in a prior incident.
                         if scroll_smartshift_changed(&prev_scroll, &new_scroll) {
-                            apply_scroll_to_device(&mut *manager, &new_scroll);
+                            apply_scroll_to_device(&mut manager, &new_scroll);
                         } else {
                             tracing::debug!(
                                 "Scroll SmartShift config unchanged — skipping HID++ apply"
@@ -580,7 +590,10 @@ impl OxideMXService {
                     }
                     Err(e) => {
                         tracing::error!(error = %e, "Failed to lock haptic manager for update");
-                        return Err(fdo::Error::Failed(format!("Haptic manager lock error: {}", e)));
+                        return Err(fdo::Error::Failed(format!(
+                            "Haptic manager lock error: {}",
+                            e
+                        )));
                     }
                 }
 
@@ -654,10 +667,18 @@ impl OxideMXService {
         y: i32,
     ) -> fdo::Result<()> {
         if !self.radial_enabled() {
-            tracing::debug!(x, y, "ShowMenuAtCursor suppressed - radial overlay disabled");
+            tracing::debug!(
+                x,
+                y,
+                "ShowMenuAtCursor suppressed - radial overlay disabled"
+            );
             return Ok(());
         }
-        tracing::info!(x, y, "ShowMenuAtCursor called from KWin script - ensuring overlay is running");
+        tracing::info!(
+            x,
+            y,
+            "ShowMenuAtCursor called from KWin script - ensuring overlay is running"
+        );
         let _ = self.ensure_overlay_running().await;
 
         Self::menu_requested(&emitter, x, y).await?;
@@ -691,9 +712,7 @@ impl OxideMXService {
     /// OxideMXService yet.
     /// TODO: thread hidraw path through OxideMXService when
     ///       device-cache module lands.
-    async fn get_active_device_state(
-        &self,
-    ) -> fdo::Result<(u8, bool, String, String, String)> {
+    async fn get_active_device_state(&self) -> fdo::Result<(u8, bool, String, String, String)> {
         let state = self.battery_state.read().await;
         let (battery, charging) = if state.available {
             (state.percentage, state.charging)
@@ -719,7 +738,9 @@ impl OxideMXService {
         _panel_w: i32,
         _panel_h: i32,
     ) -> fdo::Result<()> {
-        tracing::info!("ShowPopup invoked on daemon, but the extension uses native GJS popover now. Skipping.");
+        tracing::info!(
+            "ShowPopup invoked on daemon, but the extension uses native GJS popover now. Skipping."
+        );
         Ok(())
     }
 
@@ -775,18 +796,16 @@ impl OxideMXService {
         tracing::info!(dpi, "SetDpi called");
 
         match self.haptic_manager.lock() {
-            Ok(mut manager) => {
-                match manager.set_dpi(dpi) {
-                    Ok(()) => {
-                        tracing::info!(dpi, "DPI set successfully");
-                        Ok(())
-                    }
-                    Err(e) => {
-                        tracing::error!(error = %e, dpi, "Failed to set DPI");
-                        Err(fdo::Error::Failed(format!("Failed to set DPI: {}", e)))
-                    }
+            Ok(mut manager) => match manager.set_dpi(dpi) {
+                Ok(()) => {
+                    tracing::info!(dpi, "DPI set successfully");
+                    Ok(())
                 }
-            }
+                Err(e) => {
+                    tracing::error!(error = %e, dpi, "Failed to set DPI");
+                    Err(fdo::Error::Failed(format!("Failed to set DPI: {}", e)))
+                }
+            },
             Err(e) => {
                 tracing::error!(error = %e, "Failed to lock haptic manager for set_dpi");
                 Err(fdo::Error::Failed(format!("Lock error: {}", e)))
@@ -810,16 +829,14 @@ impl OxideMXService {
 
     async fn get_smart_shift(&self) -> fdo::Result<(bool, u8)> {
         match self.haptic_manager.lock() {
-            Ok(mut manager) => {
-                match manager.get_smartshift() {
-                    Some((_wheel_mode, auto_disengage, _auto_disengage_default)) => {
-                        let enabled = auto_disengage > 0;
-                        let threshold = if enabled { auto_disengage } else { 30 };
-                        Ok((enabled, threshold))
-                    }
-                    None => Ok((false, 0))
+            Ok(mut manager) => match manager.get_smartshift() {
+                Some((_wheel_mode, auto_disengage, _auto_disengage_default)) => {
+                    let enabled = auto_disengage > 0;
+                    let threshold = if enabled { auto_disengage } else { 30 };
+                    Ok((enabled, threshold))
                 }
-            }
+                None => Ok((false, 0)),
+            },
             Err(e) => {
                 tracing::error!(error = %e, "Failed to lock haptic manager for get_smart_shift");
                 Ok((false, 0))
@@ -863,7 +880,10 @@ impl OxideMXService {
                     }
                     Err(e) => {
                         tracing::error!(error = %e, enabled, threshold, "Failed to set SmartShift");
-                        Err(fdo::Error::Failed(format!("Failed to set SmartShift: {}", e)))
+                        Err(fdo::Error::Failed(format!(
+                            "Failed to set SmartShift: {}",
+                            e
+                        )))
                     }
                 }
             }
@@ -901,10 +921,10 @@ impl OxideMXService {
             // Python compat: legacy slug "free" maps to "freespin".
             "freespin" | "free" => (1u8, 0u8),
             "ratchet" => (2u8, 0u8),
-            "smartshift" | _ => {
+            // "smartshift" and anything unrecognised both land here.
+            _ => {
                 let t = threshold.clamp(1, 100) as i32;
-                let scaled =
-                    ((100 - t) as f32 * 2.55).round().clamp(0.0, 255.0) as u8;
+                let scaled = ((100 - t) as f32 * 2.55).round().clamp(0.0, 255.0) as u8;
                 (1u8, scaled)
             }
         };
@@ -912,22 +932,14 @@ impl OxideMXService {
         match self.haptic_manager.lock() {
             Ok(mut manager) => {
                 if !manager.smartshift_supported() {
-                    tracing::warn!(
-                        mode,
-                        "SmartShift / wheel-mode not supported on this device"
-                    );
+                    tracing::warn!(mode, "SmartShift / wheel-mode not supported on this device");
                     return Err(fdo::Error::NotSupported(
                         "SmartShift feature not available on this device".into(),
                     ));
                 }
                 match manager.set_smartshift(wheel_mode, auto_disengage, 0) {
                     Ok(()) => {
-                        tracing::info!(
-                            wheel_mode,
-                            auto_disengage,
-                            mode,
-                            "Wheel mode applied"
-                        );
+                        tracing::info!(wheel_mode, auto_disengage, mode, "Wheel mode applied");
                         Ok(())
                     }
                     Err(e) => {
@@ -1026,12 +1038,10 @@ impl OxideMXService {
 
     async fn get_hiresscroll_mode(&self) -> fdo::Result<(bool, bool, bool)> {
         match self.haptic_manager.lock() {
-            Ok(mut manager) => {
-                match manager.get_hiresscroll_mode() {
-                    Some((hires, invert, target)) => Ok((hires, invert, target)),
-                    None => Ok((true, false, false))
-                }
-            }
+            Ok(mut manager) => match manager.get_hiresscroll_mode() {
+                Some((hires, invert, target)) => Ok((hires, invert, target)),
+                None => Ok((true, false, false)),
+            },
             Err(e) => {
                 tracing::error!(error = %e, "Failed to lock haptic manager for get_hiresscroll_mode");
                 Ok((true, false, false))
@@ -1039,22 +1049,28 @@ impl OxideMXService {
         }
     }
 
-    async fn set_hiresscroll_mode(&self, hires: bool, invert: bool, target: bool) -> fdo::Result<()> {
+    async fn set_hiresscroll_mode(
+        &self,
+        hires: bool,
+        invert: bool,
+        target: bool,
+    ) -> fdo::Result<()> {
         tracing::info!(hires, invert, target, "SetHiResScrollMode called");
 
         match self.haptic_manager.lock() {
-            Ok(mut manager) => {
-                match manager.set_hiresscroll_mode(hires, invert, target) {
-                    Ok(()) => {
-                        tracing::info!(hires, invert, target, "HiResScroll mode set successfully");
-                        Ok(())
-                    }
-                    Err(e) => {
-                        tracing::error!(error = %e, hires, invert, target, "Failed to set HiResScroll mode");
-                        Err(fdo::Error::Failed(format!("Failed to set HiResScroll mode: {}", e)))
-                    }
+            Ok(mut manager) => match manager.set_hiresscroll_mode(hires, invert, target) {
+                Ok(()) => {
+                    tracing::info!(hires, invert, target, "HiResScroll mode set successfully");
+                    Ok(())
                 }
-            }
+                Err(e) => {
+                    tracing::error!(error = %e, hires, invert, target, "Failed to set HiResScroll mode");
+                    Err(fdo::Error::Failed(format!(
+                        "Failed to set HiResScroll mode: {}",
+                        e
+                    )))
+                }
+            },
             Err(e) => {
                 tracing::error!(error = %e, "Failed to lock haptic manager for set_hiresscroll_mode");
                 Err(fdo::Error::Failed(format!("Lock error: {}", e)))
@@ -1104,21 +1120,23 @@ impl OxideMXService {
             }
         }
         match self.haptic_manager.lock() {
-            Ok(mut manager) => {
-                match manager.get_easy_switch_info() {
-                    Some((num, current)) => {
-                        tracing::debug!(num_hosts = num, current_host = current, "Easy-Switch info retrieved");
-                        if let Ok(mut cache) = self.easy_switch_cache.write() {
-                            cache.info = Some(((num, current), std::time::Instant::now()));
-                        }
-                        Ok((num, current))
+            Ok(mut manager) => match manager.get_easy_switch_info() {
+                Some((num, current)) => {
+                    tracing::debug!(
+                        num_hosts = num,
+                        current_host = current,
+                        "Easy-Switch info retrieved"
+                    );
+                    if let Ok(mut cache) = self.easy_switch_cache.write() {
+                        cache.info = Some(((num, current), std::time::Instant::now()));
                     }
-                    None => {
-                        tracing::debug!("Easy-Switch not supported or unavailable");
-                        Ok((0, 0))
-                    }
+                    Ok((num, current))
                 }
-            }
+                None => {
+                    tracing::debug!("Easy-Switch not supported or unavailable");
+                    Ok((0, 0))
+                }
+            },
             Err(e) => {
                 tracing::error!(error = %e, "Failed to lock haptic manager for get_easy_switch_info");
                 Ok((0, 0))
@@ -1128,18 +1146,16 @@ impl OxideMXService {
 
     async fn set_host(&self, host_index: u8) -> fdo::Result<bool> {
         match self.haptic_manager.lock() {
-            Ok(mut manager) => {
-                match manager.set_current_host(host_index) {
-                    Ok(()) => {
-                        tracing::info!(host_index, "Switched to Easy-Switch host");
-                        Ok(true)
-                    }
-                    Err(e) => {
-                        tracing::error!(error = %e, host_index, "Failed to switch host");
-                        Ok(false)
-                    }
+            Ok(mut manager) => match manager.set_current_host(host_index) {
+                Ok(()) => {
+                    tracing::info!(host_index, "Switched to Easy-Switch host");
+                    Ok(true)
                 }
-            }
+                Err(e) => {
+                    tracing::error!(error = %e, host_index, "Failed to switch host");
+                    Ok(false)
+                }
+            },
             Err(e) => {
                 tracing::error!(error = %e, "Failed to lock haptic manager for set_host");
                 Ok(false)
@@ -1155,18 +1171,16 @@ impl OxideMXService {
         tracing::info!("StartMacroRecording called");
 
         match self.macro_recorder.lock() {
-            Ok(mut recorder) => {
-                match recorder.start() {
-                    Ok(()) => {
-                        tracing::info!("Macro recording started");
-                        Ok(())
-                    }
-                    Err(e) => {
-                        tracing::error!(error = %e, "Failed to start recording");
-                        Err(fdo::Error::Failed(format!("Recording failed: {}", e)))
-                    }
+            Ok(mut recorder) => match recorder.start() {
+                Ok(()) => {
+                    tracing::info!("Macro recording started");
+                    Ok(())
                 }
-            }
+                Err(e) => {
+                    tracing::error!(error = %e, "Failed to start recording");
+                    Err(fdo::Error::Failed(format!("Recording failed: {}", e)))
+                }
+            },
             Err(e) => {
                 tracing::error!(error = %e, "Failed to lock macro recorder");
                 Err(fdo::Error::Failed(format!("Lock error: {}", e)))
@@ -1215,7 +1229,9 @@ impl OxideMXService {
 
         let macro_id = config.id.clone();
         {
-            let mut engine = self.macro_engine.lock()
+            let mut engine = self
+                .macro_engine
+                .lock()
                 .map_err(|e| fdo::Error::Failed(format!("Lock error: {}", e)))?;
             engine.execute(config);
         }
@@ -1236,7 +1252,9 @@ impl OxideMXService {
 
         let macro_id = config.id.clone();
         {
-            let mut engine = self.macro_engine.lock()
+            let mut engine = self
+                .macro_engine
+                .lock()
                 .map_err(|e| fdo::Error::Failed(format!("Lock error: {}", e)))?;
             engine.execute(config);
         }
@@ -1252,7 +1270,9 @@ impl OxideMXService {
         tracing::info!("StopMacro called");
 
         {
-            let mut engine = self.macro_engine.lock()
+            let mut engine = self
+                .macro_engine
+                .lock()
                 .map_err(|e| fdo::Error::Failed(format!("Lock error: {}", e)))?;
             engine.stop();
         }
@@ -1288,8 +1308,7 @@ impl OxideMXService {
             .map_err(|e| fdo::Error::Failed(format!("Failed to load macros: {}", e)))?;
 
         let list: Vec<&crate::macros::MacroConfig> = macros.values().collect();
-        serde_json::to_string(&list)
-            .map_err(|e| fdo::Error::Failed(format!("JSON error: {}", e)))
+        serde_json::to_string(&list).map_err(|e| fdo::Error::Failed(format!("JSON error: {}", e)))
     }
 
     async fn is_macro_running(&self) -> fdo::Result<bool> {
@@ -1347,7 +1366,9 @@ impl OxideMXService {
             .unwrap_or_default();
 
         {
-            let mut gm = self.gaming_mode.write()
+            let mut gm = self
+                .gaming_mode
+                .write()
                 .map_err(|e| fdo::Error::Failed(format!("Lock error: {}", e)))?;
             if enabled {
                 gm.enable(&redirect_cfg);

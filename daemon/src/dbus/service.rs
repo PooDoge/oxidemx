@@ -25,8 +25,7 @@ pub(crate) struct EasySwitchCache {
     pub info: Option<((u8, u8), Instant)>,
 }
 
-pub(crate) const EASY_SWITCH_TTL: std::time::Duration =
-    std::time::Duration::from_secs(30);
+pub(crate) const EASY_SWITCH_TTL: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// OxideMX D-Bus service
 ///
@@ -69,6 +68,8 @@ pub struct OxideMXService {
     /// user toggles the invert setting.
     pub(crate) thumb_wheel_state: SharedThumbWheelState,
     /// Active popup child process handle for single-instance tracking.
+    /// Held (not read) so the child handle isn't dropped and zombied.
+    #[allow(dead_code)]
     pub(crate) popup_child: Mutex<Option<std::process::Child>>,
 }
 

@@ -29,8 +29,7 @@ use std::sync::{Arc, Mutex};
 
 // Re-export all public types at the module level for backwards compatibility
 pub use constants::{
-    allowed_features, blocklisted_features, features, product_ids, report_type,
-    LOGITECH_VENDOR_ID,
+    allowed_features, blocklisted_features, features, product_ids, report_type, LOGITECH_VENDOR_ID,
 };
 pub use error::HapticError;
 pub use manager::{ConnectionState, HapticManager};

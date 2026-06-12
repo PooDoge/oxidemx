@@ -44,9 +44,7 @@ fn magnitudes(effect: &FFEffectData) -> (f32, f32) {
         FFEffectKind::Periodic { magnitude, .. } => {
             (f32::from(magnitude.unsigned_abs()) * 2.0, 0.0)
         }
-        FFEffectKind::Constant { level, .. } => {
-            (f32::from(level.unsigned_abs()) * 2.0, 0.0)
-        }
+        FFEffectKind::Constant { level, .. } => (f32::from(level.unsigned_abs()) * 2.0, 0.0),
         FFEffectKind::Ramp {
             start_level,
             end_level,
@@ -150,9 +148,9 @@ pub fn fire_test_pulse(config: &HapticRedirectConfig, haptics: &SharedHapticMana
                 "haptic redirect: test pulse — haptic-manager mutex poisoned"
             ),
         },
-        None => tracing::info!(
-            "haptic redirect: test pulse — synthetic effect fell below the deadzone"
-        ),
+        None => {
+            tracing::info!("haptic redirect: test pulse — synthetic effect fell below the deadzone")
+        }
     }
 }
 
@@ -353,7 +351,7 @@ mod tests {
     #[test]
     fn combined_intensity_mixes_by_weight() {
         let cfg = HapticRedirectConfig::default(); // strong 1.0, weak 0.4
-        // Pure strong, full magnitude → clamps to 1.0.
+                                                   // Pure strong, full magnitude → clamps to 1.0.
         assert_eq!(combined_intensity(&cfg, &rumble(0xFFFF, 0), 1.0), 1.0);
         // Pure weak, full magnitude → 0.4 of the scale.
         let weak_only = combined_intensity(&cfg, &rumble(0, 0xFFFF), 1.0);
@@ -382,7 +380,10 @@ mod tests {
         assert!((apply_curve(HapticRedirectCurve::Eventy, 0.5) - 0.25).abs() < 0.001);
         // Subtle compresses and caps under its 0.7 ceiling.
         let top = apply_curve(HapticRedirectCurve::Subtle, 1.0);
-        assert!((top - 0.7).abs() < 0.001, "ceiling should be ~0.7, got {top}");
+        assert!(
+            (top - 0.7).abs() < 0.001,
+            "ceiling should be ~0.7, got {top}"
+        );
         assert_eq!(apply_curve(HapticRedirectCurve::Subtle, 0.0), 0.0);
         // Subtle lifts low values above linear (logarithmic).
         assert!(apply_curve(HapticRedirectCurve::Subtle, 0.3) > 0.3 * 0.7);
@@ -402,7 +403,7 @@ mod tests {
     #[test]
     fn deadzone_drops_quiet_rumble() {
         let cfg = HapticRedirectConfig::default(); // min_intensity 0.04
-        // A faint rumble (~3% of scale) is below the deadzone.
+                                                   // A faint rumble (~3% of scale) is below the deadzone.
         assert!(translate(&cfg, &rumble(0x0800, 0), 1.0).is_none());
         // A solid rumble translates.
         assert!(translate(&cfg, &rumble(0xC000, 0x4000), 1.0).is_some());
@@ -410,8 +411,10 @@ mod tests {
 
     #[test]
     fn translate_picks_ascending_tiers_with_linear_curve() {
-        let mut cfg = HapticRedirectConfig::default();
-        cfg.curve = HapticRedirectCurve::Linear;
+        let cfg = HapticRedirectConfig {
+            curve: HapticRedirectCurve::Linear,
+            ..Default::default()
+        };
         // ~30% → SubtleCollision band (0.20..0.50).
         assert_eq!(
             translate(&cfg, &rumble(0x4CCC, 0), 1.0),
@@ -443,9 +446,8 @@ mod tests {
     /// (locks the manager, calls `pulse_pattern`) but the manager
     /// no-ops with no device. Lets the stateful logic be exercised.
     fn test_translator() -> RumbleTranslator {
-        let haptics = crate::hidpp::new_shared_haptic_manager(
-            &crate::config::HapticConfig::default(),
-        );
+        let haptics =
+            crate::hidpp::new_shared_haptic_manager(&crate::config::HapticConfig::default());
         RumbleTranslator::new(HapticRedirectConfig::default(), haptics)
     }
 

@@ -531,7 +531,7 @@ impl EvdevHandler {
     /// Run the event loop on Linux
     #[cfg(target_os = "linux")]
     async fn run_event_loop(&mut self) -> Result<(), EvdevError> {
-        use evdev::{Device, EventType, RelativeAxisCode, uinput::VirtualDevice as UinputDevice};
+        use evdev::{uinput::VirtualDevice as UinputDevice, Device, EventType, RelativeAxisCode};
 
         // Find the device based on mode
         let device_info = if self.generic_mode {
@@ -661,9 +661,9 @@ impl EvdevHandler {
                                 }
                             }
                         }
-                        EventType::RELATIVE => {
+                        EventType::RELATIVE
                             // Track mouse movement while menu is active
-                            if self.menu_active {
+                            if self.menu_active => {
                                 let code = RelativeAxisCode(event.code());
                                 let value = event.value();
 
@@ -691,7 +691,6 @@ impl EvdevHandler {
                                     _ => {}
                                 }
                             }
-                        }
                         _ => {}
                     }
                 }

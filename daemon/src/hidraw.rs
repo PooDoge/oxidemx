@@ -121,10 +121,7 @@ impl HidrawHandler {
     /// Called once at startup by main.rs; from then on the handler
     /// dispatches matching 0x2150 notifications into the forwarder
     /// the D-Bus side has (or hasn't) installed.
-    pub fn set_thumb_wheel_state(
-        &mut self,
-        state: crate::thumb_wheel::SharedThumbWheelState,
-    ) {
+    pub fn set_thumb_wheel_state(&mut self, state: crate::thumb_wheel::SharedThumbWheelState) {
         self.thumb_wheel_state = Some(state);
     }
 
@@ -203,7 +200,7 @@ impl HidrawHandler {
         }
 
         // Sort by priority (highest first)
-        candidates.sort_by(|a, b| b.2.cmp(&a.2));
+        candidates.sort_by_key(|c| std::cmp::Reverse(c.2));
 
         // Prefer interface 2 (input2) which is typically used for HID++ communication
         let max_priority = candidates.first().map(|(_, _, p)| *p).unwrap_or(0);

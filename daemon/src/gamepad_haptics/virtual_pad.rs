@@ -23,8 +23,8 @@
 //!     without that tag SDL2 won't enumerate it as a controller.
 
 use evdev::{
-    uinput::VirtualDevice, AbsInfo, AbsoluteAxisCode, AttributeSet, BusType, FFEffectCode,
-    InputId, KeyCode, UinputAbsSetup,
+    uinput::VirtualDevice, AbsInfo, AbsoluteAxisCode, AttributeSet, BusType, FFEffectCode, InputId,
+    KeyCode, UinputAbsSetup,
 };
 
 /// Device name as it appears in `evtest` / Steam's controller list.
@@ -67,7 +67,7 @@ pub const BUTTONS: [KeyCode; 11] = [
 /// Force-feedback effect types we advertise. `FF_RUMBLE` is the one
 /// games actually use; the `FF_PERIODIC` family is advertised so
 /// SDL2's older `SDL_Haptic` probe (which checks for `FF_PERIODIC`
-/// + a waveform) considers the device haptic-capable. `FF_GAIN`
+/// plus a waveform) considers the device haptic-capable. `FF_GAIN`
 /// lets games set a master amplitude we honour as a multiplier.
 pub const FF_CODES: [FFEffectCode; 8] = [
     FFEffectCode::FF_RUMBLE,
@@ -89,8 +89,7 @@ pub const STICK_AXES: [AbsoluteAxisCode; 4] = [
 ];
 
 /// Triggers — unsigned, 0..1023.
-pub const TRIGGER_AXES: [AbsoluteAxisCode; 2] =
-    [AbsoluteAxisCode::ABS_Z, AbsoluteAxisCode::ABS_RZ];
+pub const TRIGGER_AXES: [AbsoluteAxisCode; 2] = [AbsoluteAxisCode::ABS_Z, AbsoluteAxisCode::ABS_RZ];
 
 /// D-pad — reported as a hat, -1..1 per axis.
 pub const HAT_AXES: [AbsoluteAxisCode; 2] =
@@ -258,7 +257,9 @@ mod tests {
         assert_eq!(dev.input_id().vendor(), VENDOR);
         assert_eq!(dev.input_id().product(), PRODUCT);
 
-        let ff = dev.supported_ff().expect("device advertises force feedback");
+        let ff = dev
+            .supported_ff()
+            .expect("device advertises force feedback");
         assert!(ff.contains(FFEffectCode::FF_RUMBLE));
         assert!(ff.contains(FFEffectCode::FF_GAIN));
 

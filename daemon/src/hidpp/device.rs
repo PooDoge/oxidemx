@@ -1867,8 +1867,7 @@ impl HidppDevice {
                 );
                 Ok(())
             }
-            None => Err(HapticError::IoError(std::io::Error::new(
-                std::io::ErrorKind::Other,
+            None => Err(HapticError::IoError(std::io::Error::other(
                 "ThumbWheel write returned no response",
             ))),
         }

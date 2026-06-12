@@ -224,6 +224,48 @@ impl HapticManager {
         self.last_disconnect_ms = now;
     }
 
+    /// Recover from a missed boot-time connect. Unlike
+    /// `reconnect_if_needed` (which deliberately only acts after a
+    /// LOST connection), this also acts while still `NotConnected`
+    /// — the state we're stuck in when the mouse was asleep during
+    /// daemon startup. Paced by the same 5 s cooldown so a truly
+    /// absent device costs one open attempt per cooldown window.
+    /// On success, buttons are re-diverted (divert is volatile and
+    /// the startup divert never happened on this path).
+    pub fn try_initial_connect(&mut self) -> bool {
+        if self.connection_state != ConnectionState::NotConnected {
+            return self.connection_state == ConnectionState::Connected;
+        }
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64;
+        if now.saturating_sub(self.last_disconnect_ms) < RECONNECT_COOLDOWN_MS {
+            return false;
+        }
+        match self.connect() {
+            Ok(true) => {
+                tracing::info!("Late initial device connect succeeded");
+                match self.divert_buttons() {
+                    Ok(n) if n > 0 => {
+                        tracing::info!(count = n, "Diverted buttons after late connect")
+                    }
+                    Ok(_) => {}
+                    Err(e) => {
+                        tracing::warn!(error = %e, "Failed to divert buttons after late connect")
+                    }
+                }
+                true
+            }
+            _ => {
+                // connect() left us NotConnected; stamp the cooldown
+                // clock so the next attempt waits out the window.
+                self.last_disconnect_ms = now;
+                false
+            }
+        }
+    }
+
     /// Attempt to reconnect if device was disconnected and cooldown has passed
     pub fn reconnect_if_needed(&mut self) -> bool {
         // Only reconnect if we were previously connected but lost connection
@@ -385,10 +427,7 @@ impl HapticManager {
         }
 
         if mx4 {
-            let device = self
-                .device
-                .as_mut()
-                .expect("device presence checked above");
+            let device = self.device.as_mut().expect("device presence checked above");
             match device.send_haptic_pattern(pattern) {
                 Ok(()) => {
                     self.last_pulse_ms = now;
@@ -745,7 +784,7 @@ impl HapticManager {
 
     /// Read the device-side wheel mode and translate to the slug
     /// the settings UI uses ("freespin" / "ratchet" / "smartshift")
-    /// + the user-friendly 1..100 threshold. Inverse of the
+    /// plus the user-friendly 1..100 threshold. Inverse of the
     /// `apply_smartshift_config` mapping in the D-Bus layer.
     ///
     /// Returns `None` if the feature isn't supported or the read
@@ -820,6 +859,14 @@ impl HapticManager {
     ///
     /// On IO error (stale fd), forces reconnect and retries once.
     pub fn query_battery(&mut self) -> Result<(u8, bool), HapticError> {
+        // The 10 s battery loop is the most reliable periodic caller
+        // we have — let it heal a missed boot-time connect instead
+        // of short-circuiting on a permanently-None device forever
+        // (the "0% battery + Disconnected until daemon restart" bug
+        // when the mouse is asleep while the daemon boots).
+        if self.device.is_none() {
+            self.try_initial_connect();
+        }
         let device = self.device.as_mut().ok_or(HapticError::DeviceNotFound)?;
         match device.query_battery() {
             Ok(v) => Ok(v),
@@ -852,7 +899,9 @@ impl HapticManager {
     /// HID++ feature index that the device assigned to THUMB_WHEEL,
     /// for the hidraw read loop's notification dispatcher.
     pub fn thumb_wheel_feature_index(&self) -> Option<u8> {
-        self.device.as_ref().and_then(|d| d.thumb_wheel_feature_index())
+        self.device
+            .as_ref()
+            .and_then(|d| d.thumb_wheel_feature_index())
     }
 
     /// Read the current ThumbWheel (divert, invert) flags. Returns
@@ -861,7 +910,9 @@ impl HapticManager {
         if self.device.is_none() {
             let _ = self.connect();
         }
-        self.device.as_mut().and_then(|d| d.get_thumb_wheel_status())
+        self.device
+            .as_mut()
+            .and_then(|d| d.get_thumb_wheel_status())
     }
 
     /// Write the ThumbWheel reporting flags (divert + invert).

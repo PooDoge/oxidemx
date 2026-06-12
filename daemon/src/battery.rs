@@ -543,11 +543,7 @@ async fn maybe_emit_device_state_changed(
         String::new(), // device_id — see TODO above
     );
     if let Err(e) = emitter
-        .emit(
-            crate::dbus::DBUS_INTERFACE,
-            "DeviceStateChanged",
-            &body,
-        )
+        .emit(crate::dbus::DBUS_INTERFACE, "DeviceStateChanged", &body)
         .await
     {
         tracing::warn!(error = %e, "DeviceStateChanged emit failed");
@@ -585,7 +581,11 @@ pub async fn start_battery_updater_shared_with_dbus(
         manager.query_battery()
     })
     .await
-    .unwrap_or_else(|e| Err(crate::hidpp::error::HapticError::ProtocolError(format!("spawn_blocking failed: {e}"))));
+    .unwrap_or_else(|e| {
+        Err(crate::hidpp::error::HapticError::ProtocolError(format!(
+            "spawn_blocking failed: {e}"
+        )))
+    });
 
     match initial_result {
         Ok((percentage, charging)) => {
@@ -620,7 +620,11 @@ pub async fn start_battery_updater_shared_with_dbus(
             manager.query_battery()
         })
         .await
-        .unwrap_or_else(|e| Err(crate::hidpp::error::HapticError::ProtocolError(format!("spawn_blocking failed: {e}"))));
+        .unwrap_or_else(|e| {
+            Err(crate::hidpp::error::HapticError::ProtocolError(format!(
+                "spawn_blocking failed: {e}"
+            )))
+        });
 
         match result {
             Ok((percentage, charging)) => {

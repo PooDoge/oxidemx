@@ -61,9 +61,19 @@ pub fn diagnostic_report(config: &HapticRedirectConfig) -> String {
                 bridge_node = Some(node);
             } else if vendor == 0x28DE && product == 0x11FF {
                 // Steam's virtual Xbox-360 pad (Valve VID 0x28DE).
-                steam_pad = Some(Found { node, name, vendor, product });
+                steam_pad = Some(Found {
+                    node,
+                    name,
+                    vendor,
+                    product,
+                });
             } else if proxy::is_gamepad(&device) {
-                controllers.push(Found { node, name, vendor, product });
+                controllers.push(Found {
+                    node,
+                    name,
+                    vendor,
+                    product,
+                });
             }
         }
     }
@@ -159,10 +169,9 @@ fn recommendation(
              bridge is running standalone."
                 .to_string(),
         ),
-        HapticRedirectMode::Proxy => notes.push(format!(
-            "Proxy mode will wrap '{}'.",
-            controllers[0].name
-        )),
+        HapticRedirectMode::Proxy => {
+            notes.push(format!("Proxy mode will wrap '{}'.", controllers[0].name))
+        }
         HapticRedirectMode::Standalone if !controllers.is_empty() => notes.push(
             "A real controller is connected. SDL may route its rumble over \
              hidraw and bypass the bridge — unplug it, or launch the game \
@@ -173,8 +182,7 @@ fn recommendation(
     }
 
     if notes.is_empty() {
-        "Looks good — rumble from evdev-path games will route to the mouse."
-            .to_string()
+        "Looks good — rumble from evdev-path games will route to the mouse.".to_string()
     } else {
         notes.join("\n  ")
     }

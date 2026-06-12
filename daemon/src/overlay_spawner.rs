@@ -39,7 +39,9 @@ pub struct OverlaySpawner {
 
 impl OverlaySpawner {
     pub fn new() -> Self {
-        Self { child: Mutex::new(None) }
+        Self {
+            child: Mutex::new(None),
+        }
     }
 
     /// Idempotent overlay-process ensure.
@@ -97,11 +99,15 @@ impl OverlaySpawner {
 }
 
 impl Default for OverlaySpawner {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 async fn name_owned(proxy: &zbus::fdo::DBusProxy<'_>, name: &str) -> bool {
-    let Ok(name_owned) = name.try_into() else { return false };
+    let Ok(name_owned) = name.try_into() else {
+        return false;
+    };
     proxy.name_has_owner(name_owned).await.unwrap_or(false)
 }
 

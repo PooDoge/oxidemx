@@ -30,8 +30,7 @@ use std::io;
 use std::sync::{Arc, Mutex};
 
 use evdev::{
-    uinput::VirtualDevice, AttributeSet, BusType, EventType, InputEvent, InputId,
-    RelativeAxisCode,
+    uinput::VirtualDevice, AttributeSet, BusType, EventType, InputEvent, InputId, RelativeAxisCode,
 };
 
 /// Device name announced on /dev/input. The same string is used by

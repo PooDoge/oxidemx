@@ -23,8 +23,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use evdev::{
     uinput::{VirtualDevice, VirtualEventStream},
-    AbsoluteAxisCode, Device, EventSummary, EventStream, EventType, FFEffectCode,
-    FFEffectData, FFEffectKind, InputEvent, UInputCode,
+    AbsoluteAxisCode, Device, EventStream, EventSummary, EventType, FFEffectCode, FFEffectData,
+    FFEffectKind, InputEvent, UInputCode,
 };
 use oxidemx_shared::HapticRedirectConfig;
 use tokio::sync::oneshot;
@@ -254,11 +254,7 @@ fn emit_wake_pulse(stream: &mut VirtualEventStream) {
 /// (mirroring the source's report framing). A device's *read* side
 /// never produces `EV_FF` / `EV_UINPUT`, so only `KEY` + `ABS` are
 /// forwarded; `MSC` and the rest are dropped.
-fn forward_event(
-    vstream: &mut VirtualEventStream,
-    batch: &mut Vec<InputEvent>,
-    event: InputEvent,
-) {
+fn forward_event(vstream: &mut VirtualEventStream, batch: &mut Vec<InputEvent>, event: InputEvent) {
     match event.event_type() {
         EventType::SYNCHRONIZATION => {
             if !batch.is_empty() {
@@ -519,8 +515,7 @@ mod tests {
         use std::io::ErrorKind;
         use std::time::Duration;
 
-        let mut device =
-            super::virtual_pad::build_virtual_pad().expect("build virtual pad");
+        let mut device = super::virtual_pad::build_virtual_pad().expect("build virtual pad");
         let node = device
             .enumerate_dev_nodes_blocking()
             .expect("enumerate dev nodes")
@@ -529,9 +524,8 @@ mod tests {
             .expect("virtual pad should expose an event node");
 
         // Run the servicing loop — it owns the device from here.
-        let haptics = crate::hidpp::new_shared_haptic_manager(
-            &crate::config::HapticConfig::default(),
-        );
+        let haptics =
+            crate::hidpp::new_shared_haptic_manager(&crate::config::HapticConfig::default());
         let (shutdown_tx, shutdown_rx) = oneshot::channel();
         let serve_task = tokio::spawn(serve(
             device,
@@ -615,9 +609,8 @@ mod tests {
         use std::time::Duration;
 
         // Connect a real haptic manager to the MX Master 4.
-        let haptics = crate::hidpp::new_shared_haptic_manager(
-            &crate::config::HapticConfig::default(),
-        );
+        let haptics =
+            crate::hidpp::new_shared_haptic_manager(&crate::config::HapticConfig::default());
         {
             let mut hm = haptics.lock().unwrap();
             let connected = hm.connect().unwrap_or(false);
@@ -628,8 +621,7 @@ mod tests {
             hm.set_enabled(true);
         }
 
-        let mut device =
-            super::virtual_pad::build_virtual_pad().expect("build virtual pad");
+        let mut device = super::virtual_pad::build_virtual_pad().expect("build virtual pad");
         let node = device
             .enumerate_dev_nodes_blocking()
             .expect("enumerate dev nodes")
@@ -719,8 +711,7 @@ mod tests {
     fn build_simulated_controller() -> evdev::uinput::VirtualDevice {
         use evdev::{uinput::VirtualDevice, AttributeSet, KeyCode};
 
-        let keys: AttributeSet<KeyCode> =
-            virtual_pad::BUTTONS.iter().copied().collect();
+        let keys: AttributeSet<KeyCode> = virtual_pad::BUTTONS.iter().copied().collect();
         let mut builder = VirtualDevice::builder()
             .expect("uinput builder")
             .name("Simulated Xbox 360 pad")
@@ -750,9 +741,7 @@ mod tests {
     #[tokio::test]
     #[ignore = "creates two uinput devices; needs /dev/uinput + event-node access"]
     async fn proxy_forwards_simulated_controller_input() {
-        use evdev::{
-            AbsoluteAxisCode, Device, EventType, InputEvent, KeyCode,
-        };
+        use evdev::{AbsoluteAxisCode, Device, EventType, InputEvent, KeyCode};
         use std::io::ErrorKind;
         use std::time::{Duration, Instant};
 
@@ -801,13 +790,13 @@ mod tests {
             }
             Err(e) => panic!("open bridge pad: {e}"),
         };
-        let mut bridge_stream =
-            bridge_reader.into_event_stream().expect("bridge event stream");
+        let mut bridge_stream = bridge_reader
+            .into_event_stream()
+            .expect("bridge event stream");
 
         // 5. Run the bridge in proxy mode over the simulated pad.
-        let haptics = crate::hidpp::new_shared_haptic_manager(
-            &crate::config::HapticConfig::default(),
-        );
+        let haptics =
+            crate::hidpp::new_shared_haptic_manager(&crate::config::HapticConfig::default());
         let (shutdown_tx, shutdown_rx) = oneshot::channel();
         let serve_task = tokio::spawn(serve(
             bridge,
@@ -830,11 +819,7 @@ mod tests {
         let mut collected: Vec<InputEvent> = Vec::new();
         let deadline = Instant::now() + Duration::from_secs(2);
         while Instant::now() < deadline {
-            match tokio::time::timeout(
-                Duration::from_millis(250),
-                bridge_stream.next_event(),
-            )
-            .await
+            match tokio::time::timeout(Duration::from_millis(250), bridge_stream.next_event()).await
             {
                 Ok(Ok(event)) => collected.push(event),
                 Ok(Err(_)) => break,
@@ -848,9 +833,7 @@ mod tests {
         let _ = tokio::time::timeout(Duration::from_secs(2), serve_task).await;
 
         let forwarded_button = collected.iter().any(|e| {
-            e.event_type() == EventType::KEY
-                && e.code() == KeyCode::BTN_SOUTH.0
-                && e.value() == 1
+            e.event_type() == EventType::KEY && e.code() == KeyCode::BTN_SOUTH.0 && e.value() == 1
         });
         let forwarded_axis = collected.iter().any(|e| {
             e.event_type() == EventType::ABSOLUTE
