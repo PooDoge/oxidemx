@@ -4761,6 +4761,7 @@ dependencies = [
  "image",
  "oxidemx-icons",
  "oxidemx-shared",
+ "oxidemx-widget-cli",
  "oxidemx-widget-host",
  "oxidemx-widget-proto",
  "oxidemx-widgets",

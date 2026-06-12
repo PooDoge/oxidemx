@@ -22,6 +22,10 @@ oxidemx-widget-host = { path = "../oxidemx-widget-host" }
 # Manifest types (WidgetManifest / OptionSpec) — the options card
 # renders straight from the manifest's options[] schema.
 oxidemx-widget-proto = { path = "../oxidemx-widget-proto" }
+# The widget store dialog reuses the CLI crate's lib target for
+# its verified, zip-slip-safe install pipeline (incl. the sideload
+# consent gate) instead of reimplementing it.
+oxidemx-widget-cli = { path = "../tools/oxidemx-widget-cli" }
 
 # iced 0.14 — same toolkit as the overlay so we share render
 # tech and don't drag in a separate UI dep tree. Standard widgets

@@ -41,6 +41,7 @@ mod recents;
 mod singleton;
 mod theme_customiser;
 mod ui_state;
+mod widget_store;
 
 use iced::widget::{button, column, container, row, rule, scrollable, text, Space};
 use iced::{Element, Length, Subscription, Task};
@@ -496,12 +497,39 @@ pub enum Message {
     /// (instance_key for custom widgets), auto-labels, closes the
     /// panel. Restores the undo snapshot when the tile matches it.
     PickWidget(usize, oxidemx_shared::WidgetSource),
-    /// "Get more widgets…" stub tile. Opens the downloader dialog
-    /// once Task 3 lands; reports a status hint until then.
+    /// "Get more widgets…" tile (picker) / Reinstall button
+    /// (missing-widget chip). Opens the store/downloader dialog.
     OpenWidgetStore,
     /// Re-scan `~/.config/oxidemx/widgets` into the settings-side
     /// registry cache. Triggered after store install/uninstall.
     RescanWidgets,
+
+    // --- Widget store / downloader dialog (spec §11) ---
+    /// Back button on the store panel (also the "Settings" jump on
+    /// an installed row — the options card lives on the slice
+    /// editor behind the dialog).
+    CloseWidgetStore,
+    /// Live text of the store's list filter field.
+    StoreSearch(String),
+    /// Live text of the "Install from URL…" field.
+    StoreUrlInput(String),
+    /// "Install from file…" — native picker → verified install.
+    StoreInstallFromFile,
+    /// "Install from URL…" — curl to a temp file → same install.
+    StoreInstallFromUrl,
+    /// Outcome of any install attempt (file, URL, or consent
+    /// retry). Success rescans the registry; sideload refusals
+    /// surface the consent prompt.
+    StoreInstallResult(widget_store::StoreInstallOutcome),
+    /// "Install anyway" on the consent prompt — retry the parked
+    /// bundle with `force`.
+    StoreConsentAccept,
+    /// Dismiss the consent prompt without installing.
+    StoreConsentCancel,
+    /// Two-step uninstall: first click arms the row's confirm,
+    /// second click on the same id removes the widget directory
+    /// (settings bags kept, spec §9) and rescans.
+    StoreUninstall(String),
 
     // --- Widget options card (spec §5/§6/§10d) ---
     /// Scope toggle at the top of the options card. → Global just
@@ -1290,6 +1318,10 @@ pub struct State {
     pub widget_loc_results: Vec<geocode::GeoHit>,
     /// In-flight flag for the location-option geocoder.
     pub widget_loc_searching: bool,
+    /// Widget store / downloader dialog (spec §11). `Some` while
+    /// open — takes over the content area via the same full-panel
+    /// chrome as the icon picker; dropped wholesale on close.
+    pub widget_store: Option<widget_store::WidgetStoreState>,
 }
 
 /// Where the AI Assistant's Gemini API key lives. Mirrors the
@@ -1381,6 +1413,7 @@ impl Default for State {
             widget_loc_query: String::new(),
             widget_loc_results: Vec::new(),
             widget_loc_searching: false,
+            widget_store: None,
         }
     }
 }
@@ -2102,6 +2135,16 @@ fn boot() -> (State, Task<Message>) {
             Task::perform(daemon::poll(), Message::DaemonSnapshotReceived),
         ]),
     )
+}
+
+/// Re-scan `~/.config/oxidemx/widgets` into the settings-side
+/// caches (lite summaries + full manifests). Shared by the
+/// `RescanWidgets` message and the store's install/uninstall
+/// follow-ups.
+fn rescan_widgets(state: &mut State) {
+    let (registry, manifests) = tabs::buttons::picker::scan_registry_full();
+    state.widget_registry = registry;
+    state.widget_manifests = manifests;
 }
 
 fn update(state: &mut State, message: Message) -> Task<Message> {
@@ -3018,17 +3061,129 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             Task::none()
         }
         Message::OpenWidgetStore => {
-            // Downloader dialog lands in Task 3 — until then point
-            // at the manual install path (spec §11 stub footer).
-            state.status =
-                "Widget store coming soon — drop a bundle into ~/.config/oxidemx/widgets/"
-                    .to_string();
+            state.widget_store = Some(widget_store::WidgetStoreState::default());
             Task::none()
         }
         Message::RescanWidgets => {
-            let (registry, manifests) = tabs::buttons::picker::scan_registry_full();
-            state.widget_registry = registry;
-            state.widget_manifests = manifests;
+            rescan_widgets(state);
+            Task::none()
+        }
+
+        // --- Widget store / downloader dialog (spec §11) ---
+        Message::CloseWidgetStore => {
+            state.widget_store = None;
+            Task::none()
+        }
+        Message::StoreSearch(s) => {
+            if let Some(store) = state.widget_store.as_mut() {
+                store.search = s;
+            }
+            Task::none()
+        }
+        Message::StoreUrlInput(s) => {
+            if let Some(store) = state.widget_store.as_mut() {
+                store.url_input = s;
+            }
+            Task::none()
+        }
+        Message::StoreInstallFromFile => {
+            if let Some(store) = state.widget_store.as_mut() {
+                store.busy = true;
+            }
+            Task::perform(widget_store::pick_and_install(), Message::StoreInstallResult)
+        }
+        Message::StoreInstallFromUrl => {
+            let url = state
+                .widget_store
+                .as_ref()
+                .map(|s| s.url_input.trim().to_string())
+                .unwrap_or_default();
+            if url.is_empty() {
+                state.status = "Enter a bundle URL first".into();
+                return Task::none();
+            }
+            if let Some(store) = state.widget_store.as_mut() {
+                store.busy = true;
+            }
+            Task::perform(
+                widget_store::download_and_install(url),
+                Message::StoreInstallResult,
+            )
+        }
+        Message::StoreInstallResult(outcome) => {
+            if let Some(store) = state.widget_store.as_mut() {
+                store.busy = false;
+            }
+            match outcome {
+                widget_store::StoreInstallOutcome::Installed { id } => {
+                    rescan_widgets(state);
+                    if let Some(store) = state.widget_store.as_mut() {
+                        store.consent = None;
+                    }
+                    state.status = format!("Widget \"{id}\" installed");
+                }
+                widget_store::StoreInstallOutcome::NeedsConsent(prompt) => {
+                    match state.widget_store.as_mut() {
+                        Some(store) => store.consent = Some(prompt),
+                        // Dialog closed while the install ran —
+                        // don't install behind the user's back.
+                        None => {
+                            state.status =
+                                "Install needs confirmation — reopen the widget store".into()
+                        }
+                    }
+                }
+                widget_store::StoreInstallOutcome::Cancelled => {
+                    state.status = "Install cancelled".into();
+                }
+                widget_store::StoreInstallOutcome::Failed(e) => {
+                    state.status = format!("Widget install failed: {e}");
+                }
+            }
+            Task::none()
+        }
+        Message::StoreConsentAccept => {
+            let prompt = state.widget_store.as_mut().and_then(|s| s.consent.take());
+            match prompt {
+                Some(p) => {
+                    if let Some(store) = state.widget_store.as_mut() {
+                        store.busy = true;
+                    }
+                    Task::perform(
+                        widget_store::install_bundle(p.bundle, true),
+                        Message::StoreInstallResult,
+                    )
+                }
+                None => Task::none(),
+            }
+        }
+        Message::StoreConsentCancel => {
+            if let Some(store) = state.widget_store.as_mut() {
+                store.consent = None;
+            }
+            state.status = "Install cancelled".into();
+            Task::none()
+        }
+        Message::StoreUninstall(id) => {
+            let Some(store) = state.widget_store.as_mut() else {
+                return Task::none();
+            };
+            if store.pending_uninstall.as_deref() == Some(id.as_str()) {
+                store.pending_uninstall = None;
+                match widget_store::uninstall(&id) {
+                    Ok(()) => {
+                        rescan_widgets(state);
+                        // Settings bags (config.widgets.*) are
+                        // deliberately KEPT (spec §9) — a reinstall
+                        // picks the old values straight back up.
+                        state.status =
+                            format!("Widget \"{id}\" uninstalled — its settings are kept");
+                    }
+                    Err(e) => state.status = format!("Uninstall failed: {e}"),
+                }
+            } else {
+                store.pending_uninstall = Some(id);
+            }
             Task::none()
         }
 
@@ -5199,7 +5354,17 @@ fn view(state: &State) -> Element<'_, Message> {
     // into the right column. Back button at the top returns to
     // whichever tab the user was on. Order matters: app-command
     // picker wins over icon picker if both are somehow open.
-    let body: Element<Message> = if let Some(p) = state.app_command_picker.as_ref() {
+    let body: Element<Message> = if let Some(store) = state.widget_store.as_ref() {
+        // The store wins over the other panels — it can be opened
+        // from inside the slice picker ("Get more widgets…") and
+        // from the missing-widget chip's Reinstall button.
+        full_panel(
+            state,
+            "Get more widgets",
+            widget_store::view(state, store),
+            Message::CloseWidgetStore,
+        )
+    } else if let Some(p) = state.app_command_picker.as_ref() {
         full_panel(
             state,
             "Pick app for command",
