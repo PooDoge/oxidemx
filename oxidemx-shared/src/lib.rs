@@ -23,6 +23,7 @@ pub mod pointer;
 pub mod popup;
 pub mod profiles;
 pub mod theme;
+pub mod migrate;
 pub mod widgets;
 
 pub use action::ActionKind;

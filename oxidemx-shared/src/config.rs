@@ -1028,6 +1028,7 @@ impl AppConfig {
             Err(e) => return Err(ConfigError::Io(e)),
         };
         cfg.radial_menu.normalize_pages();
+        crate::migrate::migrate_to_v3(&mut cfg);
         Ok(cfg)
     }
 }
