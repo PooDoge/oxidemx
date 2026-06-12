@@ -1,5 +1,10 @@
 //! Retained display list returned by a widget's `render()`.
 //! Coordinates are wedge-local: origin at the icon anchor, +y down.
+//!
+//! WIRE FORMAT: postcard encodes enum variants by declaration index —
+//! `Prim`, `Color`, `PathOp`, `TextWeight`, `TextAlign` are APPEND-ONLY
+//! and must never be reordered within an `API_VERSION` (see event.rs for
+//! the full evolution rules).
 
 use serde::{Deserialize, Serialize};
 

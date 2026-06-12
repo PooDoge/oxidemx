@@ -1,4 +1,11 @@
 //! Host → widget events and widget → host commands.
+//!
+//! WIRE FORMAT: postcard encodes enum variants by declaration index. Every
+//! enum in this crate is APPEND-ONLY — never reorder, remove, or insert
+//! variants mid-list within an `API_VERSION`. Appending is also not free:
+//! an *older* decoder hitting a new variant returns `Err` (treated as a
+//! corrupt message, not skipped), so ship new variants only behind an
+//! `API_VERSION` bump or a host-first rollout.
 
 use serde::{Deserialize, Serialize};
 

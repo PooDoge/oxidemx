@@ -1,5 +1,8 @@
 //! Resolved settings as delivered to a widget (init / SettingsChanged).
 //! A sorted Vec of pairs, not a map — postcard-friendly and deterministic.
+//!
+//! WIRE FORMAT: `SettingValue` is APPEND-ONLY — never reorder variants
+//! within an `API_VERSION` (see event.rs for the full evolution rules).
 
 use serde::{Deserialize, Serialize};
 
