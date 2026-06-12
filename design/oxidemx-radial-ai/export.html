@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en" data-accent="orange">
+<head>
+  <meta charset="UTF-8">
+  <title>JuhRadial — artboard exporter</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+  <style>
+    html, body { background: #07080B; }
+    #frame { position: fixed; inset: 0; overflow: hidden; }
+  </style>
+</head>
+<body>
+  <div id="frame"><div id="root"></div></div>
+
+  <script type="text/babel" src="icons.jsx"></script>
+  <script type="text/babel" src="popup.jsx"></script>
+  <script type="text/babel" src="indicator.jsx"></script>
+  <script type="text/babel" src="app-shell.jsx"></script>
+  <script type="text/babel" src="devices-page.jsx"></script>
+  <script type="text/babel" src="indicator-popup-page.jsx"></script>
+  <script type="text/babel" src="ext-prefs.jsx"></script>
+  <script type="text/babel" src="radial.jsx"></script>
+  <script type="text/babel" src="ai-chat.jsx"></script>
+
+  <script type="text/babel">
+    /* global React, ReactDOM, Popup, TopBar, IndicatorStrip, DevicesPage, IndicatorPopupPage, ExtPrefsDialog, DEVICES, RadialMenu, AIChatWindow, RADIAL_THEMES */
+
+    const VIEWS = {
+      "popup-default":  { w: 420,  h: 700,  el: () => <Center><Popup deviceId="mx4" /></Center> },
+      "popup-power":    { w: 420,  h: 810,  el: () => <Center><Popup deviceId="mx4" variant="power" /></Center> },
+      "popup-dropdown": { w: 420,  h: 700,  el: () => <Center><Popup deviceId="mx4" dropdownOpen /></Center> },
+      "ext-prefs":      { w: 680,  h: 1150, el: () => <ExtPrefsDialog /> },
+      "page-simple":    { w: 1280, h: 1240, el: () => <IndicatorPopupPage activeDevice={DEVICES[0]} mode="simple" /> },
+      "page-power":     { w: 1280, h: 1580, el: () => <IndicatorPopupPage activeDevice={DEVICES[0]} mode="power" /> },
+      "devices-page":   { w: 1280, h: 840,  el: () => <DevicesPage activeId="mx4" /> },
+      "indicator-strip":{ w: 720,  h: 660,  el: () => <div style={{ background: "var(--jr-bg-deepest)", height: "100%" }}><IndicatorStrip items={[
+        { label: "Healthy", pct: 78, note: "78% · default fg, no urgency" },
+        { label: "Low (≤ 30%)", pct: 30, note: "Switches to yellow once 30% is hit", color: "var(--jr-yellow)" },
+        { label: "Critical (≤ 15%)", pct: 8, note: "Pulses red; system notification fires once", color: "var(--jr-red)" },
+        { label: "Charging", pct: 42, charging: true, note: "Green fill + lightning glyph", color: "var(--jr-green)" },
+      ]} /></div> },
+      "radial-device":       { w: 760, h: 620, el: () => <Stage><RadialMenu pageId="device" pageIndex={1} submenuFor={2} /></Stage> },
+      "radial-device-mouse": { w: 760, h: 620, el: () => <Stage><RadialMenu pageId="device" pageIndex={1} submenuFor={3} /></Stage> },
+      "radial-widgets":      { w: 760, h: 620, el: () => <Stage><RadialMenu pageId="widgets" pageIndex={2} hover={1} /></Stage> },
+      "flow-1": { w: 620, h: 580, el: () => <Stage><RadialMenu pageId="apps" pageIndex={3} centerActive /></Stage> },
+      "flow-2": { w: 620, h: 760, el: () => <Stage><AIChatWindow width={484} height={640} showCommandCard={false} showTaskCard={false} showMemoryCard={false} /></Stage> },
+      "flow-3": { w: 620, h: 760, el: () => <Stage><AIChatWindow width={484} height={640} showCommandCard={false} showTaskCard={false} showMemoryCard={false} /></Stage> },
+      "chat-main":     { w: 640, h: 820, el: () => <Stage><AIChatWindow width={520} height={700} /></Stage> },
+      "chat-resize":   { w: 760, h: 880, el: () => <Stage><AIChatWindow width={640} height={760} resizing showMemoryCard={false} /></Stage> },
+      "chat-memories": { w: 640, h: 820, el: () => <Stage><AIChatWindow width={520} height={700} view="memories" /></Stage> },
+    };
+
+    const Stage = ({ children }) => {
+      const T = RADIAL_THEMES.oxidemx;
+      return (
+        <div style={{ width: "100%", height: "100%", display: "grid", placeItems: "center", background: `radial-gradient(70% 60% at 50% 38%, ${T.mantle} 0%, ${T.crust} 85%)` }}>
+          {children}
+        </div>
+      );
+    };
+
+    const Center = ({ children }) => (
+      <div style={{ width: "100%", height: "100%", display: "grid", placeItems: "center", background: "radial-gradient(60% 60% at 50% 40%, #14171f 0%, #07080B 80%)" }}>
+        {children}
+      </div>
+    );
+
+    const root = ReactDOM.createRoot(document.getElementById("root"));
+
+    window.renderView = (name) => {
+      const v = VIEWS[name];
+      if (!v) return "unknown view: " + name;
+      const frame = document.getElementById("frame");
+      const scale = Math.min(window.innerWidth / v.w, window.innerHeight / v.h, 1);
+      frame.style.width = v.w + "px";
+      frame.style.height = v.h + "px";
+      frame.style.inset = "auto";
+      frame.style.left = "0";
+      frame.style.top = "0";
+      frame.style.transformOrigin = "top left";
+      frame.style.transform = `scale(${scale})`;
+      const El = v.el;
+      root.render(<div style={{ width: v.w, height: v.h }}><El /></div>);
+      return name;
+    };
+
+    window.renderView(location.hash.slice(1) || "popup-default");
+  </script>
+</body>
+</html>
