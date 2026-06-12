@@ -267,10 +267,15 @@ pub(super) fn draw_widget_wedge(
 }
 
 /// Hover popup for the Weather wedge: place name, current
-/// conditions, and the 7-day forecast. Drawn last in the paint
-/// pass so it sits above the ring; anchored along the hovered
-/// slot's bisector just outside the outer ring and clamped to the
-/// canvas so it never clips off-window.
+/// conditions, and the 7-day forecast as a horizontal strip.
+///
+/// Placement (per design feedback): horizontally centred on the
+/// menu, in the clear band ABOVE or BELOW the ring — whichever
+/// half the hovered slice sits in — so the card never covers the
+/// wedges. The bands are the only ring-free regions of the disc
+/// square, which is also why the card is a wide strip rather
+/// than a tall list. Falls back to the opposite band if the
+/// preferred one would clip off-canvas.
 #[allow(clippy::too_many_arguments)]
 pub fn draw_weather_popup(
     frame: &mut Frame,
@@ -282,41 +287,45 @@ pub fn draw_weather_popup(
     weather: &crate::sampler::WeatherInfo,
     palette: &ThemeColors,
     icons: &crate::render::icons::IconCache,
-    mo: f32,
     alpha: f32,
 ) {
     if alpha <= 0.001 {
         return;
     }
-    let a = (mo * alpha).clamp(0.0, 1.0);
+    // The popup is an information surface, not menu chrome — it
+    // fades only with the hover dwell, NOT with the user's menu
+    // opacity, so its content stays legible whatever the ring's
+    // translucency is set to.
+    let a = alpha.clamp(0.0, 1.0);
 
-    const W: f32 = 178.0;
-    const PAD: f32 = 12.0;
-    const ROW_H: f32 = 16.0;
-    let header_h = if weather.place.is_some() { 16.0 } else { 0.0 };
-    let current_h = 30.0;
-    let rows = weather.daily.len().min(7) as f32;
-    let h = PAD + header_h + current_h + 8.0 + rows * ROW_H + PAD - 4.0;
+    const PAD: f32 = 10.0;
+    const COL_W: f32 = 42.0;
+    const GAP: f32 = 6.0;
+    let cols = weather.daily.len().min(7) as f32;
+    let w: f32 = (cols * COL_W).max(220.0) + 2.0 * PAD;
+    let header_h = 15.0;
+    let day_block_h = 50.0;
+    let h = PAD + header_h + GAP + day_block_h + PAD - 2.0;
 
-    // Anchor outward along the hovered slot's bisector, then clamp.
+    // Centre on the menu; pick the ring-free band matching the
+    // hovered slice's vertical half (slice 0 is 12 o'clock).
     let bisector = ((slot_index as f32) * (360.0 / slot_count.max(1) as f32) - 90.0).to_radians();
-    let anchor = Point::new(
-        center.x + (outer_r + 6.0) * bisector.cos(),
-        center.y + (outer_r + 6.0) * bisector.sin(),
-    );
-    let mut x = if bisector.cos() >= 0.0 {
-        anchor.x
-    } else {
-        anchor.x - W
+    let x = (center.x - w / 2.0).clamp(2.0, (canvas_size.width - w - 2.0).max(2.0));
+    let y_top = center.y - outer_r - h - 6.0;
+    let y_bottom = center.y + outer_r + 6.0;
+    let prefer_top = bisector.sin() <= 0.0;
+    let fits = |y: f32| y >= 2.0 && y + h <= canvas_size.height - 2.0;
+    let y = match (prefer_top, fits(y_top), fits(y_bottom)) {
+        (true, true, _) | (false, true, false) => y_top,
+        (false, _, true) | (true, false, true) => y_bottom,
+        // Neither band fits (tiny canvas) — clamp the preferred one.
+        _ => y_top.clamp(2.0, (canvas_size.height - h - 2.0).max(2.0)),
     };
-    let mut y = anchor.y - h / 2.0 + (h / 2.0) * bisector.sin();
-    x = x.clamp(4.0, (canvas_size.width - W - 4.0).max(4.0));
-    y = y.clamp(4.0, (canvas_size.height - h - 4.0).max(4.0));
 
     let card = Path::new(|b| {
-        b.rounded_rectangle(Point::new(x, y), Size::new(W, h), 12.0.into());
+        b.rounded_rectangle(Point::new(x, y), Size::new(w, h), 12.0.into());
     });
-    frame.fill(&card, rgba(&palette.crust, 0.96 * a));
+    frame.fill(&card, rgba(&palette.crust, 0.97 * a));
     frame.stroke(
         &card,
         Stroke::default()
@@ -328,8 +337,7 @@ pub fn draw_weather_popup(
     let sub_c = rgba(&palette.subtext0, a);
     let dim_c = rgba(&palette.subtext1, a);
     let left = x + PAD;
-    let right = x + W - PAD;
-    let mut cy = y + PAD;
+    let right = x + w - PAD;
 
     let put = |f: &mut Frame, s: &str, px: f32, py: f32, size: f32, color: Color, bold: bool| {
         f.fill_text(iced::widget::canvas::Text {
@@ -348,82 +356,71 @@ pub fn draw_weather_popup(
             ..iced::widget::canvas::Text::default()
         });
     };
-    // Right-aligned variant via the same approximate width used by
-    // `draw_centered_text` (no canvas measure pass).
+    // Approximate text width — same 0.55 em/char heuristic as
+    // `draw_centered_text` (the canvas API has no measure pass).
     let approx_w = |s: &str, size: f32| s.chars().count() as f32 * size * 0.55;
 
-    if let Some(place) = &weather.place {
-        put(frame, place, left, cy, 10.5, sub_c, true);
-        cy += header_h;
-    }
-
-    // Current conditions: icon + temperature + label.
+    // Header line: place name (left, ellipsised to the space the
+    // current-conditions block leaves free) + current temp (right).
     let unit = if weather.fahrenheit { "°F" } else { "°C" };
+    let current = format!("{}{unit} {}", weather.temp.round() as i32, weather.label);
+    let cur_w = approx_w(&current, 11.0);
     let (tr, tg, tb, _) = parse_hex_rgba(&palette.text).unwrap_or((1.0, 1.0, 1.0, 1.0));
     let tint = (tr as f32, tg as f32, tb as f32, 1.0);
-    if let Some(handle) = icons.resolve(
-        crate::sampler::weather_icon_name(weather.code),
-        super::GLYPH_RASTER_PX,
-        tint,
-    ) {
-        crate::render::icons::draw_icon(frame, left + 11.0, cy + 12.0, 22.0, &handle, a);
+    if let Some(place) = &weather.place {
+        let budget = w - 2.0 * PAD - cur_w - 12.0;
+        let mut shown: String = place.clone();
+        while approx_w(&shown, 10.5) > budget && shown.chars().count() > 1 {
+            shown.pop();
+            if !shown.ends_with('…') {
+                shown.pop();
+                shown.push('…');
+            }
+        }
+        put(frame, &shown, left, y + PAD, 10.5, sub_c, true);
     }
-    put(
-        frame,
-        &format!("{}{unit}", weather.temp.round() as i32),
-        left + 28.0,
-        cy + 2.0,
-        16.0,
-        text_c,
-        true,
-    );
-    put(
-        frame,
-        &weather.label,
-        left + 28.0,
-        cy + 19.0,
-        9.0,
-        sub_c,
-        false,
-    );
-    cy += current_h;
+    put(frame, &current, right - cur_w, y + PAD, 11.0, text_c, true);
 
-    // Separator above the forecast rows.
-    frame.fill(
-        &Path::rectangle(Point::new(left, cy), Size::new(W - 2.0 * PAD, 1.0)),
-        rgba(&palette.surface2, 0.9 * a),
-    );
-    cy += 7.0;
-
-    for day in weather.daily.iter().take(7) {
-        put(frame, &day.day, left, cy, 9.5, dim_c, false);
+    // 7-day strip: one column per day — weekday, condition icon,
+    // high, low.
+    let strip_y = y + PAD + header_h + GAP;
+    let strip_w = cols * COL_W;
+    let strip_x = x + (w - strip_w) / 2.0;
+    for (i, day) in weather.daily.iter().take(7).enumerate() {
+        let cx = strip_x + (i as f32 + 0.5) * COL_W;
+        draw_centered_text(
+            frame,
+            &day.day,
+            Point::new(cx, strip_y + 4.0),
+            8.5,
+            dim_c,
+            iced::Font::DEFAULT,
+        );
         if let Some(handle) = icons.resolve(
             crate::sampler::weather_icon_name(day.code),
             super::GLYPH_RASTER_PX,
             tint,
         ) {
-            crate::render::icons::draw_icon(frame, left + 62.0, cy + 5.5, 13.0, &handle, a);
+            crate::render::icons::draw_icon(frame, cx, strip_y + 18.0, 15.0, &handle, a);
         }
-        let hi = format!("{}°", day.t_max.round() as i32);
-        let lo = format!("{}°", day.t_min.round() as i32);
-        put(
+        draw_centered_text(
             frame,
-            &hi,
-            right - approx_w(&hi, 9.5),
-            cy,
+            &format!("{}°", day.t_max.round() as i32),
+            Point::new(cx, strip_y + 33.0),
             9.5,
             text_c,
-            true,
+            iced::Font {
+                weight: iced::font::Weight::Semibold,
+                ..Default::default()
+            },
         );
-        put(
+        draw_centered_text(
             frame,
-            &lo,
-            right - 30.0 - approx_w(&lo, 9.5),
-            cy,
-            9.5,
+            &format!("{}°", day.t_min.round() as i32),
+            Point::new(cx, strip_y + 44.0),
+            9.0,
             sub_c,
-            false,
+            iced::Font::DEFAULT,
         );
-        cy += ROW_H;
     }
 }

@@ -520,6 +520,12 @@ pub(super) fn update(state: &mut RadialState, message: Message) -> Task<Message>
                 {
                     state.set_active_page(page);
                 }
+                if let Some(slot) = std::env::var("OXIDEMX_VISION_HOVER")
+                    .ok()
+                    .and_then(|p| p.parse::<usize>().ok())
+                {
+                    state.vision_force_hover(slot);
+                }
             }
             Task::none()
         }

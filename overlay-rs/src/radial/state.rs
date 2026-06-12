@@ -692,6 +692,19 @@ impl RadialState {
         self.update_pointer(dx as f64, dy as f64, true);
     }
 
+    /// Vision-harness hook (`OXIDEMX_VISION_HOVER=<slot>`): force a
+    /// fully-dwelled hover on `idx` so screenshots can capture
+    /// hover-only chrome (tooltip arc, weather popup) without a real
+    /// pointer. Backdates the dwell timer past any tooltip delay.
+    pub(crate) fn vision_force_hover(&mut self, idx: usize) {
+        if idx >= self.active_slot_count() {
+            return;
+        }
+        self.highlights[idx].set_target(1.0, &self.anim_config.slice_highlight.enter);
+        self.target_slice = Some(idx);
+        self.target_slice_since = Some(Instant::now() - std::time::Duration::from_secs(10));
+    }
+
     /// Shared cursor-update path: updates the highlighted slice and,
     /// when the pointer is over a submenu sub-item, the sub-item
     /// highlight too. Submenu state is opened automatically (only

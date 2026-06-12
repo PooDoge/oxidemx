@@ -675,7 +675,6 @@ impl<'a> canvas::Program<crate::app::Message> for Painter<'a> {
                                 weather,
                                 palette,
                                 &self.state.icons,
-                                mopacity,
                                 alpha,
                             );
                         }
