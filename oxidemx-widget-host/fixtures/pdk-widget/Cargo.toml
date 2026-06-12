@@ -1,0 +1,22 @@
+# PDK-using test fixture for the host's integration tests.
+# Proves that widgets built with `oxidemx-widget-api` load correctly in the
+# wasmi host. NOT a workspace member.
+
+[workspace]
+
+[package]
+name = "pdk-widget"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+oxidemx-widget-api = { path = "../../../oxidemx-widget-api" }
+oxidemx-widget-proto = { path = "../../../oxidemx-widget-proto", default-features = false }
+postcard = { version = "1", features = ["alloc"] }
+
+[profile.release]
+panic = "abort"
+opt-level = "s"

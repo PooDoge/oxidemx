@@ -4530,6 +4530,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "oxidemx-widget-api"
+version = "0.1.0"
+dependencies = [
+ "oxidemx-widget-proto",
+ "postcard",
+]
+
+[[package]]
 name = "oxidemx-widget-host"
 version = "0.1.0"
 dependencies = [
