@@ -152,3 +152,23 @@ Refinements to Tier 1 items from OpenClaw's verified docs:
 - Everything else in the two catalogues either confirms existing
   tiers or is enterprise/IDE-scale machinery out of scope for a
   single-user desktop assistant.
+
+## Addendum 4 (Goose / LM Studio / Home Assistant pass — final)
+
+- **Editable tool arguments on the approval card** (LM Studio): the
+  confirm dialog lets the user EDIT the command/args before
+  approving, not just allow/deny. Natural upgrade to our approval
+  card alongside "always allow" and "reject with reason". → Tier 1,
+  fold into item 3.
+- **Self-verifying scheduled runs** (Goose recipe `retry.checks`):
+  a scheduled/heartbeat recipe can declare shell-command success
+  checks + an on-failure remediation step, retried N times before
+  reporting failure. Pairs with Tier 2 #6's delivery contract.
+- **User scripts as typed tools** (Home Assistant scripts-as-tools):
+  let the user declare their own tools in a config file — name,
+  description (becomes the tool prompt), command template, typed
+  params — instead of a plugin system. The lowest-friction
+  extensibility model for a single-user assistant; permission =
+  the act of declaring it. → new Tier 2 item.
+- Goose's per-recipe `available_tools` + "keep <25 tools enabled"
+  guidance confirms recipe tool-scoping (Tier 2 #5).
