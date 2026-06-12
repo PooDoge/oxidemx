@@ -5781,7 +5781,65 @@ fn focus_subscription_builder() -> impl futures_util::stream::Stream<Item = ()> 
     singleton::focus_stream(rx)
 }
 
+/// Headless config sanity check (`--check-config`): load the same
+/// config + widget registry the GUI would, print a short summary,
+/// exit 0/1. Used by `scripts/settings-widget-demo.sh` to validate
+/// a seeded XDG_CONFIG_HOME without launching a window.
+fn check_config() -> ! {
+    let Some(path) = oxidemx_shared::config::default_config_path() else {
+        eprintln!("check-config: cannot resolve a config path (no HOME?)");
+        std::process::exit(1);
+    };
+    let cfg = match AppConfig::load_from(&path) {
+        Ok(cfg) => cfg,
+        Err(e) => {
+            eprintln!("check-config: {} failed to load: {e}", path.display());
+            std::process::exit(1);
+        }
+    };
+    println!("config: {}", path.display());
+    for (pi, page) in cfg.radial_menu.pages.iter().enumerate() {
+        println!("page {pi} {:?}: {} slices", page.name, page.slices.len());
+        for (si, slice) in page.slices.iter().enumerate() {
+            if slice.kind == oxidemx_shared::ActionKind::Widget {
+                let source = slice
+                    .widget
+                    .as_ref()
+                    .map(|w| format!("{:?}", w.source))
+                    .unwrap_or_else(|| "<none>".into());
+                let ikey = slice
+                    .widget
+                    .as_ref()
+                    .and_then(|w| w.instance_key.as_deref())
+                    .unwrap_or("-");
+                println!("  slot {si}: widget {source} instance_key={ikey}");
+            }
+        }
+    }
+    println!(
+        "widget bags: {} global, {} instance",
+        cfg.widgets.global.len(),
+        cfg.widgets.instances.len()
+    );
+    let (registry, _) = tabs::buttons::picker::scan_registry_full();
+    for w in &registry {
+        println!(
+            "installed: {} v{} by {} ({})",
+            w.id,
+            w.version,
+            w.author,
+            if w.ready { "ready" } else { "incompatible" }
+        );
+    }
+    std::process::exit(0);
+}
+
 fn main() -> iced::Result {
+    // Headless config check for scripts — no window, no singleton.
+    if std::env::args().any(|a| a == "--check-config") {
+        check_config();
+    }
+
     // Default filter: info for our crates, error-only for usvg (it
     // floods at warn level on freedesktop icons that use legitimate
     // `marker-start="none"` CSS — rendering is unaffected).
@@ -5850,4 +5908,267 @@ fn main() -> iced::Result {
         })
         .subscription(subscription)
         .run()
+}
+
+// ============================================================================
+// Tests — end-to-end widget message flow (Plan 3 Task 4)
+// ============================================================================
+
+/// Drives `update()` through the real picker → options-card message
+/// sequence against a temp `XDG_CONFIG_HOME` holding an installed
+/// (dummy-wasm) weather widget, then persists through the real save
+/// path and re-loads. The GUI walk this replaces is documented in
+/// `scripts/settings-widget-demo.sh`.
+#[cfg(test)]
+mod widget_flow_tests {
+    use super::*;
+    use oxidemx_shared::{ActionKind, WidgetScope, WidgetSource};
+    use serde_json::json;
+
+    /// Minimal but valid weather manifest (mirrors
+    /// `examples/widgets/weather/widget.json` where it matters:
+    /// id, options incl. location/enum/select with defaults).
+    const WEATHER_MANIFEST: &str = r#"{
+      "id": "weather",
+      "name": "Weather",
+      "version": "1.4.0",
+      "author": "JuhLabs",
+      "api_version": 1,
+      "entry": "widget.wasm",
+      "icon": "icon.svg",
+      "permissions": ["net:api.open-meteo.com"],
+      "slice": { "refresh_ms": 900000, "fallback_icon": "weather-clear-symbolic" },
+      "options": [
+        { "key": "location", "type": "location", "label": "Location", "required": true },
+        { "key": "units",    "type": "enum",   "label": "Units",
+          "values": ["c", "f"], "default": "c" },
+        { "key": "refresh",  "type": "select", "label": "Refresh",
+          "values": [300, 900, 1800, 3600], "default": 900, "unit": "s" }
+      ]
+    }"#;
+
+    fn plain_slice(label: &str) -> oxidemx_shared::Slice {
+        oxidemx_shared::Slice {
+            action_id: None,
+            label: label.to_string(),
+            kind: ActionKind::Exec,
+            command: "true".into(),
+            color: "accent".into(),
+            icon: String::new(),
+            submenu: Vec::new(),
+            visible_if: None,
+            icon_untinted: false,
+            description: String::new(),
+            widget: None,
+            dial: None,
+        }
+    }
+
+    /// One temp config home with the dummy weather widget installed.
+    /// Returned guard removes the tree on drop.
+    struct TempConfigHome(std::path::PathBuf);
+    impl Drop for TempConfigHome {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn install_temp_home() -> TempConfigHome {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let root =
+            std::env::temp_dir().join(format!("oxidemx-widget-flow-{}-{stamp}", std::process::id()));
+        let widget_dir = root.join("oxidemx/widgets/weather");
+        std::fs::create_dir_all(&widget_dir).expect("mkdir widget dir");
+        std::fs::write(widget_dir.join("widget.json"), WEATHER_MANIFEST).unwrap();
+        std::fs::write(widget_dir.join("icon.svg"), "<svg xmlns='http://www.w3.org/2000/svg'/>")
+            .unwrap();
+        // Registry scan only checks the entry file *exists* — wasm is
+        // never loaded by the settings app, so a stub byte suffices.
+        std::fs::write(widget_dir.join("widget.wasm"), b"\0asm").unwrap();
+        // The whole flow (config path + registry scan) keys off
+        // XDG_CONFIG_HOME, which `State::default()` reads at build
+        // time below.
+        std::env::set_var("XDG_CONFIG_HOME", &root);
+        TempConfigHome(root)
+    }
+
+    /// The full spec §10 walk, headless: OpenPicker → PickWidget →
+    /// option edits (incl. the geocoder's WidgetLocPick path) →
+    /// scope flip → reset → persist → reload → resolution.
+    #[tokio::test(flavor = "current_thread")]
+    async fn widget_flow_end_to_end() {
+        let home = install_temp_home();
+
+        let mut state = State::default();
+        assert!(
+            state.widget_registry.iter().any(|w| w.id == "weather" && w.ready),
+            "temp-home weather widget must scan as Ready (got {:?})",
+            state.widget_registry
+        );
+        assert!(state.widget_manifests.contains_key("weather"));
+
+        // Ensure slot 4 exists on the active page.
+        while state.active_slices_mut().len() < 5 {
+            let n = state.active_slices_mut().len();
+            let s = plain_slice(&format!("S{n}"));
+            state.active_slices_mut().push(s);
+        }
+        // Slot 4 starts as a plain exec slice with an auto-labelable
+        // (empty) label so PickWidget's relabel rule applies.
+        state.active_slices_mut()[4] = plain_slice("");
+        let page_name = state.config.radial_menu.pages[state.active_page].name.clone();
+        let expected_ikey = oxidemx_shared::widgets::instance_key(&page_name, 4);
+
+        // --- picker: open + pick the installed weather widget ---
+        let _ = update(&mut state, Message::OpenPicker(4));
+        assert_eq!(state.picker_open, Some(4));
+        assert!(state.picker_undo.is_some(), "undo snapshot taken on open");
+
+        let _ = update(
+            &mut state,
+            Message::PickWidget(4, WidgetSource::Custom("weather".into())),
+        );
+        assert_eq!(state.picker_open, None, "pick applies + collapses");
+        {
+            let slice = &state.active_slices()[4];
+            assert_eq!(slice.kind, ActionKind::Widget);
+            let w = slice.widget.as_ref().expect("widget config set");
+            assert_eq!(w.source, WidgetSource::Custom("weather".into()));
+            assert_eq!(w.scope, WidgetScope::Instance);
+            assert_eq!(w.instance_key.as_deref(), Some(expected_ikey.as_str()));
+            assert_eq!(slice.label, "Weather", "auto-label from the registry name");
+        }
+
+        // --- options card edits (Instance scope) ---
+        // Location lands through the geocoder pick message.
+        let _ = update(
+            &mut state,
+            Message::WidgetLocPick {
+                slice: 4,
+                key: "location".into(),
+                name: "Oslo".into(),
+                lat: 59.91,
+                lon: 10.75,
+            },
+        );
+        let _ = update(
+            &mut state,
+            Message::SetWidgetOption {
+                slice: 4,
+                key: "units".into(),
+                value: json!("f"),
+            },
+        );
+        let inst_bag = &state.config.widgets.instances[&expected_ikey]["weather"];
+        assert_eq!(
+            inst_bag["location"],
+            json!({ "name": "Oslo", "lat": 59.91, "lon": 10.75 })
+        );
+        assert_eq!(inst_bag["units"], json!("f"));
+        assert!(state.config.widgets.global.is_empty());
+
+        // --- scope flip → Global: pointer flips, instance bag KEPT ---
+        let _ = update(&mut state, Message::SetWidgetScope(4, WidgetScope::Global));
+        assert_eq!(
+            state.active_slices()[4].widget.as_ref().unwrap().scope,
+            WidgetScope::Global
+        );
+        assert_eq!(
+            state.config.widgets.instances[&expected_ikey]["weather"]["units"],
+            json!("f"),
+            "instance bag kept (ignored) on the Global flip"
+        );
+
+        // --- global edit lands in the global bag only ---
+        let _ = update(
+            &mut state,
+            Message::SetWidgetOption {
+                slice: 4,
+                key: "units".into(),
+                value: json!("c"),
+            },
+        );
+        assert_eq!(state.config.widgets.global["weather"]["units"], json!("c"));
+        assert_eq!(
+            state.config.widgets.instances[&expected_ikey]["weather"]["units"],
+            json!("f"),
+            "instance bag untouched by a global write"
+        );
+
+        // --- resolution through the two-bag merge ---
+        let defaults = state.widget_manifests["weather"].defaults();
+        let global_view =
+            state
+                .config
+                .widgets
+                .resolve("weather", Some(&expected_ikey), WidgetScope::Global, &defaults);
+        assert_eq!(global_view["units"], json!("c"));
+        assert_eq!(global_view["refresh"], json!(900), "manifest default survives");
+        assert!(
+            !global_view.contains_key("location"),
+            "instance-bag location is ignored under Global scope"
+        );
+        let instance_view = state.config.widgets.resolve(
+            "weather",
+            Some(&expected_ikey),
+            WidgetScope::Instance,
+            &defaults,
+        );
+        assert_eq!(instance_view["units"], json!("f"), "instance beats global");
+        assert_eq!(instance_view["location"]["name"], json!("Oslo"));
+
+        // --- per-option reset under Global scope removes the global key ---
+        let _ = update(
+            &mut state,
+            Message::ResetWidgetOption {
+                slice: 4,
+                key: "units".into(),
+            },
+        );
+        assert!(
+            state.config.widgets.global.is_empty(),
+            "empty global bag is pruned after the reset"
+        );
+
+        // --- config JSON shape (what the overlay's watcher will read) ---
+        let cfg_json = serde_json::to_value(&state.config).expect("config serialises");
+        let slice_json = &cfg_json["radial_menu"]["pages"][state.active_page]["slices"][4];
+        assert_eq!(slice_json["type"], json!("widget"));
+        assert_eq!(slice_json["widget"]["source"]["custom"], json!("weather"));
+        assert_eq!(slice_json["widget"]["instance_key"], json!(expected_ikey));
+        assert_eq!(
+            cfg_json["widgets"]["instances"][&expected_ikey]["weather"]["units"],
+            json!("f")
+        );
+
+        // --- persist through the real save path + reload ---
+        let path = state.config_path.clone().expect("temp config path");
+        assert!(
+            path.starts_with(&home.0),
+            "state must point at the temp home, not the user's real config"
+        );
+        persist::save(path.clone(), state.config.clone())
+            .await
+            .expect("save");
+        let reloaded = AppConfig::load_from(&path).expect("reload");
+        let r = reloaded.widgets.resolve(
+            "weather",
+            Some(&expected_ikey),
+            WidgetScope::Instance,
+            &defaults,
+        );
+        assert_eq!(r["units"], json!("f"));
+        assert_eq!(r["location"]["name"], json!("Oslo"));
+        assert_eq!(r["refresh"], json!(900));
+        let slice = &reloaded.radial_menu.pages[state.active_page].slices[4];
+        assert_eq!(slice.kind, ActionKind::Widget);
+        assert_eq!(
+            slice.widget.as_ref().unwrap().instance_key.as_deref(),
+            Some(expected_ikey.as_str())
+        );
+        assert_eq!(slice.widget.as_ref().unwrap().scope, WidgetScope::Global);
+    }
 }
