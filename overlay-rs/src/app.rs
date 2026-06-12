@@ -131,6 +131,9 @@ pub enum Message {
         idx: usize,
         direction: i32,
     },
+    /// Monitor size arrived for the debounced chat-size persist —
+    /// clamp below the output before writing the config.
+    ChatSizePersist((f32, f32), Option<Size>),
     /// Vision-loop dev hook: the window screenshot arrived.
     VisionShot(iced::window::Screenshot),
     /// Toggle the memories management view (header brain button).
@@ -245,12 +248,22 @@ fn update(state: &mut RadialState, message: Message) -> Task<Message> {
             state.advance_animations();
             // Debounced persist of the chat size after a native grip
             // resize: the compositor streams configure events while
-            // the user drags; write the config once it's been quiet.
-            if let Some((at, (w, h))) = state.chat_size_pending_save {
+            // the user drags; once it's been quiet, query the
+            // monitor so the saved size can be clamped below it —
+            // a window at (or clamped to) full output size makes
+            // Mutter composite the surface opaque, turning every
+            // transparent region solid black on the next launch.
+            if let Some((at, pending)) = state.chat_size_pending_save {
                 if at.elapsed() >= std::time::Duration::from_millis(800) {
                     state.chat_size_pending_save = None;
-                    info!(w, h, "chat size persisted");
-                    crate::config::save_chat_size(w.round() as u32, h.round() as u32);
+                    if let Some(id) = state.window_id {
+                        return iced::window::monitor_size(id)
+                            .map(move |m| Message::ChatSizePersist(pending, m));
+                    }
+                    crate::config::save_chat_size(
+                        pending.0.round() as u32,
+                        pending.1.round() as u32,
+                    );
                 }
             }
             // Vision-loop dev hook: optional programmatic resize at
@@ -570,6 +583,18 @@ fn update(state: &mut RadialState, message: Message) -> Task<Message> {
                 state.chat_size_pending_save =
                     Some((std::time::Instant::now(), (size.width, size.height)));
             }
+            Task::none()
+        }
+        Message::ChatSizePersist((w, h), monitor) => {
+            let (mut w, mut h) = (w, h);
+            if let Some(m) = monitor {
+                // 90% of the output: keeps the surface comfortably
+                // off Mutter's "this is basically fullscreen" paths.
+                w = w.min(m.width * 0.9);
+                h = h.min(m.height * 0.9);
+            }
+            info!(w, h, "chat size persisted (monitor-clamped)");
+            crate::config::save_chat_size(w.round() as u32, h.round() as u32);
             Task::none()
         }
         Message::WidgetSample(snap) => {
