@@ -604,6 +604,11 @@ pub struct AiStatusFx {
     pub intensity: f32,
     /// Animation speed multiplier (0.25..=3.0 in the UI).
     pub speed: f32,
+    /// Optional per-status `[c0, c1, c2]` hex palette override.
+    /// `None` (or an unparsable entry) falls back position-wise to
+    /// the theme's accent / accent2 / accent_dim.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub colors: Option<[String; 3]>,
 }
 
 impl Default for AiStatusFx {
@@ -612,6 +617,7 @@ impl Default for AiStatusFx {
             effect: "aurora".to_string(),
             intensity: 1.0,
             speed: 1.0,
+            colors: None,
         }
     }
 }
@@ -643,18 +649,12 @@ pub struct AiFxConfig {
     /// Effect while the chat is open but nothing is in flight.
     #[serde(default)]
     pub idle: AiStatusFx,
-    /// Optional `[c0, c1, c2]` hex overrides. Empty strings (or
-    /// `None`) fall back to the theme's accent / accent2 /
-    /// accent_dim.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub custom_colors: Option<[String; 3]>,
 }
 
 fn default_awaiting_fx() -> AiStatusFx {
     AiStatusFx {
         effect: "glow".to_string(),
-        intensity: 1.0,
-        speed: 1.0,
+        ..AiStatusFx::default()
     }
 }
 
@@ -664,7 +664,6 @@ impl Default for AiFxConfig {
             thinking: AiStatusFx::default(),
             awaiting: default_awaiting_fx(),
             idle: AiStatusFx::default(),
-            custom_colors: None,
         }
     }
 }
