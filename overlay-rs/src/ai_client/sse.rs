@@ -31,12 +31,46 @@ fn split_sse_events(buf: &mut String) -> Vec<(String, String)> {
     events
 }
 
+/// Per-stream fold state for in-flight function_call steps. The
+/// wire shape (captured live, 2026-06-12): `step.start` announces a
+/// function_call with **empty** `arguments: {}`; the real arguments
+/// stream afterwards as one or more `step.delta` events of type
+/// `arguments_delta`, each carrying a JSON-STRING fragment; the
+/// step closes with `step.stop`. Folding only step.start therefore
+/// executed every streamed tool call with `{}` — "action argument
+/// missing" from the model's point of view.
+#[derive(Default)]
+struct FnCallFold {
+    /// step index → (position in `out.calls`, accumulated raw
+    /// arguments JSON text).
+    pending: std::collections::HashMap<u64, (usize, String)>,
+}
+
+impl FnCallFold {
+    /// Parse an accumulated arguments buffer into the call slot.
+    /// Leaves the existing value when the buffer is empty or not
+    /// yet valid JSON (a later delta may complete it).
+    fn flush(&mut self, index: u64, out: &mut RoundOutcome) {
+        if let Some((pos, buf)) = self.pending.get(&index) {
+            if !buf.trim().is_empty() {
+                if let Ok(v) = serde_json::from_str::<serde_json::Value>(buf) {
+                    if let Some(call) = out.calls.get_mut(*pos) {
+                        call.2 = v;
+                    }
+                    self.pending.remove(&index);
+                }
+            }
+        }
+    }
+}
+
 /// Fold one parsed SSE event into the round outcome, forwarding text
 /// deltas to the sink as they arrive.
 async fn apply_sse_event(
     event: &str,
     data: &str,
     out: &mut RoundOutcome,
+    fold: &mut FnCallFold,
     sink: &Option<StreamSink>,
 ) {
     match event {
@@ -59,18 +93,38 @@ async fn apply_sse_event(
                         step["name"].as_str().unwrap_or_default().to_string(),
                         step.get("arguments").cloned().unwrap_or(json!({})),
                     ));
+                    if let Some(index) = v["index"].as_u64() {
+                        fold.pending
+                            .insert(index, (out.calls.len() - 1, String::new()));
+                    }
                 }
             }
         }
         "step.delta" => {
             if let Ok(v) = serde_json::from_str::<serde_json::Value>(data) {
-                if v["delta"]["type"] == "text" {
-                    if let Some(t) = v["delta"]["text"].as_str() {
+                let delta = &v["delta"];
+                if delta["type"] == "text" {
+                    if let Some(t) = delta["text"].as_str() {
                         out.text.push_str(t);
                         if let Some(s) = sink {
                             s.send(StreamEvent::Delta(t.to_string())).await;
                         }
                     }
+                } else if delta["type"] == "arguments_delta" {
+                    if let (Some(index), Some(frag)) =
+                        (v["index"].as_u64(), delta["arguments"].as_str())
+                    {
+                        if let Some((_, buf)) = fold.pending.get_mut(&index) {
+                            buf.push_str(frag);
+                        }
+                    }
+                }
+            }
+        }
+        "step.stop" => {
+            if let Ok(v) = serde_json::from_str::<serde_json::Value>(data) {
+                if let Some(index) = v["index"].as_u64() {
+                    fold.flush(index, out);
                 }
             }
         }
@@ -108,14 +162,21 @@ pub(super) async fn stream_round(
     }
 
     let mut out = RoundOutcome::default();
+    let mut fold = FnCallFold::default();
     let mut buf = String::new();
     let mut stream = res.bytes_stream();
     while let Some(chunk) = stream.next().await {
         let chunk = chunk?;
         buf.push_str(&String::from_utf8_lossy(&chunk));
         for (event, data) in split_sse_events(&mut buf) {
-            apply_sse_event(&event, &data, &mut out, sink).await;
+            apply_sse_event(&event, &data, &mut out, &mut fold, sink).await;
         }
+    }
+    // Belt-and-suspenders: flush any argument buffers whose
+    // step.stop never arrived before the stream ended.
+    let pending_indices: Vec<u64> = fold.pending.keys().copied().collect();
+    for index in pending_indices {
+        fold.flush(index, &mut out);
     }
     if out.status.is_empty() {
         return Err("SSE stream ended without a final interaction status".into());
@@ -148,6 +209,60 @@ mod sse_tests {
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].1, "{\"t\":\"hi\"}");
         assert!(buf.is_empty());
+    }
+
+    #[tokio::test]
+    async fn arguments_delta_fills_function_call_args() {
+        // Real wire capture (2026-06-12): step.start carries empty
+        // arguments; an arguments_delta step.delta carries the JSON
+        // as a string; step.stop closes the step.
+        let mut out = super::RoundOutcome::default();
+        let mut fold = super::FnCallFold::default();
+        let events = [
+            (
+                "step.start",
+                r#"{"index":1,"step":{"id":"ebfnnw33","type":"function_call","name":"memory","arguments":{}},"event_type":"step.start"}"#,
+            ),
+            (
+                "step.delta",
+                r#"{"index":1,"delta":{"arguments":"{\"action\":\"save\",\"text\":\"my favorite color is teal\"}","type":"arguments_delta"},"event_type":"step.delta"}"#,
+            ),
+            ("step.stop", r#"{"index":1,"event_type":"step.stop"}"#),
+        ];
+        for (event, data) in events {
+            super::apply_sse_event(event, data, &mut out, &mut fold, &None).await;
+        }
+        assert_eq!(out.calls.len(), 1);
+        let (id, name, args) = &out.calls[0];
+        assert_eq!(id, "ebfnnw33");
+        assert_eq!(name, "memory");
+        assert_eq!(args["action"], "save");
+        assert_eq!(args["text"], "my favorite color is teal");
+    }
+
+    #[tokio::test]
+    async fn split_arguments_delta_fragments_accumulate() {
+        let mut out = super::RoundOutcome::default();
+        let mut fold = super::FnCallFold::default();
+        let events = [
+            (
+                "step.start",
+                r#"{"index":0,"step":{"id":"x1","type":"function_call","name":"memory","arguments":{}}}"#,
+            ),
+            (
+                "step.delta",
+                r#"{"index":0,"delta":{"arguments":"{\"action\":\"sa","type":"arguments_delta"}}"#,
+            ),
+            (
+                "step.delta",
+                r#"{"index":0,"delta":{"arguments":"ve\"}","type":"arguments_delta"}}"#,
+            ),
+            ("step.stop", r#"{"index":0}"#),
+        ];
+        for (event, data) in events {
+            super::apply_sse_event(event, data, &mut out, &mut fold, &None).await;
+        }
+        assert_eq!(out.calls[0].2["action"], "save");
     }
 
     #[test]
