@@ -2,7 +2,9 @@
 //! highlight intensity).
 
 use crate::{FontChoice, Message, State, VisualField};
-use iced::widget::{button, column, combo_box, container, pick_list, row, text, toggler, Space};
+use iced::widget::{
+    button, column, combo_box, container, pick_list, row, text, text_input, toggler, Space,
+};
 use iced::{Alignment, Element, Length};
 use oxidemx_widgets::style;
 use oxidemx_widgets::widgets::{labeled_int_slider, labeled_slider};
@@ -42,6 +44,7 @@ pub fn view(state: &State) -> Element<'_, Message> {
         |x| Message::SetVisual(VisualField::CenterLabelSize, x),
     );
     let shaders_card = gpu_shaders_card(state);
+    let ai_fx_card = ai_fx_card(state);
     let tooltip_card = tooltip_settings_card(state);
     let page_name_card = page_name_settings_card(state);
 
@@ -92,7 +95,8 @@ pub fn view(state: &State) -> Element<'_, Message> {
                     font_row,
                     tooltip_card,
                     page_name_card,
-                    shaders_card
+                    shaders_card,
+                    ai_fx_card
                 ]
                 .spacing(20),
             )
@@ -863,4 +867,147 @@ fn _imports_link() -> (
     iced::widget::Row<'static, Message>,
 ) {
     (Space::new(), Alignment::Start, row![])
+}
+
+/// "AI window effects" card. Per-status (thinking / awaiting
+/// approval / idle) shader-effect picker + intensity/speed knobs
+/// for the chat window, plus optional hex colour overrides
+/// (blank = follow the active theme's accents).
+fn ai_fx_card(state: &State) -> Element<'_, Message> {
+    let pal = &state.palette;
+    let fx = &state.config.radial_menu.visuals.ai_fx;
+
+    let effect_names: Vec<String> = oxidemx_shared::config::AI_FX_EFFECTS
+        .iter()
+        .map(|(_, name)| name.to_string())
+        .collect();
+    let display_for = |slug: &str| -> String {
+        oxidemx_shared::config::AI_FX_EFFECTS
+            .iter()
+            .find(|(s, _)| *s == slug)
+            .map(|(_, n)| n.to_string())
+            .unwrap_or_else(|| "Aurora".to_string())
+    };
+
+    let status_row = |idx: usize,
+                      title: &'static str,
+                      blurb: &'static str,
+                      cfg: &oxidemx_shared::config::AiStatusFx|
+     -> Element<'static, Message> {
+        let picker = pick_list(
+            effect_names.clone(),
+            Some(display_for(&cfg.effect)),
+            move |name: String| {
+                let slug = oxidemx_shared::config::AI_FX_EFFECTS
+                    .iter()
+                    .find(|(_, n)| *n == name)
+                    .map(|(s, _)| s.to_string())
+                    .unwrap_or_else(|| "aurora".to_string());
+                Message::SetAiFxEffect(idx, slug)
+            },
+        )
+        .text_size(12)
+        .width(Length::Fixed(170.0));
+        column![
+            text(title).size(13),
+            text(blurb).size(11).style(style::text_dim(pal)),
+            row![
+                picker,
+                labeled_slider(
+                    "Intensity",
+                    cfg.intensity,
+                    0.0..=1.0,
+                    0.01,
+                    |x| {
+                        if x <= 0.005 {
+                            "off".to_string()
+                        } else {
+                            format!("{:.0} %", x * 100.0)
+                        }
+                    },
+                    move |x| Message::SetAiFxIntensity(idx, x),
+                ),
+                labeled_slider(
+                    "Speed",
+                    cfg.speed,
+                    0.25..=3.0,
+                    0.05,
+                    |x| format!("{x:.2}x"),
+                    move |x| Message::SetAiFxSpeed(idx, x),
+                ),
+            ]
+            .spacing(12)
+            .align_y(Alignment::Center),
+        ]
+        .spacing(4)
+        .into()
+    };
+
+    let colors = fx
+        .custom_colors
+        .clone()
+        .unwrap_or_else(|| [String::new(), String::new(), String::new()]);
+    let color_input = |i: usize, placeholder: &'static str, val: &str| {
+        text_input(placeholder, val)
+            .size(12)
+            .padding(6)
+            .width(Length::Fixed(120.0))
+            .on_input(move |v| Message::SetAiFxColor(i, v))
+    };
+
+    container(
+        column![
+            text("AI window effects").size(15),
+            text(
+                "Animated shader backdrop for the AI chat, per status. \
+                 Colours follow the active theme's accents unless \
+                 overridden below. Intensity 0 disables a status's \
+                 effect entirely (no GPU work)."
+            )
+            .size(11)
+            .style(style::text_dim(pal)),
+            status_row(
+                0,
+                "Thinking",
+                "While a turn is in flight — the model is generating \
+                 or a tool is running. Breathes with the activity \
+                 pulse.",
+                &fx.thinking,
+            ),
+            status_row(
+                1,
+                "Awaiting approval",
+                "While the agent waits on your choice (the window \
+                 border also breathes yellow).",
+                &fx.awaiting,
+            ),
+            status_row(
+                2,
+                "Idle",
+                "Chat open, nothing in flight — a calm ambient wash.",
+                &fx.idle,
+            ),
+            column![
+                text("Custom colours").size(13),
+                text(
+                    "Optional hex overrides for the effect palette \
+                     (e.g. #00d4ff). Leave blank to follow the \
+                     theme's accent / accent2 / accent dim."
+                )
+                .size(11)
+                .style(style::text_dim(pal)),
+                row![
+                    color_input(0, "accent…", &colors[0]),
+                    color_input(1, "accent2…", &colors[1]),
+                    color_input(2, "accent dim…", &colors[2]),
+                ]
+                .spacing(8),
+            ]
+            .spacing(4),
+        ]
+        .spacing(12),
+    )
+    .padding(12)
+    .style(style::card_quiet(pal))
+    .into()
 }

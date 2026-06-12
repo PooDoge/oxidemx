@@ -71,10 +71,26 @@ pub fn stream() -> impl Stream<Item = OverlayEvent> {
 }
 
 async fn run_listener(tx: async_channel::Sender<OverlayEvent>) -> zbus::Result<()> {
-    let conn = zbus::connection::Builder::session()?
-        .name("org.oxidemx.overlay")?
-        .build()
-        .await?;
+    let conn = zbus::connection::Builder::session()?.build().await?;
+    // Single-instance guard. The daemon's spawner checks this name
+    // before spawning, but an overlay sitting in this listener's
+    // 2 s reconnect backoff doesn't own it yet — a menu request in
+    // that window spawns a duplicate. Duplicates used to park in
+    // the NameTaken → retry loop forever (three live overlays
+    // fighting over focus made the AI page dismiss instantly);
+    // now they exit on the spot. Vision-harness instances
+    // (OXIDEMX_VISION_SHOT) intentionally run alongside the real
+    // overlay and never claim the name.
+    if std::env::var_os("OXIDEMX_VISION_SHOT").is_none() {
+        match conn.request_name("org.oxidemx.overlay").await {
+            Ok(()) => {}
+            Err(zbus::Error::NameTaken) => {
+                info!("another overlay instance owns org.oxidemx.overlay — exiting duplicate");
+                std::process::exit(0);
+            }
+            Err(e) => return Err(e),
+        }
+    }
     let proxy = DaemonProxy::new(&conn).await?;
     info!(
         "Subscribing to org.oxidemx.Daemon signals on {}",

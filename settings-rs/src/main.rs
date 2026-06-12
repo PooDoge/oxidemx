@@ -230,6 +230,13 @@ pub enum Message {
     /// Dial target for slice `idx`.
     SetSliceDial(usize, oxidemx_shared::DialKind),
     SetVisual(VisualField, f32),
+    /// AI-chat status effect picker: (status index 0=thinking
+    /// 1=awaiting 2=idle, effect slug).
+    SetAiFxEffect(usize, String),
+    SetAiFxIntensity(usize, f32),
+    SetAiFxSpeed(usize, f32),
+    /// Custom colour override slot 0..=2 (hex text, blank = theme).
+    SetAiFxColor(usize, String),
     /// Font family override for rendered text (Visuals tab).
     /// Empty string = system default.
     SetFontFamily(String),
@@ -1923,6 +1930,58 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             Task::perform(ui_state::save_last_tab(t.tag().to_string()), |_| {
                 Message::LastTabPersisted
             })
+        }
+        Message::SetAiFxEffect(idx, slug) => {
+            let fx = &mut state.config.radial_menu.visuals.ai_fx;
+            let target = match idx {
+                0 => &mut fx.thinking,
+                1 => &mut fx.awaiting,
+                _ => &mut fx.idle,
+            };
+            target.effect = slug;
+            state.touch();
+            Task::none()
+        }
+        Message::SetAiFxIntensity(idx, v) => {
+            let fx = &mut state.config.radial_menu.visuals.ai_fx;
+            let target = match idx {
+                0 => &mut fx.thinking,
+                1 => &mut fx.awaiting,
+                _ => &mut fx.idle,
+            };
+            target.intensity = v.clamp(0.0, 1.0);
+            state.touch();
+            Task::none()
+        }
+        Message::SetAiFxSpeed(idx, v) => {
+            let fx = &mut state.config.radial_menu.visuals.ai_fx;
+            let target = match idx {
+                0 => &mut fx.thinking,
+                1 => &mut fx.awaiting,
+                _ => &mut fx.idle,
+            };
+            target.speed = v.clamp(0.25, 3.0);
+            state.touch();
+            Task::none()
+        }
+        Message::SetAiFxColor(slot, v) => {
+            let fx = &mut state.config.radial_menu.visuals.ai_fx;
+            let mut colors = fx
+                .custom_colors
+                .clone()
+                .unwrap_or_else(|| [String::new(), String::new(), String::new()]);
+            if let Some(c) = colors.get_mut(slot) {
+                *c = v;
+            }
+            // All-blank → drop the override entirely so the theme
+            // drives the palette again.
+            fx.custom_colors = if colors.iter().all(|c| c.trim().is_empty()) {
+                None
+            } else {
+                Some(colors)
+            };
+            state.touch();
+            Task::none()
         }
         Message::SetVisual(field, v) => {
             match field {

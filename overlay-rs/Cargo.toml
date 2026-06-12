@@ -60,3 +60,6 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 # Config inotify watcher — mirrors what daemon uses.
 notify = "6"
+
+[dev-dependencies]
+naga = { version = "27.0", features = ["wgsl-in"] }

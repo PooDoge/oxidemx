@@ -623,36 +623,97 @@ pub(super) fn view(state: &RadialState) -> Element<'_, Message> {
 
         let mut children: Vec<Element<'_, Message>> = vec![body.into()];
 
-        // Aurora backdrop for the chat — the same theme-tinted
-        // shader the disc uses, stretched over the whole window.
-        // Its radial falloff discards past the inscribed ellipse,
-        // so nothing spills into the transparent rounded corners.
-        // OXIDEMX_NO_CHAT_AURORA=1 disables this layer — diagnostic
-        // escape hatch for isolating post-resize compositing issues.
-        let chat_aurora_enabled = std::env::var_os("OXIDEMX_NO_CHAT_AURORA").is_none();
-        if chat_aurora_enabled && intensity > 0.001 && body_a > 0.001 {
+        // Status-effect backdrop for the chat. The user picks an
+        // effect per status (thinking / awaiting approval / idle)
+        // in settings (`visuals.ai_fx`): "aurora" reuses the disc's
+        // theme-tinted swirl via its chat newtype; the other slugs
+        // dispatch into the status_fx über-shader; "none" (or
+        // intensity 0) skips the layer — zero GPU cost.
+        // OXIDEMX_NO_CHAT_AURORA=1 disables the layer entirely —
+        // diagnostic escape hatch for compositing issues.
+        let chat_fx_enabled = std::env::var_os("OXIDEMX_NO_CHAT_AURORA").is_none();
+        let fx_cfg = &state.visuals.ai_fx;
+        // Test hook: OXIDEMX_VISION_FX=thinking|awaiting|idle
+        // overrides the live status so the vision harness can
+        // screenshot each effect deterministically.
+        let vision_fx = std::env::var("OXIDEMX_VISION_FX").ok();
+        let status_fx = match vision_fx.as_deref() {
+            Some("thinking") => &fx_cfg.thinking,
+            Some("awaiting") => &fx_cfg.awaiting,
+            Some("idle") => &fx_cfg.idle,
+            _ if awaiting_choice => &fx_cfg.awaiting,
+            _ if thinking => &fx_cfg.thinking,
+            _ => &fx_cfg.idle,
+        };
+        // Per-status base brightness: thinking breathes hard (the
+        // "working" read), awaiting breathes gently alongside the
+        // yellow border, idle stays a calm ambient wash.
+        let status_base = if vision_fx.is_none() && !thinking && !awaiting_choice {
+            0.22
+        } else if awaiting_choice || vision_fx.as_deref() == Some("awaiting") {
+            0.40 + 0.20 * pulse
+        } else {
+            0.5 + 0.3 * pulse
+        };
+        let fx_strength = status_fx.intensity.clamp(0.0, 1.0) * status_base * body_a;
+        if chat_fx_enabled && fx_strength > 0.001 {
             let accent2 = oxidemx_shared::theme::parse_hex_rgba(&palette.accent2)
                 .map(|(r, g, b, a)| [r as f32, g as f32, b as f32, a as f32])
                 .unwrap_or(accent_rgba);
             let accent_dim = oxidemx_shared::theme::parse_hex_rgba(&palette.accent_dim)
                 .map(|(r, g, b, a)| [r as f32, g as f32, b as f32, a as f32])
                 .unwrap_or(accent_rgba);
-            let chat_aurora = iced::widget::Shader::new(crate::render::aurora::ChatAuroraProgram(
-                crate::render::aurora::AuroraProgram::new(
-                    state.show_time.unwrap_or_else(std::time::Instant::now),
-                    accent_rgba,
-                    accent2,
-                    accent_dim,
-                    // Quiet backdrop at rest; brightens and breathes
-                    // while a turn is in flight so "the AI is working"
-                    // is visible from across the room.
-                    intensity * if thinking { 0.5 + 0.3 * pulse } else { 0.22 } * body_a,
-                    crate::render::animation::MenuXformRaw::IDENTITY,
-                ),
-            ))
-            .width(Length::Fill)
-            .height(Length::Fill);
-            children.push(chat_aurora.into());
+            // Colour set: theme accents unless the user supplied
+            // custom hex overrides (blank entries fall through to
+            // the theme value position-wise).
+            let pick = |i: usize, fallback: [f32; 4]| -> [f32; 4] {
+                fx_cfg
+                    .custom_colors
+                    .as_ref()
+                    .and_then(|c| oxidemx_shared::theme::parse_hex_rgba(&c[i]))
+                    .map(|(r, g, b, a)| [r as f32, g as f32, b as f32, a as f32])
+                    .unwrap_or(fallback)
+            };
+            let c0 = pick(0, accent_rgba);
+            let c1 = pick(1, accent2);
+            let c2 = pick(2, accent_dim);
+            let start = state.show_time.unwrap_or_else(std::time::Instant::now);
+            match oxidemx_shared::config::AiFxConfig::mode_index(&status_fx.effect) {
+                Some(mode) => {
+                    let fx =
+                        iced::widget::Shader::new(crate::render::status_fx::StatusFxProgram::new(
+                            start,
+                            mode,
+                            fx_strength,
+                            status_fx.speed,
+                            c0,
+                            c1,
+                            c2,
+                        ))
+                        .width(Length::Fill)
+                        .height(Length::Fill);
+                    children.push(fx.into());
+                }
+                None if status_fx.effect != "none" => {
+                    // "aurora" (and any unknown slug, for config
+                    // forward-compat) → the existing chat aurora.
+                    let chat_aurora =
+                        iced::widget::Shader::new(crate::render::aurora::ChatAuroraProgram(
+                            crate::render::aurora::AuroraProgram::new(
+                                start,
+                                c0,
+                                c1,
+                                c2,
+                                intensity.max(0.4) * fx_strength,
+                                crate::render::animation::MenuXformRaw::IDENTITY,
+                            ),
+                        ))
+                        .width(Length::Fill)
+                        .height(Length::Fill);
+                    children.push(chat_aurora.into());
+                }
+                None => {}
+            }
         }
 
         children.push(main_stack);

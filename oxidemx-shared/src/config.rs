@@ -268,6 +268,13 @@ pub struct VisualSettings {
     #[serde(default = "default_aurora_intensity")]
     pub aurora_intensity: f32,
 
+    /// Per-status shader effects for the AI chat window (thinking /
+    /// awaiting approval / idle). Each status picks an effect kind
+    /// plus intensity + speed; colours come from the active theme
+    /// unless `custom_colors` overrides them.
+    #[serde(default)]
+    pub ai_fx: AiFxConfig,
+
     /// Intensity of the haptic-ripple shader (0..=1). 0 disables
     /// — no shader pass runs on haptic events. > 0 paints a
     /// thin expanding ring from menu centre every time a haptic
@@ -560,6 +567,99 @@ fn default_page_name_arced() -> bool {
 fn default_page_name_use_monospace() -> bool {
     true
 }
+/// One AI-chat status effect choice. `effect` is one of the
+/// [`AI_FX_EFFECTS`] slugs; unknown strings render as "aurora".
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AiStatusFx {
+    /// Effect slug — see [`AI_FX_EFFECTS`].
+    pub effect: String,
+    /// Strength multiplier 0..=1 on the status's base brightness.
+    /// 0 disables the layer entirely (no GPU work).
+    pub intensity: f32,
+    /// Animation speed multiplier (0.25..=3.0 in the UI).
+    pub speed: f32,
+}
+
+impl Default for AiStatusFx {
+    fn default() -> Self {
+        AiStatusFx {
+            effect: "aurora".to_string(),
+            intensity: 1.0,
+            speed: 1.0,
+        }
+    }
+}
+
+/// Effect slugs the AI-chat status shader understands, with
+/// display names for pickers. Keep in sync with the `mode`
+/// dispatch in `overlay-rs/src/render/status_fx.wgsl`.
+pub const AI_FX_EFFECTS: &[(&str, &str)] = &[
+    ("none", "None"),
+    ("aurora", "Aurora"),
+    ("glow", "Soft glow"),
+    ("starfield", "Warping starfield"),
+    ("fibers", "Iridescent fibers"),
+    ("gridsun", "Cyber grid + sun"),
+    ("plasma", "Plasma"),
+    ("rings", "Pulse rings"),
+];
+
+/// Per-status AI-chat shader effect configuration.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AiFxConfig {
+    /// Effect while a turn is in flight (model thinking / tool
+    /// running).
+    #[serde(default)]
+    pub thinking: AiStatusFx,
+    /// Effect while the agent waits on a user approval / choice.
+    #[serde(default = "default_awaiting_fx")]
+    pub awaiting: AiStatusFx,
+    /// Effect while the chat is open but nothing is in flight.
+    #[serde(default)]
+    pub idle: AiStatusFx,
+    /// Optional `[c0, c1, c2]` hex overrides. Empty strings (or
+    /// `None`) fall back to the theme's accent / accent2 /
+    /// accent_dim.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub custom_colors: Option<[String; 3]>,
+}
+
+fn default_awaiting_fx() -> AiStatusFx {
+    AiStatusFx {
+        effect: "glow".to_string(),
+        intensity: 1.0,
+        speed: 1.0,
+    }
+}
+
+impl Default for AiFxConfig {
+    fn default() -> Self {
+        AiFxConfig {
+            thinking: AiStatusFx::default(),
+            awaiting: default_awaiting_fx(),
+            idle: AiStatusFx::default(),
+            custom_colors: None,
+        }
+    }
+}
+
+impl AiFxConfig {
+    /// Map an effect slug to the shader's `mode` index. "aurora"
+    /// and "none" are handled host-side (existing aurora pipeline /
+    /// no layer) and return `None` here.
+    pub fn mode_index(effect: &str) -> Option<u32> {
+        match effect {
+            "glow" => Some(1),
+            "starfield" => Some(2),
+            "fibers" => Some(3),
+            "gridsun" => Some(4),
+            "plasma" => Some(5),
+            "rings" => Some(6),
+            _ => None,
+        }
+    }
+}
+
 impl Default for VisualSettings {
     fn default() -> Self {
         VisualSettings {
@@ -575,6 +675,7 @@ impl Default for VisualSettings {
             tooltip_bg_alpha: default_tooltip_bg_alpha(),
             tooltip_text_color: default_tooltip_text_color(),
             aurora_intensity: default_aurora_intensity(),
+            ai_fx: AiFxConfig::default(),
             ripple_intensity: default_ripple_intensity(),
             hover_glow_intensity: default_hover_glow_intensity(),
             dispatch_burst_intensity: default_dispatch_burst_intensity(),

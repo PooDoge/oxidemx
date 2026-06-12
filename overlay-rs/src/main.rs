@@ -57,6 +57,7 @@ mod render {
     pub mod slice_bevel;
     pub mod slices;
     pub mod specular_sweep;
+    pub mod status_fx;
 }
 mod theme;
 mod tray;
