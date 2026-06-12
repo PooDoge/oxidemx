@@ -6,7 +6,7 @@ use clap::{Parser, Subcommand};
 use oxidemx_widget_cli::{install, pack, verify};
 use oxidemx_widget_host::SignatureState;
 
-/// OxideMX widget bundle tool — pack, verify, and install `.oxw` widget bundles.
+/// OxideMX widget bundle tool — pack, verify, and install `.omxw` widget bundles.
 #[derive(Parser)]
 #[command(name = "oxidemx-widget", version, about)]
 struct Cli {
@@ -16,22 +16,22 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Pack a widget directory into a signed `.oxw` bundle.
+    /// Pack a widget directory into a signed `.omxw` bundle.
     Pack {
         /// Path to the widget directory (must contain widget.json).
         dir: PathBuf,
-        /// Output path for the `.oxw` file (default: `<dir_name>.oxw`).
+        /// Output path for the `.omxw` file (default: `<dir_name>.omxw`).
         #[arg(short, long)]
         output: Option<PathBuf>,
     },
-    /// Verify the signature of a `.oxw` bundle and print the signer fingerprint.
+    /// Verify the signature of a `.omxw` bundle and print the signer fingerprint.
     Verify {
-        /// Path to the `.oxw` bundle.
+        /// Path to the `.omxw` bundle (legacy `.oxw` accepted).
         bundle: PathBuf,
     },
-    /// Install a `.oxw` bundle into the OxideMX widgets directory.
+    /// Install a `.omxw` bundle into the OxideMX widgets directory.
     Install {
-        /// Path to the `.oxw` bundle.
+        /// Path to the `.omxw` bundle (legacy `.oxw` accepted).
         bundle: PathBuf,
         /// Consent to installing an unsigned/unknown-signer bundle, and
         /// replace an existing widget with the same id.

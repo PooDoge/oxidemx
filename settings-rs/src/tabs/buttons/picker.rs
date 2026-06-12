@@ -914,7 +914,10 @@ fn icon_tile_style(pal: &Palette) -> impl Fn(&iced::Theme) -> iced::widget::cont
 }
 
 /// Picker tile button — surface card; the currently-applied tile
-/// gets an accent ring + wash.
+/// gets an accent ring + wash. Tiles without an `on_press`
+/// (incompatible registry widgets, spec §9) reach this closure with
+/// `Status::Disabled` and render properly dimmed: washed-out
+/// background, faint border, muted text.
 fn tile_style(
     pal: &Palette,
     selected: bool,
@@ -924,7 +927,22 @@ fn tile_style(
     let border = if selected { pal.accent } else { pal.hairline };
     let border_hover = if selected { pal.accent } else { pal.hairline_strong };
     let text_color = pal.text;
+    let disabled_bg = pal.crust;
+    let disabled_border = pal.hairline_faint;
+    let disabled_text = pal.overlay0;
     move |_, status| {
+        if matches!(status, iced::widget::button::Status::Disabled) {
+            return iced::widget::button::Style {
+                background: Some(Background::Color(disabled_bg)),
+                text_color: disabled_text,
+                border: Border {
+                    color: disabled_border,
+                    width: 1.0,
+                    radius: 8.0.into(),
+                },
+                ..Default::default()
+            };
+        }
         let hovered = matches!(status, iced::widget::button::Status::Hovered);
         iced::widget::button::Style {
             background: Some(Background::Color(if hovered && !selected { hover_bg } else { bg })),

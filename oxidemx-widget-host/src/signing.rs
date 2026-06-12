@@ -1,9 +1,9 @@
 //! Bundle signing and verification helpers shared by the CLI (pack/verify/install)
 //! and the registry scanner (classifying installed widgets).
 //!
-//! ## .oxw SIGNATURE entry format
+//! ## .omxw SIGNATURE entry format
 //!
-//! The `SIGNATURE` file inside a `.oxw` zip (or inside an installed widget dir)
+//! The `SIGNATURE` file inside a `.omxw` zip (or inside an installed widget dir)
 //! is exactly 96 bytes:
 //!
 //! ```text
@@ -28,7 +28,7 @@ use std::path::Path;
 
 use sha2::{Digest, Sha256};
 
-/// Name of the signature entry inside a `.oxw` zip and inside an installed
+/// Name of the signature entry inside a `.omxw` zip and inside an installed
 /// widget directory.
 pub const SIGNATURE_ENTRY: &str = "SIGNATURE";
 

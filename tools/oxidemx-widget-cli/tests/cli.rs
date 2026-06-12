@@ -41,7 +41,7 @@ fn set_dev_key_path(xdg: &Path) {
     std::env::set_var("OXIDEMX_DEV_KEY_PATH", &key_path);
 }
 
-/// Hand-craft a raw `.oxw` zip from `(name, bytes)` entries — no SIGNATURE,
+/// Hand-craft a raw `.omxw` zip from `(name, bytes)` entries — no SIGNATURE,
 /// no name sanitisation.  Used to build unsigned and hostile bundles.
 fn write_raw_bundle(path: &Path, entries: &[(&str, &[u8])]) {
     let mut buf = Vec::<u8>::new();
@@ -85,7 +85,7 @@ fn pack_verify_round_trip() {
     std::fs::create_dir_all(&xdg).unwrap();
     set_dev_key_path(&xdg);
 
-    let out = tmp.path().join("weather.oxw");
+    let out = tmp.path().join("weather.omxw");
     let pack_result = pack(&widget_dir, Some(&out)).expect("pack should succeed");
 
     assert!(out.exists(), "bundle file should be created");
@@ -113,7 +113,7 @@ fn tampered_bundle_fails_verify() {
     std::fs::create_dir_all(&xdg).unwrap();
     set_dev_key_path(&xdg);
 
-    let out = tmp.path().join("weather.oxw");
+    let out = tmp.path().join("weather.omxw");
     pack(&widget_dir, Some(&out)).expect("pack should succeed");
 
     // Flip one byte near the start of the bundle (after the PK header).
@@ -146,7 +146,7 @@ fn install_then_scan_shows_unknown_signature() {
     // Point XDG_CONFIG_HOME at the test dir so widgets_dir() returns a safe path.
     std::env::set_var("XDG_CONFIG_HOME", &xdg);
 
-    let out = tmp.path().join("weather.oxw");
+    let out = tmp.path().join("weather.omxw");
     pack(&widget_dir, Some(&out)).expect("pack should succeed");
 
     let install_root = xdg.join("oxidemx").join("widgets");
@@ -200,7 +200,7 @@ fn id_collision_refused_and_forced() {
     set_dev_key_path(&xdg);
     std::env::set_var("XDG_CONFIG_HOME", &xdg);
 
-    let out = tmp.path().join("weather.oxw");
+    let out = tmp.path().join("weather.omxw");
     pack(&widget_dir, Some(&out)).expect("pack should succeed");
 
     let install_root = xdg.join("oxidemx").join("widgets");
@@ -229,7 +229,7 @@ fn id_collision_refused_and_forced() {
 #[test]
 fn unsigned_bundle_refused_without_force_installs_with_force() {
     let tmp = tempfile::tempdir().unwrap();
-    let bundle = tmp.path().join("weather.oxw");
+    let bundle = tmp.path().join("weather.omxw");
     write_raw_bundle(
         &bundle,
         &[
@@ -275,7 +275,7 @@ fn unknown_key_bundle_refused_without_force() {
     std::fs::create_dir_all(&xdg).unwrap();
     set_dev_key_path(&xdg);
 
-    let out = tmp.path().join("weather.oxw");
+    let out = tmp.path().join("weather.omxw");
     let pack_result = pack(&widget_dir, Some(&out)).expect("pack should succeed");
 
     let install_root = tmp.path().join("widgets");
@@ -297,7 +297,7 @@ fn unknown_key_bundle_refused_without_force() {
 #[test]
 fn zip_slip_entry_is_rejected_and_writes_nothing() {
     let tmp = tempfile::tempdir().unwrap();
-    let bundle = tmp.path().join("evil.oxw");
+    let bundle = tmp.path().join("evil.omxw");
     // The zip writer happily records raw traversal names — exactly what a
     // hostile bundle would carry.
     write_raw_bundle(

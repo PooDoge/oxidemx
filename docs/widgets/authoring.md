@@ -17,7 +17,7 @@ cd my-widget
 # edit src/lib.rs, widget.json
 cargo build --release --target wasm32-wasip1
 oxidemx-widget pack              # validates + zips + dev-key-signs
-oxidemx-widget install ./my-widget-0.1.0.oxw
+oxidemx-widget install ./my-widget-0.1.0.omxw
 # the overlay hot-registers it; place it from Settings › Menu
 ```
 
@@ -202,17 +202,18 @@ All three commands are provided by `oxidemx-widget` (alias `oxidemx-widget-cli`)
 ```bash
 # Pack: validates manifest, zips all files, signs with your dev key.
 # Dev key lives at ~/.config/oxidemx/dev-signing.key (generated on first use).
-# Output: <dir_name>.oxw  (override with --out path)
-oxidemx-widget pack [--out my-widget-0.1.0.oxw] <widget-dir>
+# Output: <dir_name>.omxw  (override with --output path)
+oxidemx-widget pack [--output my-widget-0.1.0.omxw] <widget-dir>
 
-# Verify a .oxw bundle's SIGNATURE without installing.
+# Verify a .omxw bundle's SIGNATURE without installing.
+# (Legacy .oxw bundles are still accepted on input.)
 # Prints: Signed (pinned|unknown fingerprint) or Unsigned.
-oxidemx-widget verify my-widget-0.1.0.oxw
+oxidemx-widget verify my-widget-0.1.0.omxw
 
 # Install to ~/.config/oxidemx/widgets/<id>/.
 # Verifies signature first.  Unknown (dev) key: proceeds with a log line.
 # Use --force to replace an already-installed id.
-oxidemx-widget install [--force] my-widget-0.1.0.oxw
+oxidemx-widget install [--force] my-widget-0.1.0.omxw
 ```
 
 After install the dir-watcher triggers a hot-register; the overlay

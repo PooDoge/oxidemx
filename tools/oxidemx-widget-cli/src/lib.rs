@@ -148,14 +148,15 @@ fn make_signature_blob(signing_key: &SigningKey, digest: &[u8]) -> Vec<u8> {
 /// Result of a successful `pack` operation.
 #[derive(Debug)]
 pub struct PackResult {
-    /// Path to the produced `.oxw` file.
+    /// Path to the produced `.omxw` file.
     pub path: PathBuf,
     /// Hex fingerprint of the signing key used.
     pub fingerprint: String,
 }
 
-/// Pack a widget directory into a `.oxw` zip file, sign with the dev key,
-/// and write to `out_path` (defaulting to `<dir_name>.oxw` in the current dir).
+/// Pack a widget directory into a `.omxw` zip file (spec §4), sign with the
+/// dev key, and write to `out_path` (defaulting to `<dir_name>.omxw` in the
+/// current dir).
 ///
 /// The SIGNATURE entry is the last entry added to the zip, covering all other
 /// entries via `bundle_digest_from_zip`.
@@ -197,7 +198,7 @@ pub fn pack(widget_dir: &Path, out_path: Option<&Path>) -> Result<PackResult, Cl
                 .file_name()
                 .map(|s| s.to_string_lossy().into_owned())
                 .unwrap_or_else(|| "widget".to_string());
-            PathBuf::from(format!("{dir_name}.oxw"))
+            PathBuf::from(format!("{dir_name}.omxw"))
         }
     };
 
@@ -329,7 +330,7 @@ pub struct VerifyResult {
     pub fingerprint: String,
 }
 
-/// Verify a `.oxw` bundle's SIGNATURE against the pinned registry key.
+/// Verify a `.omxw` bundle's SIGNATURE against the pinned registry key.
 ///
 /// Returns `SignatureState::Unknown` for any valid signature from a key that
 /// isn't the pinned registry key (e.g. a developer key), and
@@ -386,7 +387,9 @@ pub struct InstallResult {
     pub fingerprint: String,
 }
 
-/// Install a `.oxw` bundle into `widgets_dir()`.
+/// Install a `.omxw` bundle into `widgets_dir()`.
+///
+/// Input extension is not enforced — legacy `.oxw` bundles install fine.
 ///
 /// Verifies the bundle first.  Spec §4 (sideloads need consent): only
 /// bundles signed by the pinned registry key install unconditionally.

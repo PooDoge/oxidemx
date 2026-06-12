@@ -97,12 +97,12 @@ pub enum StoreInstallOutcome {
 // ============================================================================
 
 /// "Install from file…": native file dialog → install. The dialog
-/// filter accepts both the tooling's `.oxw` extension and the
-/// spec's `.omxw` spelling.
+/// filter accepts the spec's `.omxw` extension (§4) plus the
+/// pre-standardization `.oxw` spelling for old bundles.
 pub async fn pick_and_install() -> StoreInstallOutcome {
     let chosen = rfd::AsyncFileDialog::new()
         .set_title("Install widget bundle")
-        .add_filter("Widget bundle", &["oxw", "omxw"])
+        .add_filter("Widget bundle", &["omxw", "oxw"])
         .pick_file()
         .await;
     let Some(handle) = chosen else {
@@ -210,7 +210,7 @@ pub fn uninstall(id: &str) -> Result<(), String> {
 
 /// Derive a local filename from a download URL: last path segment,
 /// query/fragment stripped, hostile characters filtered. Falls back
-/// to `widget.oxw` when the URL has no usable path (bare host,
+/// to `widget.omxw` when the URL has no usable path (bare host,
 /// trailing slash, all-dots segment).
 pub fn filename_from_url(url: &str) -> String {
     let stripped = url.split(['?', '#']).next().unwrap_or("");
@@ -226,7 +226,7 @@ pub fn filename_from_url(url: &str) -> String {
         .filter(|c| c.is_ascii_alphanumeric() || "-_.".contains(*c))
         .collect();
     if safe.trim_matches('.').is_empty() {
-        "widget.oxw".to_string()
+        "widget.omxw".to_string()
     } else {
         safe
     }
@@ -491,7 +491,7 @@ fn footer<'a>(pal: &'a Palette, store: &'a WidgetStoreState) -> Element<'a, Mess
         container(text("STUB").size(8).style(style::text_accent(pal)))
             .padding([2, 6])
             .style(style::chip(pal)),
-        text("Registry browsing coming soon — for now drop a .oxw bundle into ~/.config/oxidemx/widgets/ or install below.")
+        text("Registry browsing coming soon — for now drop a .omxw bundle into ~/.config/oxidemx/widgets/ or install below.")
             .size(10)
             .style(style::text_faint(pal)),
     ]
@@ -504,7 +504,7 @@ fn footer<'a>(pal: &'a Palette, store: &'a WidgetStoreState) -> Element<'a, Mess
 
     let url_ready = !store.busy && !store.url_input.trim().is_empty();
     let url_row = row![
-        text_input("https://…/widget.oxw", &store.url_input)
+        text_input("https://…/widget.omxw", &store.url_input)
             .on_input(Message::StoreUrlInput)
             .on_submit(Message::StoreInstallFromUrl)
             .padding(6)
@@ -542,8 +542,8 @@ mod tests {
     #[test]
     fn filename_takes_last_path_segment() {
         assert_eq!(
-            filename_from_url("https://widgets.oxidemx.org/v1/w/weather-1.4.0.oxw"),
-            "weather-1.4.0.oxw"
+            filename_from_url("https://widgets.oxidemx.org/v1/w/weather-1.4.0.omxw"),
+            "weather-1.4.0.omxw"
         );
     }
 
@@ -557,9 +557,9 @@ mod tests {
 
     #[test]
     fn filename_falls_back_for_bare_host_or_trailing_slash() {
-        assert_eq!(filename_from_url("https://example.com"), "widget.oxw");
-        assert_eq!(filename_from_url("https://example.com/"), "widget.oxw");
-        assert_eq!(filename_from_url(""), "widget.oxw");
+        assert_eq!(filename_from_url("https://example.com"), "widget.omxw");
+        assert_eq!(filename_from_url("https://example.com/"), "widget.omxw");
+        assert_eq!(filename_from_url(""), "widget.omxw");
     }
 
     #[test]
@@ -567,13 +567,13 @@ mod tests {
         // Path traversal / separators / shell metachars never
         // survive into the temp-file name.
         assert_eq!(filename_from_url("https://x.org/a/..%2F..%2Fetc"), "..2F..2Fetc");
-        assert_eq!(filename_from_url("https://x.org/.."), "widget.oxw");
-        assert_eq!(filename_from_url("https://x.org/$(rm)/.."), "widget.oxw");
+        assert_eq!(filename_from_url("https://x.org/.."), "widget.omxw");
+        assert_eq!(filename_from_url("https://x.org/$(rm)/.."), "widget.omxw");
     }
 
     #[test]
     fn filename_without_scheme_still_works() {
-        assert_eq!(filename_from_url("example.com/w.oxw"), "w.oxw");
+        assert_eq!(filename_from_url("example.com/w.omxw"), "w.omxw");
     }
 
     // --- signature chip ---

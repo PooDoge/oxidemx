@@ -236,3 +236,43 @@ e23a72a feat(daemon): add GetActiveDeviceState + ShowPopup + EnsureOverlayRunnin
 bb62f85 rename(dbus): org.kde.oxidemx -> org.oxidemx.Daemon
 deb2c0e docs: spec lock + implementation plan for indicator + popup + settings
 ```
+
+## Widget system follow-ups
+
+Deferred from the widget-plugin plans (runtime + CLI + settings UI,
+2026-06-12). Ordered roughly by user impact:
+
+- **Keyboard nav for the behavior picker** — roving focus across the
+  tile grid, Esc closes the panel, Enter applies the focused tile.
+  iced 0.14's focus APIs make this a sizeable chunk; explicitly
+  deferred from Plan 3 Task 1.
+- **Live picker-tile mini-previews (1 fps)** — picker widget tiles
+  currently show canned design-mockup values; the options-card live
+  preview (Task 5) proved the worker-embedding pattern, the picker
+  just needs a multi-instance variant with a 1 fps cap + pause when
+  the panel is hidden.
+- **`Prim::Image` real rendering + wedge-path clipping** — the scene
+  replay (`oxidemx-scene-render`) draws a placeholder rect for Image
+  prims (needs a decode + handle cache) and does not clip prims to
+  the wedge path; both halves of spec §8's drawing model.
+- **Per-frame `InstanceId` derivation caching in ring.rs** — the
+  overlay derives `instance_key` (string alloc) per widget slice per
+  frame; cache per (page, slot) and invalidate on config reload.
+- **Slot-number display vs 0-based key cosmetic mismatch** — the UI
+  says "Slot 5" (1-based) while instance keys read `apps.slot4`
+  (0-based). Settle on one public numbering or annotate the
+  breadcrumb so hand-editors aren't surprised.
+- **Haptic routing to the daemon** — `HostCmd::HapticPulse` is gated
+  on the `haptics` permission but stubs to a log line; route through
+  the daemon's haptic client like the overlay's own pulses.
+- **tracing-log bridge in the overlay** — the widget host logs via
+  `log` (incl. guests' `Log` cmds); the overlay only installs a
+  `tracing` subscriber, so widget logs vanish. Add `tracing-log`'s
+  LogTracer (settings-rs has the same gap).
+- **Registry browsing UI (1.0)** — the widget store dialog lists
+  installed widgets + file/URL install only; spec §11's catalog
+  browse/search against widgets.oxidemx.org is post-v1.
+- **exec/open-url consent UX deepening** — install-time consent
+  lists permissions, but `exec` in particular deserves a louder,
+  per-permission explanation (and possibly a first-use prompt)
+  rather than one bullet in the sideload dialog.
