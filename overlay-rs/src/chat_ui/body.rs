@@ -211,7 +211,7 @@ fn bubble_row<'a>(
     // placeholder keeps the layout from shifting.
     let hovered = state.ai_hover_msg == Some(i);
     let copy_btn: Element<'a, Message> = if hovered {
-        button(text("⧉").size(13).color(kit.fade(kit.subtext0, 1.0)))
+        button(text("⧉").size(15).color(kit.fade(kit.subtext0, 1.0)))
             .padding([2, 4])
             .style(|_, _| button::Style::default())
             .on_press(Message::AiCopyText(msg.text.clone()))
@@ -315,7 +315,7 @@ pub fn threads_list<'a>(state: &'a RadialState, kit: &Kit) -> Element<'a, Messag
         .on_press(Message::AiSelectThread(idx));
 
         let small_btn = |label: &'static str, msg: Message| {
-            button(text(label).size(12).color(kit.fade(kit.subtext0, 1.0)))
+            button(text(label).size(14).color(kit.fade(kit.subtext0, 1.0)))
                 .padding([4, 6])
                 .style(|_, _| button::Style::default())
                 .on_press(msg)

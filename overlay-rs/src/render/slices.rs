@@ -24,6 +24,14 @@ use crate::radial::{
 };
 use crate::render::icons::{draw_icon, IconCache};
 
+/// Fixed rasterization size for slice icons (ICON_BG_RADIUS × 1.4
+/// at rest scale). Icons are always rasterized at THIS size and the
+/// canvas scales the bitmap to the animated draw size — resolving
+/// at the scaled size instead re-rasterizes every SVG through resvg
+/// on every frame of any scale animation (menu-open spring, page
+/// transitions, submenu pop), which is exactly the page-switch lag.
+const GLYPH_RASTER_PX: u32 = 36;
+
 /// Default wedge sweep for the legacy 8-slot ring. Kept for the
 /// submenu pop-out which still uses this for parent-bisector
 /// math; the main ring computes its sweep from the active page's
@@ -285,7 +293,10 @@ pub fn draw_slice(
         .filter(|s| !s.is_empty())
         .unwrap_or("accent");
     let (sr, sg, sb, _) = palette.slice_color_rgba(slot_color_key);
-    let icon_color_rgba = (sr as f32, sg as f32, sb as f32, mo);
+    // Full-alpha tint: the animated opacity is applied by draw_icon,
+    // not baked into the raster — alpha is part of the cache key and
+    // a per-frame alpha would re-rasterize on every fade frame.
+    let icon_color_rgba = (sr as f32, sg as f32, sb as f32, 1.0);
 
     // Try to load + tint the slice's configured icon. On miss
     // (icon name not in any theme dir, file load failure, etc.),
@@ -293,7 +304,7 @@ pub fn draw_slice(
     // ring still has a visible identity.
     let icon_source = slice.map(|s| s.icon.as_str()).unwrap_or("");
     let glyph_size = (icon_bg_radius * 1.4).max(8.0);
-    let glyph_size_px = glyph_size.round() as u32;
+    let glyph_size_px = GLYPH_RASTER_PX;
 
     // Widget wedges replace the icon block entirely with their
     // live-data typography.
@@ -899,9 +910,11 @@ pub fn draw_submenu(
             "accent"
         };
         let (sr, sg, sb, _) = palette.slice_color_rgba(color_key);
-        let icon_color = (sr as f32, sg as f32, sb as f32, item_opacity);
+        // Full-alpha tint — see icon_color_rgba above; draw_icon
+        // applies item_opacity at draw time.
+        let icon_color = (sr as f32, sg as f32, sb as f32, 1.0);
         let glyph_size = (scaled_radius * 1.4).max(6.0);
-        let glyph_size_px = glyph_size.round().max(1.0) as u32;
+        let glyph_size_px = GLYPH_RASTER_PX;
         let resolved = if item.icon_untinted {
             icons.resolve_untinted(item.icon.as_str(), glyph_size_px)
         } else {

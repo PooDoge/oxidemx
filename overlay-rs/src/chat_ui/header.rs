@@ -58,12 +58,12 @@ pub fn view<'a>(state: &'a RadialState, kit: &Kit) -> Element<'a, Message> {
     let icon_btn = move |glyph: &'static str, tip_active: bool, msg: Message| {
         button(
             text(glyph)
-                .size(14)
+                .size(19)
                 .color(kit.fade(if tip_active { kit.accent } else { kit.subtext0 }, 1.0))
                 .align_x(iced::alignment::Horizontal::Center),
         )
-        .width(Length::Fixed(30.0))
-        .height(Length::Fixed(30.0))
+        .width(Length::Fixed(32.0))
+        .height(Length::Fixed(32.0))
         .padding(0)
         .style(move |_, _status| button::Style {
             background: if tip_active {
@@ -88,17 +88,17 @@ pub fn view<'a>(state: &'a RadialState, kit: &Kit) -> Element<'a, Message> {
     // Close: light filled circle with a dark ×, per the design.
     let close_btn = button(
         text("✕")
-            .size(12)
+            .size(16)
             .color(kit.fade(kit.crust, 1.0))
             .align_x(iced::alignment::Horizontal::Center),
     )
-    .width(Length::Fixed(30.0))
-    .height(Length::Fixed(30.0))
+    .width(Length::Fixed(32.0))
+    .height(Length::Fixed(32.0))
     .padding(0)
     .style(move |_, _status| button::Style {
         background: Some(iced::Background::Color(kit.fade(kit.text, 1.0))),
         border: iced::border::Border {
-            radius: 15.0.into(),
+            radius: 16.0.into(),
             ..Default::default()
         },
         ..Default::default()

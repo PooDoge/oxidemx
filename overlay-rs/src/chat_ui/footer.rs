@@ -83,7 +83,7 @@ pub fn view<'a>(state: &'a RadialState, kit: &Kit) -> Element<'a, Message> {
     let action_btn = if state.ai_loading {
         button(
             text("■")
-                .size(15)
+                .size(19)
                 .color(kit.fade(kit.crust, 1.0))
                 .align_x(iced::alignment::Horizontal::Center),
         )
@@ -102,7 +102,7 @@ pub fn view<'a>(state: &'a RadialState, kit: &Kit) -> Element<'a, Message> {
     } else {
         button(
             text("➤")
-                .size(15)
+                .size(20)
                 .color(kit.fade(kit.crust, 1.0))
                 .align_x(iced::alignment::Horizontal::Center),
         )

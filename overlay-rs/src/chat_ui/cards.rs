@@ -39,7 +39,7 @@ pub fn view<'a>(card: &'a AgentCardData, kit: &Kit) -> Element<'a, Message> {
     };
 
     let header = row![
-        text(glyph).size(12).color(kit.fade(tone, 1.0)),
+        text(glyph).size(15).color(kit.fade(tone, 1.0)),
         text(title)
             .size(11.5)
             .font(iced::Font {

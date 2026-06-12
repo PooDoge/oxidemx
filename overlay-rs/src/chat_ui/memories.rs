@@ -86,7 +86,7 @@ pub fn view<'a>(state: &'a RadialState, kit: &Kit) -> Element<'a, Message> {
         ]
         .spacing(8);
 
-        let del = button(text("✕").size(12).color(kit.fade(kit.subtext0, 1.0)))
+        let del = button(text("✕").size(14).color(kit.fade(kit.subtext0, 1.0)))
             .padding([2, 4])
             .style(|_, _| button::Style::default())
             .on_press(Message::AiMemoryDelete(m.id.clone()));
