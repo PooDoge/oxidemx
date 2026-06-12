@@ -6,6 +6,7 @@ use crate::gaming::GamingConfig;
 use crate::haptics::HapticsConfig;
 use crate::pointer::{PointerConfig, ScrollConfig};
 use crate::theme::ThemeName;
+use crate::widgets::WidgetStore;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
@@ -889,6 +890,16 @@ pub struct AppConfig {
     /// Absent = defaults.
     #[serde(default)]
     pub overlay: OverlayConfig,
+
+    /// Config schema version. Missing = 2 (pre-widget-store configs).
+    /// Bumped to 3 by the one-shot migration in `migrate.rs`.
+    #[serde(default = "default_schema_version")]
+    pub schema_version: u32,
+
+    /// Two-bag widget settings store (global + per-instance). See
+    /// `crate::widgets`.
+    #[serde(default, skip_serializing_if = "WidgetStore::is_empty")]
+    pub widgets: WidgetStore,
 }
 
 /// Overlay-window preferences persisted in the `overlay` table of
@@ -949,6 +960,13 @@ fn default_command_allowlist() -> Vec<String> {
         .map(String::from)
         .to_vec()
 }
+
+fn default_schema_version() -> u32 {
+    2
+}
+
+/// Schema version written by this build of the tools.
+pub const CURRENT_SCHEMA_VERSION: u32 = 3;
 
 /// Default location of the user's main config: `~/.config/oxidemx/config.json`.
 pub fn default_config_path() -> Option<PathBuf> {

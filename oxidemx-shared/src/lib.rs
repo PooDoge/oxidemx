@@ -23,6 +23,7 @@ pub mod pointer;
 pub mod popup;
 pub mod profiles;
 pub mod theme;
+pub mod widgets;
 
 pub use action::ActionKind;
 pub use animation::{
@@ -38,7 +39,7 @@ pub use buttons::{ButtonAction, ButtonsConfig, MouseButton};
 pub use conditions::Condition;
 pub use config::{
     AiConfig, AppConfig, DialKind, DispatchBurstStyle, OverlayConfig, RadialMenuConfig, RadialPage,
-    Slice, VisualSettings, WidgetConfig, WidgetSource,
+    Slice, VisualSettings, WidgetConfig, WidgetScope, WidgetSource,
 };
 pub use gaming::{
     GamingConfig, HapticEventMode, HapticRedirectConfig, HapticRedirectCurve, HapticRedirectMode,
@@ -50,3 +51,4 @@ pub use popup::{
 };
 pub use profiles::ProfileResolver;
 pub use theme::{Theme, ThemeName};
+pub use widgets::{instance_key, JsonBag, WidgetStore};
