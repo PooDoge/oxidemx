@@ -137,3 +137,18 @@ Refinements to Tier 1 items from OpenClaw's verified docs:
 - Anti-marketplace stance reinforced: ClawHub's "ClawHavoc"
   campaign planted 824 malicious skills; registry trust is a
   full-time job we should not take on.
+
+## Addendum 3 (Claude Code / Gemini CLI primary-source pass)
+
+- **Background monitors** (Claude Code plugin `monitors.json`: a
+  watcher command whose stdout lines arrive as agent notifications)
+  — a push-based complement to the heartbeat: our daemon could feed
+  battery/device/Easy-Switch events straight into the chat thread
+  as they happen instead of waiting for the next heartbeat tick.
+- **Dynamic context injection in recipes** (both vendors support
+  `!`cmd`` pre-execution in prompt files): recipe prompts that
+  embed e.g. `!`wl-paste`` make the clipboard-summarizer recipe a
+  one-liner. Gate behind the same confirm dialog Gemini uses.
+- Everything else in the two catalogues either confirms existing
+  tiers or is enterprise/IDE-scale machinery out of scope for a
+  single-user desktop assistant.
