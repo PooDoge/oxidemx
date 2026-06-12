@@ -150,6 +150,15 @@ impl<'a> canvas::Program<crate::app::Message> for Painter<'a> {
             return vec![frame.into_geometry()];
         }
 
+        // Layer cache-buster — see chat_shell::cache_epsilon.
+        frame.fill(
+            &Path::circle(
+                Point::new((1.0 - crate::chat_shell::cache_epsilon()) * 250.0, 0.0),
+                0.1,
+            ),
+            Color::from_rgba(0.0, 0.0, 0.0, 0.004),
+        );
+
         let geom = RadialGeometry::default();
         let center = Point::new(geom.cx as f32, geom.cy as f32);
         let palette = &self.state.theme.theme.colors;

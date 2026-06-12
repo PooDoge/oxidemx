@@ -76,6 +76,27 @@ fn lerp(a: f32, b: f32, t: f32) -> f32 {
     a + (b - a) * t
 }
 
+/// Frame-parity cache-buster, 1.0 / 0.999 alternating roughly per
+/// frame. iced 0.14's layer caching serves STALE GPU buffers for
+/// layers whose content stops changing (frozen mid-morph meshes,
+/// quads stuck at mid-fade alpha) while text layers stay fresh —
+/// multiplying an imperceptible epsilon into a layer's colors (or
+/// nudging a hidden vertex) forces its diff to register change
+/// every frame. Remove once upstream layer caching is fixed.
+pub fn cache_epsilon() -> f32 {
+    let parity = (std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.subsec_millis())
+        .unwrap_or(0)
+        / 16)
+        % 2;
+    if parity == 0 {
+        1.0
+    } else {
+        0.999
+    }
+}
+
 /// Hermite smoothstep between edges. Standard shader-style ramp so
 /// the three crossfades (disc out, caps in, chat in) ease at their
 /// boundaries instead of kinking.
@@ -404,6 +425,17 @@ impl<'a> canvas::Program<crate::app::Message> for CapsPainter<'a> {
         if t <= 0.001 || !self.state.is_drawable() {
             return vec![frame.into_geometry()];
         }
+
+        // Cache-buster: iced 0.14's layer diffing can keep
+        // presenting a STALE mesh buffer once a canvas's geometry
+        // stops changing (the parked caps showed frozen mid-morph
+        // triangles under fresh text layers). An invisible
+        // sub-pixel vertex that alternates every frame forces the
+        // mesh layer to register as changed and re-upload.
+        frame.fill(
+            &Path::circle(Point::new((1.0 - cache_epsilon()) * 250.0, 0.0), 0.1),
+            Color::from_rgba(0.0, 0.0, 0.0, 0.004),
+        );
 
         // Everything fades with the whole-menu tween too, so a
         // dismiss from chat mode fades the shell out exactly like

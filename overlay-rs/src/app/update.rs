@@ -441,6 +441,11 @@ pub(super) fn update(state: &mut RadialState, message: Message) -> Task<Message>
             Task::none()
         }
         Message::WindowUnfocused => {
+            // Vision-loop instances must survive focus churn from
+            // the screenshot portal — never dismiss them.
+            if std::env::var_os("OXIDEMX_VISION_SHOT").is_some() {
+                return Task::none();
+            }
             if state.ai_morph_progress() > 0.5 {
                 // Chat shell is a persistent draggable window —
                 // focus loss is routine (move grab, clicking another

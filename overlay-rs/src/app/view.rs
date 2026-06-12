@@ -546,8 +546,12 @@ pub(super) fn view(state: &RadialState) -> Element<'_, Message> {
             .width(Length::Fill)
             .height(Length::Fill);
         let open_alpha = state.menu_open_alpha();
-        let chat_a = crate::chat_shell::chat_alpha(morph) * open_alpha;
-        let body_a = crate::chat_shell::cap_alpha(morph) * open_alpha;
+        // The cache epsilon keeps every colour-derived quad layer
+        // registering as changed each frame — see
+        // chat_shell::cache_epsilon for the stale-layer story.
+        let eps = crate::chat_shell::cache_epsilon();
+        let chat_a = crate::chat_shell::chat_alpha(morph) * open_alpha * eps;
+        let body_a = crate::chat_shell::cap_alpha(morph) * open_alpha * eps;
 
         // Window body — the chat's full-window chrome per the
         // redesign: 24 px outer radius, near-opaque `base` fill,
