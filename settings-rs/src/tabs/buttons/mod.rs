@@ -10,6 +10,7 @@
 //! to work in.
 
 pub mod picker;
+pub mod rows;
 pub mod widget_options;
 
 use crate::radial_preview::radial_preview_widget;
@@ -31,7 +32,7 @@ pub fn view(state: &State) -> Element<'_, Message> {
             page_picker_card(state),
             radial_preview_card(state),
             easy_switch_panel(state),
-            selected_slice_editor(state),
+            slice_editor_section(state),
         ]
         .spacing(16),
     )
@@ -404,11 +405,14 @@ fn radial_preview_card(state: &State) -> Element<'_, Message> {
     .into()
 }
 
-/// Selected-slice editor — replaces the legacy "list every slice
-/// inline" panel. When a slice is clicked in the preview, this
-/// panel pins to it and shows the full editor; "+ Add slice" adds
-/// to the end (and selects it).
-fn selected_slice_editor(state: &State) -> Element<'_, Message> {
+/// Slice editor — the design handoff's reorder-row list (`SlotRow`
+/// and `JRSectionHead` in `docs/design-system/menu-page.jsx`): a
+/// section head with an "Add slice" button, then one compact row
+/// per slot index. The selected slot expands *inline*, rendering
+/// the full slice card in its list position; clicking another row
+/// moves the expansion (plain `SelectSlice` semantics — the radial
+/// preview's click-to-select drives the same state).
+fn slice_editor_section(state: &State) -> Element<'_, Message> {
     let pal = &state.palette;
 
     let header = row![
@@ -420,32 +424,35 @@ fn selected_slice_editor(state: &State) -> Element<'_, Message> {
     ]
     .align_y(Alignment::Center);
 
-    let active = state.active_slices();
-    let body: Element<Message> = match state.selected_slice {
-        Some(idx) if idx < active.len() => {
-            let last = active.len().saturating_sub(1);
-            slice_editor_row(state, idx, &active[idx], last)
-        }
-        _ => container(
-            text("Click a slice in the preview above to edit it.")
-                .size(12)
-                .style(style::text_dim(pal)),
-        )
-        .padding(12)
-        .into(),
-    };
+    let slices = state.active_slices();
+    let slot_count = state
+        .config
+        .radial_menu
+        .pages
+        .get(state.active_page)
+        .map(|p| p.effective_slot_count() as usize)
+        .unwrap_or(8);
+    // One row per slot the page renders; rows past `slices.len()`
+    // are "(empty)". When the slice list is *longer* than the slot
+    // count (user lowered the count), the overflow slices still get
+    // rows — hiding configured slices would look like data loss.
+    let n_rows = slot_count.max(slices.len());
+    let last_idx = slices.len().saturating_sub(1);
 
-    container(
-        column![
-            header,
-            rule::horizontal(1).style(style::rule_style(pal)),
-            body
-        ]
-        .spacing(8),
-    )
-    .padding(14)
-    .style(style::card(pal))
-    .into()
+    let mut col = column![header].spacing(8);
+    for idx in 0..n_rows {
+        let slice = slices.get(idx);
+        match (state.selected_slice == Some(idx), slice) {
+            // Expanded: the full slice card replaces the row.
+            (true, Some(s)) => {
+                col = col.push(slice_editor_row(state, idx, s, last_idx));
+            }
+            // Collapsed (also covers a selected-but-missing slot —
+            // transient, since SelectSlice pads the list in update).
+            _ => col = col.push(rows::slot_row(state, idx, slice, last_idx)),
+        }
+    }
+    col.into()
 }
 
 fn easy_switch_panel(state: &State) -> Element<'_, Message> {

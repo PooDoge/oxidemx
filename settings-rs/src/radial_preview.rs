@@ -600,8 +600,9 @@ fn with_alpha(c: Color, a: f32) -> Color {
 
 /// Resolve a slice's colour key (e.g. "green", "sapphire") to the
 /// palette colour. Falls back to the accent so something always
-/// renders.
-fn slice_color(pal: &Palette, slice: &Slice) -> (f32, f32, f32) {
+/// renders. Shared with the slice editor's reorder rows so the
+/// 15 px row icons match the wedge tint exactly.
+pub fn slice_color(pal: &Palette, slice: &Slice) -> (f32, f32, f32) {
     let key = slice.color.as_str();
     let c = match key {
         "green" => pal.green,

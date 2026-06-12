@@ -356,7 +356,7 @@ pub fn action_tiles() -> Vec<ActionTile> {
 /// Display name for a kind — same strings as the legacy pick_list
 /// (`KindOption`'s Display impl) so nothing renames behind the
 /// user's back.
-fn action_kind_name(kind: ActionKind) -> &'static str {
+pub fn action_kind_name(kind: ActionKind) -> &'static str {
     match kind {
         ActionKind::Exec => "Run command",
         ActionKind::Submenu => "Submenu",
@@ -647,8 +647,10 @@ fn missing_widget_id<'a>(state: &State, slice: &'a Slice) -> Option<&'a str> {
     }
 }
 
-/// Kind-specific one-line summary on the chip.
-fn chip_summary(state: &State, slice: &Slice) -> String {
+/// Kind-specific one-line summary of what a slice does. Used on the
+/// behavior chip AND on the collapsed reorder rows (rows.rs) so the
+/// two surfaces never drift apart.
+pub fn chip_summary(state: &State, slice: &Slice) -> String {
     let cmd = slice.command.trim();
     match slice.kind {
         ActionKind::Exec | ActionKind::Settings | ActionKind::Emoji => {

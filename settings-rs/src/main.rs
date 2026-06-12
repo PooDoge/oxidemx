@@ -3533,6 +3533,30 @@ fn update_inner(state: &mut State, message: Message) -> Task<Message> {
                 state.reset_picker();
             }
             state.selected_slice = Some(i);
+            // Empty-slot ergonomics (plan 5): the page's slice list
+            // may be shorter than its slot count, so selecting an
+            // empty slot (reorder row / radial-preview wedge) first
+            // creates the backing slice — padded with inert
+            // kind-None placeholders — and then opens the behavior
+            // picker right away, making "click empty slot → choose
+            // what it does" a single step.
+            if tabs::buttons::rows::ensure_slot_exists(state.active_slices_mut(), i) {
+                state.touch();
+            }
+            let placeholder = state
+                .active_slices()
+                .get(i)
+                .is_some_and(tabs::buttons::rows::is_placeholder);
+            if placeholder && state.picker_open != Some(i) {
+                // Mirror Message::OpenPicker — snapshot once for
+                // undo-by-reselect, open, clear the search.
+                if state.picker_undo.as_ref().map(|(u, _)| *u) != Some(i) {
+                    state.picker_undo =
+                        state.active_slices().get(i).cloned().map(|s| (i, s));
+                }
+                state.picker_open = Some(i);
+                state.picker_search.clear();
+            }
             Task::none()
         }
         Message::DismissSliceSelection => {
@@ -6267,5 +6291,90 @@ mod widget_flow_tests {
         assert!(state.widget_preview.is_some());
         let _ = update(&mut state, Message::DismissSliceSelection);
         assert!(state.widget_preview.is_none());
+    }
+}
+
+// ============================================================================
+// Tests — slice editor selection / empty-slot flow (Plan 5)
+// ============================================================================
+
+#[cfg(test)]
+mod slice_editor_tests {
+    use super::*;
+    use oxidemx_shared::ActionKind;
+
+    /// `State::default()` loads whatever config the environment
+    /// points at — normalize the active page to a known two-slice
+    /// baseline so assertions don't depend on the host machine.
+    /// In-memory only: nothing here sends `SaveTick`, so the real
+    /// config file is never written.
+    fn test_state() -> State {
+        let mut state = State::default();
+        let slices = state.active_slices_mut();
+        slices.clear();
+        for label in ["A", "B"] {
+            let mut s = tabs::buttons::rows::empty_slice();
+            s.label = label.into();
+            s.kind = ActionKind::Exec;
+            s.command = "true".into();
+            slices.push(s);
+        }
+        state.selected_slice = None;
+        state.reset_picker();
+        state
+    }
+
+    #[test]
+    fn select_empty_slot_pads_and_opens_picker() {
+        let mut state = test_state();
+        let _ = update(&mut state, Message::SelectSlice(5));
+        // Padded up to the clicked slot with inert placeholders…
+        assert_eq!(state.active_slices().len(), 6);
+        assert!(state.active_slices()[2..]
+            .iter()
+            .all(|s| s.kind == ActionKind::None));
+        // …slot selected, behavior picker auto-opened, undo armed.
+        assert_eq!(state.selected_slice, Some(5));
+        assert_eq!(state.picker_open, Some(5));
+        assert!(state.picker_undo.is_some());
+    }
+
+    #[test]
+    fn select_existing_slice_does_not_open_picker() {
+        let mut state = test_state();
+        let _ = update(&mut state, Message::SelectSlice(0));
+        assert_eq!(state.selected_slice, Some(0));
+        assert_eq!(state.picker_open, None, "configured slices keep the chip collapsed");
+        assert_eq!(state.active_slices().len(), 2, "no padding when the slot exists");
+    }
+
+    #[test]
+    fn select_existing_placeholder_opens_picker_without_padding() {
+        let mut state = test_state();
+        state
+            .active_slices_mut()
+            .push(tabs::buttons::rows::empty_slice());
+        let _ = update(&mut state, Message::SelectSlice(2));
+        assert_eq!(state.active_slices().len(), 3);
+        assert_eq!(state.picker_open, Some(2));
+    }
+
+    #[test]
+    fn switching_slots_moves_the_expansion_and_resets_the_picker() {
+        let mut state = test_state();
+        let _ = update(&mut state, Message::SelectSlice(4)); // empty → picker open
+        assert_eq!(state.picker_open, Some(4));
+        let _ = update(&mut state, Message::SelectSlice(0)); // configured slot
+        assert_eq!(state.selected_slice, Some(0));
+        assert_eq!(state.picker_open, None, "slot switch resets the stale picker");
+    }
+
+    #[test]
+    fn pick_on_a_padded_slot_lands_in_the_config() {
+        let mut state = test_state();
+        let _ = update(&mut state, Message::SelectSlice(3));
+        let _ = update(&mut state, Message::PickAction(3, ActionKind::Settings));
+        assert_eq!(state.active_slices()[3].kind, ActionKind::Settings);
+        assert_eq!(state.picker_open, None, "pick applies + collapses");
     }
 }
