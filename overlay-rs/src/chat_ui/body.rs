@@ -125,6 +125,17 @@ pub fn conversation<'a>(state: &'a RadialState, kit: &Kit) -> Element<'a, Messag
         );
     }
 
+    // While the puck is armed the chat is render-only: a scrollable
+    // here would capture wheel events before the caps canvas could
+    // route them to page cycling ("wheel anywhere cycles" contract).
+    // The conversation becomes scrollable on activation.
+    if state.ai_handoff.is_armed() {
+        return container(list)
+            .padding(iced::Padding::default().right(12.0))
+            .height(Length::Fill)
+            .clip(true)
+            .into();
+    }
     scrollable(container(list).padding(iced::Padding::default().right(12.0)))
         .id(CHAT_SCROLL_ID)
         .height(Length::Fill)

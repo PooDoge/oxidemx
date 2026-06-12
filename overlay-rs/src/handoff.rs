@@ -28,6 +28,12 @@ use std::time::Instant;
 /// travel into the chat".
 pub const ACTIVATION_TRAVEL_PX: f32 = 8.0;
 
+/// Per-event motion floor: steps smaller than this are sensor
+/// jitter and don't accumulate travel — otherwise a trembling
+/// cursor resting in place would eventually cross
+/// [`ACTIVATION_TRAVEL_PX`] and activate on its own.
+pub const JITTER_FLOOR_PX: f32 = 2.0;
+
 /// Radius of the parked header puck (32 px puck per the design).
 pub const HEADER_PUCK_R: f32 = 16.0;
 
@@ -116,7 +122,12 @@ impl AiHandoff {
             };
             return false;
         };
-        let travel = travel + pos.dist(last);
+        let step = pos.dist(last);
+        let travel = if step >= JITTER_FLOOR_PX {
+            travel + step
+        } else {
+            travel
+        };
         let outside = pos.dist(disc_center) > center_zone_r;
         if outside && travel >= ACTIVATION_TRAVEL_PX {
             *self = AiHandoff::ChatActive;
@@ -216,6 +227,21 @@ mod tests {
         assert!(!h.on_pointer(edge, CENTER, ZONE_R));
         let jitter = P::new(CENTER.x + ZONE_R + 2.0, CENTER.y);
         assert!(!h.on_pointer(jitter, CENTER, ZONE_R));
+        assert!(h.is_armed());
+    }
+
+    #[test]
+    fn micro_jitter_never_accumulates() {
+        // Sub-floor tremor outside the zone, forever: travel never
+        // crosses ACTIVATION_TRAVEL_PX because steps below
+        // JITTER_FLOOR_PX don't accumulate.
+        let mut h = armed();
+        let base = P::new(CENTER.x + ZONE_R + 20.0, CENTER.y);
+        assert!(!h.on_pointer(base, CENTER, ZONE_R));
+        for i in 0..100 {
+            let dx = if i % 2 == 0 { 0.9 } else { -0.9 };
+            assert!(!h.on_pointer(P::new(base.x + dx, base.y), CENTER, ZONE_R));
+        }
         assert!(h.is_armed());
     }
 
