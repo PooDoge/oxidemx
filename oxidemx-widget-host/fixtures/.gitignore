@@ -1,0 +1,3 @@
+# Fixtures are built on demand by tests/common/mod.rs.
+*/target/
+*/Cargo.lock

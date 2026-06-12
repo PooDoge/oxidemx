@@ -1,0 +1,23 @@
+# Raw-ABI test fixture for the host's instance lifecycle tests.
+# NOT a workspace member (see root Cargo.toml `exclude`); built on demand
+# by tests/common/mod.rs for wasm32-wasip1.
+
+# Standalone — never part of the parent workspace.
+[workspace]
+
+[package]
+name = "strike-widget"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+oxidemx-widget-proto = { path = "../../../oxidemx-widget-proto", default-features = false }
+postcard = { version = "1", features = ["alloc"] }
+
+[profile.release]
+# No unwinding machinery in the wasm module.
+panic = "abort"
+opt-level = "s"

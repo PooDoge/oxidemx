@@ -5,6 +5,8 @@
 //! Wire types live in `oxidemx-widget-proto`; everything crossing the
 //! wasm boundary goes through that crate's `envelope` functions.
 
+pub mod instance;
 pub mod registry;
 
+pub use instance::{CallOutcome, InstanceError, WidgetInstance};
 pub use registry::{InstalledWidget, WidgetRegistry, WidgetState};

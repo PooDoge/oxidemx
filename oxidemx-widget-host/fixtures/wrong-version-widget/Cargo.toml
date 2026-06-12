@@ -1,0 +1,17 @@
+# Fixture for the host's api_version_mismatch_fails_load test: reports an
+# unsupported ABI version. NOT a workspace member.
+
+# Standalone — never part of the parent workspace.
+[workspace]
+
+[package]
+name = "wrong-version-widget"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[profile.release]
+panic = "abort"
+opt-level = "s"
