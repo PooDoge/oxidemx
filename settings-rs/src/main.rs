@@ -471,6 +471,9 @@ pub enum Message {
         parent: usize,
         idx: usize,
     },
+    /// Window resize (width, logical px) — keeps `State::
+    /// window_width` current for the picker grid's 3/4-up split.
+    WindowResized(f32),
     /// Radial preview interactions.
     SelectSlice(usize),
     DismissSliceSelection,
@@ -1336,6 +1339,12 @@ pub struct State {
     /// (Plan 3 Task 5). Reconciled by `widget_preview::sync` after
     /// every update; `None` whenever the card isn't showing.
     pub widget_preview: Option<widget_preview::PreviewHandle>,
+    /// Last known window width (logical px), fed by the resize
+    /// subscription. Drives the picker grid's 3-up / 4-up split —
+    /// iced's `responsive` wrapper doesn't measure correctly inside
+    /// the page scrollable (infinite height), so we track the
+    /// window instead.
+    pub window_width: f32,
 }
 
 /// Where the AI Assistant's Gemini API key lives. Mirrors the
@@ -1429,9 +1438,15 @@ impl Default for State {
             widget_loc_searching: false,
             widget_store: None,
             widget_preview: None,
+            window_width: INITIAL_WINDOW_SIZE.width,
         }
     }
 }
+
+/// Startup window size — shared between the `iced::window::Settings`
+/// in `main()` and the `State::window_width` seed so the picker grid
+/// renders at the right density before the first resize event.
+const INITIAL_WINDOW_SIZE: iced::Size = iced::Size::new(1280.0, 820.0);
 
 #[derive(Debug, Clone, Default)]
 pub struct AppBindingDraft {
@@ -3501,6 +3516,11 @@ fn update_inner(state: &mut State, message: Message) -> Task<Message> {
                 };
                 state.touch();
             }
+            Task::none()
+        }
+
+        Message::WindowResized(width) => {
+            state.window_width = width;
             Task::none()
         }
 
@@ -5726,6 +5746,8 @@ fn subscription(state: &State) -> Subscription<Message> {
         // / battery from HID++ are essentially free to query
         // compared to UPower.
         iced::time::every(Duration::from_secs(5)).map(|_| Message::DaemonTick),
+        // Window width feeds the picker grid's 3-up / 4-up split.
+        iced::window::resize_events().map(|(_id, size)| Message::WindowResized(size.width)),
     ];
     // Shortcut-capture subscription — only active while the user
     // has armed a Capture button. Listens for keyboard events,
@@ -5965,7 +5987,7 @@ fn main() -> iced::Result {
     }
 
     let mut window = iced::window::Settings {
-        size: iced::Size::new(1280.0, 820.0),
+        size: INITIAL_WINDOW_SIZE,
         ..Default::default()
     };
     window.platform_specific.application_id = "org.oxidemx.settings".into();

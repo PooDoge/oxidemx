@@ -451,7 +451,23 @@ pub fn filter_registry<'a>(
 
 const CHIP_ICON_TILE: f32 = 40.0;
 const CHIP_ICON_PX: u32 = 24;
-const TILES_PER_ROW: usize = 3;
+
+/// Window width at which the picker grid switches from 3-up to
+/// 4-up. The design's breakpoint is a ~920 px *content* column;
+/// add the sidebar (~200 px) and page padding and that's a ~1160 px
+/// window. State tracks the window (not the column — see
+/// `State::window_width`), so the threshold bakes the chrome in.
+const WIDE_GRID_MIN_WINDOW: f32 = 1160.0;
+
+/// 3-up normally, 4-up when the window is wide enough that four
+/// tiles still get a readable width each.
+pub fn tiles_per_row(window_width: f32) -> usize {
+    if window_width >= WIDE_GRID_MIN_WINDOW {
+        4
+    } else {
+        3
+    }
+}
 
 /// Chip + (when this slice's picker is open) the panel below it.
 /// This is the slice editor's replacement for the old kind
@@ -749,6 +765,7 @@ fn picker_panel<'a>(state: &'a State, idx: usize, slice: &'a Slice) -> Element<'
     let builtins = filter_builtins(visible_builtins, query);
     let registry = filter_registry(&state.widget_registry, query);
 
+    let per_row = tiles_per_row(state.window_width);
     let mut panel = column![search].spacing(10);
 
     // Group 1 — built-in actions. Header hidden when search empties it.
@@ -758,32 +775,30 @@ fn picker_panel<'a>(state: &'a State, idx: usize, slice: &'a Slice) -> Element<'
             .into_iter()
             .map(|t| action_tile_view(state, idx, slice, t))
             .collect();
-        panel = panel.push(tile_grid(tiles));
+        panel = panel.push(tile_grid(tiles, per_row));
     }
 
     // Group 2 — widgets (built-in sources + installed registry).
-    if !builtins.is_empty() || !registry.is_empty() {
-        let installed = visible_builtin_count + state.widget_registry.len();
-        panel = panel.push(group_header(pal, format!("Widgets · {installed} installed")));
-        let mut tiles: Vec<Element<Message>> = builtins
-            .into_iter()
-            .map(|t| builtin_tile_view(state, idx, slice, t))
-            .collect();
-        tiles.extend(registry.into_iter().map(|w| registry_tile_view(state, idx, slice, w)));
-        panel = panel.push(tile_grid(tiles));
-    } else {
-        // Both groups emptied by the search (builtins are static, so
-        // this only happens with a non-matching query).
+    // Always rendered: the "Get more widgets…" stub is the grid's
+    // last tile in the design's flow (iced has no dashed borders,
+    // so it renders as a quiet outline tile), and it survives any
+    // search query.
+    let installed = visible_builtin_count + state.widget_registry.len();
+    panel = panel.push(group_header(pal, format!("Widgets · {installed} installed")));
+    if builtins.is_empty() && registry.is_empty() && !query.trim().is_empty() {
         panel = panel.push(
-            text("No matches — clear the search to see everything.")
+            text("No widgets match — clear the search to see everything.")
                 .size(11)
                 .style(style::text_faint(pal)),
         );
     }
-
-    // Last tile is always the "Get more widgets…" stub (iced has no
-    // dashed borders, so it renders as a quiet outline tile).
-    panel = panel.push(get_more_tile(pal));
+    let mut tiles: Vec<Element<Message>> = builtins
+        .into_iter()
+        .map(|t| builtin_tile_view(state, idx, slice, t))
+        .collect();
+    tiles.extend(registry.into_iter().map(|w| registry_tile_view(state, idx, slice, w)));
+    tiles.push(get_more_tile(pal));
+    panel = panel.push(tile_grid(tiles, per_row));
 
     container(panel)
         .padding(10)
@@ -796,20 +811,21 @@ fn group_header(pal: &Palette, label: String) -> Element<'_, Message> {
     text(label).size(11).style(style::text_dim(pal)).into()
 }
 
-/// Pack tiles into fixed 3-up rows (plan allows fixed-width grid;
-/// responsive 4-up at ≥920 px is a deferred nicety). Short rows are
-/// padded with spacers so every tile keeps the same width.
-fn tile_grid(tiles: Vec<Element<'_, Message>>) -> Element<'_, Message> {
+/// Pack tiles into fixed `per_row`-up rows (3-up, 4-up on wide
+/// windows — see [`tiles_per_row`]). Short rows are padded with
+/// spacers so every tile keeps the same width.
+fn tile_grid(tiles: Vec<Element<'_, Message>>, per_row: usize) -> Element<'_, Message> {
+    let per_row = per_row.max(1);
     let mut grid = column![].spacing(8);
     let mut tiles = tiles.into_iter().peekable();
     while tiles.peek().is_some() {
         let mut r = row![].spacing(8);
         let mut n = 0;
-        for tile in tiles.by_ref().take(TILES_PER_ROW) {
+        for tile in tiles.by_ref().take(per_row) {
             r = r.push(tile);
             n += 1;
         }
-        while n < TILES_PER_ROW {
+        while n < per_row {
             r = r.push(Space::new().width(Length::FillPortion(1)));
             n += 1;
         }
@@ -996,26 +1012,26 @@ fn registry_tile_view<'a>(
     btn.into()
 }
 
-/// The always-last "Get more widgets…" stub tile → store dialog
-/// (Task 3; the message exists now and reports a hint).
+/// The always-last "Get more widgets…" tile in the widgets grid →
+/// store dialog. Design's `MoreWidgetsTile` is a dashed-outline
+/// tile; iced has no dashed borders, so it renders as a quiet
+/// outline tile in the same grid flow.
 fn get_more_tile(pal: &Palette) -> Element<'_, Message> {
-    let body = row![
-        text("+").size(16).style(style::text_dim(pal)),
-        column![
-            text("Get more widgets…").size(12),
-            text("Install community widgets")
-                .size(9)
-                .style(style::text_faint(pal)),
-        ]
-        .spacing(2),
+    let body = column![
+        text("+").size(18).style(style::text_dim(pal)),
+        text("Get more widgets…").size(11),
+        text("Browse the community registry")
+            .size(9)
+            .style(style::text_faint(pal)),
     ]
-    .align_y(Alignment::Center)
-    .spacing(8);
+    .align_x(Alignment::Center)
+    .spacing(2)
+    .width(Length::Fill);
 
     button(body)
-        .padding(8)
-        .width(Length::Fill)
-        .style(style::btn_flat(pal))
+        .padding(10)
+        .width(Length::FillPortion(1))
+        .style(more_tile_style(pal))
         .on_press(Message::OpenWidgetStore)
         .into()
 }
@@ -1057,6 +1073,31 @@ fn icon_tile_style(pal: &Palette) -> impl Fn(&iced::Theme) -> iced::widget::cont
             radius: 8.0.into(),
         },
         ..Default::default()
+    }
+}
+
+/// Quiet outline tile for "Get more widgets…" — transparent body,
+/// hairline border (the closest iced gets to the design's dashed
+/// outline), text brightens on hover.
+fn more_tile_style(
+    pal: &Palette,
+) -> impl Fn(&iced::Theme, iced::widget::button::Status) -> iced::widget::button::Style + 'static {
+    let hover_bg = pal.row_hover;
+    let border = pal.hairline;
+    let border_hover = pal.hairline_strong;
+    let text_color = pal.text;
+    move |_, status| {
+        let hovered = matches!(status, iced::widget::button::Status::Hovered);
+        iced::widget::button::Style {
+            background: hovered.then_some(Background::Color(hover_bg)),
+            text_color,
+            border: Border {
+                color: if hovered { border_hover } else { border },
+                width: 1.0,
+                radius: 8.0.into(),
+            },
+            ..Default::default()
+        }
     }
 }
 
@@ -1141,6 +1182,16 @@ mod tests {
             icon_path: None,
             signature: "unsigned".into(),
         }
+    }
+
+    // --- grid density ---
+
+    #[test]
+    fn grid_is_three_up_normally_four_up_when_wide() {
+        assert_eq!(tiles_per_row(800.0), 3);
+        assert_eq!(tiles_per_row(WIDE_GRID_MIN_WINDOW - 1.0), 3);
+        assert_eq!(tiles_per_row(WIDE_GRID_MIN_WINDOW), 4);
+        assert_eq!(tiles_per_row(1920.0), 4);
     }
 
     // --- search filtering ---

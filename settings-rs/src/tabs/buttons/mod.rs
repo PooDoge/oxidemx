@@ -444,8 +444,11 @@ fn slice_editor_section(state: &State) -> Element<'_, Message> {
     for idx in 0..n_rows {
         let slice = slices.get(idx);
         match (state.selected_slice == Some(idx), slice) {
-            // Expanded: the full slice card replaces the row.
+            // Expanded: the full slice card replaces the row, with
+            // a small breadcrumb context line above it (design's
+            // SliceCardFocus header).
             (true, Some(s)) => {
+                col = col.push(card_breadcrumb(state, idx, s));
                 col = col.push(card::slice_card(state, idx, s, last_idx));
             }
             // Collapsed (also covers a selected-but-missing slot —
@@ -454,6 +457,31 @@ fn slice_editor_section(state: &State) -> Element<'_, Message> {
         }
     }
     col.into()
+}
+
+/// Dim context line above the expanded card:
+/// `Menu › Slice editor › Slot {n} · {label}`.
+fn card_breadcrumb<'a>(state: &'a State, idx: usize, slice: &'a Slice) -> Element<'a, Message> {
+    let pal = &state.palette;
+    let label = if slice.label.trim().is_empty() {
+        if slice.kind == ActionKind::None {
+            "(empty)".to_string()
+        } else {
+            picker::action_kind_name(slice.kind).to_string()
+        }
+    } else {
+        slice.label.clone()
+    };
+    row![
+        text("Menu › Slice editor ›")
+            .size(11)
+            .style(style::text_faint(pal)),
+        text(format!("Slot {} · {}", idx + 1, label))
+            .size(11)
+            .style(style::text_dim(pal)),
+    ]
+    .spacing(4)
+    .into()
 }
 
 fn easy_switch_panel(state: &State) -> Element<'_, Message> {
@@ -941,6 +969,11 @@ fn submenu_item_row<'a>(
         ]
         .align_y(Alignment::Center)
         .spacing(6),
+        // Same one-line summary the slice rows/chips use — keeps the
+        // "what does this do" vocabulary consistent across levels.
+        text(picker::chip_summary(state, item))
+            .size(10)
+            .style(style::text_faint(pal)),
         visibility_editor(
             state,
             VisibilityTarget::SubItem { parent, idx },
