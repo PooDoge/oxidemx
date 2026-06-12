@@ -1,0 +1,30 @@
+{
+  "id": "weather",
+  "name": "Weather",
+  "version": "1.4.0",
+  "author": "JuhLabs",
+  "homepage": "https://github.com/oxidemx/widgets",
+  "api_version": 1,
+  "entry": "widget.wasm",
+  "icon": "icon.svg",
+  "permissions": [
+    "net:api.open-meteo.com",
+    "net:geocoding-api.open-meteo.com",
+    "open-url",
+    "haptics"
+  ],
+  "slice": {
+    "refresh_ms": 900000,
+    "fallback_icon": "weather-clear-symbolic"
+  },
+  "options": [
+    { "key": "location", "type": "location", "label": "Location",
+      "hint": "city name or \"lat,lon\"", "required": true },
+    { "key": "units",    "type": "enum",   "label": "Units",
+      "values": ["c", "f"], "default": "c" },
+    { "key": "display",  "type": "enum",   "label": "Slice display",
+      "values": ["temp", "temp_condition", "full"], "default": "temp_condition" },
+    { "key": "refresh",  "type": "select", "label": "Refresh",
+      "values": [300, 900, 1800, 3600], "default": 900, "unit": "s" }
+  ]
+}

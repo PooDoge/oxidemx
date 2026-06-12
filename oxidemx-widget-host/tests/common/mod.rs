@@ -63,3 +63,39 @@ pub fn fixture_wasm(name: &str) -> Option<PathBuf> {
     built.insert(name.to_string(), wasm.clone());
     Some(wasm)
 }
+
+/// Build a crate at an arbitrary path (outside `fixtures/`) and return the
+/// wasm artifact. `key` is a unique cache key; `crate_dir` is the directory
+/// containing `Cargo.toml`; `bin_stem` is the wasm file name without extension.
+pub fn build_wasm_at(key: &str, crate_dir: PathBuf, bin_stem: &str) -> Option<PathBuf> {
+    if !target_installed() {
+        eprintln!(
+            "SKIP: {WASM_TARGET} target not installed; skipping {key} test"
+        );
+        return None;
+    }
+    static BUILT_EXT: OnceLock<Mutex<HashMap<String, PathBuf>>> = OnceLock::new();
+    let mut built = BUILT_EXT.get_or_init(|| Mutex::new(HashMap::new())).lock().unwrap();
+    if let Some(p) = built.get(key) {
+        return Some(p.clone());
+    }
+
+    let target_dir = crate_dir.join("target");
+    let status = Command::new("cargo")
+        .args(["build", "--release", "--target", WASM_TARGET])
+        .arg("--manifest-path")
+        .arg(crate_dir.join("Cargo.toml"))
+        .arg("--target-dir")
+        .arg(&target_dir)
+        .status()
+        .expect("failed to spawn cargo for external wasm build");
+    assert!(status.success(), "{key} wasm build failed");
+
+    let wasm = target_dir
+        .join(WASM_TARGET)
+        .join("release")
+        .join(format!("{}.wasm", bin_stem.replace('-', "_")));
+    assert!(wasm.is_file(), "expected artifact at {}", wasm.display());
+    built.insert(key.to_string(), wasm.clone());
+    Some(wasm)
+}
