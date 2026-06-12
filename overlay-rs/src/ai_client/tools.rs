@@ -107,6 +107,25 @@ pub(super) fn agent_tool_declarations() -> Vec<serde_json::Value> {
                 "required": ["action"]
             }
         }),
+        json!({
+            "type": "function",
+            "name": "persona",
+            "description": "Read or rewrite the user-editable persona files: soul.md (your identity, tone, values — first person) and user.md (durable facts about the user). `read` returns both files. `write_soul`/`write_user` REPLACE the whole file with `content` — include everything that should remain. Use sparingly: on the first-run ritual, or when the user asks to change your personality or correct their profile.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["read", "write_soul", "write_user"]
+                    },
+                    "content": {
+                        "type": "string",
+                        "description": "Full replacement markdown for write_* actions"
+                    }
+                },
+                "required": ["action"]
+            }
+        }),
     ]
 }
 
@@ -184,6 +203,7 @@ pub(super) async fn execute_local_tool(
         "execute_command" => execute_command_tool(&args, sink).await,
         "schedule_task" => schedule_task_tool(&args, sink).await,
         "memory" => memory_tool(&args, sink).await,
+        "persona" => persona_tool(&args, sink).await,
         "get_menu_config" => {
             let path = get_config_path();
             if !path.exists() {
@@ -332,14 +352,34 @@ async fn execute_command_tool(
 
     if !crate::agent::commands::is_allowlisted(command, &crate::agent::commands::allowlist()) {
         send_activity(sink, "Waiting for your approval…".to_string()).await;
+        // "Always allow" suggests the first two tokens as a prefix
+        // pattern ("git status", "systemctl --user") — broad enough
+        // to kill repeat prompts, narrow enough not to hand over
+        // the whole binary. The Claude Code approval-card detail.
+        let suggest: String = command
+            .split_whitespace()
+            .take(2)
+            .collect::<Vec<_>>()
+            .join(" ");
+        let always = format!("Always allow `{suggest} …`");
         let answer = ask_user_choice(
             format!("Run `{command}`?"),
-            vec!["Run it".to_string(), "Don't run".to_string()],
+            vec![
+                "Run it".to_string(),
+                always.clone(),
+                "Don't run".to_string(),
+            ],
         )
         .await?;
-        if answer != "Run it" {
+        if answer == always {
+            if let Err(e) = crate::agent::commands::add_allowlist_entry(&suggest) {
+                tracing::warn!("failed to persist allowlist entry: {e}");
+            }
+        } else if answer != "Run it" {
             // Tell the model plainly so it doesn't retry the same
-            // command or assume it ran.
+            // command or assume it ran. If the user explains their
+            // refusal in the next message, treat that as corrective
+            // context.
             return Ok(format!(
                 "The user declined to run `{command}`. Do not run it; \
                  ask before proposing an alternative command."
@@ -592,5 +632,40 @@ pub async fn auto_consolidate_if_due() {
     match consolidate_memories().await {
         Ok(summary) => tracing::info!("memory auto-consolidation: {summary}"),
         Err(e) => tracing::warn!("memory auto-consolidation skipped: {e}"),
+    }
+}
+
+/// `persona`: read/rewrite soul.md + user.md. Writes are full-file
+/// replaces (capped in `agent::persona`); the files are also
+/// user-editable on disk, so reads always reflect the latest text.
+async fn persona_tool(
+    args: &serde_json::Value,
+    sink: &Option<StreamSink>,
+) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+    let action = args["action"]
+        .as_str()
+        .ok_or("action argument missing or not a string")?;
+    match action {
+        "read" => {
+            let soul = std::fs::read_to_string(crate::agent::persona::soul_path())
+                .unwrap_or_else(|_| "(soul.md does not exist yet)".to_string());
+            let user = std::fs::read_to_string(crate::agent::persona::user_path())
+                .unwrap_or_else(|_| "(user.md does not exist yet)".to_string());
+            Ok(format!("--- soul.md ---\n{soul}\n--- user.md ---\n{user}"))
+        }
+        "write_soul" | "write_user" => {
+            let content = args["content"]
+                .as_str()
+                .ok_or("content argument required for write actions")?;
+            let which = if action == "write_soul" {
+                "soul"
+            } else {
+                "user"
+            };
+            send_activity(sink, format!("Writing {which}.md…")).await;
+            let path = crate::agent::persona::write_file(which, content)?;
+            Ok(format!("{} written.", path.display()))
+        }
+        other => Err(format!("Unknown persona action: {other}").into()),
     }
 }

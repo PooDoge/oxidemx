@@ -113,7 +113,10 @@ pub fn stream() -> impl futures_util::stream::Stream<Item = crate::app::Message>
 pub fn run_smoke() -> i32 {
     use std::time::Duration;
 
-    let rt = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
+    let rt = match tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+    {
         Ok(rt) => rt,
         Err(e) => {
             eprintln!("widget-smoke: tokio runtime failed: {e}");
@@ -150,7 +153,11 @@ pub fn run_smoke() -> i32 {
                         println!("widget-smoke:   {} v{} [{}]", w.id, w.version, w.state);
                     }
                 }
-                Ok(Ok(HostEvent::Scene { instance, scene, revision })) => {
+                Ok(Ok(HostEvent::Scene {
+                    instance,
+                    scene,
+                    revision,
+                })) => {
                     println!(
                         "widget-smoke: scene instance={}/{} revision={} prims={}",
                         instance.widget_id,

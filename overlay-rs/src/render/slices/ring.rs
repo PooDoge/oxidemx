@@ -314,9 +314,7 @@ pub fn draw_slice(
                     Some(scene) => {
                         // Hover and scaling are not applied here — see
                         // draw_custom_widget's doc for where they happen.
-                        draw_custom_widget(
-                            frame, scene, icon_pos, palette, slot_color, mo,
-                        );
+                        draw_custom_widget(frame, scene, icon_pos, palette, slot_color, mo);
                     }
                     None => {
                         draw_custom_fallback(

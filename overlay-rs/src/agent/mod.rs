@@ -10,4 +10,5 @@
 
 pub mod commands;
 pub mod memory;
+pub mod persona;
 pub mod tasks;

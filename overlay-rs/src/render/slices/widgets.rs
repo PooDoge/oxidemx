@@ -334,7 +334,10 @@ pub(super) fn draw_custom_fallback(
         // draw_slice's icon-miss path, dimmed.
         frame.fill(
             &Path::circle(icon_pos, icon_bg_radius * 0.35),
-            Color { a: dim, ..slot_color },
+            Color {
+                a: dim,
+                ..slot_color
+            },
         );
     }
 
