@@ -15,7 +15,19 @@ pub fn frameless_topmost(app_id: &str, size: iced::Size) -> Settings {
         size,
         decorations: false,
         transparent: true,
-        resizable: false,
+        // Must be true even though the surface has no decorations:
+        // `resizable: false` makes winit pin min = max = initial size
+        // on Wayland, so a programmatic `window::resize` (the chat's
+        // grip commit) changes the compositor-side viewport while
+        // iced never re-lays-out — the old buffer gets stretched
+        // over the new window. With resizable on, the configure
+        // round trip reaches iced and the surface really resizes.
+        resizable: true,
+        // Floor for the native grip resize (xdg_toplevel.resize):
+        // the disc needs its 484 px square and the chat contract
+        // sets 560 as the height minimum. The compositor enforces
+        // this during the interactive resize.
+        min_size: Some(iced::Size::new(484.0, 560.0)),
         level: Level::AlwaysOnTop,
         position: iced::window::Position::Centered,
         ..Settings::default()
@@ -35,7 +47,10 @@ mod tests {
         let s = frameless_topmost("org.example.test", iced::Size::new(400.0, 300.0));
         assert!(!s.decorations, "decorations must be off");
         assert!(s.transparent, "transparent must be on");
-        assert!(!s.resizable, "resizable must be off");
+        assert!(
+            s.resizable,
+            "resizable must be on (programmatic chat resize)"
+        );
         assert_eq!(s.platform_specific.application_id, "org.example.test");
         assert_eq!(s.size, iced::Size::new(400.0, 300.0));
         match s.level {

@@ -119,19 +119,9 @@ pub enum Message {
         x: f64,
         y: f64,
     },
-    /// Mouse-down on the chat's bottom-right resize grip.
-    ChatResizeStart {
-        x: f64,
-        y: f64,
-    },
-    /// Pointer motion during a resize drag — updates the ghost.
-    ChatResizeMove {
-        x: f64,
-        y: f64,
-    },
-    /// Button release ends the drag: persist `overlay.chat_size`
-    /// and issue the single real window resize.
-    ChatResizeEnd,
+    /// Mouse-down on the chat's bottom-right resize grip — starts a
+    /// native compositor interactive resize.
+    ChatResizeStart,
     /// Compositor reported a window resize — keep `win_size` true.
     WindowResized(Size),
     /// Fresh live-data sample from the 1 s widget sampler.
@@ -253,8 +243,44 @@ fn update(state: &mut RadialState, message: Message) -> Task<Message> {
     match message {
         Message::Tick => {
             state.advance_animations();
-            // Vision-loop dev hook: one screenshot after the delay,
-            // then exit in the save handler.
+            // Debounced persist of the chat size after a native grip
+            // resize: the compositor streams configure events while
+            // the user drags; write the config once it's been quiet.
+            if let Some((at, (w, h))) = state.chat_size_pending_save {
+                if at.elapsed() >= std::time::Duration::from_millis(800) {
+                    state.chat_size_pending_save = None;
+                    info!(w, h, "chat size persisted");
+                    crate::config::save_chat_size(w.round() as u32, h.round() as u32);
+                }
+            }
+            // Vision-loop dev hook: optional programmatic resize at
+            // half-delay (OXIDEMX_VISION_RESIZE="WxH") to exercise
+            // the grip-commit path headlessly, then one screenshot.
+            if !state.vision_shot_taken {
+                static VISION_RESIZED: std::sync::atomic::AtomicBool =
+                    std::sync::atomic::AtomicBool::new(false);
+                if let (Ok(spec), Some(t0), Some(id)) = (
+                    std::env::var("OXIDEMX_VISION_RESIZE"),
+                    state.show_time,
+                    state.window_id,
+                ) {
+                    let delay_ms: u64 = std::env::var("OXIDEMX_VISION_DELAY_MS")
+                        .ok()
+                        .and_then(|v| v.parse().ok())
+                        .unwrap_or(1500);
+                    if t0.elapsed() >= std::time::Duration::from_millis(delay_ms / 2)
+                        && !VISION_RESIZED.swap(true, std::sync::atomic::Ordering::SeqCst)
+                    {
+                        if let Some((w, h)) = spec
+                            .split_once('x')
+                            .and_then(|(w, h)| Some((w.parse().ok()?, h.parse().ok()?)))
+                        {
+                            state.win_size = (w, h);
+                            return iced::window::resize(id, Size::new(w, h));
+                        }
+                    }
+                }
+            }
             if !state.vision_shot_taken {
                 if let (Ok(_), Some(t0), Some(id)) = (
                     std::env::var("OXIDEMX_VISION_SHOT"),
@@ -519,28 +545,30 @@ fn update(state: &mut RadialState, message: Message) -> Task<Message> {
             state.handoff_click(x, y);
             Task::none()
         }
-        Message::ChatResizeStart { x, y } => {
-            state.chat_resize_start(x, y);
-            Task::none()
-        }
-        Message::ChatResizeMove { x, y } => {
-            state.chat_resize_move(x, y);
-            Task::none()
-        }
-        Message::ChatResizeEnd => {
-            let Some((w, h)) = state.chat_resize_end() else {
-                return Task::none();
-            };
-            info!(w, h, "chat resize committed");
-            crate::config::save_chat_size(w.round() as u32, h.round() as u32);
+        Message::ChatResizeStart => {
+            // Hand the whole gesture to the compositor: a native
+            // xdg_toplevel.resize tracks the pointer, streams real
+            // configure events (so the layout truly re-flows live),
+            // and ends itself on release. Client-side ghost dragging
+            // and one-shot `window::resize` both proved unreliable
+            // on Mutter — the surface kept its old buffer and got
+            // stretched.
+            state.activate_chat();
             if let Some(id) = state.window_id {
-                iced::window::resize(id, Size::new(w, h))
+                iced::window::drag_resize(id, iced::window::Direction::SouthEast)
             } else {
                 Task::none()
             }
         }
         Message::WindowResized(size) => {
             state.win_size = (size.width, size.height);
+            // During a chat-shell grip resize, remember the size for
+            // a debounced persist (flushed by Tick once the stream
+            // of configure events goes quiet).
+            if state.ai_morph_progress() > 0.9 {
+                state.chat_size_pending_save =
+                    Some((std::time::Instant::now(), (size.width, size.height)));
+            }
             Task::none()
         }
         Message::WidgetSample(snap) => {

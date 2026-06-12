@@ -245,44 +245,16 @@ impl<'a> canvas::Program<crate::app::Message> for CapsPainter<'a> {
             return None;
         }
 
-        // An in-flight resize drag owns ALL pointer input until the
-        // button releases — the ghost outline follows the cursor and
-        // the release commits the new size. Release is handled even
-        // without a position (the cursor may have left the window).
-        if self.state.chat_resize.is_some() {
-            return match event {
-                Event::Mouse(mouse::Event::CursorMoved { .. }) => {
-                    // The grip sits at the window corner, so growing
-                    // immediately takes the pointer OUTSIDE the
-                    // window. Wayland's implicit grab keeps the
-                    // motion events coming, but `position_in` filters
-                    // to inside-bounds and would freeze the drag at
-                    // the edge — use the raw window-coordinate
-                    // position instead.
-                    let p = cursor.position()?;
-                    Some(Action::publish(crate::app::Message::ChatResizeMove {
-                        x: (p.x - bounds.x) as f64,
-                        y: (p.y - bounds.y) as f64,
-                    }))
-                }
-                Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
-                    Some(Action::publish(crate::app::Message::ChatResizeEnd))
-                }
-                _ => None,
-            };
-        }
-
         // Grip grab — checked before the handoff branches so the
         // grip works in both the armed and active phases. Only once
-        // the shell is parked: a moving grip is not a target.
+        // the shell is parked: a moving grip is not a target. The
+        // gesture itself is a native compositor resize, so no
+        // client-side drag tracking is needed.
         if t >= INTERACTIVE_T {
             if let Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) = event {
                 if let Some(p) = cursor.position_in(bounds) {
                     if hit_grip(p, bounds.width, bounds.height) {
-                        return Some(Action::publish(crate::app::Message::ChatResizeStart {
-                            x: p.x as f64,
-                            y: p.y as f64,
-                        }));
+                        return Some(Action::publish(crate::app::Message::ChatResizeStart));
                     }
                 }
             }
@@ -393,11 +365,6 @@ impl<'a> canvas::Program<crate::app::Message> for CapsPainter<'a> {
         let t = self.state.ai_morph_progress();
         if t < INTERACTIVE_T {
             return mouse::Interaction::default();
-        }
-        // An in-flight resize keeps the diagonal cursor even while
-        // the pointer is dragged past the window edge.
-        if self.state.chat_resize.is_some() {
-            return mouse::Interaction::ResizingDiagonallyDown;
         }
         let Some(p) = cursor.position_in(bounds) else {
             return mouse::Interaction::default();
@@ -567,7 +534,7 @@ impl<'a> canvas::Program<crate::app::Message> for CapsPainter<'a> {
         if chat_a > 0.001 {
             let overlay0 =
                 self.palette_color(&palette.overlay0, Color::from_rgba(0.4, 0.42, 0.47, 1.0));
-            let grip_color = if self.state.chat_resize.is_some() {
+            let grip_color = if self.state.chat_size_pending_save.is_some() {
                 scale_alpha(accent, chat_a)
             } else {
                 scale_alpha(overlay0, 0.9 * chat_a)
@@ -589,36 +556,16 @@ impl<'a> canvas::Program<crate::app::Message> for CapsPainter<'a> {
             }
         }
 
-        // Ghost outline + live size badge during a resize drag. The
-        // window itself doesn't resize until release (programmatic
-        // per-frame resizes desync the wgpu surface on Wayland) — the
-        // dashed outline previews the prospective size, clamped to
-        // the current window for display.
-        if let Some(drag) = &self.state.chat_resize {
-            let (gw, gh) = drag.current;
-            let vis_w = gw.min(bounds.width);
-            let vis_h = gh.min(bounds.height);
-            let ghost = Path::new(|b| {
-                b.rounded_rectangle(
-                    Point::new(1.0, 1.0),
-                    iced::Size::new(vis_w - 2.0, vis_h - 2.0),
-                    24.0.into(),
-                );
-            });
-            frame.stroke(
-                &ghost,
-                Stroke {
-                    line_dash: canvas::LineDash {
-                        segments: &[6.0, 5.0],
-                        offset: 0,
-                    },
-                    ..Stroke::default()
-                        .with_color(scale_alpha(accent, 0.7))
-                        .with_width(1.5)
-                },
+        // Live `W × H` mono badge while a native grip resize is in
+        // flight (the compositor streams configure events; the badge
+        // reads the real window size and fades once the stream goes
+        // quiet and the size persists).
+        if self.state.chat_size_pending_save.is_some() {
+            let label = format!(
+                "{} × {}",
+                bounds.width.round() as u32,
+                bounds.height.round() as u32
             );
-            // `W × H` mono badge tucked against the grip corner.
-            let label = format!("{} × {}", gw.round() as u32, gh.round() as u32);
             frame.fill_text(iced::widget::canvas::Text {
                 content: label,
                 position: Point::new(bounds.width - 96.0, bounds.height - 36.0),

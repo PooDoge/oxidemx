@@ -473,10 +473,11 @@ pub struct RadialState {
     /// resize-grip drag commits or the compositor reports a resize.
     pub win_size: (f32, f32),
 
-    /// In-flight resize-grip drag, `None` when not resizing. The
-    /// ghost outline + size badge render from `current`; the window
-    /// only actually resizes when the drag ends.
-    pub chat_resize: Option<ChatResizeDrag>,
+    /// Set on every compositor configure during a native grip
+    /// resize; Tick persists `overlay.chat_size` once the stream
+    /// has been quiet for a beat. Also drives the live `W × H`
+    /// badge while Some.
+    pub chat_size_pending_save: Option<(Instant, (f32, f32))>,
 
     /// Memories management view open (header brain button).
     pub ai_show_memories: bool,
@@ -533,18 +534,6 @@ impl WidgetData {
         }
         self.snap = snap;
     }
-}
-
-/// State of one resize-grip drag.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct ChatResizeDrag {
-    /// Cursor position at grab time (window-local).
-    pub grab: (f32, f32),
-    /// Window size at grab time.
-    pub origin: (f32, f32),
-    /// Prospective size = origin + cursor delta, clamped to the
-    /// chat minimums. Committed on release.
-    pub current: (f32, f32),
 }
 
 /// Name of the auto-appended AI Assistant page. Shared between the
@@ -654,7 +643,7 @@ impl RadialState {
                 let s = crate::chat_shell::effective_window_size(config.overlay.chat_size);
                 (s.width, s.height)
             },
-            chat_resize: None,
+            chat_size_pending_save: None,
             ai_show_memories: false,
             ai_memories_query: String::new(),
             ai_memories: Vec::new(),
@@ -928,43 +917,6 @@ impl RadialState {
         if self.ai_handoff.is_armed() {
             self.ai_handoff.activate();
             self.chat_focus_pending = true;
-        }
-    }
-
-    /// Begin a resize-grip drag. Grabbing the grip is a deliberate
-    /// chat interaction, so it also disarms an armed puck.
-    pub fn chat_resize_start(&mut self, x: f64, y: f64) {
-        self.activate_chat();
-        self.chat_resize = Some(ChatResizeDrag {
-            grab: (x as f32, y as f32),
-            origin: self.win_size,
-            current: self.win_size,
-        });
-    }
-
-    /// Update the prospective size from the current cursor position.
-    pub fn chat_resize_move(&mut self, x: f64, y: f64) {
-        if let Some(d) = &mut self.chat_resize {
-            let w = d.origin.0 + (x as f32 - d.grab.0);
-            let h = d.origin.1 + (y as f32 - d.grab.1);
-            d.current = (
-                w.max(crate::chat_shell::CHAT_MIN_W)
-                    .max(crate::geometry::WINDOW_SIZE as f32),
-                h.max(crate::chat_shell::CHAT_MIN_H),
-            );
-        }
-    }
-
-    /// Finish the drag. Returns the committed size when it changed
-    /// (the app layer persists it and issues the one real window
-    /// resize), `None` for a no-op release.
-    pub fn chat_resize_end(&mut self) -> Option<(f32, f32)> {
-        let d = self.chat_resize.take()?;
-        if d.current != d.origin {
-            self.win_size = d.current;
-            Some(d.current)
-        } else {
-            None
         }
     }
 
