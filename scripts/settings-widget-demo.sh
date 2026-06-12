@@ -12,9 +12,8 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-echo "==> building weather example (wasm32-wasip1)"
-cargo build --release --target wasm32-wasip1 \
-    --manifest-path widgets/builtin/weather/Cargo.toml
+echo "==> building + packing the bundled builtin widgets"
+scripts/build-builtin-widgets.sh
 
 echo "==> building widget CLI + settings app (debug)"
 cargo build -p oxidemx-widget-cli -p oxidemx-settings
@@ -26,6 +25,10 @@ find /tmp -maxdepth 1 -name 'oxidemx-settings-widget-demo.*' -user "$(id -un)" \
     -mmin +120 -exec rm -rf {} + 2>/dev/null || true
 export XDG_CONFIG_HOME="$TMP/config"
 mkdir -p "$XDG_CONFIG_HOME/oxidemx"
+# Settings startup seeds every target/builtin-widgets/*.omxw bundle
+# before its registry scan (spec §16) — the demo asserts all six
+# bundled widgets come up ready below.
+export OXIDEMX_BUILTIN_WIDGETS_DIR="$PWD/target/builtin-widgets"
 
 echo "==> packing + installing the weather widget via the CLI"
 BUNDLE="$TMP/weather-1.4.0.omxw"
@@ -90,6 +93,21 @@ grep -q 'installed: weather' <<< "$OUT" || {
     echo "==> demo FAILED: weather widget not in the registry scan" >&2
     exit 1
 }
+
+# Startup seeding (spec §16) must leave all six bundled widgets
+# installed and ready: weather (hand-installed, seed skips the equal
+# version) + cpu/memory/network/disk/tasks from the seed dir.
+READY_COUNT="$(grep -c '^installed: .* (ready)$' <<< "$OUT" || true)"
+if [ "$READY_COUNT" -ne 6 ]; then
+    echo "==> demo FAILED: expected 6 ready widgets post-seed, got $READY_COUNT" >&2
+    exit 1
+fi
+for id in weather cpu memory network disk tasks; do
+    grep -q "^installed: $id " <<< "$OUT" || {
+        echo "==> demo FAILED: bundled widget '$id' missing from the registry" >&2
+        exit 1
+    }
+done
 
 echo "==> settings-widget-demo OK"
 echo

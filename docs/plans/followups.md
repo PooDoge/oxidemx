@@ -276,6 +276,24 @@ Deferred from the widget-plugin plans (runtime + CLI + settings UI,
   lists permissions, but `exec` in particular deserves a louder,
   per-permission explanation (and possibly a first-use prompt)
   rather than one bullet in the sideload dialog.
+- **MouseBattery → bundled plugin conversion** — the only built-in
+  widget left native after the spec §16 conversion (plan 4). Blocked
+  on a host-side battery data feed: `SystemStatsSnapshot` already
+  reserves `battery_pct`/`battery_charging` (append-only, always
+  `None` today), but the widget host has no daemon D-Bus client to
+  fill them. Add one (subscribe to the daemon's battery signal like
+  the indicator does), populate the snapshot fields, ship a
+  `widgets/builtin/battery` crate, and extend the picker mapping in
+  `settings-rs/src/tabs/buttons/picker.rs::builtin_plugin_id`.
+- **Native widget render-path removal (future MAJOR)** — the legacy
+  `WidgetSource::{Weather,Cpu,Memory,Network,Disk,TasksDue}` render
+  paths in `overlay-rs/src/render/slices/widgets.rs` +
+  `overlay-rs/src/sampler.rs` stay for back-compat with existing
+  configs (spec §16: existing slices keep rendering exactly as
+  today; the picker offers one-click conversion). Remove them only
+  in a major cleanup once conversion has been the default for a
+  release — at that point also drop the canned native picker tiles
+  and auto-convert remaining configs.
 
 ## Gap-sweep triage (2026-06-12 evening)
 

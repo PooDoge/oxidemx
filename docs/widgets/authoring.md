@@ -54,6 +54,7 @@ All variants are `#[non_exhaustive]`; unknown variants arrive as
 | `Event::Scroll { delta }` | The user scrolled the wheel over this slice. Positive = scroll down. |
 | `Event::SettingsChanged` | The user edited an option in the Settings app. Re-read `ctx.setting_*` and re-fetch if needed. |
 | `Event::HttpResponse { id, status, body }` | Response to a `ctx.http_get` call. `id` matches what you passed; `status == 0` means the request was denied or failed (network or permission). |
+| `Event::SystemStats(snapshot)` | Host-pushed system stats (requires the `system-stats` permission): once on `MenuOpened`, then every 1 s while the menu is open. Every snapshot field is `Option`-al — fields the host could not sample (e.g. `cpu_pct` before the first /proc/stat delta) arrive as `None`. Nothing is pushed while the menu is closed. |
 
 ---
 
@@ -179,6 +180,7 @@ Adding a new variant requires bumping `api_version`.
 | `open-url` | `xdg-open <url>` from `ctx.open_url`. |
 | `exec` | `sh -c <cmd>` from `ctx.exec`.  Shows a strong install-time prompt. |
 | `haptics` | `ctx.haptic` pattern delivery (stub in v1). |
+| `system-stats` | Receive the host-pushed `Event::SystemStats` feed (CPU / memory / network / disk / tasks-due readings sampled by the host — sandboxed guests cannot read /proc themselves).  Read-only; instances without the permission simply never see the event. |
 
 ### Settings resolution order
 
@@ -255,6 +257,34 @@ cargo test --manifest-path widgets/builtin/weather/Cargo.toml
 The weather example has full native unit tests for JSON parsing,
 settings accessors, event handling, render output shape, and °F
 conversion — use it as a template for your own test suite.
+
+---
+
+## Bundled built-in widgets
+
+The widgets shipped with OxideMX itself live in `widgets/builtin/`:
+`weather`, `cpu`, `memory`, `network`, `disk`, and `tasks`.  They are
+ordinary plugin widgets — same manifest, same sandbox, same caps — and
+double as reference implementations:
+
+- **weather** demonstrates HTTP fetching, the `location` option type,
+  timers, and hover/click handling.
+- **cpu / memory / network / disk / tasks** demonstrate the
+  `system-stats` push feed: no timers, no HTTP — they just fold each
+  `Event::SystemStats` into state and re-render.  cpu and network keep
+  their own 30-sample sparkline ring buffers in guest state.
+
+`scripts/build-builtin-widgets.sh` compiles each crate to
+wasm32-wasip1 and packs `target/builtin-widgets/<id>-<ver>.omxw`;
+`install.sh` ships that directory to `<prefix>/share/oxidemx/widgets/`,
+and overlay/settings startup *seeding* installs the bundles into the
+user's widgets dir (see the security note below for the trust model
+and upgrade-only semantics).  In the Settings picker the bundled
+plugins replace the canned native tiles once installed; legacy native
+widget slices keep rendering through the old native paths and offer a
+one-click "Convert" to the plugin version.  The native MouseBattery
+widget has no bundled plugin yet — the host has no battery data feed
+(daemon D-Bus follow-up, see `docs/plans/followups.md`).
 
 ---
 
