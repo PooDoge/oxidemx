@@ -31,6 +31,7 @@ mod color_canvas;
 mod cursor_helper;
 mod daemon;
 mod fonts;
+mod geocode;
 mod icon_picker;
 mod mouse_callouts;
 mod persist;
@@ -219,7 +220,7 @@ pub enum Message {
     /// Weather-location geocoder (Settings tab).
     SetWeatherQuery(String),
     WeatherSearch,
-    WeatherResults(Result<Vec<GeoPlace>, String>),
+    WeatherResults(Result<Vec<geocode::GeoHit>, String>),
     /// Pick result `idx` → persist overlay.weather_location/_place.
     WeatherPick(usize),
     WeatherClearLocation,
@@ -501,6 +502,51 @@ pub enum Message {
     /// Re-scan `~/.config/oxidemx/widgets` into the settings-side
     /// registry cache. Triggered after store install/uninstall.
     RescanWidgets,
+
+    // --- Widget options card (spec §5/§6/§10d) ---
+    /// Scope toggle at the top of the options card. → Global just
+    /// flips the pointer (instance bag kept, ignored); → Instance
+    /// seeds the instance bag as a copy of the current resolved
+    /// values so it diverges from there (spec §6 table).
+    SetWidgetScope(usize, oxidemx_shared::WidgetScope),
+    /// One option edit from any card control. Writes to the bag the
+    /// slice's current scope selects: Global → `widgets.global[id]`,
+    /// Instance → `widgets.instances[ikey][id]`.
+    SetWidgetOption {
+        slice: usize,
+        key: String,
+        value: serde_json::Value,
+    },
+    /// Per-option "↺": Instance scope drops the instance override
+    /// ("Reset to global"), Global drops the global value ("Reset
+    /// to default").
+    ResetWidgetOption {
+        slice: usize,
+        key: String,
+    },
+    /// Live text of a location option's geocoder search field. Also
+    /// claims the shared search state for that (slice, option key).
+    WidgetLocQuery {
+        slice: usize,
+        key: String,
+        text: String,
+    },
+    /// Kick off the Open-Meteo lookup for the current query.
+    WidgetLocSearch {
+        slice: usize,
+        key: String,
+    },
+    /// Geocoder results (or error) for the in-flight search.
+    WidgetLocResults(Result<Vec<geocode::GeoHit>, String>),
+    /// Pick one geocoder hit → stores `{"name", "lat", "lon"}`
+    /// through the same scoped write path as `SetWidgetOption`.
+    WidgetLocPick {
+        slice: usize,
+        key: String,
+        name: String,
+        lat: f64,
+        lon: f64,
+    },
 
     // --- Haptics tab ---
     SetHapticsEnabled(bool),
@@ -1061,74 +1107,6 @@ impl AnimDirection {
 // State
 // ============================================================================
 
-/// One geocoding hit from Open-Meteo's keyless geocoder.
-#[derive(Debug, Clone, PartialEq)]
-pub struct GeoPlace {
-    /// "Oslo, NO" — also persisted as `overlay.weather_place`.
-    pub label: String,
-    pub lat: f64,
-    pub lon: f64,
-}
-
-/// Resolve a city name via Open-Meteo's geocoding API. Runs `curl`
-/// in a blocking task — settings has no HTTP client dependency and
-/// this is a rare, user-initiated call.
-async fn geocode_city(query: String) -> Result<Vec<GeoPlace>, String> {
-    tokio::task::spawn_blocking(move || {
-        let encoded: String = query
-            .trim()
-            .chars()
-            .map(|c| {
-                if c.is_ascii_alphanumeric() || "-_.~".contains(c) {
-                    c.to_string()
-                } else {
-                    c.to_string()
-                        .bytes()
-                        .map(|b| format!("%{b:02X}"))
-                        .collect()
-                }
-            })
-            .collect();
-        let url = format!(
-            "https://geocoding-api.open-meteo.com/v1/search?name={encoded}&count=5&language=en&format=json"
-        );
-        let out = std::process::Command::new("curl")
-            .args(["-sm", "8", &url])
-            .output()
-            .map_err(|e| format!("curl failed to start: {e}"))?;
-        if !out.status.success() {
-            return Err("geocoding request failed (offline?)".to_string());
-        }
-        let v: serde_json::Value = serde_json::from_slice(&out.stdout)
-            .map_err(|e| format!("geocoding response unreadable: {e}"))?;
-        let mut places = Vec::new();
-        for r in v["results"].as_array().into_iter().flatten() {
-            let (Some(name), Some(lat), Some(lon)) = (
-                r["name"].as_str(),
-                r["latitude"].as_f64(),
-                r["longitude"].as_f64(),
-            ) else {
-                continue;
-            };
-            let region = r["admin1"].as_str().unwrap_or("");
-            let country = r["country_code"].as_str().unwrap_or("");
-            let label = match (region.is_empty(), country.is_empty()) {
-                (false, false) => format!("{name}, {region}, {country}"),
-                (true, false) => format!("{name}, {country}"),
-                _ => name.to_string(),
-            };
-            places.push(GeoPlace { label, lat, lon });
-        }
-        if places.is_empty() {
-            Err("no places matched".to_string())
-        } else {
-            Ok(places)
-        }
-    })
-    .await
-    .map_err(|e| format!("geocoding task failed: {e}"))?
-}
-
 pub struct State {
     pub config: AppConfig,
     /// Resolved colour palette derived from `config.theme`. Rebuilt
@@ -1160,7 +1138,7 @@ pub struct State {
     /// Weather-location geocoder (Settings tab): live query text,
     /// the last search's results, and an in-flight flag.
     pub weather_query: String,
-    pub weather_results: Vec<GeoPlace>,
+    pub weather_results: Vec<geocode::GeoHit>,
     pub weather_searching: bool,
     /// Currently-selected slot in the radial preview, if any.
     /// Drives the per-slice editor in the Buttons-tab right column.
@@ -1297,6 +1275,21 @@ pub struct State {
     /// pick-applies-and-collapses step; GC'd on explicit Cancel,
     /// slice deselect/reselect, and slice list mutations.
     pub picker_undo: Option<(usize, oxidemx_shared::Slice)>,
+    /// Full manifests per installed widget id — the options card
+    /// renders from `manifest.options`, which `WidgetSummaryLite`
+    /// intentionally omits. Refreshed together with
+    /// `widget_registry` (same scan).
+    pub widget_manifests: std::collections::HashMap<String, oxidemx_widget_proto::WidgetManifest>,
+    /// Which (slice idx, option key) owns the location-option
+    /// geocoder state below. One search at a time — the card only
+    /// shows the query/results on the control that claimed it.
+    pub widget_loc_target: Option<(usize, String)>,
+    /// Live query text of the active location option's search field.
+    pub widget_loc_query: String,
+    /// Results of the last location-option search.
+    pub widget_loc_results: Vec<geocode::GeoHit>,
+    /// In-flight flag for the location-option geocoder.
+    pub widget_loc_searching: bool,
 }
 
 /// Where the AI Assistant's Gemini API key lives. Mirrors the
@@ -1327,6 +1320,7 @@ impl Default for State {
             .as_deref()
             .and_then(Tab::from_tag)
             .unwrap_or(Tab::MouseButtons);
+        let (widget_registry, widget_manifests) = tabs::buttons::picker::scan_registry_full();
         State {
             config,
             palette: pal,
@@ -1378,10 +1372,15 @@ impl Default for State {
             haptic_diagnosis: None,
             ai_key_draft: String::new(),
             ai_key_present: ai_key_path().exists(),
-            widget_registry: tabs::buttons::picker::scan_registry(),
+            widget_registry,
             picker_open: None,
             picker_search: String::new(),
             picker_undo: None,
+            widget_manifests,
+            widget_loc_target: None,
+            widget_loc_query: String::new(),
+            widget_loc_results: Vec::new(),
+            widget_loc_searching: false,
         }
     }
 }
@@ -1971,6 +1970,55 @@ impl State {
         self.picker_open = None;
         self.picker_search.clear();
         self.picker_undo = None;
+        // The options card's location search is slice-addressed too —
+        // a stale target would render under the wrong control after a
+        // deselect/reorder, so it resets with the picker state.
+        self.widget_loc_target = None;
+        self.widget_loc_query.clear();
+        self.widget_loc_results.clear();
+        self.widget_loc_searching = false;
+    }
+
+    /// Editing context of the custom widget on slice `idx`:
+    /// `(widget id, current scope, effective instance key)`.
+    ///
+    /// When the slice has no `instance_key` yet (hand-edited
+    /// config), the canonical `<page-slug>.slot<N>` key is derived
+    /// AND written back into the slice so this first edit and every
+    /// later one land under a stable address. `None` for built-in
+    /// widget sources and non-widget slices.
+    fn widget_edit_ctx(
+        &mut self,
+        idx: usize,
+    ) -> Option<(String, oxidemx_shared::WidgetScope, String)> {
+        let page_name = self
+            .config
+            .radial_menu
+            .pages
+            .get(self.active_page)
+            .map(|p| p.name.clone())
+            .unwrap_or_default();
+        let slice = self.active_slices_mut().get_mut(idx)?;
+        let w = slice.widget.as_mut()?;
+        let oxidemx_shared::WidgetSource::Custom(id) = &w.source else {
+            return None;
+        };
+        let id = id.clone();
+        let (ikey, derived) = match w.instance_key.as_deref() {
+            Some(k) if !k.is_empty() => (k.to_string(), false),
+            _ => {
+                let k = oxidemx_shared::widgets::instance_key(&page_name, idx);
+                w.instance_key = Some(k.clone());
+                (k, true)
+            }
+        };
+        let scope = w.scope;
+        if derived {
+            // The write-back is a config mutation in its own right —
+            // persist it even if the calling handler bails out.
+            self.touch();
+        }
+        Some((id, scope, ikey))
     }
 
     /// Tick the status auto-clear timer. Picks up new strings on
@@ -2978,7 +3026,129 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             Task::none()
         }
         Message::RescanWidgets => {
-            state.widget_registry = tabs::buttons::picker::scan_registry();
+            let (registry, manifests) = tabs::buttons::picker::scan_registry_full();
+            state.widget_registry = registry;
+            state.widget_manifests = manifests;
+            Task::none()
+        }
+
+        // --- Widget options card (spec §5/§6/§10d) ---
+        Message::SetWidgetScope(idx, scope) => {
+            if let Some((id, old_scope, ikey)) = state.widget_edit_ctx(idx) {
+                if old_scope != scope {
+                    if let Some(w) = state
+                        .active_slices_mut()
+                        .get_mut(idx)
+                        .and_then(|s| s.widget.as_mut())
+                    {
+                        w.scope = scope;
+                    }
+                    // Global → slice: seed the instance bag as a copy
+                    // of the current resolved values so it diverges
+                    // from there (spec §6 table). The reverse toggle
+                    // keeps the instance bag (ignored until toggled
+                    // back).
+                    if scope == oxidemx_shared::WidgetScope::Instance {
+                        let defaults = state
+                            .widget_manifests
+                            .get(&id)
+                            .map(|m| m.defaults())
+                            .unwrap_or_default();
+                        state.config.widgets.seed_instance(&id, &ikey, &defaults);
+                    }
+                    state.touch();
+                }
+            }
+            Task::none()
+        }
+        Message::SetWidgetOption { slice, key, value } => {
+            if let Some((id, scope, ikey)) = state.widget_edit_ctx(slice) {
+                tabs::buttons::widget_options::write_option(
+                    &mut state.config.widgets,
+                    &id,
+                    &ikey,
+                    scope,
+                    &key,
+                    value,
+                );
+                state.touch();
+            }
+            Task::none()
+        }
+        Message::ResetWidgetOption { slice, key } => {
+            if let Some((id, scope, ikey)) = state.widget_edit_ctx(slice) {
+                tabs::buttons::widget_options::reset_option(
+                    &mut state.config.widgets,
+                    &id,
+                    &ikey,
+                    scope,
+                    &key,
+                );
+                state.touch();
+            }
+            Task::none()
+        }
+        Message::WidgetLocQuery { slice, key, text } => {
+            // Typing claims the shared search state for this control;
+            // stale results from another control are dropped.
+            let target = Some((slice, key));
+            if state.widget_loc_target != target {
+                state.widget_loc_results.clear();
+            }
+            state.widget_loc_target = target;
+            state.widget_loc_query = text;
+            Task::none()
+        }
+        Message::WidgetLocSearch { slice, key } => {
+            let target = Some((slice, key));
+            if state.widget_loc_target != target {
+                // Search pressed on a control that never claimed the
+                // query — claim it empty instead of searching another
+                // control's text under this key.
+                state.widget_loc_target = target;
+                state.widget_loc_query.clear();
+                state.widget_loc_results.clear();
+                return Task::none();
+            }
+            let q = state.widget_loc_query.trim().to_string();
+            if q.is_empty() || state.widget_loc_searching {
+                return Task::none();
+            }
+            state.widget_loc_searching = true;
+            state.widget_loc_results.clear();
+            Task::perform(geocode::search(q), Message::WidgetLocResults)
+        }
+        Message::WidgetLocResults(res) => {
+            state.widget_loc_searching = false;
+            match res {
+                Ok(hits) => state.widget_loc_results = hits,
+                Err(e) => state.status = format!("Location lookup failed: {e}"),
+            }
+            Task::none()
+        }
+        Message::WidgetLocPick {
+            slice,
+            key,
+            name,
+            lat,
+            lon,
+        } => {
+            if let Some((id, scope, ikey)) = state.widget_edit_ctx(slice) {
+                let value = serde_json::json!({ "name": name, "lat": lat, "lon": lon });
+                tabs::buttons::widget_options::write_option(
+                    &mut state.config.widgets,
+                    &id,
+                    &ikey,
+                    scope,
+                    &key,
+                    value,
+                );
+                state.widget_loc_target = None;
+                state.widget_loc_query.clear();
+                state.widget_loc_results.clear();
+                state.status = format!("Location set: {name}");
+                state.touch();
+            }
             Task::none()
         }
         Message::SetSliceDial(i, kind) => {
@@ -2999,7 +3169,7 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             }
             state.weather_searching = true;
             state.weather_results.clear();
-            Task::perform(geocode_city(q), Message::WeatherResults)
+            Task::perform(geocode::search(q), Message::WeatherResults)
         }
         Message::WeatherResults(res) => {
             state.weather_searching = false;
@@ -3015,10 +3185,10 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
         Message::WeatherPick(idx) => {
             if let Some(place) = state.weather_results.get(idx).cloned() {
                 state.config.overlay.weather_location = Some((place.lat, place.lon));
-                state.config.overlay.weather_place = Some(place.label.clone());
+                state.config.overlay.weather_place = Some(place.name.clone());
                 state.weather_results.clear();
                 state.weather_query.clear();
-                state.status = format!("Weather location set: {}", place.label);
+                state.status = format!("Weather location set: {}", place.name);
                 state.touch();
             }
             Task::none()

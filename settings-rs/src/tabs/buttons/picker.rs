@@ -46,15 +46,26 @@ pub struct WidgetSummaryLite {
     pub signature: String,
 }
 
-/// Scan `~/.config/oxidemx/widgets` into the settings-side cache.
-/// Called once at startup and on `Message::RescanWidgets`.
-pub fn scan_registry() -> Vec<WidgetSummaryLite> {
+/// Scan `~/.config/oxidemx/widgets` into the settings-side caches:
+/// lite summaries for the picker tiles + full manifests per widget
+/// id for the options card (which renders from `manifest.options`,
+/// intentionally omitted from the lite summary). Called once at
+/// startup and on `Message::RescanWidgets`.
+pub fn scan_registry_full() -> (
+    Vec<WidgetSummaryLite>,
+    std::collections::HashMap<String, oxidemx_widget_proto::WidgetManifest>,
+) {
     use oxidemx_widget_host::registry::{SignatureState, WidgetRegistry, WidgetState};
     let Some(dir) = WidgetRegistry::widgets_dir() else {
-        return Vec::new();
+        return (Vec::new(), std::collections::HashMap::new());
     };
     let reg = WidgetRegistry::scan(&dir);
-    reg.iter()
+    let manifests = reg
+        .iter()
+        .map(|w| (w.manifest.id.clone(), w.manifest.clone()))
+        .collect();
+    let summaries = reg
+        .iter()
         .map(|w| {
             let (ready, reason) = match &w.state {
                 WidgetState::Ready => (true, None),
@@ -80,7 +91,8 @@ pub fn scan_registry() -> Vec<WidgetSummaryLite> {
                 },
             }
         })
-        .collect()
+        .collect();
+    (summaries, manifests)
 }
 
 // ============================================================================
@@ -383,6 +395,17 @@ fn behavior_chip<'a>(
             .on_press(Message::OpenPicker(idx))
     };
 
+    // Orphaned widget slice (custom id not installed, spec §10e):
+    // a Reinstall button next to Change… opens the downloader.
+    let reinstall_btn: Element<Message> = if missing_widget_id(state, slice).is_some() {
+        button(text("Reinstall").size(11))
+            .style(style::btn_primary(pal))
+            .on_press(Message::OpenWidgetStore)
+            .into()
+    } else {
+        Space::new().width(Length::Shrink).into()
+    };
+
     let body = row![
         chip_icon_tile(state, slice),
         column![
@@ -391,6 +414,7 @@ fn behavior_chip<'a>(
         ]
         .spacing(2),
         Space::new().width(Length::Fill),
+        reinstall_btn,
         change_btn,
     ]
     .align_y(Alignment::Center)
@@ -467,6 +491,22 @@ fn chip_icon_tile<'a>(state: &'a State, slice: &'a Slice) -> Element<'a, Message
         .into()
 }
 
+/// `Some(id)` when the slice points at a custom widget whose id is
+/// not in the installed registry (uninstalled / orphaned, spec §10e).
+fn missing_widget_id<'a>(state: &State, slice: &'a Slice) -> Option<&'a str> {
+    if slice.kind != ActionKind::Widget {
+        return None;
+    }
+    match &slice.widget {
+        Some(WidgetConfig { source: WidgetSource::Custom(id), .. })
+            if !state.widget_registry.iter().any(|w| w.id == *id) =>
+        {
+            Some(id)
+        }
+        _ => None,
+    }
+}
+
 /// Kind-specific one-line summary on the chip.
 fn chip_summary(state: &State, slice: &Slice) -> String {
     let cmd = slice.command.trim();
@@ -509,6 +549,11 @@ fn chip_summary(state: &State, slice: &Slice) -> String {
             format!("{n} sub-item{}", if n == 1 { "" } else { "s" })
         }
         ActionKind::Widget => {
+            // Uninstalled custom widget → "missing widget" summary
+            // (spec §10e); the chip also grows a Reinstall button.
+            if let Some(id) = missing_widget_id(state, slice) {
+                return format!("Missing widget · \"{id}\" is not installed");
+            }
             let name = slice
                 .widget
                 .as_ref()

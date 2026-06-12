@@ -19,6 +19,9 @@ oxidemx-widgets = { path = "../oxidemx-widgets" }
 # settings app does not spawn the wasm worker (live previews are a
 # deferred follow-up).
 oxidemx-widget-host = { path = "../oxidemx-widget-host" }
+# Manifest types (WidgetManifest / OptionSpec) — the options card
+# renders straight from the manifest's options[] schema.
+oxidemx-widget-proto = { path = "../oxidemx-widget-proto" }
 
 # iced 0.14 — same toolkit as the overlay so we share render
 # tech and don't drag in a separate UI dep tree. Standard widgets
