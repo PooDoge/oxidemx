@@ -328,3 +328,14 @@ priority order, with deferral reasons verified in-code:
 5. Editor-crate TODOs (icon_picker, editor window, tray SNI) —
    superseded in practice by settings-rs; decide deprecate-vs-
    finish before investing.
+
+### From Plan 4/5 final reviews (2026-06-12)
+- **Atomic seeding**: `install()` does remove_dir_all + incremental extract; two
+  processes seeding concurrently (overlay autostart + settings) can interleave on
+  an upgrade and a registry scan can observe a half-extracted widget. Fix:
+  extract-to-tempdir-then-rename, or a flock around seeding.
+- **Stats sampling skip for dead instances**: 3-strike-disabled instances keep
+  their `system-stats` permission entry, so push_stats keeps sampling (df spawns)
+  for widgets that will never render. Filter disabled instances in push_stats.
+- Preview worker MenuOpened one-shot: DONE inline (widget_preview.rs) — stats
+  widgets now render live in the options-card preview.

@@ -221,6 +221,14 @@ fn spawn_preview(state: &mut State, desired: Desired) -> Task<Message> {
             Box::new(oxidemx_widget_host::ProcStatsSource::new()),
         );
         let _ = ctl_tx.send(HostCtl::ConfigChanged(cfg)).await;
+        // Stats-fed widgets (cpu/memory/…) only receive SystemStats pushes
+        // while the menu is "open" — without this the preview renders "—"
+        // forever. The preview worker's menu is permanently open.
+        let _ = ctl_tx
+            .send(HostCtl::MenuOpened {
+                page: "preview".into(),
+            })
+            .await;
         let _ = ctl_tx
             .send(HostCtl::Slice {
                 instance,
