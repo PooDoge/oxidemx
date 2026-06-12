@@ -14,6 +14,11 @@ path = "src/main.rs"
 oxidemx-shared = { path = "../oxidemx-shared" }
 oxidemx-icons = { path = "../oxidemx-icons" }
 oxidemx-widgets = { path = "../oxidemx-widgets" }
+# Installed-widget registry scan (behavior picker tiles + options
+# card). Manifest discovery + signature classification only — the
+# settings app does not spawn the wasm worker (live previews are a
+# deferred follow-up).
+oxidemx-widget-host = { path = "../oxidemx-widget-host" }
 
 # iced 0.14 — same toolkit as the overlay so we share render
 # tech and don't drag in a separate UI dep tree. Standard widgets

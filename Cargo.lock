@@ -4761,6 +4761,7 @@ dependencies = [
  "image",
  "oxidemx-icons",
  "oxidemx-shared",
+ "oxidemx-widget-host",
  "oxidemx-widgets",
  "rfd",
  "serde",

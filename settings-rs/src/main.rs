@@ -476,6 +476,32 @@ pub enum Message {
         to: usize,
     },
 
+    // --- Behavior chip + action/widget picker panel (spec §10b/c) ---
+    /// `Change…` on a slice's behavior chip — expands the picker
+    /// panel for that slot and snapshots the slice for
+    /// undo-by-reselect.
+    OpenPicker(usize),
+    /// `Cancel` on the chip / explicit close — collapses the panel
+    /// without applying and drops the undo snapshot.
+    ClosePicker,
+    /// Live text of the picker's search field.
+    PickerSearch(String),
+    /// Click on a built-in action tile: applies the kind (or
+    /// restores the undo snapshot when the tile matches it) and
+    /// closes the panel.
+    PickAction(usize, oxidemx_shared::ActionKind),
+    /// Click on a widget tile (built-in source or installed
+    /// `Custom(id)`): sets kind=Widget + a fresh `WidgetConfig`
+    /// (instance_key for custom widgets), auto-labels, closes the
+    /// panel. Restores the undo snapshot when the tile matches it.
+    PickWidget(usize, oxidemx_shared::WidgetSource),
+    /// "Get more widgets…" stub tile. Opens the downloader dialog
+    /// once Task 3 lands; reports a status hint until then.
+    OpenWidgetStore,
+    /// Re-scan `~/.config/oxidemx/widgets` into the settings-side
+    /// registry cache. Triggered after store install/uninstall.
+    RescanWidgets,
+
     // --- Haptics tab ---
     SetHapticsEnabled(bool),
     SetHapticsPerEvent(tabs::haptics::HapticsEvent, String),
@@ -1256,6 +1282,21 @@ pub struct State {
     /// Whether `~/.config/oxidemx/gemini.key` exists. Checked at
     /// boot and updated on save/remove.
     pub ai_key_present: bool,
+    /// Settings-side mirror of the installed-widget registry
+    /// (`~/.config/oxidemx/widgets`). Scanned once at startup +
+    /// re-scanned on `Message::RescanWidgets` after store actions.
+    pub widget_registry: Vec<tabs::buttons::picker::WidgetSummaryLite>,
+    /// Slice index whose behavior picker panel is expanded, if any.
+    pub picker_open: Option<usize>,
+    /// Live query of the picker's search field.
+    pub picker_search: String,
+    /// Undo-by-reselect snapshot: the slice as it was before the
+    /// picker session started. Re-picking the tile matching this
+    /// snapshot's behavior restores it wholesale (so a widget's
+    /// instance settings survive a round-trip). Kept across the
+    /// pick-applies-and-collapses step; GC'd on explicit Cancel,
+    /// slice deselect/reselect, and slice list mutations.
+    pub picker_undo: Option<(usize, oxidemx_shared::Slice)>,
 }
 
 /// Where the AI Assistant's Gemini API key lives. Mirrors the
@@ -1337,6 +1378,10 @@ impl Default for State {
             haptic_diagnosis: None,
             ai_key_draft: String::new(),
             ai_key_present: ai_key_path().exists(),
+            widget_registry: tabs::buttons::picker::scan_registry(),
+            picker_open: None,
+            picker_search: String::new(),
+            picker_undo: None,
         }
     }
 }
@@ -1916,6 +1961,16 @@ impl State {
     fn touch(&mut self) {
         self.last_edit = Some(Instant::now());
         self.saved_pending = true;
+    }
+
+    /// Collapse the behavior picker panel and drop the
+    /// undo-by-reselect snapshot. Called on explicit Cancel, slice
+    /// deselect/reselect, and any slice-list mutation that would
+    /// leave the snapshot pointing at a stale index.
+    fn reset_picker(&mut self) {
+        self.picker_open = None;
+        self.picker_search.clear();
+        self.picker_undo = None;
     }
 
     /// Tick the status auto-clear timer. Picks up new strings on
@@ -2774,6 +2829,9 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                 slices.remove(i);
                 state.touch();
             }
+            // Indices shifted — a stale picker/undo snapshot could
+            // restore onto the wrong slot.
+            state.reset_picker();
             Task::none()
         }
         Message::MoveSliceUp(i) => {
@@ -2782,6 +2840,7 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                 slices.swap(i, i - 1);
                 state.touch();
             }
+            state.reset_picker();
             Task::none()
         }
         Message::MoveSliceDown(i) => {
@@ -2790,6 +2849,7 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                 slices.swap(i, i + 1);
                 state.touch();
             }
+            state.reset_picker();
             Task::none()
         }
         Message::SetSliceLabel(i, s) => {
@@ -2823,6 +2883,102 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                 });
                 state.touch();
             }
+            Task::none()
+        }
+
+        // --- Behavior chip + picker panel (spec §10b/c) ---
+        Message::OpenPicker(idx) => {
+            // Snapshot for undo-by-reselect — but only when no
+            // snapshot exists for this slot yet, so a pick →
+            // reopen → re-pick round-trip can still restore the
+            // original slice (incl. a widget's instance config).
+            if state.picker_undo.as_ref().map(|(i, _)| *i) != Some(idx) {
+                state.picker_undo = state
+                    .active_slices()
+                    .get(idx)
+                    .cloned()
+                    .map(|s| (idx, s));
+            }
+            state.picker_open = Some(idx);
+            state.picker_search.clear();
+            Task::none()
+        }
+        Message::ClosePicker => {
+            state.reset_picker();
+            Task::none()
+        }
+        Message::PickerSearch(q) => {
+            state.picker_search = q;
+            Task::none()
+        }
+        Message::PickAction(i, kind) => {
+            use tabs::buttons::picker::{pick_matches_slice, PickChoice};
+            let restored = match state.picker_undo.as_ref() {
+                Some((ui, stored))
+                    if *ui == i && pick_matches_slice(stored, &PickChoice::Action(kind)) =>
+                {
+                    Some(stored.clone())
+                }
+                _ => None,
+            };
+            if let Some(slice) = state.active_slices_mut().get_mut(i) {
+                match restored {
+                    // Undo-by-reselect: bring the whole snapshot back.
+                    Some(stored) => *slice = stored,
+                    // Fresh pick — same mutation as the legacy
+                    // SetSliceKind (command/color/etc. survive).
+                    None => slice.kind = kind,
+                }
+                state.touch();
+            }
+            // Single click applies + collapses; the snapshot stays
+            // for a potential reselect (cleared on Cancel/deselect).
+            state.picker_open = None;
+            state.picker_search.clear();
+            Task::none()
+        }
+        Message::PickWidget(i, source) => {
+            use tabs::buttons::picker::{apply_widget_pick, pick_matches_slice, PickChoice};
+            let restored = match state.picker_undo.as_ref() {
+                Some((ui, stored))
+                    if *ui == i
+                        && pick_matches_slice(stored, &PickChoice::Widget(source.clone())) =>
+                {
+                    Some(stored.clone())
+                }
+                _ => None,
+            };
+            let page_name = state
+                .config
+                .radial_menu
+                .pages
+                .get(state.active_page)
+                .map(|p| p.name.clone())
+                .unwrap_or_default();
+            // Cloned so the registry can be read while the slice is
+            // borrowed mutably; the list is tiny (installed widgets).
+            let registry = state.widget_registry.clone();
+            if let Some(slice) = state.active_slices_mut().get_mut(i) {
+                match restored {
+                    Some(stored) => *slice = stored,
+                    None => apply_widget_pick(slice, source, &page_name, i, &registry),
+                }
+                state.touch();
+            }
+            state.picker_open = None;
+            state.picker_search.clear();
+            Task::none()
+        }
+        Message::OpenWidgetStore => {
+            // Downloader dialog lands in Task 3 — until then point
+            // at the manual install path (spec §11 stub footer).
+            state.status =
+                "Widget store coming soon — drop a bundle into ~/.config/oxidemx/widgets/"
+                    .to_string();
+            Task::none()
+        }
+        Message::RescanWidgets => {
+            state.widget_registry = tabs::buttons::picker::scan_registry();
             Task::none()
         }
         Message::SetSliceDial(i, kind) => {
@@ -2989,6 +3145,11 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                     state.app_command_picker = None;
                 }
             }
+            // Behavior picker + undo snapshot are slot-bound too —
+            // moving to a different slot invalidates both.
+            if state.selected_slice != Some(i) {
+                state.reset_picker();
+            }
             state.selected_slice = Some(i);
             Task::none()
         }
@@ -2997,6 +3158,7 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             // Close anything bound to the deselected slot.
             state.icon_picker = None;
             state.app_command_picker = None;
+            state.reset_picker();
             Task::none()
         }
         Message::SwapSlices { from, to } => {
@@ -3025,6 +3187,8 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                 state.selected_slice = Some(to);
                 state.touch();
             }
+            // Slot indices changed under the picker/undo snapshot.
+            state.reset_picker();
             Task::none()
         }
 

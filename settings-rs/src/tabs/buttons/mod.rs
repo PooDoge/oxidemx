@@ -9,6 +9,8 @@
 //! entry) so the radial-menu editor gets the full window width
 //! to work in.
 
+pub mod picker;
+
 use crate::radial_preview::radial_preview_widget;
 use crate::{Message, State};
 use iced::widget::{
@@ -522,13 +524,10 @@ fn slice_editor_row<'a>(
         Space::new().width(Length::Shrink).into()
     };
 
-    let kind_picker = pick_list(
-        KIND_OPTIONS.as_slice(),
-        Some(KindOption::from(slice.kind)),
-        move |opt| Message::SetSliceKind(idx, opt.into()),
-    )
-    .style(style::pick_list_style(pal))
-    .text_size(12);
+    // Behavior chip + inline picker panel — replaces the legacy
+    // kind pick_list (see picker.rs). The colour picker and the
+    // kind-specific value editor below stay.
+    let behavior = picker::behavior_section(state, idx, slice);
 
     // Selected colour: "Full colour" sentinel takes priority when
     // icon_untinted is set; otherwise the slice's actual palette
@@ -607,10 +606,10 @@ fn slice_editor_row<'a>(
 
     let mut col = column![
         header,
+        behavior,
         label_input,
         desc_input,
         row![
-            kind_picker,
             color_picker,
             iced::widget::container(cmd_input).width(Length::Fill),
             app_pick_btn,
@@ -1192,19 +1191,12 @@ fn action_value_editor<'a>(state: &'a State, idx: usize, slice: &'a Slice) -> El
             .style(style::text_dim(pal))
             .into(),
         ActionKind::Widget => {
-            let selected = slice
-                .widget
-                .as_ref()
-                .map(|w| WidgetSourceOption(w.source.clone()));
-            pick_list(
-                widget_source_options(),
-                selected,
-                move |o: WidgetSourceOption| Message::SetSliceWidgetSource(idx, o.0),
-            )
-            .style(style::pick_list_style(pal))
-            .text_size(12)
-            .placeholder("Pick data source…")
-            .into()
+            // Data source is chosen through the behavior picker
+            // (chip → Change…) — the legacy pick_list is gone.
+            text("(data source — pick via Change… above)")
+                .size(11)
+                .style(style::text_dim(pal))
+                .into()
         }
         ActionKind::Dial => {
             let selected = slice.dial.map(DialKindOption);
@@ -1484,37 +1476,9 @@ impl std::fmt::Display for PowerOption {
     }
 }
 
-/// Pick-list wrapper for a widget wedge's data source.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct WidgetSourceOption(pub oxidemx_shared::WidgetSource);
-
-impl std::fmt::Display for WidgetSourceOption {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        use oxidemx_shared::WidgetSource as W;
-        f.write_str(match &self.0 {
-            W::Weather => "Weather",
-            W::Cpu => "CPU usage",
-            W::Memory => "Memory",
-            W::Network => "Network rate",
-            W::Disk => "Disk free",
-            W::TasksDue => "Tasks due",
-            W::MouseBattery => "Mouse battery",
-            W::Custom(_) => "Custom widget",
-        })
-    }
-}
-
-fn widget_source_options() -> Vec<WidgetSourceOption> {
-    vec![
-        WidgetSourceOption(oxidemx_shared::WidgetSource::Weather),
-        WidgetSourceOption(oxidemx_shared::WidgetSource::Cpu),
-        WidgetSourceOption(oxidemx_shared::WidgetSource::Memory),
-        WidgetSourceOption(oxidemx_shared::WidgetSource::Network),
-        WidgetSourceOption(oxidemx_shared::WidgetSource::Disk),
-        WidgetSourceOption(oxidemx_shared::WidgetSource::TasksDue),
-        WidgetSourceOption(oxidemx_shared::WidgetSource::MouseBattery),
-    ]
-}
+// (The legacy WidgetSourceOption pick_list lived here; the behavior
+// picker in picker.rs replaces it. Message::SetSliceWidgetSource
+// stays handled in main.rs for compatibility.)
 
 /// Pick-list wrapper for a dial wedge's target.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
