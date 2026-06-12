@@ -146,13 +146,16 @@ fn fx_gridsun(pa: vec2<f32>, t: f32) -> vec4<f32> {
     var col = vec3<f32>(0.0);
     var a = 0.0;
     if pa.y > horizon {
-        // Grid floor.
+        // Grid floor. Line thickness derives from the PERSPECTIVE
+        // depth (pre-scroll g.y) — folding the time scroll in first
+        // makes the thickness grow without bound until the whole
+        // floor renders solid after a few seconds.
         var g = vec2<f32>(0.0);
         g.y = 3.0 / (abs(pa.y - horizon) + 0.05);
         g.x = pa.x * g.y;
+        let size = vec2<f32>(g.y, g.y * g.y * 0.2) * 0.01;
         g.y += t * 2.4;
         let cell = abs(fract(g) - vec2<f32>(0.5));
-        let size = vec2<f32>(g.y, g.y * g.y * 0.2) * 0.01;
         let lines = smoothstep(size, vec2<f32>(0.0), cell);
         let gv = clamp(lines.x + lines.y, 0.0, 1.2);
         col = u.c0.rgb * gv;

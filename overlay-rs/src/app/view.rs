@@ -663,12 +663,12 @@ pub(super) fn view(state: &RadialState) -> Element<'_, Message> {
             let accent_dim = oxidemx_shared::theme::parse_hex_rgba(&palette.accent_dim)
                 .map(|(r, g, b, a)| [r as f32, g as f32, b as f32, a as f32])
                 .unwrap_or(accent_rgba);
-            // Colour set: theme accents unless the user supplied
-            // custom hex overrides (blank entries fall through to
-            // the theme value position-wise).
+            // Colour set: theme accents unless this status carries
+            // custom hex overrides (unparsable entries fall through
+            // to the theme value position-wise).
             let pick = |i: usize, fallback: [f32; 4]| -> [f32; 4] {
-                fx_cfg
-                    .custom_colors
+                status_fx
+                    .colors
                     .as_ref()
                     .and_then(|c| oxidemx_shared::theme::parse_hex_rgba(&c[i]))
                     .map(|(r, g, b, a)| [r as f32, g as f32, b as f32, a as f32])

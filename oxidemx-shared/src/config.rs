@@ -95,8 +95,10 @@ pub struct WidgetConfig {
     /// `None` = the source's default formatting. Built-ins only.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub format: Option<String>,
-    /// Where the options card writes (spec §6). Reads always merge
-    /// defaults ← global ← instance regardless.
+    /// Where the options card writes (spec §6) — and which layers apply
+    /// on read: resolution merges defaults ← global, then the instance
+    /// bag on top only when this is `Instance`. Under `Global` the
+    /// instance bag is ignored (kept on disk for toggling back).
     #[serde(default)]
     pub scope: WidgetScope,
     /// Key into `AppConfig::widgets.instances` — `<page-slug>.slot<N>`,
@@ -106,7 +108,8 @@ pub struct WidgetConfig {
 }
 
 /// Which level of the two-bag widget settings store an options card
-/// writes to. Resolution always reads through both (spec §6).
+/// writes to — and whether the instance bag participates in reads
+/// (it does only under `Instance`; spec §6).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum WidgetScope {
@@ -1021,7 +1024,12 @@ impl AppConfig {
         let mut cfg = match std::fs::read_to_string(path) {
             Ok(s) => serde_json::from_str::<Self>(&s).map_err(ConfigError::Parse)?,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                let mut def = AppConfig::default();
+                // derive(Default) zeroes schema_version; a fresh config is
+                // already current — don't let it look pre-migration.
+                let mut def = AppConfig {
+                    schema_version: CURRENT_SCHEMA_VERSION,
+                    ..AppConfig::default()
+                };
                 def.radial_menu.normalize_pages();
                 return Ok(def);
             }
@@ -1252,5 +1260,14 @@ mod tests {
         assert_eq!(w.source, WidgetSource::Cpu);
         assert_eq!(w.scope, WidgetScope::Instance); // default
         assert_eq!(w.instance_key, None);
+    }
+
+    #[test]
+    fn missing_config_defaults_to_current_schema() {
+        let cfg = AppConfig::load_from(std::path::Path::new(
+            "/nonexistent/oxidemx-test/config.json",
+        ))
+        .unwrap();
+        assert_eq!(cfg.schema_version, CURRENT_SCHEMA_VERSION);
     }
 }

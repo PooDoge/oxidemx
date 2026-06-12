@@ -19,11 +19,11 @@ pub mod conditions;
 pub mod config;
 pub mod gaming;
 pub mod haptics;
+pub mod migrate;
 pub mod pointer;
 pub mod popup;
 pub mod profiles;
 pub mod theme;
-pub mod migrate;
 pub mod widgets;
 
 pub use action::ActionKind;

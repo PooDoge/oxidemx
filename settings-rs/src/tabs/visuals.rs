@@ -894,6 +894,54 @@ fn ai_fx_card(state: &State) -> Element<'_, Message> {
                       blurb: &'static str,
                       cfg: &oxidemx_shared::config::AiStatusFx|
      -> Element<'static, Message> {
+        // Per-status palette: three swatch chips (effective colour
+        // — custom override or theme fallback) + a theme-reset
+        // button. Clicking a chip opens the inline HSV picker.
+        let mut swatches = row![text("Colours:").size(11)]
+            .spacing(8)
+            .align_y(Alignment::Center);
+        for slot in 0..3usize {
+            let hex = crate::ai_fx_effective_hex(state, idx, slot);
+            let (r, g, b) = crate::parse_hex_channels(&hex);
+            let c = iced::Color::from_rgb8(r, g, b);
+            let editing = state.ai_fx_editing == Some((idx, slot));
+            swatches = swatches.push(
+                button(
+                    Space::new()
+                        .width(Length::Fixed(18.0))
+                        .height(Length::Fixed(18.0)),
+                )
+                .padding(0)
+                .style(move |_, _| iced::widget::button::Style {
+                    background: Some(iced::Background::Color(c)),
+                    border: iced::Border {
+                        color: if editing {
+                            iced::Color::WHITE
+                        } else {
+                            iced::Color::from_rgba(0.0, 0.0, 0.0, 0.35)
+                        },
+                        width: if editing { 2.0 } else { 1.0 },
+                        radius: 4.0.into(),
+                    },
+                    ..Default::default()
+                })
+                .on_press(Message::ToggleAiFxColorPicker(idx, slot)),
+            );
+        }
+        if cfg.colors.is_some() {
+            swatches = swatches.push(
+                button(text("Theme").size(10))
+                    .style(style::btn_secondary(pal))
+                    .on_press(Message::ResetAiFxColors(idx)),
+            );
+        }
+
+        let color_picker_el: Element<'static, Message> =
+            if let Some((eidx, slot)) = state.ai_fx_editing.filter(|(i, _)| *i == idx) {
+                ai_fx_color_picker(state, eidx, slot)
+            } else {
+                Space::new().into()
+            };
         let picker = pick_list(
             effect_names.clone(),
             Some(display_for(&cfg.effect)),
@@ -938,21 +986,11 @@ fn ai_fx_card(state: &State) -> Element<'_, Message> {
             ]
             .spacing(12)
             .align_y(Alignment::Center),
+            swatches,
+            color_picker_el,
         ]
-        .spacing(4)
+        .spacing(6)
         .into()
-    };
-
-    let colors = fx
-        .custom_colors
-        .clone()
-        .unwrap_or_else(|| [String::new(), String::new(), String::new()]);
-    let color_input = |i: usize, placeholder: &'static str, val: &str| {
-        text_input(placeholder, val)
-            .size(12)
-            .padding(6)
-            .width(Length::Fixed(120.0))
-            .on_input(move |v| Message::SetAiFxColor(i, v))
     };
 
     container(
@@ -987,27 +1025,68 @@ fn ai_fx_card(state: &State) -> Element<'_, Message> {
                 "Chat open, nothing in flight — a calm ambient wash.",
                 &fx.idle,
             ),
-            column![
-                text("Custom colours").size(13),
-                text(
-                    "Optional hex overrides for the effect palette \
-                     (e.g. #00d4ff). Leave blank to follow the \
-                     theme's accent / accent2 / accent dim."
-                )
-                .size(11)
-                .style(style::text_dim(pal)),
-                row![
-                    color_input(0, "accent…", &colors[0]),
-                    color_input(1, "accent2…", &colors[1]),
-                    color_input(2, "accent dim…", &colors[2]),
-                ]
-                .spacing(8),
-            ]
-            .spacing(4),
         ]
         .spacing(12),
     )
     .padding(12)
     .style(style::card_quiet(pal))
+    .into()
+}
+
+/// Inline HSV colour picker for one AI-FX palette slot — the same
+/// SV square + hue strip the theme editor uses, plus a hex input.
+fn ai_fx_color_picker(state: &State, idx: usize, slot: usize) -> Element<'static, Message> {
+    use iced::widget::canvas;
+    let hex = crate::ai_fx_effective_hex(state, idx, slot);
+    let (r, g, b) = crate::parse_hex_channels(&hex);
+    let (h, s, v) =
+        crate::color_canvas::rgb_to_hsv(r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0);
+
+    let sv = canvas(crate::color_canvas::HsvSquare {
+        hue: h,
+        saturation: s,
+        value: v,
+        on_change: move |ns, nv| Message::SetAiFxColorSv(idx, slot, ns, nv),
+    })
+    .width(Length::Fixed(160.0))
+    .height(Length::Fixed(160.0));
+
+    let hue = canvas(crate::color_canvas::HueStrip {
+        hue: h,
+        on_change: move |nh| Message::SetAiFxColorHue(idx, slot, nh),
+    })
+    .width(Length::Fixed(20.0))
+    .height(Length::Fixed(160.0));
+
+    let chip_color = iced::Color::from_rgb8(r, g, b);
+    let chip = iced::widget::container(
+        Space::new()
+            .width(Length::Fixed(40.0))
+            .height(Length::Fixed(40.0)),
+    )
+    .style(move |_| iced::widget::container::Style {
+        background: Some(iced::Background::Color(chip_color)),
+        border: iced::Border {
+            color: iced::Color::from_rgba(0.0, 0.0, 0.0, 0.3),
+            width: 1.0,
+            radius: 4.0.into(),
+        },
+        ..Default::default()
+    });
+
+    let hex_input = text_input("#rrggbb", &hex)
+        .size(12)
+        .padding(6)
+        .width(Length::Fixed(100.0))
+        .on_input(move |t| Message::SetAiFxColorHex(idx, slot, t));
+
+    let slot_name = ["c0 (accent)", "c1 (accent2)", "c2 (accent dim)"][slot.min(2)];
+
+    row![
+        sv,
+        hue,
+        column![text(slot_name).size(11), chip, hex_input,].spacing(8),
+    ]
+    .spacing(10)
     .into()
 }

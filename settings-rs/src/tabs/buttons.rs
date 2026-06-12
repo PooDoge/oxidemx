@@ -1192,7 +1192,10 @@ fn action_value_editor<'a>(state: &'a State, idx: usize, slice: &'a Slice) -> El
             .style(style::text_dim(pal))
             .into(),
         ActionKind::Widget => {
-            let selected = slice.widget.as_ref().map(|w| WidgetSourceOption(w.source.clone()));
+            let selected = slice
+                .widget
+                .as_ref()
+                .map(|w| WidgetSourceOption(w.source.clone()));
             pick_list(
                 widget_source_options(),
                 selected,

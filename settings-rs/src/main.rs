@@ -235,8 +235,16 @@ pub enum Message {
     SetAiFxEffect(usize, String),
     SetAiFxIntensity(usize, f32),
     SetAiFxSpeed(usize, f32),
-    /// Custom colour override slot 0..=2 (hex text, blank = theme).
-    SetAiFxColor(usize, String),
+    /// Toggle the inline colour picker for (status, palette slot).
+    ToggleAiFxColorPicker(usize, usize),
+    /// SV-square change for (status, slot).
+    SetAiFxColorSv(usize, usize, f32, f32),
+    /// Hue-strip change for (status, slot).
+    SetAiFxColorHue(usize, usize, f32),
+    /// Hex text input for (status, slot).
+    SetAiFxColorHex(usize, usize, String),
+    /// Drop a status's custom palette → follow the theme again.
+    ResetAiFxColors(usize),
     /// Font family override for rendered text (Visuals tab).
     /// Empty string = system default.
     SetFontFamily(String),
@@ -1158,6 +1166,9 @@ pub struct State {
     /// Custom-theme editor state. None = collapsed; Some =
     /// expanded with the WIP palette + the slug typed by the user.
     pub theme_editor: Option<ThemeEditor>,
+    /// Open inline colour picker in the AI-window-effects card:
+    /// `(status index, palette slot)`.
+    pub ai_fx_editing: Option<(usize, usize)>,
     /// In-place macro editor — when populated, the matching row in
     /// the Macros list shows an inline form instead of the
     /// read-only summary.
@@ -1300,6 +1311,7 @@ impl Default for State {
             daemon: daemon::DaemonSnapshot::default(),
             recording: RecordingState::Idle,
             theme_editor: None,
+            ai_fx_editing: None,
             macro_edit: None,
             app_binding_draft: AppBindingDraft::default(),
             active_page: 0,
@@ -1559,6 +1571,79 @@ where
 /// Decode a `#rrggbb` (or `rrggbb`) hex into its three byte
 /// channels. Unknown / malformed input returns black so the picker
 /// always has a sane base to work from.
+/// The active theme's `[accent, accent2, accent_dim]` hexes — the
+/// fallback palette every AI-window effect starts from.
+pub fn ai_fx_theme_hexes(state: &State) -> [String; 3] {
+    oxidemx_shared::theme::Theme::load(&state.config.theme)
+        .map(|t| {
+            [
+                t.colors.accent.clone(),
+                t.colors.accent2.clone(),
+                t.colors.accent_dim.clone(),
+            ]
+        })
+        .unwrap_or_else(|| {
+            [
+                "#00d4ff".to_string(),
+                "#b794ff".to_string(),
+                "#1a6a80".to_string(),
+            ]
+        })
+}
+
+pub fn ai_fx_status_mut(state: &mut State, idx: usize) -> &mut oxidemx_shared::config::AiStatusFx {
+    let fx = &mut state.config.radial_menu.visuals.ai_fx;
+    match idx {
+        0 => &mut fx.thinking,
+        1 => &mut fx.awaiting,
+        _ => &mut fx.idle,
+    }
+}
+
+/// Effective hex for (status, slot): the custom override when set,
+/// else the theme fallback.
+pub fn ai_fx_effective_hex(state: &State, idx: usize, slot: usize) -> String {
+    let fx = &state.config.radial_menu.visuals.ai_fx;
+    let status = match idx {
+        0 => &fx.thinking,
+        1 => &fx.awaiting,
+        _ => &fx.idle,
+    };
+    status
+        .colors
+        .as_ref()
+        .map(|c| c[slot].clone())
+        .filter(|c| oxidemx_shared::theme::parse_hex_rgba(c).is_some())
+        .unwrap_or_else(|| ai_fx_theme_hexes(state)[slot].clone())
+}
+
+/// Read-modify-write one AI-FX palette colour through HSV space —
+/// the SV-square / hue-strip handlers both funnel through here.
+fn apply_ai_fx_hsv(
+    state: &mut State,
+    idx: usize,
+    slot: usize,
+    f: impl FnOnce(f32, f32, f32) -> (f32, f32, f32),
+) {
+    let current = ai_fx_effective_hex(state, idx, slot);
+    let (r, g, b) = parse_hex_channels(&current);
+    let (h, s, v) = color_canvas::rgb_to_hsv(r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0);
+    let (h, s, v) = f(h, s, v);
+    let (nr, ng, nb) = color_canvas::hsv_to_rgb(h, s, v);
+    let hex = format!(
+        "#{:02x}{:02x}{:02x}",
+        (nr * 255.0).round() as u8,
+        (ng * 255.0).round() as u8,
+        (nb * 255.0).round() as u8
+    );
+    let theme_hexes = ai_fx_theme_hexes(state);
+    let fx = ai_fx_status_mut(state, idx);
+    let mut colors = fx.colors.clone().unwrap_or(theme_hexes);
+    colors[slot] = hex;
+    fx.colors = Some(colors);
+    state.touch();
+}
+
 pub fn parse_hex_channels(s: &str) -> (u8, u8, u8) {
     let s = s.trim().trim_start_matches('#');
     if s.len() != 6 {
@@ -1964,22 +2049,42 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             state.touch();
             Task::none()
         }
-        Message::SetAiFxColor(slot, v) => {
-            let fx = &mut state.config.radial_menu.visuals.ai_fx;
-            let mut colors = fx
-                .custom_colors
-                .clone()
-                .unwrap_or_else(|| [String::new(), String::new(), String::new()]);
-            if let Some(c) = colors.get_mut(slot) {
-                *c = v;
-            }
-            // All-blank → drop the override entirely so the theme
-            // drives the palette again.
-            fx.custom_colors = if colors.iter().all(|c| c.trim().is_empty()) {
-                None
-            } else {
-                Some(colors)
+        Message::ToggleAiFxColorPicker(idx, slot) => {
+            state.ai_fx_editing = match state.ai_fx_editing {
+                Some(cur) if cur == (idx, slot) => None,
+                _ => Some((idx, slot)),
             };
+            Task::none()
+        }
+        Message::SetAiFxColorSv(idx, slot, sat, val) => {
+            apply_ai_fx_hsv(state, idx, slot, |h, _, _| (h, sat, val));
+            Task::none()
+        }
+        Message::SetAiFxColorHue(idx, slot, h) => {
+            apply_ai_fx_hsv(state, idx, slot, |_, s, v| {
+                // Greyscale rescue — same trick as the theme
+                // editor's hue strip: dragging hue on a black/white
+                // colour would otherwise feel inert.
+                let s = if s < 0.001 { 1.0 } else { s };
+                let v = if v < 0.001 { 1.0 } else { v };
+                (h, s, v)
+            });
+            Task::none()
+        }
+        Message::SetAiFxColorHex(idx, slot, hex) => {
+            let theme_hexes = ai_fx_theme_hexes(state);
+            let fx = ai_fx_status_mut(state, idx);
+            let mut colors = fx.colors.clone().unwrap_or(theme_hexes);
+            if let Some(c) = colors.get_mut(slot) {
+                *c = hex;
+            }
+            fx.colors = Some(colors);
+            state.touch();
+            Task::none()
+        }
+        Message::ResetAiFxColors(idx) => {
+            ai_fx_status_mut(state, idx).colors = None;
+            state.ai_fx_editing = None;
             state.touch();
             Task::none()
         }

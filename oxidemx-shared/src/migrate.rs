@@ -22,9 +22,8 @@ pub fn migrate_to_v3(cfg: &mut AppConfig) -> bool {
                 "lon": lon,
             })
         });
-        bag.entry("units".to_string()).or_insert_with(|| {
-            serde_json::json!(if celsius { "c" } else { "f" })
-        });
+        bag.entry("units".to_string())
+            .or_insert_with(|| serde_json::json!(if celsius { "c" } else { "f" }));
     }
     cfg.schema_version = CURRENT_SCHEMA_VERSION;
     true
@@ -59,9 +58,8 @@ mod tests {
     use std::path::PathBuf;
 
     fn tmp(name: &str) -> PathBuf {
-        let d = std::env::temp_dir().join(format!(
-            "oxidemx-migrate-{}-{}", name, std::process::id()
-        ));
+        let d =
+            std::env::temp_dir().join(format!("oxidemx-migrate-{}-{}", name, std::process::id()));
         std::fs::create_dir_all(&d).unwrap();
         d.join("config.json")
     }
@@ -99,7 +97,10 @@ mod tests {
         });
         migrate_to_v3(&mut cfg);
         // user's existing value wins over the lifted one
-        assert_eq!(cfg.widgets.global["weather"]["units"], serde_json::json!("f"));
+        assert_eq!(
+            cfg.widgets.global["weather"]["units"],
+            serde_json::json!("f")
+        );
     }
 
     #[test]

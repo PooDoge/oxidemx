@@ -1,7 +1,8 @@
 //! Two-bag widget settings store (spec §6/§7): `global` holds one bag per
 //! widget id shared by every instance; `instances` holds partial override
-//! bags keyed by `<page-slug>.slot<N>`. Reads always merge
-//! defaults ← global ← instance; `scope` only selects the write target.
+//! bags keyed by `<page-slug>.slot<N>`. Reads merge defaults ← global
+//! always, then the instance bag on top only when the slice's scope is
+//! `Instance`; `scope` also selects where the options card writes.
 
 use crate::config::WidgetScope;
 use serde::{Deserialize, Serialize};
@@ -88,7 +89,11 @@ fn slugify(name: &str) -> String {
     while out.ends_with('-') {
         out.pop();
     }
-    if out.is_empty() { "page".into() } else { out }
+    if out.is_empty() {
+        "page".into()
+    } else {
+        out
+    }
 }
 
 #[cfg(test)]
@@ -98,34 +103,53 @@ mod tests {
     use serde_json::json;
 
     fn bag(pairs: &[(&str, serde_json::Value)]) -> JsonBag {
-        pairs.iter().map(|(k, v)| (k.to_string(), v.clone())).collect()
+        pairs
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.clone()))
+            .collect()
     }
 
     #[test]
     fn resolution_merges_defaults_global_instance() {
         let defaults = bag(&[("units", json!("c")), ("refresh", json!(900))]);
         let mut store = WidgetStore::default();
-        store.global.insert("weather".into(), bag(&[("units", json!("f"))]));
+        store
+            .global
+            .insert("weather".into(), bag(&[("units", json!("f"))]));
         store.instances.insert(
             "apps.slot4".into(),
-            [( "weather".to_string(), bag(&[("refresh", json!(300))]) )].into_iter().collect(),
+            [("weather".to_string(), bag(&[("refresh", json!(300))]))]
+                .into_iter()
+                .collect(),
         );
 
         // instance scope: all three layers
-        let r = store.resolve("weather", Some("apps.slot4"), WidgetScope::Instance, &defaults);
-        assert_eq!(r.get("units"), Some(&json!("f")));    // global beat default
-        assert_eq!(r.get("refresh"), Some(&json!(300)));  // instance beat global
+        let r = store.resolve(
+            "weather",
+            Some("apps.slot4"),
+            WidgetScope::Instance,
+            &defaults,
+        );
+        assert_eq!(r.get("units"), Some(&json!("f"))); // global beat default
+        assert_eq!(r.get("refresh"), Some(&json!(300))); // instance beat global
 
         // global scope: instance layer skipped
-        let r = store.resolve("weather", Some("apps.slot4"), WidgetScope::Global, &defaults);
-        assert_eq!(r.get("refresh"), Some(&json!(900)));  // default survives
+        let r = store.resolve(
+            "weather",
+            Some("apps.slot4"),
+            WidgetScope::Global,
+            &defaults,
+        );
+        assert_eq!(r.get("refresh"), Some(&json!(900))); // default survives
     }
 
     #[test]
     fn seed_instance_copies_resolved_values() {
         let defaults = bag(&[("units", json!("c"))]);
         let mut store = WidgetStore::default();
-        store.global.insert("weather".into(), bag(&[("units", json!("f"))]));
+        store
+            .global
+            .insert("weather".into(), bag(&[("units", json!("f"))]));
         store.seed_instance("weather", "apps.slot4", &defaults);
         assert_eq!(
             store.instances["apps.slot4"]["weather"].get("units"),
@@ -138,11 +162,16 @@ mod tests {
         let mut store = WidgetStore::default();
         store.instances.insert(
             "apps.slot4".into(),
-            [("weather".to_string(), bag(&[("units", json!("f"))]))].into_iter().collect(),
+            [("weather".to_string(), bag(&[("units", json!("f"))]))]
+                .into_iter()
+                .collect(),
         );
         store.rekey_instance("apps.slot4", "apps.slot2");
         assert!(!store.instances.contains_key("apps.slot4"));
-        assert_eq!(store.instances["apps.slot2"]["weather"].get("units"), Some(&json!("f")));
+        assert_eq!(
+            store.instances["apps.slot2"]["weather"].get("units"),
+            Some(&json!("f"))
+        );
     }
 
     #[test]
