@@ -45,7 +45,7 @@ pub fn decode_cmd(bytes: &[u8]) -> postcard::Result<Option<HostCmd>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::event::{Event, HostCmd};
+    use crate::event::{Event, HostCmd, SystemStatsSnapshot};
 
     #[test]
     fn event_round_trips_through_envelope() {
@@ -67,6 +67,35 @@ mod tests {
             let back = decode_event(&bytes).unwrap();
             assert_eq!(Some(ev), back);
         }
+    }
+
+    #[test]
+    fn system_stats_round_trips_through_envelope() {
+        // Fully populated snapshot.
+        let snap = SystemStatsSnapshot {
+            cpu_pct: Some(23.4),
+            cpu_cores: Some(8),
+            cpu_temp_c: Some(52.0),
+            mem_used_gb: Some(11.2),
+            mem_total_gb: Some(32.0),
+            net_down_mbps: Some(84.5),
+            net_up_mbps: Some(12.1),
+            disk_free_gb: Some(412.0),
+            tasks_due: Some(3),
+            battery_pct: Some(80),
+            battery_charging: Some(false),
+        };
+        let ev = Event::SystemStats(snap);
+        let bytes = encode_event(&ev).unwrap();
+        assert_eq!(Some(ev), decode_event(&bytes).unwrap());
+
+        // Default snapshot: every field None.
+        let default = SystemStatsSnapshot::default();
+        assert_eq!(default.cpu_pct, None);
+        assert_eq!(default.battery_charging, None);
+        let ev = Event::SystemStats(default);
+        let bytes = encode_event(&ev).unwrap();
+        assert_eq!(Some(ev), decode_event(&bytes).unwrap());
     }
 
     #[test]

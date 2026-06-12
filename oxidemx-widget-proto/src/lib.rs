@@ -14,7 +14,7 @@ pub mod settings;
 pub mod manifest;
 
 pub use envelope::Envelope;
-pub use event::{Event, HostCmd};
+pub use event::{Event, HostCmd, SystemStatsSnapshot};
 pub use scene::{Color, PathOp, Prim, Scene, Stroke, TextAlign, TextWeight, WedgeGeom};
 pub use settings::SettingValue;
 #[cfg(feature = "manifest")]
