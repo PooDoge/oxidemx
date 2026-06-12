@@ -609,7 +609,13 @@ fn check_net_permission(permissions: &[String], url: &str) -> Result<(), String>
     let host = parsed
         .host_str()
         .ok_or_else(|| format!("denied: {url:?} has no host"))?;
-    if permissions.iter().any(|p| p.strip_prefix("net:") == Some(host)) {
+    // Case-insensitive host comparison (spec §8): manifest entries like
+    // `net:API.Open-Meteo.com` must match `api.open-meteo.com` from the
+    // parsed URL, which the url crate normalises to ASCII lowercase.
+    if permissions
+        .iter()
+        .any(|p| p.strip_prefix("net:").map(|h| h.eq_ignore_ascii_case(host)).unwrap_or(false))
+    {
         Ok(())
     } else {
         Err(format!("denied: manifest lacks the net:{host} permission"))
@@ -691,5 +697,19 @@ mod tests {
         // unrelated host + garbage
         assert!(check_net_permission(&perms, "https://example.com/").is_err());
         assert!(check_net_permission(&perms, "not a url").is_err());
+    }
+
+    #[test]
+    fn net_permission_case_insensitive_manifest_entry() {
+        // Manifests may be authored with mixed-case hosts (e.g. copy-pasted
+        // from docs). A `net:API.Open-Meteo.com` entry must match the
+        // url-crate-normalised lowercase host `api.open-meteo.com`.
+        let perms = vec!["net:API.Open-Meteo.com".to_string()];
+        assert!(
+            check_net_permission(&perms, "https://api.open-meteo.com/v1?x=1").is_ok(),
+            "mixed-case manifest entry should match normalised URL host"
+        );
+        // Unrelated host still rejected.
+        assert!(check_net_permission(&perms, "https://example.com/").is_err());
     }
 }

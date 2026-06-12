@@ -7,7 +7,7 @@ use iced::{Color, Point, Size};
 use oxidemx_shared::theme::{parse_hex_rgba, ThemeColors};
 use oxidemx_shared::Slice;
 use oxidemx_widget_host::{InstanceId, WidgetSummary};
-use oxidemx_widget_proto::{Prim, Scene, TextAlign, TextWeight, WedgeGeom};
+use oxidemx_widget_proto::{Prim, Scene, TextAlign, TextWeight};
 
 use super::rgba;
 
@@ -292,14 +292,19 @@ pub(super) fn draw_widget_wedge(
 /// keys resolve through the active theme; `"accent"` and unknown
 /// keys resolve to the slice's configured colour — same fallback
 /// chain `draw_slice` uses for icon tinting.
-#[allow(clippy::too_many_arguments)]
+///
+/// Hover and scaling are intentionally NOT applied here:
+///   - Hover state is delivered to the widget guest as
+///     `WedgeGeom::hovered` on each event, letting the widget choose
+///     its own hover response in the Scene it returns.
+///   - Per-slot scale transforms are handled by ring.rs's
+///     `apply_composed_transform` wrap around the whole draw_slice
+///     call, so they apply uniformly to canvas wedge and widget alike.
 pub(super) fn draw_custom_widget(
     frame: &mut Frame,
     scene: &Scene,
-    _geom: &WedgeGeom,
     anchor: Point,
     palette: &ThemeColors,
-    _hover: f32,
     slice_color: Color,
     mo: f32,
 ) {

@@ -312,23 +312,10 @@ pub fn draw_slice(
                 };
                 match scene {
                     Some(scene) => {
-                        // Live wedge geometry matching this draw —
-                        // mirrors widget_host::wedge_geom_for_slot
-                        // but uses the (possibly animated) radii.
-                        let sweep = slice_degrees.to_radians();
-                        let a0 = (index as f32) * sweep - sweep / 2.0
-                            - std::f32::consts::FRAC_PI_2;
-                        let geom = oxidemx_widget_proto::WedgeGeom {
-                            width: 2.0 * outer_r * (sweep / 2.0).sin(),
-                            height: outer_r - inner_r,
-                            inner_radius: inner_r,
-                            outer_radius: outer_r,
-                            angle_start: a0,
-                            angle_end: a0 + sweep,
-                            hovered: highlight.clamp(0.0, 1.0),
-                        };
+                        // Hover and scaling are not applied here — see
+                        // draw_custom_widget's doc for where they happen.
                         draw_custom_widget(
-                            frame, scene, &geom, icon_pos, palette, hl, slot_color, mo,
+                            frame, scene, icon_pos, palette, slot_color, mo,
                         );
                     }
                     None => {

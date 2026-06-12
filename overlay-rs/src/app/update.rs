@@ -505,6 +505,44 @@ pub(super) fn update(state: &mut RadialState, message: Message) -> Task<Message>
                 std::sync::Arc::new((*cfg).clone()),
             ));
             state.reload_from(&cfg);
+            // Prune widget_scenes and widget_failed for instances that
+            // no longer correspond to any Custom-widget slice in the new
+            // config. Derives expected InstanceIds the same way the
+            // worker's desired_instances does (explicit instance_key wins,
+            // otherwise the shared <page-slug>.slot<N> helper).
+            let expected: std::collections::HashSet<oxidemx_widget_host::InstanceId> = {
+                let legacy_page;
+                let pages: Vec<(&str, &[oxidemx_shared::config::Slice])> =
+                    if cfg.radial_menu.pages.is_empty() {
+                        legacy_page = ("Default", cfg.radial_menu.slices.as_slice());
+                        vec![legacy_page]
+                    } else {
+                        cfg.radial_menu
+                            .pages
+                            .iter()
+                            .map(|p| (p.name.as_str(), p.slices.as_slice()))
+                            .collect()
+                    };
+                let mut set = std::collections::HashSet::new();
+                for (page_name, slices) in pages {
+                    for (slot, slice) in slices.iter().enumerate() {
+                        let Some(w) = &slice.widget else { continue };
+                        let oxidemx_shared::WidgetSource::Custom(widget_id) = &w.source else {
+                            continue
+                        };
+                        let instance_key = w.instance_key.clone().unwrap_or_else(|| {
+                            oxidemx_shared::widgets::instance_key(page_name, slot)
+                        });
+                        set.insert(oxidemx_widget_host::InstanceId {
+                            instance_key,
+                            widget_id: widget_id.clone(),
+                        });
+                    }
+                }
+                set
+            };
+            state.widget_scenes.retain(|id, _| expected.contains(id));
+            state.widget_failed.retain(|id, _| expected.contains(id));
             Task::none()
         }
         Message::WidgetHost(ev) => {
@@ -533,6 +571,16 @@ pub(super) fn update(state: &mut RadialState, message: Message) -> Task<Message>
                 }
                 oxidemx_widget_host::HostEvent::RegistryChanged(list) => {
                     debug!(count = list.len(), "widget registry updated");
+                    // Prune scenes/failures for any widget_id no longer
+                    // present in the registry (uninstalled widget).
+                    let installed_ids: std::collections::HashSet<&str> =
+                        list.iter().map(|s| s.id.as_str()).collect();
+                    state
+                        .widget_scenes
+                        .retain(|id, _| installed_ids.contains(id.widget_id.as_str()));
+                    state
+                        .widget_failed
+                        .retain(|id, _| installed_ids.contains(id.widget_id.as_str()));
                     state.widget_registry =
                         list.into_iter().map(|s| (s.id.clone(), s)).collect();
                 }
