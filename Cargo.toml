@@ -26,6 +26,7 @@ members = [
     "popup-rs",
     "settings-rs",
     "spike-iced", "iced_gtk_themer",
+    "tools/oxidemx-widget-cli",
 ]
 exclude = ["pop_os_iced", "libcosmic", "oxidemx-widget-host/fixtures/*", "examples/widgets/*"]
 

@@ -9,12 +9,20 @@ use std::path::{Path, PathBuf};
 
 use oxidemx_widget_proto::{WidgetManifest, API_VERSION};
 
+use crate::signing::{
+    bundle_digest_from_dir, fingerprint, verify_signature, BundleError,
+    PINNED_REGISTRY_PUBKEY, SIGNATURE_ENTRY,
+};
+
 /// One `<id>/` dir under the widgets install dir.
 pub struct InstalledWidget {
     pub manifest: WidgetManifest,
     /// `~/.config/oxidemx/widgets/<id>/`
     pub dir: PathBuf,
     pub state: WidgetState,
+    /// Whether (and by whom) this widget's content is signed.
+    /// Informational only — does not affect Ready/Incompatible determination.
+    pub signature_state: SignatureState,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -23,6 +31,26 @@ pub enum WidgetState {
     /// Bad manifest / api_version range / missing files — reason is shown
     /// verbatim in the picker (spec §9).
     Incompatible { reason: String },
+}
+
+/// Signing status of an installed widget.
+///
+/// - `Pinned`  — signed by the compiled-in registry public key.
+/// - `Unknown` — signed by a key whose fingerprint is shown; typically a
+///   developer / third-party key.
+/// - `Unsigned` — no `SIGNATURE` file present.
+///
+/// This is purely informational; the widget is `Ready` in all three cases
+/// once it passes the structural/API-version checks.
+#[derive(Debug, Clone, PartialEq)]
+pub enum SignatureState {
+    /// Signed by the pinned registry public key.
+    Pinned,
+    /// Signed, but by an unrecognised key.  The String is a hex fingerprint
+    /// of the signer's public key (first 8 bytes).
+    Unknown(String),
+    /// No `SIGNATURE` file found in the widget directory.
+    Unsigned,
 }
 
 pub struct WidgetRegistry {
@@ -73,7 +101,11 @@ impl WidgetRegistry {
             if let WidgetState::Incompatible { reason } = &state {
                 log::warn!("widget {dir_id}: incompatible: {reason}");
             }
-            widgets.insert(dir_id, InstalledWidget { manifest, dir: wdir, state });
+            let signature_state = read_signature_state(&wdir);
+            widgets.insert(
+                dir_id,
+                InstalledWidget { manifest, dir: wdir, state, signature_state },
+            );
         }
         WidgetRegistry { widgets }
     }
@@ -99,6 +131,53 @@ impl WidgetRegistry {
             .filter(|p| p.is_absolute())
             .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))?;
         Some(base.join("oxidemx").join("widgets"))
+    }
+}
+
+/// Check for a `SIGNATURE` file in the widget directory and classify it.
+///
+/// Reads `<dir>/SIGNATURE` if present, recomputes the bundle digest over the
+/// directory contents, and verifies the signature.  If the signer's public key
+/// matches [`PINNED_REGISTRY_PUBKEY`] the result is [`SignatureState::Pinned`];
+/// any other valid key gives [`SignatureState::Unknown(fingerprint)`].  A
+/// missing file or a broken signature both yield [`SignatureState::Unsigned`]
+/// (the latter is logged as a warning).
+fn read_signature_state(dir: &Path) -> SignatureState {
+    let sig_path = dir.join(SIGNATURE_ENTRY);
+    if !sig_path.exists() {
+        return SignatureState::Unsigned;
+    }
+    let sig_bytes = match std::fs::read(&sig_path) {
+        Ok(b) => b,
+        Err(e) => {
+            log::warn!("widget {:?}: cannot read SIGNATURE: {e}", dir);
+            return SignatureState::Unsigned;
+        }
+    };
+    let digest = match bundle_digest_from_dir(dir) {
+        Ok(d) => d,
+        Err(BundleError::Io(e)) => {
+            log::warn!("widget {:?}: digest error: {e}", dir);
+            return SignatureState::Unsigned;
+        }
+        Err(e) => {
+            log::warn!("widget {:?}: digest error: {e}", dir);
+            return SignatureState::Unsigned;
+        }
+    };
+    match verify_signature(&sig_bytes, &digest) {
+        Ok(pubkey) => {
+            if pubkey == PINNED_REGISTRY_PUBKEY {
+                SignatureState::Pinned
+            } else {
+                SignatureState::Unknown(fingerprint(&pubkey))
+            }
+        }
+        Err(e) => {
+            log::warn!("widget {:?}: invalid SIGNATURE: {e}", dir);
+            // Treat a bad signature as Unsigned rather than failing the widget.
+            SignatureState::Unsigned
+        }
     }
 }
 
@@ -195,6 +274,8 @@ mod tests {
         assert_eq!(w.manifest.api_version, 1);
         assert_eq!(w.dir, dir);
         assert_eq!(reg.iter_ready().count(), 1);
+        // No SIGNATURE file → Unsigned
+        assert_eq!(w.signature_state, SignatureState::Unsigned);
     }
 
     #[test]

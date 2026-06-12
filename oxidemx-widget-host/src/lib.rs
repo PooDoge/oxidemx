@@ -10,9 +10,10 @@
 pub mod http;
 pub mod instance;
 pub mod registry;
+pub mod signing;
 pub mod worker;
 
 pub use http::{HttpCache, HttpFetcher, ReqwestFetcher};
 pub use instance::{CallOutcome, InstanceError, WidgetInstance};
-pub use registry::{InstalledWidget, WidgetRegistry, WidgetState};
+pub use registry::{InstalledWidget, SignatureState, WidgetRegistry, WidgetState};
 pub use worker::{spawn, HostCtl, HostEvent, InstanceId, SliceEvent, WidgetSummary};
