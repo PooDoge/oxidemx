@@ -14,8 +14,8 @@
 //! coordinates the way the gtk4-layer-shell prototype tried to.
 
 use iced::widget::canvas::Canvas;
-use iced::widget::{button, column, container, row, scrollable, text, text_input, Space};
-use iced::{Alignment, Color, Element, Length, Size, Subscription, Task};
+use iced::widget::{container, Space};
+use iced::{Color, Element, Length, Size, Subscription, Task};
 use tracing::{debug, error, info, warn};
 
 use oxidemx_shared::AppConfig;
@@ -85,8 +85,6 @@ pub enum Message {
     AiRenameInput(String),
     AiRenameCommit,
     AiDeleteThread(usize),
-    /// Copy the whole active conversation as markdown.
-    AiCopyChat,
     /// Reply for the prompt sent from thread `.0` — indexed so a
     /// response landing after the user switched/created threads
     /// still files into the conversation that asked.
@@ -121,6 +119,41 @@ pub enum Message {
         x: f64,
         y: f64,
     },
+    /// Mouse-down on the chat's bottom-right resize grip.
+    ChatResizeStart {
+        x: f64,
+        y: f64,
+    },
+    /// Pointer motion during a resize drag — updates the ghost.
+    ChatResizeMove {
+        x: f64,
+        y: f64,
+    },
+    /// Button release ends the drag: persist `overlay.chat_size`
+    /// and issue the single real window resize.
+    ChatResizeEnd,
+    /// Compositor reported a window resize — keep `win_size` true.
+    WindowResized(Size),
+    /// Toggle the memories management view (header brain button).
+    AiToggleMemories,
+    /// Live edit of the memories view's search filter.
+    AiMemorySearch(String),
+    /// Delete a memory by id (row 🗑 / card "Forget" chip).
+    AiMemoryDelete(String),
+    /// Pin/unpin a memory by id.
+    AiMemoryPin(String, bool),
+    /// Toggle the scheduled-tasks view (header clock button).
+    AiToggleTasks,
+    /// Async task-list refresh finished.
+    AiTasksLoaded(Vec<crate::agent::tasks::TaskInfo>),
+    /// Enable/disable a task's timer (card / row switch).
+    AiTaskToggle(String, bool),
+    /// "Run now" on a task (unit base name).
+    AiTaskRun(String),
+    /// Delete a task's units entirely.
+    AiTaskDelete(String),
+    /// "Edit" chip — drops an edit prompt into the input.
+    AiTaskEdit(String),
     /// The overlay window lost keyboard focus. Dismisses the disc
     /// (click-elsewhere-to-close), but is IGNORED while the chat
     /// shell is up: Mutter drops keyboard focus the moment an
@@ -141,13 +174,16 @@ pub fn run() -> iced::Result {
     // disc, stretched chat, hit-boxes offset from visuals. The disc
     // renders in the top WINDOW_SIZE×WINDOW_SIZE square; the strip
     // below is transparent until the AI chat morph uses it.
-    let window = oxidemx_window::frameless_topmost(
-        APP_ID,
-        Size::new(
-            WINDOW_SIZE as f32,
-            crate::chat_shell::CHAT_WINDOW_HEIGHT as f32,
-        ),
+    // Size from the persisted `overlay.chat_size` (clamped so the
+    // disc square + chat minimums always fit). A resize-grip commit
+    // updates the config and issues one window resize; the next
+    // launch starts at the committed size.
+    let initial_size = crate::chat_shell::effective_window_size(
+        crate::config::load()
+            .map(|c| c.overlay.chat_size)
+            .unwrap_or(None),
     );
+    let window = oxidemx_window::frameless_topmost(APP_ID, initial_size);
 
     iced::application(boot, update, view)
         .title("OxideMX")
@@ -184,7 +220,6 @@ fn update(state: &mut RadialState, message: Message) -> Task<Message> {
                 | Message::AiModelToggled
                 | Message::AiRenameStart(_)
                 | Message::AiDeleteThread(_)
-                | Message::AiCopyChat
                 | Message::AiModeSelected(_)
                 | Message::AiNewChat
                 | Message::AiToggleThreads
@@ -193,6 +228,15 @@ fn update(state: &mut RadialState, message: Message) -> Task<Message> {
                 | Message::AiStopRequest
                 | Message::AiLinkClicked(_)
                 | Message::AiCopyText(_)
+                | Message::AiToggleMemories
+                | Message::AiMemorySearch(_)
+                | Message::AiMemoryDelete(_)
+                | Message::AiMemoryPin(_, _)
+                | Message::AiToggleTasks
+                | Message::AiTaskToggle(_, _)
+                | Message::AiTaskRun(_)
+                | Message::AiTaskDelete(_)
+                | Message::AiTaskEdit(_)
         )
     {
         state.activate_chat();
@@ -223,7 +267,11 @@ fn update(state: &mut RadialState, message: Message) -> Task<Message> {
             // size before sending. Pass monitor=-1 (absolute stage
             // coords) — the extension figures out which monitor
             // contains the requested point.
-            let half = (WINDOW_SIZE / 2.0) as i32;
+            // Centre the DISC (not the window) on the cursor: the
+            // disc sits centred horizontally in the top square of a
+            // possibly-wider/taller chat-sized window.
+            let half_x = (state.win_size.0 / 2.0) as i32;
+            let half_y = (WINDOW_SIZE / 2.0) as i32;
             // Three parallel D-Bus round-trips: window position,
             // focus query, and the menu_appear haptic pulse.
             // Batching keeps perceived open latency bounded by
@@ -237,7 +285,7 @@ fn update(state: &mut RadialState, message: Message) -> Task<Message> {
                 Task::batch(vec![
                     iced::window::move_to(
                         id,
-                        iced::Point::new((x - half) as f32, (y - half) as f32),
+                        iced::Point::new((x - half_x) as f32, (y - half_y) as f32),
                     ),
                     iced::window::minimize(id, false),
                     iced::window::gain_focus(id),
@@ -251,8 +299,8 @@ fn update(state: &mut RadialState, message: Message) -> Task<Message> {
                 Task::perform(
                     oxidemx_window::cursor_helper::move_overlay(
                         APP_ID.to_string(),
-                        x - half,
-                        y - half,
+                        x - half_x,
+                        y - half_y,
                         -1,
                     ),
                     Message::Positioned,
@@ -339,8 +387,8 @@ fn update(state: &mut RadialState, message: Message) -> Task<Message> {
         Message::CenterOverlay(Some(size)) => {
             info!("CenterOverlay triggered with monitor size: {:?}", size);
             if let Some(id) = state.window_id {
-                let x = (size.width - WINDOW_SIZE as f32) / 2.0;
-                let y = (size.height - WINDOW_SIZE as f32) / 2.0;
+                let x = (size.width - state.win_size.0) / 2.0;
+                let y = (size.height - state.win_size.1) / 2.0;
                 info!("Centering window on monitor: x={}, y={}", x, y);
                 iced::window::move_to(id, iced::Point::new(x, y))
             } else {
@@ -442,6 +490,30 @@ fn update(state: &mut RadialState, message: Message) -> Task<Message> {
         }
         Message::HandoffClick { x, y } => {
             state.handoff_click(x, y);
+            Task::none()
+        }
+        Message::ChatResizeStart { x, y } => {
+            state.chat_resize_start(x, y);
+            Task::none()
+        }
+        Message::ChatResizeMove { x, y } => {
+            state.chat_resize_move(x, y);
+            Task::none()
+        }
+        Message::ChatResizeEnd => {
+            let Some((w, h)) = state.chat_resize_end() else {
+                return Task::none();
+            };
+            info!(w, h, "chat resize committed");
+            crate::config::save_chat_size(w.round() as u32, h.round() as u32);
+            if let Some(id) = state.window_id {
+                iced::window::resize(id, Size::new(w, h))
+            } else {
+                Task::none()
+            }
+        }
+        Message::WindowResized(size) => {
+            state.win_size = (size.width, size.height);
             Task::none()
         }
         Message::WindowUnfocused => {
@@ -645,20 +717,6 @@ fn update(state: &mut RadialState, message: Message) -> Task<Message> {
             crate::radial::save_chat_threads(&state.ai_threads);
             Task::none()
         }
-        Message::AiCopyChat => {
-            let chat = state.chat();
-            let mut out = String::new();
-            for msg in &chat.history {
-                out.push_str(if msg.is_user {
-                    "**You:**\n"
-                } else {
-                    "**AI:**\n"
-                });
-                out.push_str(&msg.text);
-                out.push_str("\n\n");
-            }
-            iced::clipboard::write(out)
-        }
         Message::AiModeSelected(mode) => {
             let chat = state.chat_mut();
             if chat.mode != mode {
@@ -705,7 +763,97 @@ fn update(state: &mut RadialState, message: Message) -> Task<Message> {
             state.trigger_ripple();
             Task::none()
         }
+        Message::AiToggleMemories => {
+            state.ai_show_memories = !state.ai_show_memories;
+            state.ai_show_tasks = false;
+            state.ai_show_threads = false;
+            if state.ai_show_memories {
+                state.ai_memories = crate::agent::memory::load_all();
+                state.ai_memories_bytes = crate::agent::memory::store_size_bytes();
+            }
+            Task::none()
+        }
+        Message::AiMemorySearch(q) => {
+            state.ai_memories_query = q;
+            Task::none()
+        }
+        Message::AiMemoryDelete(id) => {
+            crate::agent::memory::delete(&id);
+            state.ai_memories = crate::agent::memory::load_all();
+            state.ai_memories_bytes = crate::agent::memory::store_size_bytes();
+            Task::none()
+        }
+        Message::AiMemoryPin(id, pinned) => {
+            crate::agent::memory::set_pinned(&id, pinned);
+            state.ai_memories = crate::agent::memory::load_all();
+            Task::none()
+        }
+        Message::AiToggleTasks => {
+            state.ai_show_tasks = !state.ai_show_tasks;
+            state.ai_show_memories = false;
+            state.ai_show_threads = false;
+            if state.ai_show_tasks {
+                refresh_tasks()
+            } else {
+                Task::none()
+            }
+        }
+        Message::AiTasksLoaded(list) => {
+            state.ai_tasks = list;
+            Task::none()
+        }
+        Message::AiTaskToggle(unit, enabled) => Task::perform(
+            async move {
+                let u = unit.clone();
+                let _ = tokio::task::spawn_blocking(move || {
+                    crate::agent::tasks::set_enabled(&u, enabled)
+                })
+                .await;
+                tokio::task::spawn_blocking(crate::agent::tasks::list)
+                    .await
+                    .unwrap_or_default()
+            },
+            Message::AiTasksLoaded,
+        ),
+        Message::AiTaskRun(unit) => Task::perform(
+            async move {
+                let _ =
+                    tokio::task::spawn_blocking(move || crate::agent::tasks::run_now(&unit)).await;
+            },
+            |_| Message::Noop,
+        ),
+        Message::AiTaskDelete(unit) => Task::perform(
+            async move {
+                let _ =
+                    tokio::task::spawn_blocking(move || crate::agent::tasks::delete(&unit)).await;
+                tokio::task::spawn_blocking(crate::agent::tasks::list)
+                    .await
+                    .unwrap_or_default()
+            },
+            Message::AiTasksLoaded,
+        ),
+        Message::AiTaskEdit(name) => {
+            state.ai_editor = iced::widget::text_editor::Content::with_text(&format!(
+                "Edit the scheduled task \"{name}\": "
+            ));
+            state.ai_show_tasks = false;
+            state.ai_show_memories = false;
+            Task::none()
+        }
     }
+}
+
+/// Reload the scheduled-task list off the render path (systemctl
+/// round trips).
+fn refresh_tasks() -> Task<Message> {
+    Task::perform(
+        async {
+            tokio::task::spawn_blocking(crate::agent::tasks::list)
+                .await
+                .unwrap_or_default()
+        },
+        Message::AiTasksLoaded,
+    )
 }
 
 /// Outcome of a dispatch attempt — drives which haptic event
@@ -1358,11 +1506,18 @@ fn view(state: &RadialState) -> Element<'_, Message> {
         }
     }
 
-    let main_stack = if layers.len() == 1 {
+    let main_stack: Element<'_, Message> = if layers.len() == 1 {
         layers.into_iter().next().unwrap()
     } else {
         iced::widget::Stack::with_children(layers).into()
     };
+    // Centre the 484 px disc stack horizontally so wider persisted
+    // chat sizes keep the disc (and the morph origin) in the middle
+    // of the window. Vertical anchor stays the top square.
+    let main_stack: Element<'_, Message> = container(main_stack)
+        .width(Length::Fill)
+        .align_x(iced::alignment::Horizontal::Center)
+        .into();
 
     // Chat shell composition: while the disc ↔ chat morph is in
     // flight (or parked at the chat end), stack the caps painter
@@ -1373,10 +1528,77 @@ fn view(state: &RadialState) -> Element<'_, Message> {
         let caps = Canvas::new(crate::chat_shell::CapsPainter::new(state))
             .width(Length::Fill)
             .height(Length::Fill);
-        let chat_a = crate::chat_shell::chat_alpha(morph) * state.menu_open_alpha();
-        let mut children: Vec<Element<'_, Message>> = vec![main_stack, caps.into()];
+        let open_alpha = state.menu_open_alpha();
+        let chat_a = crate::chat_shell::chat_alpha(morph) * open_alpha;
+        let body_a = crate::chat_shell::cap_alpha(morph) * open_alpha;
+
+        // Window body — the chat's full-window chrome per the
+        // redesign: 24 px outer radius, near-opaque `base` fill,
+        // hairline `surface1` border, accent-tinted shadow. Fades
+        // in on the cap ramp so the chrome arrives as the disc
+        // hands over.
+        let base_c = to_iced_color(&palette.base, Color::from_rgba(0.07, 0.08, 0.09, 1.0));
+        let surface1_c = to_iced_color(&palette.surface1, Color::from_rgba(0.14, 0.16, 0.20, 1.0));
+        let accent_c = to_iced_color(&palette.accent, Color::from_rgb(0.5, 0.5, 1.0));
+        let body = container(Space::new())
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .style(move |_| iced::widget::container::Style {
+                background: Some(iced::Background::Color(Color {
+                    a: 0.94 * body_a,
+                    ..base_c
+                })),
+                border: iced::border::Border {
+                    color: Color {
+                        a: body_a,
+                        ..surface1_c
+                    },
+                    width: 1.0,
+                    radius: 24.0.into(),
+                },
+                shadow: iced::Shadow {
+                    color: Color {
+                        a: 0.08 * body_a,
+                        ..accent_c
+                    },
+                    offset: iced::Vector::new(0.0, 8.0),
+                    blur_radius: 42.0,
+                },
+                ..Default::default()
+            });
+
+        let mut children: Vec<Element<'_, Message>> = vec![body.into()];
+
+        // Aurora backdrop for the chat — the same theme-tinted
+        // shader the disc uses, stretched over the whole window.
+        // Its radial falloff discards past the inscribed ellipse,
+        // so nothing spills into the transparent rounded corners.
+        if intensity > 0.001 && body_a > 0.001 {
+            let accent2 = oxidemx_shared::theme::parse_hex_rgba(&palette.accent2)
+                .map(|(r, g, b, a)| [r as f32, g as f32, b as f32, a as f32])
+                .unwrap_or(accent_rgba);
+            let accent_dim = oxidemx_shared::theme::parse_hex_rgba(&palette.accent_dim)
+                .map(|(r, g, b, a)| [r as f32, g as f32, b as f32, a as f32])
+                .unwrap_or(accent_rgba);
+            let chat_aurora = iced::widget::Shader::new(crate::render::aurora::AuroraProgram::new(
+                state.show_time.unwrap_or_else(std::time::Instant::now),
+                accent_rgba,
+                accent2,
+                accent_dim,
+                // Quieter than the disc's pass — it's a backdrop
+                // for reading text, not a hero element.
+                intensity * 0.45 * body_a,
+                crate::render::animation::MenuXformRaw::IDENTITY,
+            ))
+            .width(Length::Fill)
+            .height(Length::Fill);
+            children.push(chat_aurora.into());
+        }
+
+        children.push(main_stack);
+        children.push(caps.into());
         if chat_a > 0.01 {
-            children.push(build_ai_panel(state, chat_a));
+            children.push(crate::chat_ui::view(state, chat_a));
         }
         iced::widget::Stack::with_children(children)
             .width(Length::Fill)
@@ -1410,6 +1632,7 @@ fn subscription(_state: &RadialState) -> Subscription<Message> {
             // shell is up — see Message::WindowUnfocused.
             iced::window::Event::Unfocused => Message::WindowUnfocused,
             iced::window::Event::Focused => Message::WindowFocused,
+            iced::window::Event::Resized(size) => Message::WindowResized(size),
             _ => Message::Noop,
         }),
     ])
@@ -1459,16 +1682,13 @@ fn ai_stream_stream() -> impl futures_util::stream::Stream<Item = Message> {
     rx
 }
 
-/// Scrollable id for the conversation history + a task that snaps
-/// it to the newest message.
-const CHAT_SCROLL_ID: &str = "ai-chat-history";
-
+/// Snap the conversation scrollable to the newest message.
 fn scroll_chat_to_end() -> Task<Message> {
-    iced::widget::operation::snap_to_end(CHAT_SCROLL_ID)
+    iced::widget::operation::snap_to_end(crate::chat_ui::body::CHAT_SCROLL_ID)
 }
 
-/// "2h ago"-style label for the thread list.
-fn rel_time(ts: u64) -> String {
+/// "2h ago"-style label for the thread list + memories view.
+pub(crate) fn rel_time(ts: u64) -> String {
     if ts == 0 {
         return "earlier".to_string();
     }
@@ -1480,479 +1700,6 @@ fn rel_time(ts: u64) -> String {
         3600..=86_399 => format!("{}h ago", delta / 3600),
         _ => format!("{}d ago", delta / 86_400),
     }
-}
-
-/// Chat content for the arc-shell layout: a translucent card with
-/// the conversation history (+ pending multiple-choice question),
-/// and an input row that visually sits on the footer arc. `alpha`
-/// (0..1) fades the whole panel in lockstep with
-/// `chat_shell::chat_alpha` — iced has no opacity wrapper, so every
-/// colour is scaled instead.
-fn build_ai_panel(state: &RadialState, alpha: f32) -> Element<'_, Message> {
-    let palette = &state.theme.theme.colors;
-    let fade = move |c: Color, k: f32| Color {
-        a: c.a * (alpha * k).clamp(0.0, 1.0),
-        ..c
-    };
-
-    let base_color = to_iced_color(&palette.base, Color::from_rgba(0.08, 0.08, 0.1, 0.95));
-    let surface_color = to_iced_color(&palette.surface0, Color::from_rgba(0.12, 0.12, 0.15, 0.9));
-    let text_color = to_iced_color(&palette.text, Color::WHITE);
-    let accent_color = to_iced_color(&palette.accent, Color::from_rgb(0.5, 0.5, 1.0));
-
-    let card_bg = fade(
-        Color::from_rgba(base_color.r, base_color.g, base_color.b, 0.92),
-        1.0,
-    );
-    let card_border = fade(accent_color, 0.25);
-    let body_text = fade(text_color, 1.0);
-    let dim_text = fade(text_color, 0.55);
-
-    let active_mode = state.chat().mode;
-
-    // ---- toolbar: new chat / thread list / mode pills ----
-    let tool_btn = move |label: &'static str, msg: Message, highlighted: bool| {
-        button(text(label).size(11).color(body_text))
-            .padding([4, 10])
-            .style(move |_, _status| button::Style {
-                background: Some(iced::Background::Color(if highlighted {
-                    fade(accent_color, 0.45)
-                } else {
-                    fade(surface_color, 0.6)
-                })),
-                border: iced::border::Border {
-                    color: if highlighted {
-                        fade(accent_color, 0.9)
-                    } else {
-                        fade(text_color, 0.12)
-                    },
-                    width: 1.0,
-                    radius: 9.0.into(),
-                },
-                text_color: body_text,
-                ..Default::default()
-            })
-            .on_press(msg)
-    };
-
-    let saved_count = state
-        .ai_threads
-        .iter()
-        .filter(|t| !t.history.is_empty())
-        .count();
-    let mut toolbar = row![
-        tool_btn("＋ New", Message::AiNewChat, false),
-        tool_btn(
-            if state.ai_show_threads {
-                "‹ Back"
-            } else {
-                "Chats"
-            },
-            Message::AiToggleThreads,
-            state.ai_show_threads,
-        ),
-    ]
-    .spacing(6)
-    .align_y(Alignment::Center);
-    if !state.ai_show_threads && saved_count > 0 {
-        toolbar = toolbar.push(
-            text(format!("{saved_count} saved"))
-                .size(10)
-                .color(fade(text_color, 0.35)),
-        );
-    }
-    toolbar = toolbar.push(Space::new().width(Length::Fill));
-    for mode in [
-        crate::ai_client::AgentMode::SettingsCustomizer,
-        crate::ai_client::AgentMode::GeneralChat,
-    ] {
-        toolbar = toolbar.push(tool_btn(
-            mode.label(),
-            Message::AiModeSelected(mode),
-            mode == active_mode,
-        ));
-    }
-    let is_pro = state.chat().model == crate::ai_client::PRO_MODEL;
-    toolbar = toolbar.push(tool_btn(
-        if is_pro { "Pro" } else { "Flash" },
-        Message::AiModelToggled,
-        is_pro,
-    ));
-    if !state.chat().history.is_empty() {
-        toolbar = toolbar.push(tool_btn("⧉", Message::AiCopyChat, false));
-    }
-
-    let mut chat_list = column![].spacing(8);
-
-    if state.chat().history.is_empty() {
-        let suggestions = match active_mode {
-            crate::ai_client::AgentMode::SettingsCustomizer => {
-                "Try asking:\n• 'Change slice colors to green'\n• 'Set animation speed to fast'\n• 'Switch to Dracula theme'\n• 'Show installed apps'"
-            }
-            crate::ai_client::AgentMode::GeneralChat => {
-                "General assistant with live Google search.\nTry asking:\n• 'What's new in GNOME 50?'\n• 'Explain Wayland fractional scaling'\n• 'Best Rust crate for HID devices?'"
-            }
-        };
-        chat_list = chat_list.push(text(suggestions).size(13).color(dim_text));
-    } else {
-        // One bubble-style factory so user/AI styles share a type.
-        let bubble_style = move |is_user: bool| {
-            move |_: &iced::Theme| container::Style {
-                background: Some(iced::Background::Color(if is_user {
-                    fade(accent_color, 0.25)
-                } else {
-                    fade(surface_color, 0.5)
-                })),
-                border: iced::border::Border {
-                    color: if is_user {
-                        fade(accent_color, 0.4)
-                    } else {
-                        fade(text_color, 0.1)
-                    },
-                    width: 1.0,
-                    radius: 10.0.into(),
-                },
-                ..Default::default()
-            }
-        };
-
-        for (i, msg) in state.chat().history.iter().enumerate() {
-            // AI replies render as markdown (links map to opener
-            // messages); user prompts stay plain text.
-            let content: Element<'_, Message> = if msg.is_user || msg.md.is_empty() {
-                text(&msg.text).size(13).color(body_text).into()
-            } else {
-                iced::widget::markdown::view(&msg.md, iced::Theme::CatppuccinMocha)
-                    .map(|url| Message::AiLinkClicked(url.to_string()))
-            };
-            let bubble = container(content)
-                .padding(9)
-                .max_width(360.0)
-                .style(bubble_style(msg.is_user));
-
-            // Hovering a bubble reveals its copy button; a fixed-
-            // width placeholder keeps the layout from shifting.
-            let hovered = state.ai_hover_msg == Some(i);
-            let copy_btn: Element<'_, Message> = if hovered {
-                button(text("⧉").size(13).color(dim_text))
-                    .padding([2, 4])
-                    .style(|_, _| button::Style::default())
-                    .on_press(Message::AiCopyText(msg.text.clone()))
-                    .into()
-            } else {
-                Space::new().width(Length::Fixed(25.0)).into()
-            };
-            let wrapped = iced::widget::mouse_area(bubble)
-                .on_enter(Message::AiBubbleHover(Some(i)))
-                .on_exit(Message::AiBubbleHover(None));
-
-            let align_row = if msg.is_user {
-                row![Space::new().width(Length::Fill), copy_btn, wrapped]
-            } else {
-                row![wrapped, copy_btn, Space::new().width(Length::Fill)]
-            }
-            .spacing(4)
-            .align_y(Alignment::Center);
-            chat_list = chat_list.push(align_row);
-        }
-
-        // In-flight streamed reply for this thread — plain text with
-        // a cursor; switches to rendered markdown on completion.
-        if let Some((idx, partial)) = &state.ai_stream {
-            if *idx == state.ai_active && !partial.is_empty() {
-                chat_list = chat_list.push(row![
-                    container(text(format!("{partial}▌")).size(13).color(body_text))
-                        .padding(9)
-                        .max_width(360.0)
-                        .style(bubble_style(false)),
-                    Space::new().width(Length::Fill),
-                ]);
-            }
-        }
-    }
-
-    // Card body: the conversation (history + optional pending
-    // multiple-choice question) — or the previous-chats list when
-    // the toolbar's "Chats" toggle is on.
-    let card_body: Element<'_, Message> = if state.ai_show_threads {
-        let mut list = column![].spacing(6);
-        if saved_count == 0 {
-            list = list.push(text("No previous chats yet.").size(12).color(dim_text));
-        }
-        // Newest first; skip never-used empty threads.
-        for (idx, thread) in state.ai_threads.iter().enumerate().rev() {
-            if thread.history.is_empty() {
-                continue;
-            }
-            let is_active = idx == state.ai_active;
-            let renaming = matches!(state.ai_renaming, Some((r, _)) if r == idx);
-
-            let title_el: Element<'_, Message> = if renaming {
-                let draft = state
-                    .ai_renaming
-                    .as_ref()
-                    .map(|(_, d)| d.as_str())
-                    .unwrap_or("");
-                text_input("Thread name…", draft)
-                    .size(12)
-                    .padding(4)
-                    .on_input(Message::AiRenameInput)
-                    .on_submit(Message::AiRenameCommit)
-                    .into()
-            } else {
-                let title = if thread.title.is_empty() {
-                    "Untitled chat".to_string()
-                } else {
-                    thread.title.clone()
-                };
-                text(title).size(12).color(body_text).into()
-            };
-
-            let meta = format!(
-                "{} · {} messages · {}",
-                thread.mode.label(),
-                thread.history.len(),
-                rel_time(thread.updated_at),
-            );
-
-            let open_btn = button(
-                column![title_el, text(meta).size(10).color(fade(text_color, 0.45))].spacing(2),
-            )
-            .width(Length::Fill)
-            .padding(8)
-            .style(move |_, _status| button::Style {
-                background: Some(iced::Background::Color(if is_active {
-                    fade(accent_color, 0.22)
-                } else {
-                    fade(surface_color, 0.45)
-                })),
-                border: iced::border::Border {
-                    color: if is_active {
-                        fade(accent_color, 0.7)
-                    } else {
-                        fade(text_color, 0.08)
-                    },
-                    width: 1.0,
-                    radius: 9.0.into(),
-                },
-                text_color: body_text,
-                ..Default::default()
-            })
-            .on_press(Message::AiSelectThread(idx));
-
-            let small_btn = |label: &'static str, msg: Message| {
-                button(text(label).size(12).color(dim_text))
-                    .padding([4, 6])
-                    .style(|_, _| button::Style::default())
-                    .on_press(msg)
-            };
-            let rename_btn = if renaming {
-                small_btn("✓", Message::AiRenameCommit)
-            } else {
-                small_btn("✎", Message::AiRenameStart(idx))
-            };
-
-            list = list.push(
-                row![
-                    open_btn,
-                    rename_btn,
-                    small_btn("🗑", Message::AiDeleteThread(idx)),
-                ]
-                .spacing(4)
-                .align_y(Alignment::Center),
-            );
-        }
-        // Right padding keeps the overlay scrollbar off the rows.
-        scrollable(container(list).padding(iced::Padding::default().right(14.0)))
-            .height(Length::Fill)
-            .into()
-    } else {
-        scrollable(container(chat_list).padding(iced::Padding::default().right(14.0)))
-            .id(CHAT_SCROLL_ID)
-            .height(Length::Fill)
-            .into()
-    };
-
-    let mut card_col = column![card_body].spacing(8);
-
-    if let Some(pending) = &state.ai_pending_question {
-        let mut question_col = column![
-            text(&pending.question)
-                .size(12)
-                .font(iced::Font {
-                    weight: iced::font::Weight::Bold,
-                    ..Default::default()
-                })
-                .color(fade(accent_color, 1.0)),
-            Space::new().height(Length::Fixed(4.0)),
-        ]
-        .spacing(4);
-
-        for opt in &pending.options {
-            let opt_clone = opt.clone();
-            question_col = question_col.push(
-                button(
-                    text(opt)
-                        .size(11)
-                        .color(body_text)
-                        .align_x(iced::alignment::Horizontal::Center),
-                )
-                .width(Length::Fill)
-                .padding(6)
-                .style(move |theme, status| {
-                    let mut s = button::primary(theme, status);
-                    s.background = Some(iced::Background::Color(fade(accent_color, 0.3)));
-                    s.border.color = fade(accent_color, 1.0);
-                    s.border.width = 1.0;
-                    s.border.radius = 6.0.into();
-                    s
-                })
-                .on_press(Message::AiChooseOption(opt_clone)),
-            );
-        }
-
-        card_col =
-            card_col.push(
-                container(question_col)
-                    .padding(8)
-                    .style(move |_| container::Style {
-                        background: Some(iced::Background::Color(fade(surface_color, 0.5))),
-                        border: iced::border::Border {
-                            color: fade(accent_color, 1.0),
-                            width: 1.0,
-                            radius: 8.0.into(),
-                        },
-                        ..Default::default()
-                    }),
-            );
-    }
-
-    let card = container(card_col)
-        .padding(12)
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .style(move |_| container::Style {
-            background: Some(iced::Background::Color(card_bg)),
-            border: iced::border::Border {
-                color: card_border,
-                width: 1.0,
-                radius: 14.0.into(),
-            },
-            ..Default::default()
-        });
-
-    // Input row — sits below the card so it lands on the footer
-    // arc, "inside" the flattened bottom half of the disc.
-    // Multi-line editor: Enter sends, Shift+Enter inserts a newline.
-    let editor = iced::widget::text_editor(&state.ai_editor)
-        .placeholder("Ask AI…  (Shift+Enter for newline)")
-        .size(13)
-        .padding(10)
-        .height(Length::Fixed(58.0))
-        .on_action(Message::AiEditorAction)
-        .key_binding(|key_press| {
-            use iced::widget::text_editor::Binding;
-            if matches!(
-                key_press.key,
-                iced::keyboard::Key::Named(iced::keyboard::key::Named::Enter)
-            ) && !key_press.modifiers.shift()
-            {
-                return Some(Binding::Custom(Message::AiSubmitPrompt));
-            }
-            Binding::from_key_press(key_press)
-        })
-        .style(move |theme, status| {
-            let mut s = iced::widget::text_editor::default(theme, status);
-            s.background = iced::Background::Color(fade(surface_color, 0.75));
-            s.value = body_text;
-            s.placeholder = fade(text_color, 0.4);
-            s.border.color = fade(text_color, 0.15);
-            s.border.radius = 9.0.into();
-            s
-        });
-
-    // Send flips to Stop while a turn is in flight.
-    let action_btn = if state.ai_loading {
-        button(
-            text("Stop")
-                .size(11)
-                .font(iced::Font {
-                    weight: iced::font::Weight::Bold,
-                    ..Default::default()
-                })
-                .color(body_text),
-        )
-        .padding(6)
-        .style(move |theme, status| {
-            let mut s = button::primary(theme, status);
-            s.background = Some(iced::Background::Color(fade(
-                Color::from_rgb(0.85, 0.35, 0.4),
-                1.0,
-            )));
-            s.border.radius = 9.0.into();
-            s
-        })
-        .on_press(Message::AiStopRequest)
-    } else {
-        button(
-            text("Send")
-                .size(11)
-                .font(iced::Font {
-                    weight: iced::font::Weight::Bold,
-                    ..Default::default()
-                })
-                .color(body_text),
-        )
-        .padding(6)
-        .style(move |theme, status| {
-            let mut s = button::primary(theme, status);
-            s.background = Some(iced::Background::Color(fade(accent_color, 1.0)));
-            s.border.radius = 9.0.into();
-            s
-        })
-        .on_press(Message::AiSubmitPrompt)
-    };
-
-    let mut input_col = column![].spacing(4);
-    if state.ai_loading {
-        input_col = input_col.push(
-            text(state.ai_activity.as_deref().unwrap_or("Working…"))
-                .size(11)
-                .font(iced::Font {
-                    style: iced::font::Style::Italic,
-                    ..Default::default()
-                })
-                .color(fade(accent_color, 1.0)),
-        );
-    }
-    input_col = input_col.push(row![editor, action_btn].spacing(6).align_y(Alignment::End));
-    let input_area: Element<'_, Message> = input_col.into();
-
-    let content_col = column![toolbar, card, input_area].spacing(10);
-
-    // Region between the parked arcs: below the header
-    // (EDGE_PAD + HEADER_H + breathing room), with the input row's
-    // bottom padding placing it over the footer arc.
-    container(content_col)
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .padding(iced::Padding {
-            // Slight downward offset that releases as the content
-            // fades in — reads as the chat rising into place.
-            top: crate::chat_shell::EDGE_PAD
-                + crate::chat_shell::HEADER_H
-                + 8.0
-                + (1.0 - alpha) * 18.0,
-            right: 20.0,
-            // Tucks the editor row inside the (taller) footer arc —
-            // arc top sits at win_h − EDGE_PAD − FOOTER_H, and the
-            // editor + activity label must land below it. The extra
-            // bottom space lets the editor's corners breathe inside
-            // the arc's large rounded corners.
-            bottom: 30.0,
-            left: 20.0,
-        })
-        .into()
 }
 
 #[allow(dead_code)]

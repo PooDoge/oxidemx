@@ -28,15 +28,37 @@ use iced::{mouse, Color, Event, Point, Rectangle, Renderer, Theme};
 use crate::geometry::{CENTER, MENU_RADIUS};
 use crate::radial::RadialState;
 
-/// Window height while the chat shell is active. Width stays
-/// `WINDOW_SIZE`. The window is resized to this once at morph start
-/// and restored once the morph fully reverses (or the menu hides).
-/// Kept modest — a towering window reads as "stretched" next to the
+/// Legacy/default window height while the chat shell is active —
+/// used when no `overlay.chat_size` has been persisted yet. Kept
+/// modest — a towering window reads as "stretched" next to the
 /// 300 px disc it morphs from.
 pub const CHAT_WINDOW_HEIGHT: f64 = 640.0;
 
-/// Final header-arc height (the flattened top cap).
-pub const HEADER_H: f32 = 44.0;
+/// Minimum chat size the resize grip will commit (design contract:
+/// 420×560). Width is additionally floored at `WINDOW_SIZE` because
+/// the disc needs its full 484 px square — the window IS the chat
+/// surface and the disc surface at different morph phases.
+pub const CHAT_MIN_W: f32 = 420.0;
+pub const CHAT_MIN_H: f32 = 560.0;
+
+/// Resolve the persisted `overlay.chat_size` into the actual window
+/// size, clamping hand-edited or stale values so the disc square
+/// and the chat minimums always fit. This is the single source of
+/// truth for the window's created size and `RadialState::win_size`.
+pub fn effective_window_size(chat_size: Option<(u32, u32)>) -> iced::Size {
+    let (w, h) = chat_size.map(|(w, h)| (w as f32, h as f32)).unwrap_or((
+        crate::geometry::WINDOW_SIZE as f32,
+        CHAT_WINDOW_HEIGHT as f32,
+    ));
+    iced::Size::new(
+        w.max(CHAT_MIN_W).max(crate::geometry::WINDOW_SIZE as f32),
+        h.max(CHAT_MIN_H),
+    )
+}
+
+/// Final header-arc height (the flattened top cap). 52 px per the
+/// redesign — fits the 32 px page puck plus title + status line.
+pub const HEADER_H: f32 = 52.0;
 /// Final footer-arc height (the flattened bottom cap). Sized to
 /// fully back the input zone — the 58 px editor row plus the
 /// tool-activity label above it — with enough room below the editor
@@ -44,8 +66,6 @@ pub const HEADER_H: f32 = 44.0;
 pub const FOOTER_H: f32 = 104.0;
 /// Margin between the arcs and the window edges.
 pub const EDGE_PAD: f32 = 8.0;
-/// Radius of the × close-button hit circle.
-pub const CLOSE_HIT_R: f32 = 16.0;
 /// Morph progress above which the header interactions (drag, ×,
 /// wheel-back over the arcs) are armed. Below this the chat shell is
 /// still in flight and clicks would grab a moving target.
@@ -98,7 +118,12 @@ pub struct CapRects {
 
 pub fn cap_rects(t: f32, win_w: f32, win_h: f32) -> CapRects {
     let t = t.clamp(0.0, 1.0);
-    let cx = CENTER as f32;
+    // The disc is centred horizontally in the window (the view
+    // wraps the 484 px layer stack in a centring container so wider
+    // persisted chat sizes keep the disc — and the morph origin —
+    // in the middle). Vertically the disc stays anchored at the
+    // top: the clamshell opens downward.
+    let cx = win_w / 2.0;
     let cy = CENTER as f32;
     let r = MENU_RADIUS as f32;
 
@@ -144,7 +169,7 @@ pub fn puck_geom(t: f32, win_w: f32, win_h: f32) -> (Point, f32) {
         parked.top.x + 14.0 + crate::handoff::HEADER_PUCK_R,
         parked.top.y + parked.top.height / 2.0,
     );
-    let start = Point::new(CENTER as f32, CENTER as f32);
+    let start = Point::new(win_w / 2.0, CENTER as f32);
     let r = lerp(
         crate::geometry::CENTER_ZONE_RADIUS as f32,
         crate::handoff::HEADER_PUCK_R,
@@ -156,24 +181,20 @@ pub fn puck_geom(t: f32, win_w: f32, win_h: f32) -> (Point, f32) {
     )
 }
 
-/// Centre of the × close button inside the header arc.
-pub fn close_center(top: &Rectangle) -> Point {
-    Point::new(
-        top.x + top.width - top.height * 0.5 - 6.0,
-        top.y + top.height * 0.5,
-    )
-}
-
-/// Hit-test the × close button.
-pub fn hit_close(p: Point, top: &Rectangle) -> bool {
-    let c = close_center(top);
-    let (dx, dy) = (p.x - c.x, p.y - c.y);
-    dx * dx + dy * dy <= CLOSE_HIT_R * CLOSE_HIT_R
-}
-
-/// Hit-test the draggable header surface (the arc minus the ×).
+/// Hit-test the draggable header surface. The header's buttons are
+/// widgets above the canvas and capture their own presses, so the
+/// whole arc is fair game here.
 pub fn hit_drag(p: Point, top: &Rectangle) -> bool {
-    top.contains(p) && !hit_close(p, top)
+    top.contains(p)
+}
+
+/// Side of the square corner zone (window bottom-right) that grabs
+/// the resize grip.
+pub const GRIP_ZONE: f32 = 22.0;
+
+/// Hit-test the bottom-right resize grip.
+pub fn hit_grip(p: Point, win_w: f32, win_h: f32) -> bool {
+    p.x >= win_w - GRIP_ZONE && p.y >= win_h - GRIP_ZONE
 }
 
 /// Resolve a wheel delta to a page-cycle direction (+1 next, -1
@@ -224,6 +245,42 @@ impl<'a> canvas::Program<crate::app::Message> for CapsPainter<'a> {
             return None;
         }
 
+        // An in-flight resize drag owns ALL pointer input until the
+        // button releases — the ghost outline follows the cursor and
+        // the release commits the new size. Release is handled even
+        // without a position (the cursor may have left the window).
+        if self.state.chat_resize.is_some() {
+            return match event {
+                Event::Mouse(mouse::Event::CursorMoved { .. }) => {
+                    let p = cursor.position_in(bounds)?;
+                    Some(Action::publish(crate::app::Message::ChatResizeMove {
+                        x: p.x as f64,
+                        y: p.y as f64,
+                    }))
+                }
+                Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
+                    Some(Action::publish(crate::app::Message::ChatResizeEnd))
+                }
+                _ => None,
+            };
+        }
+
+        // Grip grab — checked before the handoff branches so the
+        // grip works in both the armed and active phases. Only once
+        // the shell is parked: a moving grip is not a target.
+        if t >= INTERACTIVE_T {
+            if let Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) = event {
+                if let Some(p) = cursor.position_in(bounds) {
+                    if hit_grip(p, bounds.width, bounds.height) {
+                        return Some(Action::publish(crate::app::Message::ChatResizeStart {
+                            x: p.x as f64,
+                            y: p.y as f64,
+                        }));
+                    }
+                }
+            }
+        }
+
         // Escape closes the chat at any morph stage once the shell
         // owns the page (armed or parked) — mirrors the main
         // painter's dismiss path, which is gated off during the
@@ -257,16 +314,14 @@ impl<'a> canvas::Program<crate::app::Message> for CapsPainter<'a> {
                     }))
                 }
                 Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
-                    if t >= INTERACTIVE_T && hit_close(p, &rects.top) {
-                        // × still closes outright — activation isn't
-                        // a prerequisite for closing.
-                        Some(Action::publish(crate::app::Message::ToggleDismiss))
-                    } else {
-                        Some(Action::publish(crate::app::Message::HandoffClick {
-                            x: p.x as f64,
-                            y: p.y as f64,
-                        }))
-                    }
+                    // The × close button is a widget above this
+                    // canvas — it captures its own presses (and
+                    // closes without requiring activation). Anything
+                    // that reaches here feeds the activation rule.
+                    Some(Action::publish(crate::app::Message::HandoffClick {
+                        x: p.x as f64,
+                        y: p.y as f64,
+                    }))
                 }
                 Event::Mouse(mouse::Event::WheelScrolled { delta }) => {
                     let direction = wheel_direction(delta)?;
@@ -279,11 +334,10 @@ impl<'a> canvas::Program<crate::app::Message> for CapsPainter<'a> {
         if self.state.ai_handoff.is_chat_active() && t >= INTERACTIVE_T {
             return match event {
                 Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
-                    if hit_close(p, &rects.top) {
-                        Some(Action::publish(crate::app::Message::ToggleDismiss))
-                    } else if hit_drag(p, &rects.top) {
-                        // Native compositor move, like grabbing a
-                        // titlebar.
+                    // The × is a widget above this canvas; empty
+                    // header surface starts a native compositor
+                    // move, like grabbing a titlebar.
+                    if hit_drag(p, &rects.top) {
                         Some(Action::publish(crate::app::Message::ChatHeaderPressed))
                     } else {
                         None
@@ -311,8 +365,9 @@ impl<'a> canvas::Program<crate::app::Message> for CapsPainter<'a> {
         // wheel zone live so continued scrolling keeps stepping
         // through pages.
         if let Event::Mouse(mouse::Event::WheelScrolled { delta }) = event {
-            let cx = CENTER as f32;
-            let (dx, dy) = (p.x - cx, p.y - cx);
+            let cx = bounds.width / 2.0;
+            let cy = CENTER as f32;
+            let (dx, dy) = (p.x - cx, p.y - cy);
             let zone = crate::geometry::CENTER_ZONE_RADIUS as f32;
             if dx * dx + dy * dy <= zone * zone {
                 let direction = wheel_direction(delta)?;
@@ -335,10 +390,10 @@ impl<'a> canvas::Program<crate::app::Message> for CapsPainter<'a> {
         let Some(p) = cursor.position_in(bounds) else {
             return mouse::Interaction::default();
         };
-        let rects = cap_rects(t, bounds.width, bounds.height);
-        if hit_close(p, &rects.top) {
-            return mouse::Interaction::Pointer;
+        if self.state.chat_resize.is_some() || hit_grip(p, bounds.width, bounds.height) {
+            return mouse::Interaction::ResizingDiagonallyDown;
         }
+        let rects = cap_rects(t, bounds.width, bounds.height);
         // The header puck is a wheel target in every phase — show a
         // pointer so it reads as interactive.
         let (puck_c, puck_r) = puck_geom(t, bounds.width, bounds.height);
@@ -477,52 +532,89 @@ impl<'a> canvas::Program<crate::app::Message> for CapsPainter<'a> {
             );
         }
 
-        // Header furniture appears with the chat content.
+        // Header furniture: only the drag pill stays canvas-drawn —
+        // the title, status line, and action buttons are widgets in
+        // `chat_ui::header` layered above (so they're clickable),
+        // and the puck is drawn below as the travelling object.
         if chat_a > 0.001 {
             let top = rects.top;
-
-            // Page title, left-aligned inside the arc.
-            frame.fill_text(iced::widget::canvas::Text {
-                content: "AI Assistant".to_string(),
-                position: Point::new(top.x + 24.0, top.y + top.height / 2.0 - 8.0),
-                color: scale_alpha(text_color, chat_a),
-                size: 15.0.into(),
-                font: iced::Font {
-                    weight: iced::font::Weight::Bold,
-                    ..Default::default()
-                },
-                ..iced::widget::canvas::Text::default()
-            });
-
-            // Drag handle: small centred bar, the universal
-            // "grab here" affordance.
             let handle_w = 44.0;
             let handle = Path::new(|b| {
                 b.rounded_rectangle(
-                    Point::new(top.x + (top.width - handle_w) / 2.0, top.y + 10.0),
+                    Point::new(top.x + (top.width - handle_w) / 2.0, top.y + 7.0),
                     iced::Size::new(handle_w, 4.0),
                     2.0.into(),
                 );
             });
             frame.fill(&handle, scale_alpha(text_color, 0.35 * chat_a));
+        }
 
-            // × close button.
-            let c = close_center(&top);
-            let ring = Path::circle(c, CLOSE_HIT_R - 3.0);
-            frame.fill(&ring, scale_alpha(surface0, 0.85 * chat_a));
-            let k = 4.5;
-            for (sx, sy) in [(1.0_f32, 1.0_f32), (1.0, -1.0)] {
-                let line = Path::line(
-                    Point::new(c.x - k * sx, c.y - k * sy),
-                    Point::new(c.x + k * sx, c.y + k * sy),
-                );
+        // Resize grip — bottom-right corner, visible once the chat
+        // content is up. Accent while a drag is in flight, muted
+        // otherwise.
+        if chat_a > 0.001 {
+            let overlay0 =
+                self.palette_color(&palette.overlay0, Color::from_rgba(0.4, 0.42, 0.47, 1.0));
+            let grip_color = if self.state.chat_resize.is_some() {
+                scale_alpha(accent, chat_a)
+            } else {
+                scale_alpha(overlay0, 0.9 * chat_a)
+            };
+            let gx = bounds.width - 5.0;
+            let gy = bounds.height - 5.0;
+            // Two nested corner brackets, per the design's grip glyph.
+            for inset in [0.0_f32, 4.5] {
+                let arm = 10.0 - inset;
+                let path = Path::new(|b| {
+                    b.move_to(Point::new(gx - inset, gy - inset - arm));
+                    b.line_to(Point::new(gx - inset, gy - inset));
+                    b.line_to(Point::new(gx - inset - arm, gy - inset));
+                });
                 frame.stroke(
-                    &line,
-                    Stroke::default()
-                        .with_color(scale_alpha(text_color, chat_a))
-                        .with_width(2.0),
+                    &path,
+                    Stroke::default().with_color(grip_color).with_width(1.5),
                 );
             }
+        }
+
+        // Ghost outline + live size badge during a resize drag. The
+        // window itself doesn't resize until release (programmatic
+        // per-frame resizes desync the wgpu surface on Wayland) — the
+        // dashed outline previews the prospective size, clamped to
+        // the current window for display.
+        if let Some(drag) = &self.state.chat_resize {
+            let (gw, gh) = drag.current;
+            let vis_w = gw.min(bounds.width);
+            let vis_h = gh.min(bounds.height);
+            let ghost = Path::new(|b| {
+                b.rounded_rectangle(
+                    Point::new(1.0, 1.0),
+                    iced::Size::new(vis_w - 2.0, vis_h - 2.0),
+                    24.0.into(),
+                );
+            });
+            frame.stroke(
+                &ghost,
+                Stroke {
+                    line_dash: canvas::LineDash {
+                        segments: &[6.0, 5.0],
+                        offset: 0,
+                    },
+                    ..Stroke::default()
+                        .with_color(scale_alpha(accent, 0.7))
+                        .with_width(1.5)
+                },
+            );
+            // `W × H` mono badge tucked against the grip corner.
+            let label = format!("{} × {}", gw.round() as u32, gh.round() as u32);
+            frame.fill_text(iced::widget::canvas::Text {
+                content: label,
+                position: Point::new(bounds.width - 96.0, bounds.height - 36.0),
+                color: scale_alpha(accent, 1.0),
+                size: 11.0.into(),
+                font: iced::Font::MONOSPACE,
+                ..iced::widget::canvas::Text::default()
+            });
         }
 
         // The travelling page puck — the disc's centre circle
@@ -613,16 +705,10 @@ mod tests {
     }
 
     #[test]
-    fn close_hit_and_drag_are_disjoint() {
+    fn drag_covers_header_only() {
         let r = cap_rects(1.0, W, H);
-        let c = close_center(&r.top);
-        assert!(hit_close(c, &r.top));
-        assert!(!hit_drag(c, &r.top));
-        // A point on the far left of the header drags, not closes.
         let left = Point::new(r.top.x + 12.0, r.top.y + r.top.height / 2.0);
         assert!(hit_drag(left, &r.top));
-        assert!(!hit_close(left, &r.top));
-        // Outside both caps: neither.
         let mid = Point::new(W / 2.0, H / 2.0);
         assert!(!hit_drag(mid, &r.top));
         assert!(!r.top.contains(mid) && !r.bottom.contains(mid));

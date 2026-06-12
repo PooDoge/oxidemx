@@ -26,6 +26,46 @@ pub fn load() -> Result<AppConfig, oxidemx_shared::config::ConfigError> {
     AppConfig::load_from(&path)
 }
 
+/// Persist the committed chat window size into `overlay.chat_size`.
+///
+/// Edits the on-disk JSON as a `serde_json::Value` instead of
+/// round-tripping through `AppConfig` — the overlay must never drop
+/// keys it doesn't model (the daemon/settings own most of the file).
+/// Best-effort: failures are logged, the in-memory size still wins
+/// for this session.
+pub fn save_chat_size(w: u32, h: u32) {
+    let Some(path) = oxidemx_shared::config::default_config_path() else {
+        return;
+    };
+    let mut root: serde_json::Value = match std::fs::read_to_string(&path) {
+        Ok(s) => serde_json::from_str(&s).unwrap_or(serde_json::Value::Null),
+        Err(_) => serde_json::Value::Null,
+    };
+    if !root.is_object() {
+        root = serde_json::json!({});
+    }
+    let overlay = root
+        .as_object_mut()
+        .expect("root forced to object above")
+        .entry("overlay")
+        .or_insert_with(|| serde_json::json!({}));
+    if !overlay.is_object() {
+        *overlay = serde_json::json!({});
+    }
+    overlay
+        .as_object_mut()
+        .expect("overlay forced to object above")
+        .insert("chat_size".into(), serde_json::json!([w, h]));
+    match serde_json::to_string_pretty(&root) {
+        Ok(json) => {
+            if let Err(e) = std::fs::write(&path, json) {
+                tracing::warn!(error = %e, "failed to persist chat_size");
+            }
+        }
+        Err(e) => tracing::warn!(error = %e, "failed to serialise config for chat_size"),
+    }
+}
+
 /// Watch `~/.config/oxidemx/config.json` for changes and yield a
 /// fresh `AppConfig` each time it's written. Dropped events are
 /// debounced — saves from text editors typically produce a flurry

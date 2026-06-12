@@ -38,7 +38,9 @@ bytemuck = { version = "1.0", features = ["derive"] }
 zbus = "5"
 async-channel = "2"
 futures-util = "0.3"
-tokio = { version = "1", features = ["rt", "macros", "time", "fs"] }
+# "process" backs the agent's execute_command tool (sh -c with a
+# kill-on-timeout, which std::process can't do without threads).
+tokio = { version = "1", features = ["rt", "macros", "time", "fs", "process"] }
 
 # Image loading for slice icons. iced::widget::svg + the `image`
 # crate cover SVG/PNG/JPEG; tiny-skia rasterises SVGs through resvg

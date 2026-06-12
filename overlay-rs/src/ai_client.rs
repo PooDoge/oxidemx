@@ -38,7 +38,6 @@ pub enum StreamEvent {
     /// conversation (command executed / task scheduled / memory
     /// saved). Rendered by `chat_ui::cards` and persisted on the
     /// owning `ChatMessage`.
-    #[allow(dead_code)] // constructed by the T4 tool executors
     Card(AgentCardData),
 }
 
@@ -106,7 +105,9 @@ impl StreamSink {
     }
 }
 
-/// Human label for a tool the agent is about to run.
+/// Human label for a tool the agent is about to run. Generic
+/// fallback per tool — the executors emit more specific labels once
+/// they've parsed their arguments (e.g. "Running brightnessctl…").
 fn activity_for_tool(name: &str) -> &'static str {
     match name {
         "google_search" => "Searching the web…",
@@ -114,6 +115,9 @@ fn activity_for_tool(name: &str) -> &'static str {
         "set_menu_config" => "Writing config…",
         "list_system_apps" => "Listing installed apps…",
         "ask_multiple_choice_question" => "Waiting for your choice…",
+        "execute_command" => "Running command…",
+        "schedule_task" => "Managing scheduled tasks…",
+        "memory" => "Updating memories…",
         _ => "Running tool…",
     }
 }
@@ -176,8 +180,17 @@ impl AgentMode {
         }
     }
 
-    pub fn system_instruction(&self) -> &'static str {
-        match self {
+    /// Number of tools armed for this mode — surfaced in the chat
+    /// header's status line ("· N tools armed").
+    pub fn tool_count(&self) -> usize {
+        self.tools().len()
+    }
+
+    /// Full system instruction for this mode: the static persona
+    /// text plus the user's saved-memories block (when any exist),
+    /// so both modes can recall facts the user asked us to keep.
+    pub fn system_instruction(&self) -> String {
+        let base = match self {
             AgentMode::GeneralChat => {
                 "You are OxideMX-AI, a helpful conversational desktop assistant. \
                  You can answer questions, explain concepts, and query the web to ground your responses in real-time. \
@@ -200,17 +213,21 @@ impl AgentMode {
                  calling list_system_apps and reusing each app's real exec and icon. \
                  Keep your text replies clean, direct, and focused on layout modification."
             }
+        };
+        match crate::agent::memory::injection_block() {
+            Some(block) => format!("{base}\n\n{block}"),
+            None => base.to_string(),
         }
     }
 
     /// Tool declarations for the Interactions API. NOTE: the API
     /// rejects requests mixing built-in tools (`{"type":
     /// "google_search"}`) with custom function declarations
-    /// ("cannot be combined in the same request"), so for modes
-    /// that need both, `google_search` is declared as a CUSTOM
-    /// function here and its executor runs a nested, search-only
-    /// Interactions call (see `grounded_search`). Same API key, no
-    /// third-party service.
+    /// ("cannot be combined in the same request"). Both modes carry
+    /// custom functions now (the agent tools below), so BOTH declare
+    /// `google_search` as a CUSTOM function whose executor runs a
+    /// nested, search-only Interactions call (see `grounded_search`).
+    /// Same API key, no third-party service.
     pub fn tools(&self) -> Vec<serde_json::Value> {
         let search_fn = json!({
             "type": "function",
@@ -229,70 +246,160 @@ impl AgentMode {
         });
 
         match self {
-            // Chat-only mode has no custom functions, so it can use
-            // the built-in tool directly — grounding citations and
-            // all, in a single round-trip.
-            AgentMode::GeneralChat => vec![json!({ "type": "google_search" })],
-            AgentMode::SettingsCustomizer => vec![
-                json!({
-                    "type": "function",
-                    "name": "get_menu_config",
-                    "description": "Retrieve the current OxideMX radial menu layout, animation curves, and mouse button configuration.",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {}
-                    }
-                }),
-                json!({
-                    "type": "function",
-                    "name": "set_menu_config",
-                    "description": "Overwrite the current OxideMX radial menu configuration with a new JSON setup. Use this to save changes to themes, layout slices, custom pages, or animation speeds.",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "config_json": {
-                                "type": "string",
-                                "description": "The complete new configuration JSON string"
-                            }
-                        },
-                        "required": ["config_json"]
-                    }
-                }),
-                json!({
-                    "type": "function",
-                    "name": "list_system_apps",
-                    "description": "Scan the host system's desktop directories to list installed applications, commands, and icons. Helpful for recommending executables to bind to custom slices.",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {}
-                    }
-                }),
-                search_fn,
-                json!({
-                    "type": "function",
-                    "name": "ask_multiple_choice_question",
-                    "description": "Ask the user a clarifying multiple-choice question. Used when there are multiple valid options or parameters to clarify.",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "question": {
-                                "type": "string",
-                                "description": "The question text to present"
+            // General chat gets web search + the local agent tools.
+            AgentMode::GeneralChat => {
+                let mut tools = vec![search_fn];
+                tools.extend(agent_tool_declarations());
+                tools
+            }
+            AgentMode::SettingsCustomizer => {
+                let mut tools = vec![
+                    json!({
+                        "type": "function",
+                        "name": "get_menu_config",
+                        "description": "Retrieve the current OxideMX radial menu layout, animation curves, and mouse button configuration.",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {}
+                        }
+                    }),
+                    json!({
+                        "type": "function",
+                        "name": "set_menu_config",
+                        "description": "Overwrite the current OxideMX radial menu configuration with a new JSON setup. Use this to save changes to themes, layout slices, custom pages, or animation speeds.",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "config_json": {
+                                    "type": "string",
+                                    "description": "The complete new configuration JSON string"
+                                }
                             },
-                            "options": {
-                                "type": "array",
-                                "items": {
-                                    "type": "string"
+                            "required": ["config_json"]
+                        }
+                    }),
+                    json!({
+                        "type": "function",
+                        "name": "list_system_apps",
+                        "description": "Scan the host system's desktop directories to list installed applications, commands, and icons. Helpful for recommending executables to bind to custom slices.",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {}
+                        }
+                    }),
+                    search_fn,
+                    json!({
+                        "type": "function",
+                        "name": "ask_multiple_choice_question",
+                        "description": "Ask the user a clarifying multiple-choice question. Used when there are multiple valid options or parameters to clarify.",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "question": {
+                                    "type": "string",
+                                    "description": "The question text to present"
                                 },
-                                "description": "The list of choices/options the user can click"
-                            }
-                        },
-                        "required": ["question", "options"]
-                    }
-                }),
-            ],
+                                "options": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "string"
+                                    },
+                                    "description": "The list of choices/options the user can click"
+                                }
+                            },
+                            "required": ["question", "options"]
+                        }
+                    }),
+                ];
+                tools.extend(agent_tool_declarations());
+                tools
+            }
         }
     }
+}
+
+/// Declarations for the local agent tools (`execute_command`,
+/// `schedule_task`, `memory`), shared by both modes so general chat
+/// and the settings customizer expose identical machine-side
+/// capabilities.
+fn agent_tool_declarations() -> Vec<serde_json::Value> {
+    vec![
+        json!({
+            "type": "function",
+            "name": "execute_command",
+            "description": "Run a shell command on the user's machine via `sh -c`, with a 10 second timeout. Commands matching the user's allowlist run immediately; anything else asks the user for confirmation first. Returns the command's output and exit code.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "command": {
+                        "type": "string",
+                        "description": "The shell command line to execute"
+                    }
+                },
+                "required": ["command"]
+            }
+        }),
+        json!({
+            "type": "function",
+            "name": "schedule_task",
+            "description": "Manage recurring tasks backed by systemd user timers. `create` needs name, on_calendar and command; `enable`/`disable`/`delete`/`run_now` need unit; `list` returns all OxideMX tasks as JSON.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["create", "enable", "disable", "delete", "run_now", "list"],
+                        "description": "What to do"
+                    },
+                    "name": {
+                        "type": "string",
+                        "description": "Human-readable task name (create only)"
+                    },
+                    "on_calendar": {
+                        "type": "string",
+                        "description": "systemd OnCalendar expression, e.g. 'daily' or '*-*-* 03:00:00' (create only)"
+                    },
+                    "command": {
+                        "type": "string",
+                        "description": "Shell command the task runs (create only)"
+                    },
+                    "unit": {
+                        "type": "string",
+                        "description": "Task unit base name from list/create output, e.g. 'oxidemx-task-nightly-backup'"
+                    }
+                },
+                "required": ["action"]
+            }
+        }),
+        json!({
+            "type": "function",
+            "name": "memory",
+            "description": "Persist and recall small facts about the user across conversations. `save` needs text (and optionally scope); `delete`/`pin`/`unpin` need id; `list` returns all entries as JSON. Unpinned memories expire after 90 days of disuse; pinned ones are kept until deleted.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["save", "list", "delete", "pin", "unpin"],
+                        "description": "What to do"
+                    },
+                    "text": {
+                        "type": "string",
+                        "description": "The fact to remember (save only)"
+                    },
+                    "scope": {
+                        "type": "string",
+                        "description": "Grouping label like 'preferences' or 'projects' (save only, defaults to 'general')"
+                    },
+                    "id": {
+                        "type": "string",
+                        "description": "Memory id from list/save output (delete/pin/unpin)"
+                    }
+                },
+                "required": ["action"]
+            }
+        }),
+    ]
 }
 
 // =============================================================================
@@ -600,7 +707,7 @@ pub async fn ask_ai(
                     s.send(StreamEvent::Activity(activity_for_tool(&name).to_string()))
                         .await;
                 }
-                let result_text = match execute_local_tool(&name, args).await {
+                let result_text = match execute_local_tool(&name, args, &sink).await {
                     Ok(t) => t,
                     // Feed tool failures back to the model instead
                     // of aborting the turn — it can usually recover
@@ -664,11 +771,45 @@ async fn grounded_search(query: &str) -> Result<String, Box<dyn std::error::Erro
 // LOCAL TOOL EXECUTION ROUTER
 // =============================================================================
 
+/// Push a multiple-choice question to the chat UI via `QUESTION_TX`
+/// and block the agent turn until the user picks an option. Shared
+/// by the model-facing `ask_multiple_choice_question` tool and the
+/// `execute_command` off-allowlist confirmation flow.
+async fn ask_user_choice(
+    question: String,
+    options: Vec<String>,
+) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+    let tx_opt = QUESTION_TX.lock().unwrap().clone();
+    let Some(tx) = tx_opt else {
+        return Err("Question channel not initialized".into());
+    };
+    let (resp_tx, mut resp_rx) = mpsc::channel(1);
+    tx.send(PendingQuestion {
+        question,
+        options,
+        response_tx: resp_tx,
+    })
+    .await?;
+    match resp_rx.recv().await {
+        Some(answer) => Ok(answer),
+        None => Err("Response channel closed".into()),
+    }
+}
+
+/// Execute one model-requested tool call. `sink` lets executors push
+/// live `Activity` labels (with the actual target interpolated) and
+/// structured `Card` events into the owning chat thread; the
+/// returned string is what goes back to the model as the
+/// `function_result`.
 async fn execute_local_tool(
     name: &str,
     args: serde_json::Value,
+    sink: &Option<StreamSink>,
 ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
     match name {
+        "execute_command" => execute_command_tool(&args, sink).await,
+        "schedule_task" => schedule_task_tool(&args, sink).await,
+        "memory" => memory_tool(&args, sink).await,
         "get_menu_config" => {
             let path = get_config_path();
             if !path.exists() {
@@ -777,26 +918,231 @@ async fn execute_local_tool(
                 }
             }
 
-            let tx_opt = QUESTION_TX.lock().unwrap().clone();
-            if let Some(tx) = tx_opt {
-                let (resp_tx, mut resp_rx) = mpsc::channel(1);
-                let pending = PendingQuestion {
-                    question: question.to_string(),
-                    options,
-                    response_tx: resp_tx,
-                };
-                tx.send(pending).await?;
-
-                if let Some(answer) = resp_rx.recv().await {
-                    Ok(answer)
-                } else {
-                    Err("Response channel closed".into())
-                }
-            } else {
-                Err("Question channel not initialized".into())
-            }
+            ask_user_choice(question.to_string(), options).await
         }
         other => Err(format!("Unknown tool: {}", other).into()),
+    }
+}
+
+// =============================================================================
+// AGENT TOOL EXECUTORS (execute_command / schedule_task / memory)
+// =============================================================================
+
+/// Send an `Activity` label to the chat thread, if streaming.
+async fn send_activity(sink: &Option<StreamSink>, label: String) {
+    if let Some(s) = sink {
+        s.send(StreamEvent::Activity(label)).await;
+    }
+}
+
+/// Send a structured agent card to the chat thread, if streaming.
+async fn send_card(sink: &Option<StreamSink>, card: AgentCardData) {
+    if let Some(s) = sink {
+        s.send(StreamEvent::Card(card)).await;
+    }
+}
+
+/// `execute_command`: allowlisted commands run straight away,
+/// anything else asks the user through the chat's confirmation chip
+/// first. Either way the run is surfaced as a Command card and the
+/// model receives the (capped) output + exit code.
+async fn execute_command_tool(
+    args: &serde_json::Value,
+    sink: &Option<StreamSink>,
+) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+    let command = args["command"]
+        .as_str()
+        .ok_or("command argument missing or not a string")?;
+    let head = command.split_whitespace().next().unwrap_or(command);
+    send_activity(sink, format!("Running {head}…")).await;
+
+    if !crate::agent::commands::is_allowlisted(command, &crate::agent::commands::allowlist()) {
+        send_activity(sink, "Waiting for your approval…".to_string()).await;
+        let answer = ask_user_choice(
+            format!("Run `{command}`?"),
+            vec!["Run it".to_string(), "Don't run".to_string()],
+        )
+        .await?;
+        if answer != "Run it" {
+            // Tell the model plainly so it doesn't retry the same
+            // command or assume it ran.
+            return Ok(format!(
+                "The user declined to run `{command}`. Do not run it; \
+                 ask before proposing an alternative command."
+            ));
+        }
+        send_activity(sink, format!("Running {head}…")).await;
+    }
+
+    let (output, exit_code) = crate::agent::commands::run(command).await;
+    send_card(
+        sink,
+        AgentCardData::Command {
+            command: command.to_string(),
+            stdout: output.clone(),
+            exit_code,
+        },
+    )
+    .await;
+    Ok(format!("exit code {exit_code}\noutput:\n{output}"))
+}
+
+/// Build the Task card payload from a `TaskInfo`.
+fn task_card(info: &crate::agent::tasks::TaskInfo) -> AgentCardData {
+    AgentCardData::Task {
+        name: info.name.clone(),
+        unit: info.unit.clone(),
+        schedule: info.schedule.clone(),
+        next_run: info.next_run.clone(),
+        enabled: info.enabled,
+    }
+}
+
+/// `schedule_task`: thin dispatcher over `agent::tasks`. Mutating
+/// actions emit a Task card so the conversation shows the timer's
+/// state; `list` feeds plain JSON back to the model only.
+async fn schedule_task_tool(
+    args: &serde_json::Value,
+    sink: &Option<StreamSink>,
+) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+    let action = args["action"]
+        .as_str()
+        .ok_or("action argument missing or not a string")?;
+    // `unit` is shared by every action except create/list.
+    let unit = || -> Result<&str, String> {
+        args["unit"]
+            .as_str()
+            .ok_or_else(|| format!("unit argument required for action '{action}'"))
+    };
+
+    match action {
+        "create" => {
+            let name = args["name"]
+                .as_str()
+                .ok_or("name argument required for create")?;
+            let on_calendar = args["on_calendar"]
+                .as_str()
+                .ok_or("on_calendar argument required for create")?;
+            let command = args["command"]
+                .as_str()
+                .ok_or("command argument required for create")?;
+            send_activity(sink, "Scheduling task — writing systemd unit…".to_string()).await;
+            let info = crate::agent::tasks::create(name, on_calendar, command)?;
+            send_card(sink, task_card(&info)).await;
+            Ok(format!("Task created: {}", serde_json::to_string(&info)?))
+        }
+        "enable" | "disable" => {
+            let unit = unit()?;
+            let enabled = action == "enable";
+            send_activity(
+                sink,
+                format!("{} task…", if enabled { "Enabling" } else { "Disabling" }),
+            )
+            .await;
+            crate::agent::tasks::set_enabled(unit, enabled)?;
+            // Re-read so the card shows the post-change state
+            // (enabled flag + refreshed next_run).
+            if let Some(info) = crate::agent::tasks::list()
+                .into_iter()
+                .find(|t| t.unit == unit)
+            {
+                send_card(sink, task_card(&info)).await;
+            }
+            Ok(format!(
+                "Task '{unit}' {}.",
+                if enabled { "enabled" } else { "disabled" }
+            ))
+        }
+        "run_now" => {
+            let unit = unit()?;
+            send_activity(sink, "Starting task…".to_string()).await;
+            crate::agent::tasks::run_now(unit)?;
+            Ok(format!("Task '{unit}' started."))
+        }
+        "delete" => {
+            let unit = unit()?;
+            send_activity(sink, "Deleting task…".to_string()).await;
+            crate::agent::tasks::delete(unit)?;
+            Ok(format!("Task '{unit}' deleted."))
+        }
+        "list" => {
+            send_activity(sink, "Listing scheduled tasks…".to_string()).await;
+            Ok(serde_json::to_string(&crate::agent::tasks::list())?)
+        }
+        other => Err(format!("Unknown schedule_task action: {other}").into()),
+    }
+}
+
+/// `memory`: thin dispatcher over `agent::memory`. Only `save`
+/// produces a card (the retention chip); the rest return short
+/// confirmations or JSON the model folds into its reply.
+async fn memory_tool(
+    args: &serde_json::Value,
+    sink: &Option<StreamSink>,
+) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+    let action = args["action"]
+        .as_str()
+        .ok_or("action argument missing or not a string")?;
+    let id = || -> Result<&str, String> {
+        args["id"]
+            .as_str()
+            .ok_or_else(|| format!("id argument required for action '{action}'"))
+    };
+
+    match action {
+        "save" => {
+            let text = args["text"]
+                .as_str()
+                .ok_or("text argument required for save")?;
+            let scope = args["scope"].as_str().unwrap_or("general");
+            send_activity(sink, "Saving memory…".to_string()).await;
+            let entry = crate::agent::memory::save_entry(text, scope);
+            send_card(
+                sink,
+                AgentCardData::Memory {
+                    id: entry.id.clone(),
+                    text: entry.text.clone(),
+                    // Saves are always unpinned; pinning is a
+                    // separate action with its own retention.
+                    retention: "auto · 90d".to_string(),
+                },
+            )
+            .await;
+            Ok(format!("Memory saved with id {}.", entry.id))
+        }
+        "list" => Ok(serde_json::to_string(&crate::agent::memory::load_all())?),
+        "delete" => {
+            let id = id()?;
+            send_activity(sink, "Deleting memory…".to_string()).await;
+            if crate::agent::memory::delete(id) {
+                Ok(format!("Memory {id} deleted."))
+            } else {
+                Ok(format!("No memory with id {id}."))
+            }
+        }
+        "pin" | "unpin" => {
+            let id = id()?;
+            let pinned = action == "pin";
+            send_activity(
+                sink,
+                format!("{} memory…", if pinned { "Pinning" } else { "Unpinning" }),
+            )
+            .await;
+            if crate::agent::memory::set_pinned(id, pinned) {
+                Ok(format!(
+                    "Memory {id} {} — retention is now '{}'.",
+                    if pinned { "pinned" } else { "unpinned" },
+                    if pinned {
+                        "until changed"
+                    } else {
+                        "auto · 90d"
+                    }
+                ))
+            } else {
+                Ok(format!("No memory with id {id}."))
+            }
+        }
+        other => Err(format!("Unknown memory action: {other}").into()),
     }
 }
 

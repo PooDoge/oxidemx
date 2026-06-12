@@ -466,6 +466,45 @@ pub struct RadialState {
     /// disarmed to `ChatActive` by a deliberate click / mouse-out
     /// gesture. Transition rules + tests live in `crate::handoff`.
     pub ai_handoff: crate::handoff::AiHandoff,
+
+    /// Current window size in logical px. Created from the persisted
+    /// `overlay.chat_size` (clamped by
+    /// `chat_shell::effective_window_size`) and updated when a
+    /// resize-grip drag commits or the compositor reports a resize.
+    pub win_size: (f32, f32),
+
+    /// In-flight resize-grip drag, `None` when not resizing. The
+    /// ghost outline + size badge render from `current`; the window
+    /// only actually resizes when the drag ends.
+    pub chat_resize: Option<ChatResizeDrag>,
+
+    /// Memories management view open (header brain button).
+    pub ai_show_memories: bool,
+    /// Live search filter for the memories view.
+    pub ai_memories_query: String,
+    /// Cached memory entries, refreshed when the view opens or an
+    /// entry is pinned/deleted (the store is a small local JSON).
+    pub ai_memories: Vec<crate::agent::memory::MemoryEntry>,
+    /// Store size at last refresh, for the "12 KB" label.
+    pub ai_memories_bytes: u64,
+
+    /// Scheduled-tasks view open (header clock button).
+    pub ai_show_tasks: bool,
+    /// Cached task list, loaded async when the view opens / changes
+    /// (systemctl round trips don't belong on the render path).
+    pub ai_tasks: Vec<crate::agent::tasks::TaskInfo>,
+}
+
+/// State of one resize-grip drag.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ChatResizeDrag {
+    /// Cursor position at grab time (window-local).
+    pub grab: (f32, f32),
+    /// Window size at grab time.
+    pub origin: (f32, f32),
+    /// Prospective size = origin + cursor delta, clamped to the
+    /// chat minimums. Committed on release.
+    pub current: (f32, f32),
 }
 
 /// Name of the auto-appended AI Assistant page. Shared between the
@@ -571,6 +610,17 @@ impl RadialState {
             ai_morph: Tween::at(0.0),
             chat_focus_pending: false,
             ai_handoff: crate::handoff::AiHandoff::Inactive,
+            win_size: {
+                let s = crate::chat_shell::effective_window_size(config.overlay.chat_size);
+                (s.width, s.height)
+            },
+            chat_resize: None,
+            ai_show_memories: false,
+            ai_memories_query: String::new(),
+            ai_memories: Vec::new(),
+            ai_memories_bytes: 0,
+            ai_show_tasks: false,
+            ai_tasks: Vec::new(),
         }
     }
 
@@ -761,6 +811,8 @@ impl RadialState {
             self.ai_active = self.ai_threads.len() - 1;
         }
         self.ai_show_threads = false;
+        self.ai_show_memories = false;
+        self.ai_show_tasks = false;
         self.ai_pending_question = None;
         self.ai_editor = iced::widget::text_editor::Content::new();
         self.ai_hover_msg = None;
@@ -773,6 +825,8 @@ impl RadialState {
             self.ai_active = idx;
         }
         self.ai_show_threads = false;
+        self.ai_show_memories = false;
+        self.ai_show_tasks = false;
         self.ai_pending_question = None;
         self.ai_hover_msg = None;
         self.ai_renaming = None;
@@ -835,6 +889,43 @@ impl RadialState {
         }
     }
 
+    /// Begin a resize-grip drag. Grabbing the grip is a deliberate
+    /// chat interaction, so it also disarms an armed puck.
+    pub fn chat_resize_start(&mut self, x: f64, y: f64) {
+        self.activate_chat();
+        self.chat_resize = Some(ChatResizeDrag {
+            grab: (x as f32, y as f32),
+            origin: self.win_size,
+            current: self.win_size,
+        });
+    }
+
+    /// Update the prospective size from the current cursor position.
+    pub fn chat_resize_move(&mut self, x: f64, y: f64) {
+        if let Some(d) = &mut self.chat_resize {
+            let w = d.origin.0 + (x as f32 - d.grab.0);
+            let h = d.origin.1 + (y as f32 - d.grab.1);
+            d.current = (
+                w.max(crate::chat_shell::CHAT_MIN_W)
+                    .max(crate::geometry::WINDOW_SIZE as f32),
+                h.max(crate::chat_shell::CHAT_MIN_H),
+            );
+        }
+    }
+
+    /// Finish the drag. Returns the committed size when it changed
+    /// (the app layer persists it and issues the one real window
+    /// resize), `None` for a no-op release.
+    pub fn chat_resize_end(&mut self) -> Option<(f32, f32)> {
+        let d = self.chat_resize.take()?;
+        if d.current != d.origin {
+            self.win_size = d.current;
+            Some(d.current)
+        } else {
+            None
+        }
+    }
+
     /// Feed a window-local click into the armed handoff. Clicks
     /// outside the travelling puck's hit circle activate the chat;
     /// clicks on the puck leave it armed (it's the page-cycle
@@ -843,8 +934,8 @@ impl RadialState {
         use crate::handoff::{HEADER_PUCK_HIT_SLOP, P};
         let (pc, pr) = crate::chat_shell::puck_geom(
             self.ai_morph_progress(),
-            crate::geometry::WINDOW_SIZE as f32,
-            crate::chat_shell::CHAT_WINDOW_HEIGHT as f32,
+            self.win_size.0,
+            self.win_size.1,
         );
         if self.ai_handoff.on_click(
             P::new(x as f32, y as f32),
@@ -860,10 +951,9 @@ impl RadialState {
     /// travel rule (see `crate::handoff`).
     pub fn handoff_pointer(&mut self, x: f64, y: f64) {
         use crate::handoff::P;
-        let disc_center = P::new(
-            crate::geometry::CENTER as f32,
-            crate::geometry::CENTER as f32,
-        );
+        // The disc is centred horizontally in the (possibly wider)
+        // window; vertically it stays anchored in the top square.
+        let disc_center = P::new(self.win_size.0 / 2.0, crate::geometry::CENTER as f32);
         if self.ai_handoff.on_pointer(
             P::new(x as f32, y as f32),
             disc_center,

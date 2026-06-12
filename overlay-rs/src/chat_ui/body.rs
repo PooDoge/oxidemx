@@ -1,0 +1,330 @@
+//! Conversation body: bubbles, agent cards, in-flight stream, the
+//! pending multiple-choice question, and the full thread list view
+//! (reached from the "…" chip when more threads exist than fit the
+//! strip).
+
+use iced::widget::{button, column, container, row, scrollable, text, text_input, Space};
+use iced::{Alignment, Color, Element, Length};
+
+use super::Kit;
+use crate::app::Message;
+use crate::radial::RadialState;
+
+/// Scrollable id for the conversation history — the update loop
+/// snaps it to the newest message.
+pub const CHAT_SCROLL_ID: &str = "ai-chat-history";
+
+/// 1 px horizontal divider in `color`.
+pub fn hairline<'a>(kit: Kit, color: Color) -> Element<'a, Message> {
+    container(Space::new())
+        .width(Length::Fill)
+        .height(Length::Fixed(1.0))
+        .style(move |_| iced::widget::container::Style {
+            background: Some(iced::Background::Color(kit.fade(color, 1.0))),
+            ..Default::default()
+        })
+        .into()
+}
+
+pub fn conversation<'a>(state: &'a RadialState, kit: &Kit) -> Element<'a, Message> {
+    let kit = *kit;
+    let mut list = column![].spacing(10);
+
+    if state.chat().history.is_empty() {
+        let suggestions = match state.chat().mode {
+            crate::ai_client::AgentMode::SettingsCustomizer => {
+                "Try asking:\n• 'Change slice colors to green'\n• 'Set animation speed to fast'\n• 'Switch to Dracula theme'\n• 'Show installed apps'"
+            }
+            crate::ai_client::AgentMode::GeneralChat => {
+                "Ask, or describe an automation:\n• 'Dim the screen to 40% tonight at 22:00'\n• 'Remember I prefer warm light after sunset'\n• 'What's new in GNOME 50?'"
+            }
+        };
+        list = list.push(
+            text(suggestions)
+                .size(13)
+                .color(kit.fade(kit.subtext0, 1.0)),
+        );
+    } else {
+        for (i, msg) in state.chat().history.iter().enumerate() {
+            if let Some(card) = &msg.card {
+                list = list.push(super::cards::view(card, &kit));
+                continue;
+            }
+            list = list.push(bubble_row(state, kit, i, msg));
+        }
+
+        // In-flight streamed reply for this thread — plain text with
+        // a cursor; switches to rendered markdown on completion.
+        if let Some((idx, partial)) = &state.ai_stream {
+            if *idx == state.ai_active && !partial.is_empty() {
+                list = list.push(row![
+                    container(
+                        text(format!("{partial}▌"))
+                            .size(13)
+                            .color(kit.fade(kit.text, 1.0))
+                    )
+                    .padding(iced::Padding {
+                        top: 9.0,
+                        right: 13.0,
+                        bottom: 9.0,
+                        left: 13.0,
+                    })
+                    .max_width(360.0)
+                    .style(bubble_style(kit, false)),
+                    Space::new().width(Length::Fill),
+                ]);
+            }
+        }
+    }
+
+    if let Some(pending) = &state.ai_pending_question {
+        let mut q = column![text(&pending.question)
+            .size(12)
+            .font(iced::Font {
+                weight: iced::font::Weight::Bold,
+                ..Default::default()
+            })
+            .color(kit.fade(kit.accent, 1.0)),]
+        .spacing(6);
+        for opt in &pending.options {
+            let opt_clone = opt.clone();
+            q = q.push(
+                button(
+                    text(opt)
+                        .size(11)
+                        .color(kit.fade(kit.text, 1.0))
+                        .align_x(iced::alignment::Horizontal::Center),
+                )
+                .width(Length::Fill)
+                .padding(6)
+                .style(move |_, _status| button::Style {
+                    background: Some(iced::Background::Color(kit.fade(kit.accent, 0.25))),
+                    border: iced::border::Border {
+                        color: kit.fade(kit.accent, 0.9),
+                        width: 1.0,
+                        radius: 8.0.into(),
+                    },
+                    text_color: kit.fade(kit.text, 1.0),
+                    ..Default::default()
+                })
+                .on_press(Message::AiChooseOption(opt_clone)),
+            );
+        }
+        list = list.push(
+            container(q)
+                .padding(10)
+                .style(move |_| iced::widget::container::Style {
+                    background: Some(iced::Background::Color(kit.fade(kit.surface0, 0.8))),
+                    border: iced::border::Border {
+                        color: kit.fade(kit.accent, 0.7),
+                        width: 1.0,
+                        radius: 10.0.into(),
+                    },
+                    ..Default::default()
+                }),
+        );
+    }
+
+    scrollable(container(list).padding(iced::Padding::default().right(12.0)))
+        .id(CHAT_SCROLL_ID)
+        .height(Length::Fill)
+        .into()
+}
+
+fn bubble_style(
+    kit: Kit,
+    is_user: bool,
+) -> impl Fn(&iced::Theme) -> iced::widget::container::Style {
+    move |_| iced::widget::container::Style {
+        background: Some(iced::Background::Color(if is_user {
+            kit.fade(kit.accent, 0.11)
+        } else {
+            kit.fade(kit.surface0, 1.0)
+        })),
+        border: iced::border::Border {
+            color: if is_user {
+                kit.fade(kit.accent, 0.23)
+            } else {
+                kit.fade(kit.text, 0.05)
+            },
+            width: 1.0,
+            // Speech-tail asymmetry per the design: the corner
+            // nearest the sender is tight.
+            radius: if is_user {
+                iced::border::Radius::default()
+                    .top_left(14.0)
+                    .top_right(14.0)
+                    .bottom_left(14.0)
+                    .bottom_right(4.0)
+            } else {
+                iced::border::Radius::default()
+                    .top_left(14.0)
+                    .top_right(14.0)
+                    .bottom_left(4.0)
+                    .bottom_right(14.0)
+            },
+        },
+        ..Default::default()
+    }
+}
+
+fn bubble_row<'a>(
+    state: &'a RadialState,
+    kit: Kit,
+    i: usize,
+    msg: &'a crate::radial::ChatMessage,
+) -> Element<'a, Message> {
+    // AI replies render as markdown (links map to opener messages);
+    // user prompts stay plain text.
+    let content: Element<'a, Message> = if msg.is_user || msg.md.is_empty() {
+        text(&msg.text)
+            .size(13)
+            .color(kit.fade(kit.text, 1.0))
+            .into()
+    } else {
+        iced::widget::markdown::view(&msg.md, iced::Theme::CatppuccinMocha)
+            .map(|url| Message::AiLinkClicked(url.to_string()))
+    };
+    let bubble = container(content)
+        .padding(iced::Padding {
+            top: 9.0,
+            right: 13.0,
+            bottom: 9.0,
+            left: 13.0,
+        })
+        .max_width(360.0)
+        .style(bubble_style(kit, msg.is_user));
+
+    // Hovering a bubble reveals its copy button; a fixed-width
+    // placeholder keeps the layout from shifting.
+    let hovered = state.ai_hover_msg == Some(i);
+    let copy_btn: Element<'a, Message> = if hovered {
+        button(text("⧉").size(13).color(kit.fade(kit.subtext0, 1.0)))
+            .padding([2, 4])
+            .style(|_, _| button::Style::default())
+            .on_press(Message::AiCopyText(msg.text.clone()))
+            .into()
+    } else {
+        Space::new().width(Length::Fixed(25.0)).into()
+    };
+    let wrapped = iced::widget::mouse_area(bubble)
+        .on_enter(Message::AiBubbleHover(Some(i)))
+        .on_exit(Message::AiBubbleHover(None));
+
+    if msg.is_user {
+        row![Space::new().width(Length::Fill), copy_btn, wrapped]
+    } else {
+        row![wrapped, copy_btn, Space::new().width(Length::Fill)]
+    }
+    .spacing(4)
+    .align_y(Alignment::Center)
+    .into()
+}
+
+/// Full thread list (rename / delete / open) — functionality kept
+/// from the pre-redesign toolbar, reached via the strip's "…" chip.
+pub fn threads_list<'a>(state: &'a RadialState, kit: &Kit) -> Element<'a, Message> {
+    let kit = *kit;
+    let mut list = column![].spacing(6);
+    let saved = state
+        .ai_threads
+        .iter()
+        .filter(|t| !t.history.is_empty())
+        .count();
+    if saved == 0 {
+        list = list.push(
+            text("No previous chats yet.")
+                .size(12)
+                .color(kit.fade(kit.subtext0, 1.0)),
+        );
+    }
+    for (idx, thread) in state.ai_threads.iter().enumerate().rev() {
+        if thread.history.is_empty() {
+            continue;
+        }
+        let is_active = idx == state.ai_active;
+        let renaming = matches!(state.ai_renaming, Some((r, _)) if r == idx);
+
+        let title_el: Element<'a, Message> = if renaming {
+            let draft = state
+                .ai_renaming
+                .as_ref()
+                .map(|(_, d)| d.as_str())
+                .unwrap_or("");
+            text_input("Thread name…", draft)
+                .size(12)
+                .padding(4)
+                .on_input(Message::AiRenameInput)
+                .on_submit(Message::AiRenameCommit)
+                .into()
+        } else {
+            let title = if thread.title.is_empty() {
+                "Untitled chat".to_string()
+            } else {
+                thread.title.clone()
+            };
+            text(title).size(12).color(kit.fade(kit.text, 1.0)).into()
+        };
+
+        let meta = format!(
+            "{} · {} messages · {}",
+            thread.mode.label(),
+            thread.history.len(),
+            crate::app::rel_time(thread.updated_at),
+        );
+
+        let open_btn = button(
+            column![
+                title_el,
+                text(meta).size(10).color(kit.fade(kit.subtext0, 0.9))
+            ]
+            .spacing(2),
+        )
+        .width(Length::Fill)
+        .padding(8)
+        .style(move |_, _status| button::Style {
+            background: Some(iced::Background::Color(if is_active {
+                kit.fade(kit.accent, 0.15)
+            } else {
+                kit.fade(kit.surface0, 0.8)
+            })),
+            border: iced::border::Border {
+                color: if is_active {
+                    kit.fade(kit.accent, 0.6)
+                } else {
+                    kit.fade(kit.text, 0.06)
+                },
+                width: 1.0,
+                radius: 9.0.into(),
+            },
+            text_color: kit.fade(kit.text, 1.0),
+            ..Default::default()
+        })
+        .on_press(Message::AiSelectThread(idx));
+
+        let small_btn = |label: &'static str, msg: Message| {
+            button(text(label).size(12).color(kit.fade(kit.subtext0, 1.0)))
+                .padding([4, 6])
+                .style(|_, _| button::Style::default())
+                .on_press(msg)
+        };
+        let rename_btn = if renaming {
+            small_btn("✓", Message::AiRenameCommit)
+        } else {
+            small_btn("✎", Message::AiRenameStart(idx))
+        };
+
+        list = list.push(
+            row![
+                open_btn,
+                rename_btn,
+                small_btn("🗑", Message::AiDeleteThread(idx)),
+            ]
+            .spacing(4)
+            .align_y(Alignment::Center),
+        );
+    }
+    scrollable(container(list).padding(iced::Padding::default().right(12.0)))
+        .height(Length::Fill)
+        .into()
+}

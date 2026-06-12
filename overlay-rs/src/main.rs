@@ -20,10 +20,12 @@
 //! GTK, no `*-devel` rpm-ostree layering. Pure Rust dep tree.
 
 mod actions;
+mod agent;
 mod ai_client;
 mod anim;
 mod app;
 mod chat_shell;
+mod chat_ui;
 mod config;
 mod dbus;
 mod fonts;
