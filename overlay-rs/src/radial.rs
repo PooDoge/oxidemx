@@ -945,9 +945,12 @@ impl RadialState {
     /// travel rule (see `crate::handoff`).
     pub fn handoff_pointer(&mut self, x: f64, y: f64) {
         use crate::handoff::P;
-        // The disc is centred horizontally in the (possibly wider)
-        // window; vertically it stays anchored in the top square.
-        let disc_center = P::new(self.win_size.0 / 2.0, crate::geometry::CENTER as f32);
+        // The disc is anchored in the window's top-left 484 px
+        // square — its centre is fixed regardless of window size.
+        let disc_center = P::new(
+            crate::geometry::CENTER as f32,
+            crate::geometry::CENTER as f32,
+        );
         if self.ai_handoff.on_pointer(
             P::new(x as f32, y as f32),
             disc_center,

@@ -321,9 +321,10 @@ fn update(state: &mut RadialState, message: Message) -> Task<Message> {
             // coords) — the extension figures out which monitor
             // contains the requested point.
             // Centre the DISC (not the window) on the cursor: the
-            // disc sits centred horizontally in the top square of a
-            // possibly-wider/taller chat-sized window.
-            let half_x = (state.win_size.0 / 2.0) as i32;
+            // disc is anchored in the window's top-left 484 px
+            // square, so the offset is the disc's own half-size
+            // regardless of how large the chat-sized window is.
+            let half_x = (WINDOW_SIZE / 2.0) as i32;
             let half_y = (WINDOW_SIZE / 2.0) as i32;
             // Three parallel D-Bus round-trips: window position,
             // focus query, and the menu_appear haptic pulse.
@@ -1623,13 +1624,12 @@ fn view(state: &RadialState) -> Element<'_, Message> {
     } else {
         iced::widget::Stack::with_children(layers).into()
     };
-    // Centre the 484 px disc stack horizontally so wider persisted
-    // chat sizes keep the disc (and the morph origin) in the middle
-    // of the window. Vertical anchor stays the top square.
-    let main_stack: Element<'_, Message> = container(main_stack)
-        .width(Length::Fill)
-        .align_x(iced::alignment::Horizontal::Center)
-        .into();
+    // The 484 px disc stack stays anchored at the window's top-left.
+    // Centering it via an aligned container looks nicer for wide
+    // persisted chat sizes, but iced 0.14 clips canvas MESH layers
+    // inside an offset container with a doubled offset — wedge and
+    // dome fills vanish while icons/text survive. The morph instead
+    // sweeps from the disc's square to the full window.
 
     // Chat shell composition: while the disc ↔ chat morph is in
     // flight (or parked at the chat end), stack the caps painter

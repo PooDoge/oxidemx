@@ -118,18 +118,21 @@ pub struct CapRects {
 
 pub fn cap_rects(t: f32, win_w: f32, win_h: f32) -> CapRects {
     let t = t.clamp(0.0, 1.0);
-    // The disc is centred horizontally in the window (the view
-    // wraps the 484 px layer stack in a centring container so wider
-    // persisted chat sizes keep the disc — and the morph origin —
-    // in the middle). Vertically the disc stays anchored at the
-    // top: the clamshell opens downward.
-    let cx = win_w / 2.0;
+    // The disc is anchored in the window's top-left 484 px square
+    // (centering it trips an iced canvas-mesh clipping bug — see
+    // app.rs). The caps start as the disc's halves there and sweep
+    // right/down to fill the whole window; the clamshell opens
+    // downward.
+    let cx = CENTER as f32;
     let cy = CENTER as f32;
     let r = MENU_RADIUS as f32;
 
-    // Width grows from the disc diameter to nearly the full window.
+    // Width grows from the disc diameter to nearly the full window;
+    // the left edge travels from the disc's rim to the window pad
+    // (deriving x from a fixed centre would push it negative on
+    // wide windows mid-morph).
     let w = lerp(2.0 * r, win_w - 2.0 * EDGE_PAD, t);
-    let x = cx - w / 2.0;
+    let x = lerp(cx - r, EDGE_PAD, t);
 
     // Top cap: its bottom edge travels from the disc centre up to
     // just below the window's top padding while the cap flattens.
@@ -169,7 +172,7 @@ pub fn puck_geom(t: f32, win_w: f32, win_h: f32) -> (Point, f32) {
         parked.top.x + 14.0 + crate::handoff::HEADER_PUCK_R,
         parked.top.y + parked.top.height / 2.0,
     );
-    let start = Point::new(win_w / 2.0, CENTER as f32);
+    let start = Point::new(CENTER as f32, CENTER as f32);
     let r = lerp(
         crate::geometry::CENTER_ZONE_RADIUS as f32,
         crate::handoff::HEADER_PUCK_R,
@@ -344,7 +347,7 @@ impl<'a> canvas::Program<crate::app::Message> for CapsPainter<'a> {
         // wheel zone live so continued scrolling keeps stepping
         // through pages.
         if let Event::Mouse(mouse::Event::WheelScrolled { delta }) = event {
-            let cx = bounds.width / 2.0;
+            let cx = CENTER as f32;
             let cy = CENTER as f32;
             let (dx, dy) = (p.x - cx, p.y - cy);
             let zone = crate::geometry::CENTER_ZONE_RADIUS as f32;
@@ -630,6 +633,23 @@ mod tests {
         // Bottom cap: the disc's lower half — seam edges touch.
         assert!((r.bottom.y - cy).abs() < 0.01);
         assert!((r.top.y + r.top.height - r.bottom.y).abs() < 0.01);
+    }
+
+    #[test]
+    fn wide_window_caps_park_at_edges_without_going_negative() {
+        // 1200-wide chat window: the disc square sits top-left, so
+        // the caps must sweep from the disc rim to EDGE_PAD without
+        // x ever going negative mid-morph.
+        let w = 1200.0;
+        for t in [0.0, 0.25, 0.5, 0.75, 1.0] {
+            let r = cap_rects(t, w, H);
+            assert!(r.top.x >= 0.0, "x negative at t={t}");
+        }
+        let parked = cap_rects(1.0, w, H);
+        assert!((parked.top.x - EDGE_PAD).abs() < 0.01);
+        assert!((parked.top.width - (w - 2.0 * EDGE_PAD)).abs() < 0.01);
+        let start = cap_rects(0.0, w, H);
+        assert!((start.top.x - (CENTER as f32 - MENU_RADIUS as f32)).abs() < 0.01);
     }
 
     #[test]
