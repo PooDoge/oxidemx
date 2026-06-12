@@ -674,7 +674,7 @@ fn weather_location(state: &State) -> Element<'_, Message> {
     let mut col = column![current, units, search].spacing(8);
     for (i, place) in state.weather_results.iter().enumerate() {
         col = col.push(
-            button(text(place.label.clone()).size(12))
+            button(text(place.name.clone()).size(12))
                 .style(style::btn_secondary(pal))
                 .on_press(Message::WeatherPick(i)),
         );

@@ -9,6 +9,9 @@
 //! entry) so the radial-menu editor gets the full window width
 //! to work in.
 
+pub mod picker;
+pub mod widget_options;
+
 use crate::radial_preview::radial_preview_widget;
 use crate::{Message, State};
 use iced::widget::{
@@ -522,13 +525,16 @@ fn slice_editor_row<'a>(
         Space::new().width(Length::Shrink).into()
     };
 
-    let kind_picker = pick_list(
-        KIND_OPTIONS.as_slice(),
-        Some(KindOption::from(slice.kind)),
-        move |opt| Message::SetSliceKind(idx, opt.into()),
-    )
-    .style(style::pick_list_style(pal))
-    .text_size(12);
+    // Behavior chip + inline picker panel — replaces the legacy
+    // kind pick_list (see picker.rs). The colour picker and the
+    // kind-specific value editor below stay.
+    let behavior = picker::behavior_section(state, idx, slice);
+
+    // Schema-driven options card (spec §10d) — renders under the
+    // chip when the slice hosts a Ready custom widget that declares
+    // options; collapses to nothing otherwise (widget_options.rs
+    // decides internally).
+    let options_card = widget_options::options_section(state, idx, slice);
 
     // Selected colour: "Full colour" sentinel takes priority when
     // icon_untinted is set; otherwise the slice's actual palette
@@ -564,9 +570,19 @@ fn slice_editor_row<'a>(
     let icon_file_btn = button(text("From file…").size(11))
         .style(style::btn_secondary(pal))
         .on_press(Message::BrowseIconFile(icon_browse_target));
-    let icon_row = row![icon_input, icon_browse, icon_file_btn]
-        .align_y(Alignment::Center)
-        .spacing(8);
+    // Widget slices draw their own slice content, so the icon input
+    // is hidden for them (colour + visibility stay, spec §10d).
+    let icon_row: Element<Message> = if slice.kind == ActionKind::Widget {
+        text("The widget draws its own slice content — no icon needed. Colour and visibility still apply.")
+            .size(11)
+            .style(style::text_faint(pal))
+            .into()
+    } else {
+        row![icon_input, icon_browse, icon_file_btn]
+            .align_y(Alignment::Center)
+            .spacing(8)
+            .into()
+    };
 
     // (Original-colour toggle moved into the colour pick_list as
     // the "Full colour" option — saves vertical space and ties
@@ -607,10 +623,11 @@ fn slice_editor_row<'a>(
 
     let mut col = column![
         header,
+        behavior,
+        options_card,
         label_input,
         desc_input,
         row![
-            kind_picker,
             color_picker,
             iced::widget::container(cmd_input).width(Length::Fill),
             app_pick_btn,
@@ -1192,19 +1209,12 @@ fn action_value_editor<'a>(state: &'a State, idx: usize, slice: &'a Slice) -> El
             .style(style::text_dim(pal))
             .into(),
         ActionKind::Widget => {
-            let selected = slice
-                .widget
-                .as_ref()
-                .map(|w| WidgetSourceOption(w.source.clone()));
-            pick_list(
-                widget_source_options(),
-                selected,
-                move |o: WidgetSourceOption| Message::SetSliceWidgetSource(idx, o.0),
-            )
-            .style(style::pick_list_style(pal))
-            .text_size(12)
-            .placeholder("Pick data source…")
-            .into()
+            // Data source is chosen through the behavior picker
+            // (chip → Change…) — the legacy pick_list is gone.
+            text("(data source — pick via Change… above)")
+                .size(11)
+                .style(style::text_dim(pal))
+                .into()
         }
         ActionKind::Dial => {
             let selected = slice.dial.map(DialKindOption);
@@ -1484,37 +1494,9 @@ impl std::fmt::Display for PowerOption {
     }
 }
 
-/// Pick-list wrapper for a widget wedge's data source.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct WidgetSourceOption(pub oxidemx_shared::WidgetSource);
-
-impl std::fmt::Display for WidgetSourceOption {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        use oxidemx_shared::WidgetSource as W;
-        f.write_str(match &self.0 {
-            W::Weather => "Weather",
-            W::Cpu => "CPU usage",
-            W::Memory => "Memory",
-            W::Network => "Network rate",
-            W::Disk => "Disk free",
-            W::TasksDue => "Tasks due",
-            W::MouseBattery => "Mouse battery",
-            W::Custom(_) => "Custom widget",
-        })
-    }
-}
-
-fn widget_source_options() -> Vec<WidgetSourceOption> {
-    vec![
-        WidgetSourceOption(oxidemx_shared::WidgetSource::Weather),
-        WidgetSourceOption(oxidemx_shared::WidgetSource::Cpu),
-        WidgetSourceOption(oxidemx_shared::WidgetSource::Memory),
-        WidgetSourceOption(oxidemx_shared::WidgetSource::Network),
-        WidgetSourceOption(oxidemx_shared::WidgetSource::Disk),
-        WidgetSourceOption(oxidemx_shared::WidgetSource::TasksDue),
-        WidgetSourceOption(oxidemx_shared::WidgetSource::MouseBattery),
-    ]
-}
+// (The legacy WidgetSourceOption pick_list lived here; the behavior
+// picker in picker.rs replaces it. Message::SetSliceWidgetSource
+// stays handled in main.rs for compatibility.)
 
 /// Pick-list wrapper for a dial wedge's target.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1562,18 +1544,23 @@ impl std::fmt::Display for ColorOption {
     }
 }
 
-// Catppuccin-style colour key list (matches oxidemx_shared's
-// ThemeColors::slice_color_rgba lookup), with a special "Full
-// colour" sentinel at the top that maps to icon_untinted = true
-// rather than a tint colour. Selecting it leaves the slice's
-// underlying `color` unchanged so the user's previous palette
-// choice is preserved when they toggle back.
+/// The curated slice palette tokens (matches oxidemx_shared's
+/// ThemeColors::slice_color_rgba lookup). Shared with the widget
+/// options card's `color` swatch row so widget-declared colours
+/// stay on the same curated ring palette (spec §5).
+pub const SLICE_PALETTE_KEYS: [&str; 11] = [
+    "accent", "green", "yellow", "red", "blue", "mauve", "pink", "peach", "teal", "sapphire",
+    "lavender",
+];
+
+// Catppuccin-style colour key list with a special "Full colour"
+// sentinel at the top that maps to icon_untinted = true rather
+// than a tint colour. Selecting it leaves the slice's underlying
+// `color` unchanged so the user's previous palette choice is
+// preserved when they toggle back.
 fn color_options() -> Vec<ColorOption> {
     let mut v: Vec<ColorOption> = vec![ColorOption(FULL_COLOR_KEY.to_string())];
-    for s in [
-        "accent", "green", "yellow", "red", "blue", "mauve", "pink", "peach", "teal", "sapphire",
-        "lavender",
-    ] {
+    for s in SLICE_PALETTE_KEYS {
         v.push(ColorOption(s.to_string()));
     }
     v

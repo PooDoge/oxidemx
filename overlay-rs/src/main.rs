@@ -61,6 +61,7 @@ mod render {
 }
 mod theme;
 mod tray;
+mod widget_host;
 
 fn main() -> iced::Result {
     // Default filter: info-level for our crates, error-only for usvg
@@ -74,6 +75,14 @@ fn main() -> iced::Result {
                 .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(default_filter)),
         )
         .init();
+
+    // Debug-only smoke hook (`scripts/widget-smoke.sh`): boot the
+    // widget-host worker without iced, print the first scene
+    // revision, exit. Compiled out of release builds.
+    #[cfg(debug_assertions)]
+    if std::env::args().any(|a| a == "--widget-smoke") {
+        std::process::exit(widget_host::run_smoke());
+    }
 
     app::run()
 }

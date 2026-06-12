@@ -7,7 +7,9 @@ use oxidemx_shared::{ComposedTransform, Slice};
 
 use crate::render::icons::{draw_icon, IconCache};
 
-use super::widgets::{draw_centered_text, draw_widget_wedge};
+use super::widgets::{
+    draw_centered_text, draw_custom_fallback, draw_custom_widget, draw_widget_wedge, CustomWidgets,
+};
 use super::{build_wedge, lerp, polar, rgba, GLYPH_RASTER_PX};
 
 /// Render an entire 8-slot ring of slices with an optional uniform
@@ -60,6 +62,7 @@ pub fn draw_ring_transformed(
     slot_count: usize,
     wedge_fill_mul: f32,
     widgets: &crate::radial::WidgetData,
+    custom: &CustomWidgets<'_>,
 ) {
     let n = slot_count.clamp(2, 8);
     frame.with_save(|f| {
@@ -108,6 +111,7 @@ pub fn draw_ring_transformed(
                     n,
                     wedge_fill_mul,
                     widgets,
+                    custom,
                 );
             };
 
@@ -149,6 +153,7 @@ pub fn draw_slice(
     slot_count: usize,
     wedge_fill_mul: f32,
     widgets: &crate::radial::WidgetData,
+    custom: &CustomWidgets<'_>,
 ) {
     // Wedge sweep — 360° / slot_count. The legacy 8-slot ring
     // hits 45°; a 4-slot ring uses 90° per wedge, etc. Half-sweep
@@ -281,16 +286,56 @@ pub fn draw_slice(
     // live-data typography.
     if let Some(s) = slice {
         if matches!(s.kind, oxidemx_shared::ActionKind::Widget) {
+            let slot_color = Color::from_rgba(sr as f32, sg as f32, sb as f32, 1.0);
+            // Plugin widgets: replay the instance's last decoded
+            // scene (the frame path never calls wasm — spec §8);
+            // disabled / missing / not-yet-rendered instances get
+            // the dimmed fallback wedge (spec §9).
+            if let Some(oxidemx_shared::WidgetSource::Custom(widget_id)) =
+                s.widget.as_ref().map(|w| &w.source)
+            {
+                let instance_key = s
+                    .widget
+                    .as_ref()
+                    .and_then(|w| w.instance_key.clone())
+                    .unwrap_or_else(|| {
+                        oxidemx_shared::widgets::instance_key(custom.page_name, index)
+                    });
+                let iid = oxidemx_widget_host::InstanceId {
+                    instance_key,
+                    widget_id: widget_id.clone(),
+                };
+                let scene = if custom.failed.contains_key(&iid) {
+                    None
+                } else {
+                    custom.scenes.get(&iid).map(|(scene, _rev)| scene)
+                };
+                match scene {
+                    Some(scene) => {
+                        // Hover and scaling are not applied here — see
+                        // draw_custom_widget's doc for where they happen.
+                        draw_custom_widget(
+                            frame, scene, icon_pos, palette, slot_color, mo,
+                        );
+                    }
+                    None => {
+                        draw_custom_fallback(
+                            frame,
+                            icon_pos,
+                            s,
+                            custom.registry.get(widget_id.as_str()),
+                            palette,
+                            mo,
+                            slot_color,
+                            icons,
+                            icon_bg_radius,
+                        );
+                    }
+                }
+                return;
+            }
             draw_widget_wedge(
-                frame,
-                icon_pos,
-                s,
-                widgets,
-                palette,
-                mo,
-                hl,
-                Color::from_rgba(sr as f32, sg as f32, sb as f32, 1.0),
-                icons,
+                frame, icon_pos, s, widgets, palette, mo, hl, slot_color, icons,
             );
             return;
         }

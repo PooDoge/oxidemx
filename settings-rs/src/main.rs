@@ -31,6 +31,7 @@ mod color_canvas;
 mod cursor_helper;
 mod daemon;
 mod fonts;
+mod geocode;
 mod icon_picker;
 mod mouse_callouts;
 mod persist;
@@ -40,6 +41,8 @@ mod recents;
 mod singleton;
 mod theme_customiser;
 mod ui_state;
+mod widget_preview;
+mod widget_store;
 
 use iced::widget::{button, column, container, row, rule, scrollable, text, Space};
 use iced::{Element, Length, Subscription, Task};
@@ -219,7 +222,7 @@ pub enum Message {
     /// Weather-location geocoder (Settings tab).
     SetWeatherQuery(String),
     WeatherSearch,
-    WeatherResults(Result<Vec<GeoPlace>, String>),
+    WeatherResults(Result<Vec<geocode::GeoHit>, String>),
     /// Pick result `idx` → persist overlay.weather_location/_place.
     WeatherPick(usize),
     WeatherClearLocation,
@@ -475,6 +478,107 @@ pub enum Message {
         from: usize,
         to: usize,
     },
+
+    // --- Behavior chip + action/widget picker panel (spec §10b/c) ---
+    /// `Change…` on a slice's behavior chip — expands the picker
+    /// panel for that slot and snapshots the slice for
+    /// undo-by-reselect.
+    OpenPicker(usize),
+    /// `Cancel` on the chip / explicit close — collapses the panel
+    /// without applying and drops the undo snapshot.
+    ClosePicker,
+    /// Live text of the picker's search field.
+    PickerSearch(String),
+    /// Click on a built-in action tile: applies the kind (or
+    /// restores the undo snapshot when the tile matches it) and
+    /// closes the panel.
+    PickAction(usize, oxidemx_shared::ActionKind),
+    /// Click on a widget tile (built-in source or installed
+    /// `Custom(id)`): sets kind=Widget + a fresh `WidgetConfig`
+    /// (instance_key for custom widgets), auto-labels, closes the
+    /// panel. Restores the undo snapshot when the tile matches it.
+    PickWidget(usize, oxidemx_shared::WidgetSource),
+    /// "Get more widgets…" tile (picker) / Reinstall button
+    /// (missing-widget chip). Opens the store/downloader dialog.
+    OpenWidgetStore,
+    /// Re-scan `~/.config/oxidemx/widgets` into the settings-side
+    /// registry cache. Triggered after store install/uninstall.
+    RescanWidgets,
+
+    // --- Widget store / downloader dialog (spec §11) ---
+    /// Back button on the store panel (also the "Settings" jump on
+    /// an installed row — the options card lives on the slice
+    /// editor behind the dialog).
+    CloseWidgetStore,
+    /// Live text of the store's list filter field.
+    StoreSearch(String),
+    /// Live text of the "Install from URL…" field.
+    StoreUrlInput(String),
+    /// "Install from file…" — native picker → verified install.
+    StoreInstallFromFile,
+    /// "Install from URL…" — curl to a temp file → same install.
+    StoreInstallFromUrl,
+    /// Outcome of any install attempt (file, URL, or consent
+    /// retry). Success rescans the registry; sideload refusals
+    /// surface the consent prompt.
+    StoreInstallResult(widget_store::StoreInstallOutcome),
+    /// "Install anyway" on the consent prompt — retry the parked
+    /// bundle with `force`.
+    StoreConsentAccept,
+    /// Dismiss the consent prompt without installing.
+    StoreConsentCancel,
+    /// Two-step uninstall: first click arms the row's confirm,
+    /// second click on the same id removes the widget directory
+    /// (settings bags kept, spec §9) and rescans.
+    StoreUninstall(String),
+
+    // --- Widget options card (spec §5/§6/§10d) ---
+    /// Scope toggle at the top of the options card. → Global just
+    /// flips the pointer (instance bag kept, ignored); → Instance
+    /// seeds the instance bag as a copy of the current resolved
+    /// values so it diverges from there (spec §6 table).
+    SetWidgetScope(usize, oxidemx_shared::WidgetScope),
+    /// One option edit from any card control. Writes to the bag the
+    /// slice's current scope selects: Global → `widgets.global[id]`,
+    /// Instance → `widgets.instances[ikey][id]`.
+    SetWidgetOption {
+        slice: usize,
+        key: String,
+        value: serde_json::Value,
+    },
+    /// Per-option "↺": Instance scope drops the instance override
+    /// ("Reset to global"), Global drops the global value ("Reset
+    /// to default").
+    ResetWidgetOption {
+        slice: usize,
+        key: String,
+    },
+    /// Live text of a location option's geocoder search field. Also
+    /// claims the shared search state for that (slice, option key).
+    WidgetLocQuery {
+        slice: usize,
+        key: String,
+        text: String,
+    },
+    /// Kick off the Open-Meteo lookup for the current query.
+    WidgetLocSearch {
+        slice: usize,
+        key: String,
+    },
+    /// Geocoder results (or error) for the in-flight search.
+    WidgetLocResults(Result<Vec<geocode::GeoHit>, String>),
+    /// Pick one geocoder hit → stores `{"name", "lat", "lon"}`
+    /// through the same scoped write path as `SetWidgetOption`.
+    WidgetLocPick {
+        slice: usize,
+        key: String,
+        name: String,
+        lat: f64,
+        lon: f64,
+    },
+    /// Event from the options-card live-preview worker (Task 5):
+    /// fresh scenes + instance failures, streamed via `Task::run`.
+    WidgetPreviewEvent(oxidemx_widget_host::HostEvent),
 
     // --- Haptics tab ---
     SetHapticsEnabled(bool),
@@ -1035,74 +1139,6 @@ impl AnimDirection {
 // State
 // ============================================================================
 
-/// One geocoding hit from Open-Meteo's keyless geocoder.
-#[derive(Debug, Clone, PartialEq)]
-pub struct GeoPlace {
-    /// "Oslo, NO" — also persisted as `overlay.weather_place`.
-    pub label: String,
-    pub lat: f64,
-    pub lon: f64,
-}
-
-/// Resolve a city name via Open-Meteo's geocoding API. Runs `curl`
-/// in a blocking task — settings has no HTTP client dependency and
-/// this is a rare, user-initiated call.
-async fn geocode_city(query: String) -> Result<Vec<GeoPlace>, String> {
-    tokio::task::spawn_blocking(move || {
-        let encoded: String = query
-            .trim()
-            .chars()
-            .map(|c| {
-                if c.is_ascii_alphanumeric() || "-_.~".contains(c) {
-                    c.to_string()
-                } else {
-                    c.to_string()
-                        .bytes()
-                        .map(|b| format!("%{b:02X}"))
-                        .collect()
-                }
-            })
-            .collect();
-        let url = format!(
-            "https://geocoding-api.open-meteo.com/v1/search?name={encoded}&count=5&language=en&format=json"
-        );
-        let out = std::process::Command::new("curl")
-            .args(["-sm", "8", &url])
-            .output()
-            .map_err(|e| format!("curl failed to start: {e}"))?;
-        if !out.status.success() {
-            return Err("geocoding request failed (offline?)".to_string());
-        }
-        let v: serde_json::Value = serde_json::from_slice(&out.stdout)
-            .map_err(|e| format!("geocoding response unreadable: {e}"))?;
-        let mut places = Vec::new();
-        for r in v["results"].as_array().into_iter().flatten() {
-            let (Some(name), Some(lat), Some(lon)) = (
-                r["name"].as_str(),
-                r["latitude"].as_f64(),
-                r["longitude"].as_f64(),
-            ) else {
-                continue;
-            };
-            let region = r["admin1"].as_str().unwrap_or("");
-            let country = r["country_code"].as_str().unwrap_or("");
-            let label = match (region.is_empty(), country.is_empty()) {
-                (false, false) => format!("{name}, {region}, {country}"),
-                (true, false) => format!("{name}, {country}"),
-                _ => name.to_string(),
-            };
-            places.push(GeoPlace { label, lat, lon });
-        }
-        if places.is_empty() {
-            Err("no places matched".to_string())
-        } else {
-            Ok(places)
-        }
-    })
-    .await
-    .map_err(|e| format!("geocoding task failed: {e}"))?
-}
-
 pub struct State {
     pub config: AppConfig,
     /// Resolved colour palette derived from `config.theme`. Rebuilt
@@ -1134,7 +1170,7 @@ pub struct State {
     /// Weather-location geocoder (Settings tab): live query text,
     /// the last search's results, and an in-flight flag.
     pub weather_query: String,
-    pub weather_results: Vec<GeoPlace>,
+    pub weather_results: Vec<geocode::GeoHit>,
     pub weather_searching: bool,
     /// Currently-selected slot in the radial preview, if any.
     /// Drives the per-slice editor in the Buttons-tab right column.
@@ -1256,6 +1292,44 @@ pub struct State {
     /// Whether `~/.config/oxidemx/gemini.key` exists. Checked at
     /// boot and updated on save/remove.
     pub ai_key_present: bool,
+    /// Settings-side mirror of the installed-widget registry
+    /// (`~/.config/oxidemx/widgets`). Scanned once at startup +
+    /// re-scanned on `Message::RescanWidgets` after store actions.
+    pub widget_registry: Vec<tabs::buttons::picker::WidgetSummaryLite>,
+    /// Slice index whose behavior picker panel is expanded, if any.
+    pub picker_open: Option<usize>,
+    /// Live query of the picker's search field.
+    pub picker_search: String,
+    /// Undo-by-reselect snapshot: the slice as it was before the
+    /// picker session started. Re-picking the tile matching this
+    /// snapshot's behavior restores it wholesale (so a widget's
+    /// instance settings survive a round-trip). Kept across the
+    /// pick-applies-and-collapses step; GC'd on explicit Cancel,
+    /// slice deselect/reselect, and slice list mutations.
+    pub picker_undo: Option<(usize, oxidemx_shared::Slice)>,
+    /// Full manifests per installed widget id — the options card
+    /// renders from `manifest.options`, which `WidgetSummaryLite`
+    /// intentionally omits. Refreshed together with
+    /// `widget_registry` (same scan).
+    pub widget_manifests: std::collections::HashMap<String, oxidemx_widget_proto::WidgetManifest>,
+    /// Which (slice idx, option key) owns the location-option
+    /// geocoder state below. One search at a time — the card only
+    /// shows the query/results on the control that claimed it.
+    pub widget_loc_target: Option<(usize, String)>,
+    /// Live query text of the active location option's search field.
+    pub widget_loc_query: String,
+    /// Results of the last location-option search.
+    pub widget_loc_results: Vec<geocode::GeoHit>,
+    /// In-flight flag for the location-option geocoder.
+    pub widget_loc_searching: bool,
+    /// Widget store / downloader dialog (spec §11). `Some` while
+    /// open — takes over the content area via the same full-panel
+    /// chrome as the icon picker; dropped wholesale on close.
+    pub widget_store: Option<widget_store::WidgetStoreState>,
+    /// Live wedge preview worker for the open widget options card
+    /// (Plan 3 Task 5). Reconciled by `widget_preview::sync` after
+    /// every update; `None` whenever the card isn't showing.
+    pub widget_preview: Option<widget_preview::PreviewHandle>,
 }
 
 /// Where the AI Assistant's Gemini API key lives. Mirrors the
@@ -1286,6 +1360,7 @@ impl Default for State {
             .as_deref()
             .and_then(Tab::from_tag)
             .unwrap_or(Tab::MouseButtons);
+        let (widget_registry, widget_manifests) = tabs::buttons::picker::scan_registry_full();
         State {
             config,
             palette: pal,
@@ -1337,6 +1412,17 @@ impl Default for State {
             haptic_diagnosis: None,
             ai_key_draft: String::new(),
             ai_key_present: ai_key_path().exists(),
+            widget_registry,
+            picker_open: None,
+            picker_search: String::new(),
+            picker_undo: None,
+            widget_manifests,
+            widget_loc_target: None,
+            widget_loc_query: String::new(),
+            widget_loc_results: Vec::new(),
+            widget_loc_searching: false,
+            widget_store: None,
+            widget_preview: None,
         }
     }
 }
@@ -1918,6 +2004,65 @@ impl State {
         self.saved_pending = true;
     }
 
+    /// Collapse the behavior picker panel and drop the
+    /// undo-by-reselect snapshot. Called on explicit Cancel, slice
+    /// deselect/reselect, and any slice-list mutation that would
+    /// leave the snapshot pointing at a stale index.
+    fn reset_picker(&mut self) {
+        self.picker_open = None;
+        self.picker_search.clear();
+        self.picker_undo = None;
+        // The options card's location search is slice-addressed too —
+        // a stale target would render under the wrong control after a
+        // deselect/reorder, so it resets with the picker state.
+        self.widget_loc_target = None;
+        self.widget_loc_query.clear();
+        self.widget_loc_results.clear();
+        self.widget_loc_searching = false;
+    }
+
+    /// Editing context of the custom widget on slice `idx`:
+    /// `(widget id, current scope, effective instance key)`.
+    ///
+    /// When the slice has no `instance_key` yet (hand-edited
+    /// config), the canonical `<page-slug>.slot<N>` key is derived
+    /// AND written back into the slice so this first edit and every
+    /// later one land under a stable address. `None` for built-in
+    /// widget sources and non-widget slices.
+    fn widget_edit_ctx(
+        &mut self,
+        idx: usize,
+    ) -> Option<(String, oxidemx_shared::WidgetScope, String)> {
+        let page_name = self
+            .config
+            .radial_menu
+            .pages
+            .get(self.active_page)
+            .map(|p| p.name.clone())
+            .unwrap_or_default();
+        let slice = self.active_slices_mut().get_mut(idx)?;
+        let w = slice.widget.as_mut()?;
+        let oxidemx_shared::WidgetSource::Custom(id) = &w.source else {
+            return None;
+        };
+        let id = id.clone();
+        let (ikey, derived) = match w.instance_key.as_deref() {
+            Some(k) if !k.is_empty() => (k.to_string(), false),
+            _ => {
+                let k = oxidemx_shared::widgets::instance_key(&page_name, idx);
+                w.instance_key = Some(k.clone());
+                (k, true)
+            }
+        };
+        let scope = w.scope;
+        if derived {
+            // The write-back is a config mutation in its own right —
+            // persist it even if the calling handler bails out.
+            self.touch();
+        }
+        Some((id, scope, ikey))
+    }
+
     /// Tick the status auto-clear timer. Picks up new strings on
     /// the same tick they're written without requiring every call
     /// site to stamp a timestamp; clears strings older than
@@ -2001,7 +2146,26 @@ fn boot() -> (State, Task<Message>) {
     )
 }
 
+/// Re-scan `~/.config/oxidemx/widgets` into the settings-side
+/// caches (lite summaries + full manifests). Shared by the
+/// `RescanWidgets` message and the store's install/uninstall
+/// follow-ups.
+fn rescan_widgets(state: &mut State) {
+    let (registry, manifests) = tabs::buttons::picker::scan_registry_full();
+    state.widget_registry = registry;
+    state.widget_manifests = manifests;
+}
+
 fn update(state: &mut State, message: Message) -> Task<Message> {
+    let task = update_inner(state, message);
+    // Reconcile the options-card live preview against whatever the
+    // message just changed (selection, option edits, tab switches,
+    // uninstalls…). Cheap when no custom-widget slice is selected.
+    let preview = widget_preview::sync(state);
+    Task::batch([task, preview])
+}
+
+fn update_inner(state: &mut State, message: Message) -> Task<Message> {
     match message {
         Message::SwitchTab(t) => {
             state.tab = t;
@@ -2774,6 +2938,9 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                 slices.remove(i);
                 state.touch();
             }
+            // Indices shifted — a stale picker/undo snapshot could
+            // restore onto the wrong slot.
+            state.reset_picker();
             Task::none()
         }
         Message::MoveSliceUp(i) => {
@@ -2782,6 +2949,7 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                 slices.swap(i, i - 1);
                 state.touch();
             }
+            state.reset_picker();
             Task::none()
         }
         Message::MoveSliceDown(i) => {
@@ -2790,6 +2958,7 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                 slices.swap(i, i + 1);
                 state.touch();
             }
+            state.reset_picker();
             Task::none()
         }
         Message::SetSliceLabel(i, s) => {
@@ -2825,6 +2994,340 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             }
             Task::none()
         }
+
+        // --- Behavior chip + picker panel (spec §10b/c) ---
+        Message::OpenPicker(idx) => {
+            // Snapshot for undo-by-reselect — but only when no
+            // snapshot exists for this slot yet, so a pick →
+            // reopen → re-pick round-trip can still restore the
+            // original slice (incl. a widget's instance config).
+            if state.picker_undo.as_ref().map(|(i, _)| *i) != Some(idx) {
+                state.picker_undo = state
+                    .active_slices()
+                    .get(idx)
+                    .cloned()
+                    .map(|s| (idx, s));
+            }
+            state.picker_open = Some(idx);
+            state.picker_search.clear();
+            Task::none()
+        }
+        Message::ClosePicker => {
+            state.reset_picker();
+            Task::none()
+        }
+        Message::PickerSearch(q) => {
+            state.picker_search = q;
+            Task::none()
+        }
+        Message::PickAction(i, kind) => {
+            use tabs::buttons::picker::{pick_matches_slice, PickChoice};
+            let restored = match state.picker_undo.as_ref() {
+                Some((ui, stored))
+                    if *ui == i && pick_matches_slice(stored, &PickChoice::Action(kind)) =>
+                {
+                    Some(stored.clone())
+                }
+                _ => None,
+            };
+            if let Some(slice) = state.active_slices_mut().get_mut(i) {
+                match restored {
+                    // Undo-by-reselect: bring the whole snapshot back.
+                    Some(stored) => *slice = stored,
+                    // Fresh pick — same mutation as the legacy
+                    // SetSliceKind (command/color/etc. survive).
+                    None => slice.kind = kind,
+                }
+                state.touch();
+            }
+            // Single click applies + collapses; the snapshot stays
+            // for a potential reselect (cleared on Cancel/deselect).
+            state.picker_open = None;
+            state.picker_search.clear();
+            Task::none()
+        }
+        Message::PickWidget(i, source) => {
+            use tabs::buttons::picker::{apply_widget_pick, pick_matches_slice, PickChoice};
+            let restored = match state.picker_undo.as_ref() {
+                Some((ui, stored))
+                    if *ui == i
+                        && pick_matches_slice(stored, &PickChoice::Widget(source.clone())) =>
+                {
+                    Some(stored.clone())
+                }
+                _ => None,
+            };
+            let page_name = state
+                .config
+                .radial_menu
+                .pages
+                .get(state.active_page)
+                .map(|p| p.name.clone())
+                .unwrap_or_default();
+            // Cloned so the registry can be read while the slice is
+            // borrowed mutably; the list is tiny (installed widgets).
+            let registry = state.widget_registry.clone();
+            if let Some(slice) = state.active_slices_mut().get_mut(i) {
+                match restored {
+                    Some(stored) => *slice = stored,
+                    None => apply_widget_pick(slice, source, &page_name, i, &registry),
+                }
+                state.touch();
+            }
+            state.picker_open = None;
+            state.picker_search.clear();
+            Task::none()
+        }
+        Message::OpenWidgetStore => {
+            state.widget_store = Some(widget_store::WidgetStoreState::default());
+            Task::none()
+        }
+        Message::RescanWidgets => {
+            rescan_widgets(state);
+            Task::none()
+        }
+
+        // --- Widget store / downloader dialog (spec §11) ---
+        Message::CloseWidgetStore => {
+            state.widget_store = None;
+            Task::none()
+        }
+        Message::StoreSearch(s) => {
+            if let Some(store) = state.widget_store.as_mut() {
+                store.search = s;
+            }
+            Task::none()
+        }
+        Message::StoreUrlInput(s) => {
+            if let Some(store) = state.widget_store.as_mut() {
+                store.url_input = s;
+            }
+            Task::none()
+        }
+        Message::StoreInstallFromFile => {
+            if let Some(store) = state.widget_store.as_mut() {
+                store.busy = true;
+            }
+            Task::perform(widget_store::pick_and_install(), Message::StoreInstallResult)
+        }
+        Message::StoreInstallFromUrl => {
+            let url = state
+                .widget_store
+                .as_ref()
+                .map(|s| s.url_input.trim().to_string())
+                .unwrap_or_default();
+            if url.is_empty() {
+                state.status = "Enter a bundle URL first".into();
+                return Task::none();
+            }
+            if let Some(store) = state.widget_store.as_mut() {
+                store.busy = true;
+            }
+            Task::perform(
+                widget_store::download_and_install(url),
+                Message::StoreInstallResult,
+            )
+        }
+        Message::StoreInstallResult(outcome) => {
+            if let Some(store) = state.widget_store.as_mut() {
+                store.busy = false;
+            }
+            match outcome {
+                widget_store::StoreInstallOutcome::Installed { id } => {
+                    rescan_widgets(state);
+                    if let Some(store) = state.widget_store.as_mut() {
+                        store.consent = None;
+                    }
+                    state.status = format!("Widget \"{id}\" installed");
+                }
+                widget_store::StoreInstallOutcome::NeedsConsent(prompt) => {
+                    match state.widget_store.as_mut() {
+                        Some(store) => store.consent = Some(prompt),
+                        // Dialog closed while the install ran —
+                        // don't install behind the user's back.
+                        None => {
+                            state.status =
+                                "Install needs confirmation — reopen the widget store".into()
+                        }
+                    }
+                }
+                widget_store::StoreInstallOutcome::Cancelled => {
+                    state.status = "Install cancelled".into();
+                }
+                widget_store::StoreInstallOutcome::Failed(e) => {
+                    state.status = format!("Widget install failed: {e}");
+                }
+            }
+            Task::none()
+        }
+        Message::StoreConsentAccept => {
+            let prompt = state.widget_store.as_mut().and_then(|s| s.consent.take());
+            match prompt {
+                Some(p) => {
+                    if let Some(store) = state.widget_store.as_mut() {
+                        store.busy = true;
+                    }
+                    Task::perform(
+                        widget_store::install_bundle(p.bundle, true),
+                        Message::StoreInstallResult,
+                    )
+                }
+                None => Task::none(),
+            }
+        }
+        Message::StoreConsentCancel => {
+            if let Some(store) = state.widget_store.as_mut() {
+                store.consent = None;
+            }
+            state.status = "Install cancelled".into();
+            Task::none()
+        }
+        Message::StoreUninstall(id) => {
+            let Some(store) = state.widget_store.as_mut() else {
+                return Task::none();
+            };
+            if store.pending_uninstall.as_deref() == Some(id.as_str()) {
+                store.pending_uninstall = None;
+                match widget_store::uninstall(&id) {
+                    Ok(()) => {
+                        rescan_widgets(state);
+                        // Settings bags (config.widgets.*) are
+                        // deliberately KEPT (spec §9) — a reinstall
+                        // picks the old values straight back up.
+                        state.status =
+                            format!("Widget \"{id}\" uninstalled — its settings are kept");
+                    }
+                    Err(e) => state.status = format!("Uninstall failed: {e}"),
+                }
+            } else {
+                store.pending_uninstall = Some(id);
+            }
+            Task::none()
+        }
+
+        // --- Widget options card (spec §5/§6/§10d) ---
+        Message::SetWidgetScope(idx, scope) => {
+            if let Some((id, old_scope, ikey)) = state.widget_edit_ctx(idx) {
+                if old_scope != scope {
+                    if let Some(w) = state
+                        .active_slices_mut()
+                        .get_mut(idx)
+                        .and_then(|s| s.widget.as_mut())
+                    {
+                        w.scope = scope;
+                    }
+                    // Global → slice: seed the instance bag as a copy
+                    // of the current resolved values so it diverges
+                    // from there (spec §6 table). The reverse toggle
+                    // keeps the instance bag (ignored until toggled
+                    // back).
+                    if scope == oxidemx_shared::WidgetScope::Instance {
+                        let defaults = state
+                            .widget_manifests
+                            .get(&id)
+                            .map(|m| m.defaults())
+                            .unwrap_or_default();
+                        state.config.widgets.seed_instance(&id, &ikey, &defaults);
+                    }
+                    state.touch();
+                }
+            }
+            Task::none()
+        }
+        Message::SetWidgetOption { slice, key, value } => {
+            if let Some((id, scope, ikey)) = state.widget_edit_ctx(slice) {
+                tabs::buttons::widget_options::write_option(
+                    &mut state.config.widgets,
+                    &id,
+                    &ikey,
+                    scope,
+                    &key,
+                    value,
+                );
+                state.touch();
+            }
+            Task::none()
+        }
+        Message::ResetWidgetOption { slice, key } => {
+            if let Some((id, scope, ikey)) = state.widget_edit_ctx(slice) {
+                tabs::buttons::widget_options::reset_option(
+                    &mut state.config.widgets,
+                    &id,
+                    &ikey,
+                    scope,
+                    &key,
+                );
+                state.touch();
+            }
+            Task::none()
+        }
+        Message::WidgetLocQuery { slice, key, text } => {
+            // Typing claims the shared search state for this control;
+            // stale results from another control are dropped.
+            let target = Some((slice, key));
+            if state.widget_loc_target != target {
+                state.widget_loc_results.clear();
+            }
+            state.widget_loc_target = target;
+            state.widget_loc_query = text;
+            Task::none()
+        }
+        Message::WidgetLocSearch { slice, key } => {
+            let target = Some((slice, key));
+            if state.widget_loc_target != target {
+                // Search pressed on a control that never claimed the
+                // query — claim it empty instead of searching another
+                // control's text under this key.
+                state.widget_loc_target = target;
+                state.widget_loc_query.clear();
+                state.widget_loc_results.clear();
+                return Task::none();
+            }
+            let q = state.widget_loc_query.trim().to_string();
+            if q.is_empty() || state.widget_loc_searching {
+                return Task::none();
+            }
+            state.widget_loc_searching = true;
+            state.widget_loc_results.clear();
+            Task::perform(geocode::search(q), Message::WidgetLocResults)
+        }
+        Message::WidgetLocResults(res) => {
+            state.widget_loc_searching = false;
+            match res {
+                Ok(hits) => state.widget_loc_results = hits,
+                Err(e) => state.status = format!("Location lookup failed: {e}"),
+            }
+            Task::none()
+        }
+        Message::WidgetLocPick {
+            slice,
+            key,
+            name,
+            lat,
+            lon,
+        } => {
+            if let Some((id, scope, ikey)) = state.widget_edit_ctx(slice) {
+                let value = serde_json::json!({ "name": name, "lat": lat, "lon": lon });
+                tabs::buttons::widget_options::write_option(
+                    &mut state.config.widgets,
+                    &id,
+                    &ikey,
+                    scope,
+                    &key,
+                    value,
+                );
+                state.widget_loc_target = None;
+                state.widget_loc_query.clear();
+                state.widget_loc_results.clear();
+                state.status = format!("Location set: {name}");
+                state.touch();
+            }
+            Task::none()
+        }
+        Message::WidgetPreviewEvent(event) => {
+            widget_preview::on_event(state, event);
+            Task::none()
+        }
         Message::SetSliceDial(i, kind) => {
             if let Some(slice) = state.active_slices_mut().get_mut(i) {
                 slice.dial = Some(kind);
@@ -2843,7 +3346,7 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             }
             state.weather_searching = true;
             state.weather_results.clear();
-            Task::perform(geocode_city(q), Message::WeatherResults)
+            Task::perform(geocode::search(q), Message::WeatherResults)
         }
         Message::WeatherResults(res) => {
             state.weather_searching = false;
@@ -2859,10 +3362,10 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
         Message::WeatherPick(idx) => {
             if let Some(place) = state.weather_results.get(idx).cloned() {
                 state.config.overlay.weather_location = Some((place.lat, place.lon));
-                state.config.overlay.weather_place = Some(place.label.clone());
+                state.config.overlay.weather_place = Some(place.name.clone());
                 state.weather_results.clear();
                 state.weather_query.clear();
-                state.status = format!("Weather location set: {}", place.label);
+                state.status = format!("Weather location set: {}", place.name);
                 state.touch();
             }
             Task::none()
@@ -2989,6 +3492,11 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                     state.app_command_picker = None;
                 }
             }
+            // Behavior picker + undo snapshot are slot-bound too —
+            // moving to a different slot invalidates both.
+            if state.selected_slice != Some(i) {
+                state.reset_picker();
+            }
             state.selected_slice = Some(i);
             Task::none()
         }
@@ -2997,6 +3505,7 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             // Close anything bound to the deselected slot.
             state.icon_picker = None;
             state.app_command_picker = None;
+            state.reset_picker();
             Task::none()
         }
         Message::SwapSlices { from, to } => {
@@ -3025,6 +3534,8 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                 state.selected_slice = Some(to);
                 state.touch();
             }
+            // Slot indices changed under the picker/undo snapshot.
+            state.reset_picker();
             Task::none()
         }
 
@@ -4865,7 +5376,17 @@ fn view(state: &State) -> Element<'_, Message> {
     // into the right column. Back button at the top returns to
     // whichever tab the user was on. Order matters: app-command
     // picker wins over icon picker if both are somehow open.
-    let body: Element<Message> = if let Some(p) = state.app_command_picker.as_ref() {
+    let body: Element<Message> = if let Some(store) = state.widget_store.as_ref() {
+        // The store wins over the other panels — it can be opened
+        // from inside the slice picker ("Get more widgets…") and
+        // from the missing-widget chip's Reinstall button.
+        full_panel(
+            state,
+            "Get more widgets",
+            widget_store::view(state, store),
+            Message::CloseWidgetStore,
+        )
+    } else if let Some(p) = state.app_command_picker.as_ref() {
         full_panel(
             state,
             "Pick app for command",
@@ -5282,7 +5803,65 @@ fn focus_subscription_builder() -> impl futures_util::stream::Stream<Item = ()> 
     singleton::focus_stream(rx)
 }
 
+/// Headless config sanity check (`--check-config`): load the same
+/// config + widget registry the GUI would, print a short summary,
+/// exit 0/1. Used by `scripts/settings-widget-demo.sh` to validate
+/// a seeded XDG_CONFIG_HOME without launching a window.
+fn check_config() -> ! {
+    let Some(path) = oxidemx_shared::config::default_config_path() else {
+        eprintln!("check-config: cannot resolve a config path (no HOME?)");
+        std::process::exit(1);
+    };
+    let cfg = match AppConfig::load_from(&path) {
+        Ok(cfg) => cfg,
+        Err(e) => {
+            eprintln!("check-config: {} failed to load: {e}", path.display());
+            std::process::exit(1);
+        }
+    };
+    println!("config: {}", path.display());
+    for (pi, page) in cfg.radial_menu.pages.iter().enumerate() {
+        println!("page {pi} {:?}: {} slices", page.name, page.slices.len());
+        for (si, slice) in page.slices.iter().enumerate() {
+            if slice.kind == oxidemx_shared::ActionKind::Widget {
+                let source = slice
+                    .widget
+                    .as_ref()
+                    .map(|w| format!("{:?}", w.source))
+                    .unwrap_or_else(|| "<none>".into());
+                let ikey = slice
+                    .widget
+                    .as_ref()
+                    .and_then(|w| w.instance_key.as_deref())
+                    .unwrap_or("-");
+                println!("  slot {si}: widget {source} instance_key={ikey}");
+            }
+        }
+    }
+    println!(
+        "widget bags: {} global, {} instance",
+        cfg.widgets.global.len(),
+        cfg.widgets.instances.len()
+    );
+    let (registry, _) = tabs::buttons::picker::scan_registry_full();
+    for w in &registry {
+        println!(
+            "installed: {} v{} by {} ({})",
+            w.id,
+            w.version,
+            w.author,
+            if w.ready { "ready" } else { "incompatible" }
+        );
+    }
+    std::process::exit(0);
+}
+
 fn main() -> iced::Result {
+    // Headless config check for scripts — no window, no singleton.
+    if std::env::args().any(|a| a == "--check-config") {
+        check_config();
+    }
+
     // Default filter: info for our crates, error-only for usvg (it
     // floods at warn level on freedesktop icons that use legitimate
     // `marker-start="none"` CSS — rendering is unaffected).
@@ -5351,4 +5930,292 @@ fn main() -> iced::Result {
         })
         .subscription(subscription)
         .run()
+}
+
+// ============================================================================
+// Tests — end-to-end widget message flow (Plan 3 Task 4)
+// ============================================================================
+
+/// Drives `update()` through the real picker → options-card message
+/// sequence against a temp `XDG_CONFIG_HOME` holding an installed
+/// (dummy-wasm) weather widget, then persists through the real save
+/// path and re-loads. The GUI walk this replaces is documented in
+/// `scripts/settings-widget-demo.sh`.
+#[cfg(test)]
+mod widget_flow_tests {
+    use super::*;
+    use oxidemx_shared::{ActionKind, WidgetScope, WidgetSource};
+    use serde_json::json;
+
+    /// Minimal but valid weather manifest (mirrors
+    /// `examples/widgets/weather/widget.json` where it matters:
+    /// id, options incl. location/enum/select with defaults).
+    const WEATHER_MANIFEST: &str = r#"{
+      "id": "weather",
+      "name": "Weather",
+      "version": "1.4.0",
+      "author": "JuhLabs",
+      "api_version": 1,
+      "entry": "widget.wasm",
+      "icon": "icon.svg",
+      "permissions": ["net:api.open-meteo.com"],
+      "slice": { "refresh_ms": 900000, "fallback_icon": "weather-clear-symbolic" },
+      "options": [
+        { "key": "location", "type": "location", "label": "Location", "required": true },
+        { "key": "units",    "type": "enum",   "label": "Units",
+          "values": ["c", "f"], "default": "c" },
+        { "key": "refresh",  "type": "select", "label": "Refresh",
+          "values": [300, 900, 1800, 3600], "default": 900, "unit": "s" }
+      ]
+    }"#;
+
+    fn plain_slice(label: &str) -> oxidemx_shared::Slice {
+        oxidemx_shared::Slice {
+            action_id: None,
+            label: label.to_string(),
+            kind: ActionKind::Exec,
+            command: "true".into(),
+            color: "accent".into(),
+            icon: String::new(),
+            submenu: Vec::new(),
+            visible_if: None,
+            icon_untinted: false,
+            description: String::new(),
+            widget: None,
+            dial: None,
+        }
+    }
+
+    /// One temp config home with the dummy weather widget installed.
+    /// Returned guard removes the tree on drop.
+    struct TempConfigHome(std::path::PathBuf);
+    impl Drop for TempConfigHome {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn install_temp_home() -> TempConfigHome {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let root =
+            std::env::temp_dir().join(format!("oxidemx-widget-flow-{}-{stamp}", std::process::id()));
+        let widget_dir = root.join("oxidemx/widgets/weather");
+        std::fs::create_dir_all(&widget_dir).expect("mkdir widget dir");
+        std::fs::write(widget_dir.join("widget.json"), WEATHER_MANIFEST).unwrap();
+        std::fs::write(widget_dir.join("icon.svg"), "<svg xmlns='http://www.w3.org/2000/svg'/>")
+            .unwrap();
+        // Registry scan only checks the entry file *exists* — wasm is
+        // never loaded by the settings app, so a stub byte suffices.
+        std::fs::write(widget_dir.join("widget.wasm"), b"\0asm").unwrap();
+        // The whole flow (config path + registry scan) keys off
+        // XDG_CONFIG_HOME, which `State::default()` reads at build
+        // time below.
+        std::env::set_var("XDG_CONFIG_HOME", &root);
+        TempConfigHome(root)
+    }
+
+    /// The full spec §10 walk, headless: OpenPicker → PickWidget →
+    /// option edits (incl. the geocoder's WidgetLocPick path) →
+    /// scope flip → reset → persist → reload → resolution.
+    #[tokio::test(flavor = "current_thread")]
+    async fn widget_flow_end_to_end() {
+        let home = install_temp_home();
+
+        let mut state = State::default();
+        assert!(
+            state.widget_registry.iter().any(|w| w.id == "weather" && w.ready),
+            "temp-home weather widget must scan as Ready (got {:?})",
+            state.widget_registry
+        );
+        assert!(state.widget_manifests.contains_key("weather"));
+
+        // Ensure slot 4 exists on the active page.
+        while state.active_slices_mut().len() < 5 {
+            let n = state.active_slices_mut().len();
+            let s = plain_slice(&format!("S{n}"));
+            state.active_slices_mut().push(s);
+        }
+        // Slot 4 starts as a plain exec slice with an auto-labelable
+        // (empty) label so PickWidget's relabel rule applies.
+        state.active_slices_mut()[4] = plain_slice("");
+        let page_name = state.config.radial_menu.pages[state.active_page].name.clone();
+        let expected_ikey = oxidemx_shared::widgets::instance_key(&page_name, 4);
+
+        // --- picker: open + pick the installed weather widget ---
+        let _ = update(&mut state, Message::OpenPicker(4));
+        assert_eq!(state.picker_open, Some(4));
+        assert!(state.picker_undo.is_some(), "undo snapshot taken on open");
+
+        let _ = update(
+            &mut state,
+            Message::PickWidget(4, WidgetSource::Custom("weather".into())),
+        );
+        assert_eq!(state.picker_open, None, "pick applies + collapses");
+        {
+            let slice = &state.active_slices()[4];
+            assert_eq!(slice.kind, ActionKind::Widget);
+            let w = slice.widget.as_ref().expect("widget config set");
+            assert_eq!(w.source, WidgetSource::Custom("weather".into()));
+            assert_eq!(w.scope, WidgetScope::Instance);
+            assert_eq!(w.instance_key.as_deref(), Some(expected_ikey.as_str()));
+            assert_eq!(slice.label, "Weather", "auto-label from the registry name");
+        }
+
+        // --- options card edits (Instance scope) ---
+        // Location lands through the geocoder pick message.
+        let _ = update(
+            &mut state,
+            Message::WidgetLocPick {
+                slice: 4,
+                key: "location".into(),
+                name: "Oslo".into(),
+                lat: 59.91,
+                lon: 10.75,
+            },
+        );
+        let _ = update(
+            &mut state,
+            Message::SetWidgetOption {
+                slice: 4,
+                key: "units".into(),
+                value: json!("f"),
+            },
+        );
+        let inst_bag = &state.config.widgets.instances[&expected_ikey]["weather"];
+        assert_eq!(
+            inst_bag["location"],
+            json!({ "name": "Oslo", "lat": 59.91, "lon": 10.75 })
+        );
+        assert_eq!(inst_bag["units"], json!("f"));
+        assert!(state.config.widgets.global.is_empty());
+
+        // --- scope flip → Global: pointer flips, instance bag KEPT ---
+        let _ = update(&mut state, Message::SetWidgetScope(4, WidgetScope::Global));
+        assert_eq!(
+            state.active_slices()[4].widget.as_ref().unwrap().scope,
+            WidgetScope::Global
+        );
+        assert_eq!(
+            state.config.widgets.instances[&expected_ikey]["weather"]["units"],
+            json!("f"),
+            "instance bag kept (ignored) on the Global flip"
+        );
+
+        // --- global edit lands in the global bag only ---
+        let _ = update(
+            &mut state,
+            Message::SetWidgetOption {
+                slice: 4,
+                key: "units".into(),
+                value: json!("c"),
+            },
+        );
+        assert_eq!(state.config.widgets.global["weather"]["units"], json!("c"));
+        assert_eq!(
+            state.config.widgets.instances[&expected_ikey]["weather"]["units"],
+            json!("f"),
+            "instance bag untouched by a global write"
+        );
+
+        // --- resolution through the two-bag merge ---
+        let defaults = state.widget_manifests["weather"].defaults();
+        let global_view =
+            state
+                .config
+                .widgets
+                .resolve("weather", Some(&expected_ikey), WidgetScope::Global, &defaults);
+        assert_eq!(global_view["units"], json!("c"));
+        assert_eq!(global_view["refresh"], json!(900), "manifest default survives");
+        assert!(
+            !global_view.contains_key("location"),
+            "instance-bag location is ignored under Global scope"
+        );
+        let instance_view = state.config.widgets.resolve(
+            "weather",
+            Some(&expected_ikey),
+            WidgetScope::Instance,
+            &defaults,
+        );
+        assert_eq!(instance_view["units"], json!("f"), "instance beats global");
+        assert_eq!(instance_view["location"]["name"], json!("Oslo"));
+
+        // --- per-option reset under Global scope removes the global key ---
+        let _ = update(
+            &mut state,
+            Message::ResetWidgetOption {
+                slice: 4,
+                key: "units".into(),
+            },
+        );
+        assert!(
+            state.config.widgets.global.is_empty(),
+            "empty global bag is pruned after the reset"
+        );
+
+        // --- config JSON shape (what the overlay's watcher will read) ---
+        let cfg_json = serde_json::to_value(&state.config).expect("config serialises");
+        let slice_json = &cfg_json["radial_menu"]["pages"][state.active_page]["slices"][4];
+        assert_eq!(slice_json["type"], json!("widget"));
+        assert_eq!(slice_json["widget"]["source"]["custom"], json!("weather"));
+        assert_eq!(slice_json["widget"]["instance_key"], json!(expected_ikey));
+        assert_eq!(
+            cfg_json["widgets"]["instances"][&expected_ikey]["weather"]["units"],
+            json!("f")
+        );
+
+        // --- persist through the real save path + reload ---
+        let path = state.config_path.clone().expect("temp config path");
+        assert!(
+            path.starts_with(&home.0),
+            "state must point at the temp home, not the user's real config"
+        );
+        persist::save(path.clone(), state.config.clone())
+            .await
+            .expect("save");
+        let reloaded = AppConfig::load_from(&path).expect("reload");
+        let r = reloaded.widgets.resolve(
+            "weather",
+            Some(&expected_ikey),
+            WidgetScope::Instance,
+            &defaults,
+        );
+        assert_eq!(r["units"], json!("f"));
+        assert_eq!(r["location"]["name"], json!("Oslo"));
+        assert_eq!(r["refresh"], json!(900));
+        let slice = &reloaded.radial_menu.pages[state.active_page].slices[4];
+        assert_eq!(slice.kind, ActionKind::Widget);
+        assert_eq!(
+            slice.widget.as_ref().unwrap().instance_key.as_deref(),
+            Some(expected_ikey.as_str())
+        );
+        assert_eq!(slice.widget.as_ref().unwrap().scope, WidgetScope::Global);
+
+        // --- live-preview lifecycle (Task 5): the post-update sync
+        // spawns a preview handle when the options card becomes
+        // visible (Menu tab + custom widget slice selected) and
+        // drops it on deselect. The worker itself runs inside the
+        // returned Task's stream — not polled here, so no wasm
+        // executes; the lifecycle is what's under test.
+        let _ = update(&mut state, Message::SwitchTab(Tab::Menu));
+        let _ = update(&mut state, Message::SelectSlice(4));
+        {
+            let p = state
+                .widget_preview
+                .as_ref()
+                .expect("preview handle spawned for the visible options card");
+            assert_eq!(p.instance.widget_id, "weather");
+            assert_eq!(p.instance.instance_key, expected_ikey);
+        }
+        // Selecting a non-widget slice tears the preview down.
+        let _ = update(&mut state, Message::SelectSlice(0));
+        assert!(state.widget_preview.is_none());
+        // …and so does deselecting entirely.
+        let _ = update(&mut state, Message::SelectSlice(4));
+        assert!(state.widget_preview.is_some());
+        let _ = update(&mut state, Message::DismissSliceSelection);
+        assert!(state.widget_preview.is_none());
+    }
 }

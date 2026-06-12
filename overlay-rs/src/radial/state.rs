@@ -87,8 +87,62 @@ impl RadialState {
             ai_show_tasks: false,
             ai_tasks: Vec::new(),
             widgets: WidgetData::default(),
+            widget_scenes: std::collections::HashMap::new(),
+            widget_failed: std::collections::HashMap::new(),
+            widget_registry: std::collections::HashMap::new(),
+            previous_page_name: None,
             vision_shot_taken: false,
         }
+    }
+
+    /// `InstanceId` for slot `idx` of the active page, if it holds a
+    /// `WidgetSource::Custom` slice. Derivation MUST match the
+    /// worker's (`desired_instances`): explicit `instance_key` wins,
+    /// otherwise `<page-slug>.slot<N>` from the shared helper.
+    pub(crate) fn custom_instance_id(&self, idx: usize) -> Option<oxidemx_widget_host::InstanceId> {
+        let slice = self.slices.get(idx)?;
+        let w = slice.widget.as_ref()?;
+        let oxidemx_shared::WidgetSource::Custom(widget_id) = &w.source else {
+            return None;
+        };
+        let page = self
+            .pages
+            .get(self.active_page)
+            .map(|p| p.name.as_str())
+            .unwrap_or("Default");
+        let instance_key = w
+            .instance_key
+            .clone()
+            .unwrap_or_else(|| oxidemx_shared::widgets::instance_key(page, idx));
+        Some(oxidemx_widget_host::InstanceId {
+            instance_key,
+            widget_id: widget_id.clone(),
+        })
+    }
+
+    /// Live wedge geometry for slot `idx` — painter layout math at
+    /// rest scale plus the slot's current hover-tween progress.
+    pub(crate) fn widget_geom(&self, idx: usize) -> oxidemx_widget_proto::WedgeGeom {
+        let hovered = self
+            .highlights
+            .get(idx)
+            .map(|t| t.current)
+            .unwrap_or(0.0);
+        crate::widget_host::wedge_geom_for_slot(idx, self.active_slot_count(), hovered)
+    }
+
+    /// Forward a pointer event on slot `idx` to the host worker iff
+    /// the slot is a Custom-widget slice. Non-blocking (`try_send`
+    /// inside `widget_host::send`); no-op for every other slice.
+    pub(crate) fn send_widget_slice_event(&self, idx: usize, ev: oxidemx_widget_host::SliceEvent) {
+        let Some(instance) = self.custom_instance_id(idx) else {
+            return;
+        };
+        crate::widget_host::send(oxidemx_widget_host::HostCtl::Slice {
+            instance,
+            ev,
+            geom: self.widget_geom(idx),
+        });
     }
 
     /// Trigger a page-name transition. `previous_name` and
@@ -186,7 +240,18 @@ impl RadialState {
         // Reset any in-flight page transition so a re-open after a
         // fast cycle doesn't paint an extra phantom ring.
         self.previous_slices = None;
+        self.previous_page_name = None;
         self.page_transition = Tween::at(1.0);
+        // Wake the widget host: resets the closed-menu timer latches
+        // and hands every guest its MenuOpened "refresh if stale"
+        // hook (spec §8).
+        crate::widget_host::send(oxidemx_widget_host::HostCtl::MenuOpened {
+            page: self
+                .pages
+                .get(self.active_page)
+                .map(|p| p.name.clone())
+                .unwrap_or_else(|| "Default".into()),
+        });
     }
 
     /// Update the cached focused window class and, when the menu
@@ -482,6 +547,12 @@ impl RadialState {
             && pt_cfg.duration_ms > 0;
         if animate {
             self.previous_slices = Some(self.slices.clone());
+            // Keep the outgoing ring's page name so its custom
+            // widgets still derive the right instance keys mid-spin.
+            self.previous_page_name = self
+                .pages
+                .get(self.active_page)
+                .map(|p| p.name.clone());
             self.page_transition_dir = (direction.signum()) as f32;
             // Reset to 0 so the eased value starts from "old fully
             // visible" each transition, regardless of where the
@@ -493,6 +564,7 @@ impl RadialState {
             // Animation disabled or duration 0: clear any stale
             // transition state and skip straight to the new page.
             self.previous_slices = None;
+            self.previous_page_name = None;
             self.page_transition = Tween::at(1.0);
         }
         // Drop hover state on the old page so the new page doesn't
@@ -596,6 +668,12 @@ impl RadialState {
     /// Toggle-mode dismiss without dispatching (right click / Esc /
     /// click outside).
     pub fn dismiss(&mut self) {
+        // Open → closed transition only (dismiss() can be re-entered
+        // by focus churn while already closed) — relaxes the widget
+        // host's timers (spec §8 closed-menu latch).
+        if self.menu.target > 0.5 {
+            crate::widget_host::send(oxidemx_widget_host::HostCtl::MenuClosed);
+        }
         self.target_slice = None;
         self.target_slice_since = None;
         for a in &mut self.highlights {
@@ -615,6 +693,9 @@ impl RadialState {
     }
 
     fn dispatch_and_close(&mut self) {
+        if self.menu.target > 0.5 {
+            crate::widget_host::send(oxidemx_widget_host::HostCtl::MenuClosed);
+        }
         self.menu.set_target(0.0, &self.anim_config.menu.exit);
         // Submenu sub-item wins over the parent slice — if the user
         // released while hovering one, fire that. Falling back to
@@ -641,7 +722,16 @@ impl RadialState {
             if let Some(slice) = self.slices.get(idx) {
                 let visible = slice.visible_if.as_ref().map(|c| c.eval()).unwrap_or(true);
                 if visible {
-                    crate::actions::dispatch(slice);
+                    // Custom-widget wedges route the click to the
+                    // plugin instead of the (empty) command path.
+                    match self.custom_instance_id(idx) {
+                        Some(instance) => crate::actions::dispatch_custom_widget(
+                            slice,
+                            instance,
+                            self.widget_geom(idx),
+                        ),
+                        None => crate::actions::dispatch(slice),
+                    }
                 }
             }
         }
@@ -835,9 +925,14 @@ impl RadialState {
         if effective_target != self.target_slice {
             if let Some(prev) = self.target_slice {
                 self.highlights[prev].set_target(0.0, &self.anim_config.slice_highlight.exit);
+                // Custom-widget hover leave (no-op for other slices).
+                self.send_widget_slice_event(prev, oxidemx_widget_host::SliceEvent::Hover(false));
             }
             if let Some(next) = effective_target {
                 self.highlights[next].set_target(1.0, &self.anim_config.slice_highlight.enter);
+                // Custom-widget hover enter — carries live geometry
+                // so the guest's next render uses real wedge bounds.
+                self.send_widget_slice_event(next, oxidemx_widget_host::SliceEvent::Hover(true));
             }
             self.target_slice = effective_target;
             // Reset the tooltip dwell timer on every target
@@ -879,6 +974,7 @@ impl RadialState {
         self.page_transition.step(dt_ms);
         if self.page_transition.is_idle() && self.previous_slices.is_some() {
             self.previous_slices = None;
+            self.previous_page_name = None;
         }
         // Drop the ripple state once its duration has elapsed so
         // the shader stops running for nothing on subsequent

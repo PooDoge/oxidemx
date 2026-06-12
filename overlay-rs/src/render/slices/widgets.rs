@@ -1,12 +1,31 @@
-//! Live-data widget wedges (`draw_widget_wedge`) and the shared
-//! centred-text helper.
+//! Live-data widget wedges (`draw_widget_wedge`), the plugin-scene
+//! replay path (`draw_custom_widget` + `draw_custom_fallback`), and
+//! the shared centred-text helper.
 
 use iced::widget::canvas::{Frame, Path, Stroke};
 use iced::{Color, Point, Size};
 use oxidemx_shared::theme::{parse_hex_rgba, ThemeColors};
 use oxidemx_shared::Slice;
+use oxidemx_widget_host::{InstanceId, WidgetSummary};
+use oxidemx_widget_proto::Scene;
+
+// The scene replay (prim walk + palette colour resolution) lives in
+// the shared `oxidemx-scene-render` crate so the settings app's
+// options-card preview replays the exact pixels this ring draws.
+pub(super) use oxidemx_scene_render::draw_custom_widget;
 
 use super::rgba;
+
+/// Per-ring view of the custom-widget runtime state the painter
+/// hands down to `draw_slice`: the page name (derived instance
+/// keys), the replay store, the failure set, and the installed-
+/// widget registry (fallback icons).
+pub struct CustomWidgets<'a> {
+    pub page_name: &'a str,
+    pub scenes: &'a std::collections::HashMap<InstanceId, (Scene, u64)>,
+    pub failed: &'a std::collections::HashMap<InstanceId, String>,
+    pub registry: &'a std::collections::HashMap<String, WidgetSummary>,
+}
 
 /// Approximate-width centred single-line canvas text (the canvas
 /// API has no measure pass; 0.55 em/char matches `draw_center`).
@@ -263,6 +282,87 @@ pub(super) fn draw_widget_wedge(
                 weight: iced::font::Weight::Semibold,
                 ..Default::default()
             },
+        );
+    }
+}
+
+/// Fallback wedge for a disabled / missing / not-yet-rendered
+/// plugin instance (spec §9): the manifest's `fallback_icon` (or
+/// the widget's own icon) dimmed on a faint disc, a ⚠ badge at the
+/// disc's top-right, and the slice label below — the same
+/// icon+caption layout `draw_slice` paints for placeholder slots.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn draw_custom_fallback(
+    frame: &mut Frame,
+    icon_pos: Point,
+    slice: &Slice,
+    summary: Option<&WidgetSummary>,
+    palette: &ThemeColors,
+    mo: f32,
+    slot_color: Color,
+    icons: &crate::render::icons::IconCache,
+    icon_bg_radius: f32,
+) {
+    let dim = 0.45 * mo;
+
+    // Faint icon-background disc (the regular widget path skips the
+    // icon furniture; the fallback brings it back so the wedge
+    // reads as "a slot with a problem", not "empty").
+    let (s1r, s1g, s1b, _) = parse_hex_rgba(&palette.surface1).unwrap_or((0.2, 0.2, 0.25, 1.0));
+    frame.fill(
+        &Path::circle(icon_pos, icon_bg_radius),
+        Color::from_rgba(s1r as f32, s1g as f32, s1b as f32, 0.5 * mo),
+    );
+
+    // fallback_icon (XDG name) first, then the bundle's own icon
+    // file (absolute path) — IconCache resolves both shapes.
+    let source: Option<String> = summary
+        .and_then(|s| s.fallback_icon.clone())
+        .or_else(|| summary.map(|s| s.icon_path.display().to_string()));
+    let tint = (slot_color.r, slot_color.g, slot_color.b, 1.0);
+    let glyph_size = (icon_bg_radius * 1.4).max(8.0);
+    let drew_icon = source
+        .and_then(|src| icons.resolve(&src, super::GLYPH_RASTER_PX, tint))
+        .map(|handle| {
+            crate::render::icons::draw_icon(
+                frame, icon_pos.x, icon_pos.y, glyph_size, &handle, dim,
+            );
+        })
+        .is_some();
+    if !drew_icon {
+        // Not installed / icon unloadable — placeholder dot, same as
+        // draw_slice's icon-miss path, dimmed.
+        frame.fill(
+            &Path::circle(icon_pos, icon_bg_radius * 0.35),
+            Color { a: dim, ..slot_color },
+        );
+    }
+
+    // ⚠ badge at the disc's top-right (theme yellow).
+    let (yr, yg, yb, _) = parse_hex_rgba(&palette.yellow).unwrap_or((0.96, 0.76, 0.25, 1.0));
+    draw_centered_text(
+        frame,
+        "⚠",
+        Point::new(
+            icon_pos.x + icon_bg_radius * 0.78,
+            icon_pos.y - icon_bg_radius * 0.78,
+        ),
+        12.0,
+        Color::from_rgba(yr as f32, yg as f32, yb as f32, mo),
+        iced::Font::DEFAULT,
+    );
+
+    // Caption below the disc — slice label (dimmed), mirroring the
+    // under-icon caption of regular slices.
+    if !slice.label.trim().is_empty() {
+        let (tr, tg, tb, _) = parse_hex_rgba(&palette.subtext1).unwrap_or((0.8, 0.8, 0.8, 1.0));
+        draw_centered_text(
+            frame,
+            &slice.label,
+            Point::new(icon_pos.x, icon_pos.y + icon_bg_radius + 4.0),
+            10.0,
+            Color::from_rgba(tr as f32, tg as f32, tb as f32, 0.9 * dim),
+            iced::Font::DEFAULT,
         );
     }
 }

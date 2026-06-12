@@ -1,0 +1,12 @@
+# Guest PDK for OxideMX widget plugins.
+# Compiles natively (for tests) and to wasm32-wasip1 (for the actual plugin).
+# NOT no_std: we rely on alloc + std (wasm32-wasip1 has std via WASI).
+
+[package]
+name = "oxidemx-widget-api"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+oxidemx-widget-proto = { path = "../oxidemx-widget-proto", default-features = false }
+postcard = { version = "1", features = ["alloc"] }

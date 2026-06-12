@@ -1,0 +1,24 @@
+# Weather widget — canonical PDK example.
+# NOT a workspace member (excluded via root Cargo.toml `examples/widgets/*`).
+# Build with: cargo build --release --target wasm32-wasip1
+# Install with: oxidemx-widget install ./weather-1.4.0.omxw
+
+# Standalone — never part of the parent workspace.
+[workspace]
+
+[package]
+name = "weather"
+version = "1.4.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+oxidemx-widget-api = { path = "../../../oxidemx-widget-api" }
+# oxidemx-widget-proto and postcard are re-exported by oxidemx-widget-api;
+# no direct dep needed.
+
+[profile.release]
+panic = "abort"
+opt-level = "s"

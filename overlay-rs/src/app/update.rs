@@ -498,7 +498,97 @@ pub(super) fn update(state: &mut RadialState, message: Message) -> Task<Message>
         }
         Message::ConfigReloaded(cfg) => {
             info!("config reloaded — refreshing theme + slices");
+            // The widget-host worker re-derives its desired instance
+            // set (load/drop/SettingsChanged) from the same config
+            // the UI just applied.
+            crate::widget_host::send(oxidemx_widget_host::HostCtl::ConfigChanged(
+                std::sync::Arc::new((*cfg).clone()),
+            ));
             state.reload_from(&cfg);
+            // Prune widget_scenes and widget_failed for instances that
+            // no longer correspond to any Custom-widget slice in the new
+            // config. Derives expected InstanceIds the same way the
+            // worker's desired_instances does (explicit instance_key wins,
+            // otherwise the shared <page-slug>.slot<N> helper).
+            let expected: std::collections::HashSet<oxidemx_widget_host::InstanceId> = {
+                let legacy_page;
+                let pages: Vec<(&str, &[oxidemx_shared::config::Slice])> =
+                    if cfg.radial_menu.pages.is_empty() {
+                        legacy_page = ("Default", cfg.radial_menu.slices.as_slice());
+                        vec![legacy_page]
+                    } else {
+                        cfg.radial_menu
+                            .pages
+                            .iter()
+                            .map(|p| (p.name.as_str(), p.slices.as_slice()))
+                            .collect()
+                    };
+                let mut set = std::collections::HashSet::new();
+                for (page_name, slices) in pages {
+                    for (slot, slice) in slices.iter().enumerate() {
+                        let Some(w) = &slice.widget else { continue };
+                        let oxidemx_shared::WidgetSource::Custom(widget_id) = &w.source else {
+                            continue
+                        };
+                        let instance_key = w.instance_key.clone().unwrap_or_else(|| {
+                            oxidemx_shared::widgets::instance_key(page_name, slot)
+                        });
+                        set.insert(oxidemx_widget_host::InstanceId {
+                            instance_key,
+                            widget_id: widget_id.clone(),
+                        });
+                    }
+                }
+                set
+            };
+            state.widget_scenes.retain(|id, _| expected.contains(id));
+            state.widget_failed.retain(|id, _| expected.contains(id));
+            Task::none()
+        }
+        Message::WidgetHost(ev) => {
+            match ev {
+                oxidemx_widget_host::HostEvent::Scene { instance, scene, revision } => {
+                    // A live scene clears any earlier failure (the
+                    // worker reloaded the instance after a rescan or
+                    // config edit). Storing it is all a redraw needs:
+                    // the painter rebuilds its Frame every draw and
+                    // the cache_epsilon buster (do NOT remove it)
+                    // keeps iced's layer cache from resurrecting
+                    // stale frames — same path the sampler's
+                    // WidgetSample updates ride.
+                    state.widget_failed.remove(&instance);
+                    state.widget_scenes.insert(instance, (scene, revision));
+                }
+                oxidemx_widget_host::HostEvent::InstanceFailed { instance, error } => {
+                    warn!(
+                        widget = %instance.widget_id,
+                        key = %instance.instance_key,
+                        error,
+                        "widget instance failed — rendering fallback wedge"
+                    );
+                    state.widget_scenes.remove(&instance);
+                    state.widget_failed.insert(instance, error);
+                }
+                oxidemx_widget_host::HostEvent::RegistryChanged(list) => {
+                    debug!(count = list.len(), "widget registry updated");
+                    // Prune scenes/failures for any widget_id no longer
+                    // present in the registry (uninstalled widget).
+                    let installed_ids: std::collections::HashSet<&str> =
+                        list.iter().map(|s| s.id.as_str()).collect();
+                    state
+                        .widget_scenes
+                        .retain(|id, _| installed_ids.contains(id.widget_id.as_str()));
+                    state
+                        .widget_failed
+                        .retain(|id, _| installed_ids.contains(id.widget_id.as_str()));
+                    state.widget_registry =
+                        list.into_iter().map(|s| (s.id.clone(), s)).collect();
+                }
+            }
+            Task::none()
+        }
+        Message::WidgetScroll { idx, delta } => {
+            state.send_widget_slice_event(idx, oxidemx_widget_host::SliceEvent::Scroll(delta));
             Task::none()
         }
         Message::WindowOpened(id) => {
@@ -917,6 +1007,15 @@ fn classify(slice: &oxidemx_shared::Slice) -> DispatchOutcome {
     // user gets `invalid` feedback for that confused state.
     if matches!(slice.kind, oxidemx_shared::ActionKind::Submenu) && !slice.submenu.is_empty() {
         return DispatchOutcome::Unactionable;
+    }
+    // Custom-widget wedges dispatch a real Event::Click to the
+    // plugin even though their `command` is empty — confirm, not
+    // invalid.
+    if matches!(
+        slice.widget.as_ref().map(|w| &w.source),
+        Some(oxidemx_shared::WidgetSource::Custom(_))
+    ) {
+        return DispatchOutcome::Actionable;
     }
     if slice.command.trim().is_empty() {
         return DispatchOutcome::Unactionable;

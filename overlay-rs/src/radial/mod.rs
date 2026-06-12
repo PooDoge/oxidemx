@@ -255,6 +255,30 @@ pub struct RadialState {
     /// 1 s sampler subscription while the menu is drawable.
     pub widgets: WidgetData,
 
+    /// Custom-widget replay store: the last validated `Scene` (+
+    /// revision) per placed plugin instance, filed by
+    /// `Message::WidgetHost`. The painter replays these on every
+    /// frame — the frame path never calls wasm (spec §8).
+    pub widget_scenes:
+        std::collections::HashMap<oxidemx_widget_host::InstanceId, (oxidemx_widget_proto::Scene, u64)>,
+
+    /// Instances the worker reported dead (3 strikes / load
+    /// failure) with their last error. These render the dimmed
+    /// fallback wedge (spec §9) until a Scene arrives again
+    /// (rescan / config edit reloads them).
+    pub widget_failed: std::collections::HashMap<oxidemx_widget_host::InstanceId, String>,
+
+    /// Installed-widget digests from the worker's last registry
+    /// scan, keyed by widget id. Source of the fallback wedge's
+    /// icon; Plan 3's picker reads it too.
+    pub widget_registry: std::collections::HashMap<String, oxidemx_widget_host::WidgetSummary>,
+
+    /// Name of the page whose slices are snapshotted in
+    /// `previous_slices` — keeps derived `<page-slug>.slotN`
+    /// instance keys correct for the outgoing ring during a
+    /// page-cycle transition. Lifetime mirrors `previous_slices`.
+    pub(crate) previous_page_name: Option<String>,
+
     /// Vision-loop dev hook: set once the OXIDEMX_VISION_SHOT
     /// capture has been scheduled so it fires exactly once.
     pub vision_shot_taken: bool,

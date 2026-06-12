@@ -16,7 +16,10 @@ resolver = "2"
 members = [
     "daemon",
     "oxidemx-icons",
+    "oxidemx-scene-render",
     "oxidemx-shared",
+    "oxidemx-widget-api",
+    "oxidemx-widget-host",
     "oxidemx-widget-proto",
     "oxidemx-widgets",
     "oxidemx-window",
@@ -24,8 +27,9 @@ members = [
     "popup-rs",
     "settings-rs",
     "spike-iced", "iced_gtk_themer",
+    "tools/oxidemx-widget-cli",
 ]
-exclude = ["pop_os_iced", "libcosmic"]
+exclude = ["pop_os_iced", "libcosmic", "oxidemx-widget-host/fixtures/*", "examples/widgets/*"]
 
 [profile.release]
 # Match daemon/Cargo.toml's existing release profile so a `cargo build
