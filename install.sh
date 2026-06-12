@@ -953,7 +953,34 @@ build_project() {
             ;;
     esac
 
+    build_builtin_widgets
+
     log_success "Build complete"
+}
+
+# Bundled built-in widget bundles (.omxw) — packed by
+# scripts/build-builtin-widgets.sh into target/builtin-widgets/ and
+# installed to $SHARE_DIR/widgets, where overlay/settings startup
+# seeding finds them (spec §16). Best-effort: needs host cargo + the
+# wasm32-wasip1 target; a missing target is a skip, not a failure.
+build_builtin_widgets() {
+    if compgen -G "target/builtin-widgets/*.omxw" > /dev/null \
+       && [ "${OXIDEMX_SKIP_BUILD:-}" = "1" ]; then
+        log_dim "OXIDEMX_SKIP_BUILD=1 — using existing built-in widget bundles"
+        return 0
+    fi
+    if command -v cargo &> /dev/null \
+       && command -v rustup &> /dev/null \
+       && rustup target list --installed 2>/dev/null | grep -qx wasm32-wasip1; then
+        if ./scripts/build-builtin-widgets.sh; then
+            log_success "Built-in widget bundles packed"
+        else
+            log_warning "built-in widget bundle build failed — continuing without them"
+        fi
+    else
+        log_dim "wasm32-wasip1 target not available on host — skipping built-in widget bundles"
+        log_dim "  (rustup target add wasm32-wasip1 && ./scripts/build-builtin-widgets.sh, then re-run)"
+    fi
 }
 
 # Host-cargo build, factored out for clarity. Same workspace-aware
@@ -1060,6 +1087,18 @@ install_files() {
         sudo cp assets/settings-generated/control-ring.png "$SHARE_DIR/assets/settings-generated/" 2>/dev/null || true
         sudo cp assets/settings-generated/easyswitch.png "$SHARE_DIR/assets/settings-generated/" 2>/dev/null || true
         sudo cp assets/settings-generated/haptics.png "$SHARE_DIR/assets/settings-generated/" 2>/dev/null || true
+    fi
+
+    # Install bundled built-in widget bundles (.omxw). Overlay/settings
+    # startup seeding searches <bin>/../share/oxidemx/widgets and
+    # $XDG_DATA_DIRS/oxidemx/widgets, so $SHARE_DIR/widgets is found on
+    # both atomic (/usr/local/share) and classic (/usr/share) layouts.
+    if compgen -G "target/builtin-widgets/*.omxw" > /dev/null; then
+        sudo mkdir -p "$SHARE_DIR/widgets"
+        sudo cp target/builtin-widgets/*.omxw "$SHARE_DIR/widgets/"
+        log_success "Built-in widget bundles"
+    else
+        log_dim "No built-in widget bundles (target/builtin-widgets) — seeding will find none"
     fi
 
     # Install launcher scripts. NOTE: the Rust oxidemx-settings binary

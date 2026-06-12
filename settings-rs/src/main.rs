@@ -5857,6 +5857,21 @@ fn check_config() -> ! {
 }
 
 fn main() -> iced::Result {
+    // Seed bundled built-in widgets BEFORE the startup registry scan
+    // (`State::default` → `scan_registry_full`) so the picker is
+    // populated even if the overlay never ran (spec §16). Runs ahead
+    // of --check-config too — the demo script validates the seeded
+    // registry through that path. Logged with eprintln: tracing isn't
+    // initialised yet and check-config prints to stdio anyway.
+    match oxidemx_widget_cli::seed_builtin_widgets() {
+        Ok(outcomes) => {
+            for o in &outcomes {
+                eprintln!("builtin widget seed: {o}");
+            }
+        }
+        Err(e) => eprintln!("builtin widget seeding failed: {e}"),
+    }
+
     // Headless config check for scripts — no window, no singleton.
     if std::env::args().any(|a| a == "--check-config") {
         check_config();

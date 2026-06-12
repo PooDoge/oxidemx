@@ -18,6 +18,9 @@ oxidemx-window = { path = "../oxidemx-window" }
 # painter replays (Scene/Prim/WedgeGeom).
 oxidemx-widget-host = { path = "../oxidemx-widget-host" }
 oxidemx-widget-proto = { path = "../oxidemx-widget-proto" }
+# Startup seeding of bundled built-in widgets (lib half of the CLI —
+# pack/install/seed; the binary is not built as a dependency).
+oxidemx-widget-cli = { path = "../tools/oxidemx-widget-cli" }
 # Shared Scene replay (prim walk + palette resolution) — same code
 # path the settings app uses for its options-card wedge preview.
 oxidemx-scene-render = { path = "../oxidemx-scene-render" }

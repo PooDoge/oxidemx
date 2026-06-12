@@ -3,6 +3,10 @@
 //! Functions here are public so they can be called directly from integration
 //! tests without spawning a child process.
 
+pub mod seed;
+
+pub use seed::{seed_builtin_widgets, SeedAction, SeedOutcome};
+
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 

@@ -98,6 +98,21 @@ fn main() -> iced::Result {
         )
         .init();
 
+    // Seed bundled built-in widgets into the user widgets dir BEFORE
+    // the widget host's first registry scan (spec §16; the scan runs
+    // when the iced subscription spawns the worker). Blocking is fine
+    // here: the common case is a handful of version compares against
+    // already-installed copies. See oxidemx_widget_cli::seed for the
+    // trust model (install-media bundles seed without consent).
+    match oxidemx_widget_cli::seed_builtin_widgets() {
+        Ok(outcomes) => {
+            for o in &outcomes {
+                tracing::info!("builtin widget seed: {o}");
+            }
+        }
+        Err(e) => tracing::warn!("builtin widget seeding failed: {e}"),
+    }
+
     // Debug-only smoke hook (`scripts/widget-smoke.sh`): boot the
     // widget-host worker without iced, print the first scene
     // revision, exit. Compiled out of release builds.

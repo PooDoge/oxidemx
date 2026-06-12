@@ -279,3 +279,14 @@ conversion — use it as a template for your own test suite.
   permissions, bundle extraction rejects zip-slip entry names, guest →
   host command payloads are capped at 64 KB, and the resource caps in
   the table above apply to every call.
+- **Bundled built-ins seed without consent — deliberately.** At startup
+  the overlay and settings apps install the `.omxw` bundles shipped in
+  `<prefix>/share/oxidemx/widgets/` (and `$XDG_DATA_DIRS/oxidemx/widgets`,
+  `~/.local/share/oxidemx/widgets`, or `$OXIDEMX_BUILTIN_WIDGETS_DIR`)
+  even though they are dev-signed: those files arrive on the same install
+  media as the binaries themselves, so a consent prompt would gate
+  nothing — anyone who can plant a bundle there can replace the overlay
+  outright.  Seeding only ever *upgrades*: it installs a bundle when its
+  version is strictly newer than the installed copy (numeric dot-split
+  compare), never downgrades, and never touches widget ids that have no
+  seed bundle.  See `tools/oxidemx-widget-cli/src/seed.rs`.
