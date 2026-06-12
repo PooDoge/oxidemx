@@ -551,3 +551,36 @@ PDK + weather example + pack CLI → 6. settings-rs chip + picker panel →
 7. options card (scope, resolution writes, wedge preview) → 8. downloader
 dialog + install pipeline + missing-widget chip → 9. docs
 (`docs/widgets/authoring.md`).
+
+## 16. Built-in widget conversion (added 2026-06-12 evening, approved direction)
+
+The seven built-in `WidgetSource`s become **bundled plugin widgets** shipped in-repo
+(`widgets/builtin/<id>/`) and auto-seeded into `~/.config/oxidemx/widgets/` at
+overlay startup (version-stamped: reseed only when the bundled version is newer;
+user-installed widgets never touched).
+
+**Host data feed:** sandboxed guests cannot read /proc or D-Bus. New permission
+`system-stats`: instances holding it receive a host-pushed `Event::SystemStats
+{ cpu_pct, cpu_cores, cpu_temp_c, mem_used_gb, mem_total_gb, net_down_mbps,
+net_up_mbps, disk_free_gb, tasks_due, battery_pct, battery_charging }`
+(all Option-al) every 1 s while the menu is open, plus once on MenuOpened.
+Pushed, not timer-driven — so the 5 s timer floor is untouched and nothing
+samples while the menu is closed. Sampling logic is factored from
+`overlay-rs/src/sampler.rs` into the widget host. Sparkline history lives in
+guest state (CPU/network keep their own ring buffers).
+
+Appending `Event::SystemStats` + the `system-stats` permission is an
+APPEND-ONLY enum change shipped host-first (host + bundled guests update in
+lockstep; third-party widgets unaffected — unknown events were never deliverable
+to them since the permission gates the push).
+
+**Conversion set v1:** weather (already the example — promoted to bundled),
+cpu, memory, network, disk, tasks-due. **MouseBattery stays native** (needs
+daemon D-Bus battery data in the host — follow-up).
+
+**Back-compat:** native `WidgetSource` enum variants keep rendering exactly as
+today for existing configs. The picker's "Widgets" group shows the bundled
+plugins (replacing the canned built-in tiles) for NEW picks; a legacy native
+slice's options card offers a one-click "Convert to plugin" that rewrites
+`source` to `Custom(id)` + seeds instance settings. Native render paths are
+removed only in a future major cleanup.
