@@ -144,6 +144,21 @@ pub fn dispatch(slice: &Slice) {
     }
 }
 
+/// Adjust a dial slice's target by one ±5 % step. Brightness goes
+/// through brightnessctl, volume through wpctl — same session-level
+/// CLI surfaces the execute_command allowlist defaults to.
+pub fn adjust_dial(kind: oxidemx_shared::DialKind, direction: i32) {
+    let cmd = match (kind, direction > 0) {
+        (oxidemx_shared::DialKind::Brightness, true) => "brightnessctl set 5%+",
+        (oxidemx_shared::DialKind::Brightness, false) => "brightnessctl set 5%-",
+        (oxidemx_shared::DialKind::Volume, true) => {
+            "wpctl set-volume -l 1.0 @DEFAULT_AUDIO_SINK@ 5%+"
+        }
+        (oxidemx_shared::DialKind::Volume, false) => "wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%-",
+    };
+    spawn_shell(cmd, "dial");
+}
+
 /// Resolve a sibling binary in the same directory as the running
 /// overlay executable. Returns `Some(path)` only if the file
 /// actually exists + is readable; lets the dev-mode "binary in

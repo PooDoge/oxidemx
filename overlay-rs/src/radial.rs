@@ -493,6 +493,42 @@ pub struct RadialState {
     /// Cached task list, loaded async when the view opens / changes
     /// (systemctl round trips don't belong on the render path).
     pub ai_tasks: Vec<crate::agent::tasks::TaskInfo>,
+
+    /// Latest widget sample + sparkline ring buffers, fed by the
+    /// 1 s sampler subscription while the menu is drawable.
+    pub widgets: WidgetData,
+}
+
+/// Live widget data for the Splice Widgets page. Sparkline ring
+/// buffers cap at [`SPARK_LEN`] samples (~30 s of history at the
+/// 1 s tick).
+#[derive(Debug, Clone, Default)]
+pub struct WidgetData {
+    pub snap: crate::sampler::WidgetSnapshot,
+    pub cpu_history: std::collections::VecDeque<f32>,
+    pub net_history: std::collections::VecDeque<f32>,
+}
+
+/// Sparkline sample count.
+pub const SPARK_LEN: usize = 30;
+
+impl WidgetData {
+    /// Fold a fresh snapshot in, advancing the sparkline buffers.
+    pub fn apply(&mut self, snap: crate::sampler::WidgetSnapshot) {
+        if let Some(cpu) = snap.cpu_percent {
+            self.cpu_history.push_back(cpu);
+            while self.cpu_history.len() > SPARK_LEN {
+                self.cpu_history.pop_front();
+            }
+        }
+        if let Some(down) = snap.net_down_mbps {
+            self.net_history.push_back(down);
+            while self.net_history.len() > SPARK_LEN {
+                self.net_history.pop_front();
+            }
+        }
+        self.snap = snap;
+    }
 }
 
 /// State of one resize-grip drag.
@@ -621,6 +657,7 @@ impl RadialState {
             ai_memories_bytes: 0,
             ai_show_tasks: false,
             ai_tasks: Vec::new(),
+            widgets: WidgetData::default(),
         }
     }
 
@@ -1674,14 +1711,37 @@ impl<'a> canvas::Program<crate::app::Message> for Painter<'a> {
                 let dx = p.x as f64 - WINDOW_SIZE / 2.0;
                 let dy = p.y as f64 - WINDOW_SIZE / 2.0;
                 let dist_sq = dx * dx + dy * dy;
-                if dist_sq > CENTER_ZONE_RADIUS * CENTER_ZONE_RADIUS {
-                    return None;
-                }
                 let dy_scroll = match delta {
                     mouse::ScrollDelta::Lines { y, .. } => *y,
                     mouse::ScrollDelta::Pixels { y, .. } => *y,
                 };
                 if dy_scroll.abs() < f32::EPSILON {
+                    return None;
+                }
+                if dist_sq > CENTER_ZONE_RADIUS * CENTER_ZONE_RADIUS {
+                    // Outside the page-cycle zone: wheel over a Dial
+                    // wedge adjusts its value instead (brightness /
+                    // volume quick set, no click needed).
+                    let idx = crate::input::slice_index_at(
+                        dx,
+                        dy,
+                        CENTER_ZONE_RADIUS,
+                        MENU_RADIUS,
+                        self.state.active_slot_count(),
+                    )?;
+                    if self
+                        .state
+                        .slices
+                        .get(idx)
+                        .map(|s| s.dial.is_some())
+                        .unwrap_or(false)
+                    {
+                        let direction = if dy_scroll > 0.0 { 1 } else { -1 };
+                        return Some(Action::publish(crate::app::Message::DialAdjust {
+                            idx,
+                            direction,
+                        }));
+                    }
                     return None;
                 }
                 // Scroll up (positive y) → next page; scroll down →
@@ -1914,6 +1974,7 @@ impl<'a> canvas::Program<crate::app::Message> for Painter<'a> {
                         None,
                         self.state.active_slot_count(),
                         wfm,
+                        &self.state.widgets,
                     );
                 }
             }
@@ -1962,6 +2023,7 @@ impl<'a> canvas::Program<crate::app::Message> for Painter<'a> {
             slot_transforms_arg,
             self.state.active_slot_count(),
             wfm,
+            &self.state.widgets,
         );
 
         // Centre label + description: prefer the hovered submenu

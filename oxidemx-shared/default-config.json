@@ -73,6 +73,47 @@
          {"label": "Gemini",     "type": "exec", "command": "xdg-open https://gemini.google.com", "color": "sapphire", "icon": "applications-science-symbolic"},
          {"label": "Perplexity", "type": "exec", "command": "xdg-open https://perplexity.ai",     "color": "teal",     "icon": "applications-science-symbolic"}
        ]}
+    ],
+    "pages": [
+      {"name": "Apps", "slices": []},
+      {"name": "Device", "slices": [
+        {"label": "Brightness",  "type": "dial",  "dial": "brightness", "color": "yellow", "icon": "display-brightness-symbolic"},
+        {"label": "Volume",      "type": "dial",  "dial": "volume",     "color": "teal",   "icon": "audio-volume-high-symbolic"},
+        {"label": "Power",       "type": "submenu", "color": "red",     "icon": "system-shutdown-symbolic",
+         "submenu": [
+           {"label": "Lock",      "type": "power", "command": "lock",     "color": "red", "icon": "system-lock-screen-symbolic"},
+           {"label": "Log off",   "type": "power", "command": "logoff",   "color": "red", "icon": "system-log-out-symbolic"},
+           {"label": "Suspend",   "type": "power", "command": "suspend",  "color": "red", "icon": "weather-clear-night-symbolic"},
+           {"label": "Restart",   "type": "power", "command": "restart",  "color": "red", "icon": "system-reboot-symbolic"},
+           {"label": "Shut down", "type": "power", "command": "shutdown", "color": "red", "icon": "system-shutdown-symbolic"}
+         ]},
+        {"label": "Mouse",       "type": "submenu", "color": "accent",  "icon": "input-mouse-symbolic",
+         "submenu": [
+           {"label": "DPI 1600",   "type": "mouse_setting", "command": "dpi:1600",   "color": "accent", "icon": "input-mouse-symbolic"},
+           {"label": "SmartShift", "type": "mouse_setting", "command": "smartshift", "color": "accent", "icon": "media-playlist-shuffle-symbolic"},
+           {"label": "Haptics",    "type": "mouse_setting", "command": "haptics",    "color": "accent", "icon": "phone-symbolic"},
+           {"label": "Gaming",     "type": "mouse_setting", "command": "gaming",     "color": "accent", "icon": "input-gaming-symbolic"}
+         ]},
+        {"label": "Network",     "type": "widget", "widget": {"source": "network"}, "color": "blue",  "icon": "network-wireless-symbolic"},
+        {"label": "Bluetooth",   "type": "exec",  "command": "gnome-control-center bluetooth", "color": "mauve", "icon": "bluetooth-symbolic"},
+        {"label": "Displays",    "type": "exec",  "command": "gnome-control-center display",   "color": "peach", "icon": "video-display-symbolic"},
+        {"label": "Night light", "type": "night_light", "color": "pink", "icon": "night-light-symbolic"}
+      ]},
+      {"name": "Widgets", "slices": [
+        {"label": "Weather",  "type": "widget", "widget": {"source": "weather"},       "color": "yellow", "icon": "weather-clear-symbolic"},
+        {"label": "CPU",      "type": "widget", "widget": {"source": "cpu"},           "color": "teal",   "icon": "utilities-system-monitor-symbolic"},
+        {"label": "Memory",   "type": "widget", "widget": {"source": "memory"},        "color": "mauve",  "icon": "drive-harddisk-solidstate-symbolic"},
+        {"label": "Network",  "type": "widget", "widget": {"source": "network"},       "color": "blue",   "icon": "network-wireless-symbolic"},
+        {"label": "Disk",     "type": "widget", "widget": {"source": "disk"},          "color": "peach",  "icon": "drive-harddisk-symbolic"},
+        {"label": "Tasks",    "type": "widget", "widget": {"source": "tasks_due"},     "color": "green",  "icon": "checkbox-checked-symbolic"},
+        {"label": "Task Mgr", "type": "submenu", "color": "red", "icon": "utilities-system-monitor-symbolic",
+         "submenu": [
+           {"label": "Processes", "type": "exec", "command": "gnome-system-monitor -p || flatpak run net.nokyan.Resources", "color": "red", "icon": "utilities-system-monitor-symbolic"},
+           {"label": "Services",  "type": "exec", "command": "gnome-system-monitor || flatpak run net.nokyan.Resources",   "color": "red", "icon": "emblem-system-symbolic"},
+           {"label": "Kill app",  "type": "exec", "command": "xkill",                  "color": "red", "icon": "process-stop-symbolic"}
+         ]},
+        {"label": "Battery",  "type": "widget", "widget": {"source": "mouse_battery"}, "color": "accent", "icon": "battery-good-symbolic"}
+      ]}
     ]
   }
 }

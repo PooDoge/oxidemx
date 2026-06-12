@@ -981,9 +981,33 @@ mod tests {
                 assert_eq!(sa.command, sb.command);
             }
         }
-        // Plain slices must not gain widget/dial keys on disk.
-        assert!(!json.contains("\"widget\""), "widget key leaked: {json}");
-        assert!(!json.contains("\"dial\""), "dial key leaked: {json}");
+        // Plain slices must not gain widget/dial keys on disk —
+        // check the Apps page (the new Device/Widgets pages carry
+        // them legitimately).
+        let apps = serde_json::to_string(&cfg.radial_menu.pages[0]).unwrap();
+        assert!(!apps.contains("\"widget\""), "widget key leaked: {apps}");
+        assert!(!apps.contains("\"dial\""), "dial key leaked: {apps}");
+        // And the new built-in pages parsed into typed bindings.
+        let device = cfg
+            .radial_menu
+            .pages
+            .iter()
+            .find(|p| p.name == "Device")
+            .expect("Device page shipped in defaults");
+        assert!(device
+            .slices
+            .iter()
+            .any(|s| s.dial == Some(DialKind::Brightness)));
+        let widgets = cfg
+            .radial_menu
+            .pages
+            .iter()
+            .find(|p| p.name == "Widgets")
+            .expect("Widgets page shipped in defaults");
+        assert!(widgets
+            .slices
+            .iter()
+            .any(|s| s.widget.as_ref().map(|w| w.source) == Some(WidgetSource::Cpu)));
     }
 
     #[test]

@@ -40,6 +40,7 @@ mod handoff;
 mod haptic_client;
 mod input;
 mod radial;
+mod sampler;
 mod render {
     pub mod animation;
     pub mod aurora;

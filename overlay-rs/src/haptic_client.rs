@@ -222,7 +222,6 @@ async fn try_mouse_setting(setting: &str) -> zbus::Result<()> {
 
 /// One-shot battery read for the MouseBattery widget. Returns
 /// `None` when the daemon isn't reachable.
-#[allow(dead_code)] // wired up by the widget sampler (T5)
 pub async fn battery_status() -> Option<(u8, bool)> {
     let conn = Connection::session().await.ok()?;
     let proxy = HapticProxy::new(&conn).await.ok()?;

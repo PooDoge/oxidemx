@@ -134,6 +134,13 @@ pub enum Message {
     ChatResizeEnd,
     /// Compositor reported a window resize — keep `win_size` true.
     WindowResized(Size),
+    /// Fresh live-data sample from the 1 s widget sampler.
+    WidgetSample(crate::sampler::WidgetSnapshot),
+    /// Wheel over a Dial slice — adjust its target by ±1 step.
+    DialAdjust {
+        idx: usize,
+        direction: i32,
+    },
     /// Toggle the memories management view (header brain button).
     AiToggleMemories,
     /// Live edit of the memories view's search filter.
@@ -514,6 +521,33 @@ fn update(state: &mut RadialState, message: Message) -> Task<Message> {
         }
         Message::WindowResized(size) => {
             state.win_size = (size.width, size.height);
+            Task::none()
+        }
+        Message::WidgetSample(snap) => {
+            state.widgets.apply(snap);
+            Task::none()
+        }
+        Message::DialAdjust { idx, direction } => {
+            if let Some(kind) = state.slices.get(idx).and_then(|s| s.dial) {
+                crate::actions::adjust_dial(kind, direction);
+                // Optimistic local bump so the wedge's % readout
+                // tracks the wheel instantly; the sampler corrects
+                // it on its next pass.
+                let step = 5i16 * direction as i16;
+                let bump = |v: &mut Option<u8>| {
+                    if let Some(cur) = v {
+                        *v = Some((*cur as i16 + step).clamp(0, 100) as u8);
+                    }
+                };
+                match kind {
+                    oxidemx_shared::DialKind::Brightness => {
+                        bump(&mut state.widgets.snap.brightness_percent)
+                    }
+                    oxidemx_shared::DialKind::Volume => {
+                        bump(&mut state.widgets.snap.volume_percent)
+                    }
+                }
+            }
             Task::none()
         }
         Message::WindowUnfocused => {
@@ -1609,7 +1643,7 @@ fn view(state: &RadialState) -> Element<'_, Message> {
     }
 }
 
-fn subscription(_state: &RadialState) -> Subscription<Message> {
+fn subscription(state: &RadialState) -> Subscription<Message> {
     // Three streams merged into the same Message channel:
     //   * D-Bus listener — translates the daemon's three signal
     //     streams into OverlayEvent values.
@@ -1618,7 +1652,7 @@ fn subscription(_state: &RadialState) -> Subscription<Message> {
     //   * 60 Hz frame ticker — keeps animations smooth while a
     //     menu is visible. (Cheap when nothing animates because
     //     update() returns Task::none() immediately.)
-    Subscription::batch([
+    let mut subs = vec![
         Subscription::run(crate::dbus::stream).map(Message::Overlay),
         Subscription::run(crate::config::watch_stream)
             .map(|cfg| Message::ConfigReloaded(Box::new(cfg))),
@@ -1635,7 +1669,15 @@ fn subscription(_state: &RadialState) -> Subscription<Message> {
             iced::window::Event::Resized(size) => Message::WindowResized(size),
             _ => Message::Noop,
         }),
-    ])
+    ];
+    // Live-data sampling only while something is on screen — a
+    // closed overlay spawns no sampling processes. The subscription
+    // identity restarting on open is fine: the first tick re-seeds
+    // the procfs delta baselines.
+    if state.is_drawable() {
+        subs.push(Subscription::run(crate::sampler::stream).map(Message::WidgetSample));
+    }
+    Subscription::batch(subs)
 }
 
 // =============================================================================

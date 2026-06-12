@@ -80,6 +80,7 @@ pub fn draw_ring_transformed(
     slot_transforms: Option<&[ComposedTransform; 8]>,
     slot_count: usize,
     wedge_fill_mul: f32,
+    widgets: &crate::radial::WidgetData,
 ) {
     let n = slot_count.clamp(2, 8);
     frame.with_save(|f| {
@@ -127,6 +128,7 @@ pub fn draw_ring_transformed(
                     icons,
                     n,
                     wedge_fill_mul,
+                    widgets,
                 );
             };
 
@@ -167,6 +169,7 @@ pub fn draw_slice(
     icons: &IconCache,
     slot_count: usize,
     wedge_fill_mul: f32,
+    widgets: &crate::radial::WidgetData,
 ) {
     // Wedge sweep — 360° / slot_count. The legacy 8-slot ring
     // hits 45°; a 4-slot ring uses 90° per wedge, etc. Half-sweep
@@ -241,8 +244,14 @@ pub fn draw_slice(
             );
         }
 
+        // Widget wedges paint big-value typography instead of the
+        // icon disc — skip the icon furniture for them.
+        let is_widget = slice
+            .map(|s| matches!(s.kind, oxidemx_shared::ActionKind::Widget))
+            .unwrap_or(false);
+
         // Glow ring on hover — accent halo around the icon disc.
-        if hl > 0.0 {
+        if hl > 0.0 && !is_widget {
             let glow = Path::circle(icon_pos, icon_bg_radius + 2.0);
             frame.stroke(
                 &glow,
@@ -256,14 +265,16 @@ pub fn draw_slice(
         }
 
         // Icon background — interpolate surface1 → surface2.
-        let s1 = rgba(&palette.surface1, 1.0);
-        let s2 = rgba(&palette.surface2, 1.0);
-        let bg = lerp(s1, s2, hl);
-        let bg_alpha = ((230.0 + 25.0 * hl) / 255.0) * mo * wfm;
-        frame.fill(
-            &Path::circle(icon_pos, icon_bg_radius),
-            Color { a: bg_alpha, ..bg },
-        );
+        if !is_widget {
+            let s1 = rgba(&palette.surface1, 1.0);
+            let s2 = rgba(&palette.surface2, 1.0);
+            let bg = lerp(s1, s2, hl);
+            let bg_alpha = ((230.0 + 25.0 * hl) / 255.0) * mo * wfm;
+            frame.fill(
+                &Path::circle(icon_pos, icon_bg_radius),
+                Color { a: bg_alpha, ..bg },
+            );
+        }
     }
     // ---- end wedge geometry block ----
 
@@ -284,6 +295,24 @@ pub fn draw_slice(
     let glyph_size = (icon_bg_radius * 1.4).max(8.0);
     let glyph_size_px = glyph_size.round() as u32;
 
+    // Widget wedges replace the icon block entirely with their
+    // live-data typography.
+    if let Some(s) = slice {
+        if matches!(s.kind, oxidemx_shared::ActionKind::Widget) {
+            draw_widget_wedge(
+                frame,
+                icon_pos,
+                s,
+                widgets,
+                palette,
+                mo,
+                hl,
+                Color::from_rgba(sr as f32, sg as f32, sb as f32, 1.0),
+            );
+            return;
+        }
+    }
+
     // Per-slice override: when icon_untinted is set, render with
     // the original RGBA pixels (preserves brand colours for app
     // icons, custom artwork). Default path tints to the slice
@@ -299,6 +328,250 @@ pub fn draw_slice(
     } else {
         let dot_color = Color::from_rgba(sr as f32, sg as f32, sb as f32, mo);
         frame.fill(&Path::circle(icon_pos, icon_bg_radius * 0.35), dot_color);
+    }
+
+    // Under-icon caption per the redesign: Dial wedges show their
+    // live percentage, everything else its label. Skipped when the
+    // slice has no label (placeholder slots stay clean).
+    if let Some(s) = slice {
+        let caption: Option<String> = match (s.kind, s.dial) {
+            (oxidemx_shared::ActionKind::Dial, Some(kind)) => {
+                let v = match kind {
+                    oxidemx_shared::DialKind::Brightness => widgets.snap.brightness_percent,
+                    oxidemx_shared::DialKind::Volume => widgets.snap.volume_percent,
+                };
+                Some(v.map(|p| format!("{p}%")).unwrap_or_else(|| "—".into()))
+            }
+            _ if !s.label.trim().is_empty() => Some(s.label.clone()),
+            _ => None,
+        };
+        if let Some(caption) = caption {
+            let (tr, tg, tb, _) = parse_hex_rgba(&palette.subtext1).unwrap_or((0.8, 0.8, 0.8, 1.0));
+            let size = 10.0;
+            draw_centered_text(
+                frame,
+                &caption,
+                Point::new(icon_pos.x, icon_pos.y + icon_bg_radius + 4.0),
+                size,
+                Color::from_rgba(tr as f32, tg as f32, tb as f32, 0.9 * mo),
+                iced::Font::DEFAULT,
+            );
+        }
+
+        // Toggle-state dot (night light): small glowing green dot at
+        // the icon disc's top-right while the setting is on.
+        if matches!(s.kind, oxidemx_shared::ActionKind::NightLight)
+            && widgets.snap.night_light_on == Some(true)
+        {
+            let (gr, gg, gb, _) = parse_hex_rgba(&palette.green).unwrap_or((0.0, 0.9, 0.45, 1.0));
+            let dot = Point::new(
+                icon_pos.x + icon_bg_radius * 0.75,
+                icon_pos.y - icon_bg_radius * 0.75,
+            );
+            frame.fill(
+                &Path::circle(dot, 7.0),
+                Color::from_rgba(gr as f32, gg as f32, gb as f32, 0.30 * mo),
+            );
+            frame.fill(
+                &Path::circle(dot, 4.0),
+                Color::from_rgba(gr as f32, gg as f32, gb as f32, mo),
+            );
+        }
+    }
+}
+
+/// Approximate-width centred single-line canvas text (the canvas
+/// API has no measure pass; 0.55 em/char matches `draw_center`).
+fn draw_centered_text(
+    frame: &mut Frame,
+    content: &str,
+    center: Point,
+    size: f32,
+    color: Color,
+    font: iced::Font,
+) {
+    let approx_w = content.chars().count() as f32 * size * 0.55;
+    frame.fill_text(iced::widget::canvas::Text {
+        content: content.to_string(),
+        position: Point::new(center.x - approx_w / 2.0, center.y - size / 2.0),
+        color,
+        size: size.into(),
+        font,
+        ..iced::widget::canvas::Text::default()
+    });
+}
+
+/// Live-data widget wedge: big value, optional sparkline, sublabel,
+/// uppercase label — per `radial.jsx`'s widget slices.
+#[allow(clippy::too_many_arguments)]
+fn draw_widget_wedge(
+    frame: &mut Frame,
+    icon_pos: Point,
+    slice: &Slice,
+    widgets: &crate::radial::WidgetData,
+    palette: &ThemeColors,
+    mo: f32,
+    hl: f32,
+    slot_color: Color,
+) {
+    use oxidemx_shared::WidgetSource;
+    let snap = &widgets.snap;
+    let source = slice.widget.as_ref().map(|w| w.source);
+
+    // Resolve (big value, sublabel, sparkline data) per source.
+    let (big, small, spark): (String, String, Option<&std::collections::VecDeque<f32>>) =
+        match source {
+            Some(WidgetSource::Weather) => match &snap.weather {
+                Some((t, cond)) => (format!("{}°", t.round() as i32), cond.clone(), None),
+                None => ("—".into(), "set location".into(), None),
+            },
+            Some(WidgetSource::Cpu) => (
+                snap.cpu_percent
+                    .map(|c| format!("{}%", c.round() as u32))
+                    .unwrap_or_else(|| "—".into()),
+                match (snap.cpu_cores, snap.cpu_temp_c) {
+                    (n, Some(t)) if n > 0 => format!("{n} cores · {}°C", t.round() as i32),
+                    (n, None) if n > 0 => format!("{n} cores"),
+                    _ => String::new(),
+                },
+                Some(&widgets.cpu_history),
+            ),
+            Some(WidgetSource::Memory) => (
+                snap.mem_used_gb
+                    .map(|u| format!("{u:.1}"))
+                    .unwrap_or_else(|| "—".into()),
+                snap.mem_total_gb
+                    .map(|t| format!("of {} GB", t.round() as u32))
+                    .unwrap_or_default(),
+                None,
+            ),
+            Some(WidgetSource::Network) => (
+                snap.net_down_mbps
+                    .map(|d| format!("{}↓", d.round() as u32))
+                    .unwrap_or_else(|| "—".into()),
+                snap.net_up_mbps
+                    .map(|u| format!("{}↑ Mb/s", u.round() as u32))
+                    .unwrap_or_default(),
+                Some(&widgets.net_history),
+            ),
+            Some(WidgetSource::Disk) => (
+                snap.disk_free_gb
+                    .map(|f| format!("{}", f.round() as u32))
+                    .unwrap_or_else(|| "—".into()),
+                "GB free".into(),
+                None,
+            ),
+            // No task backend exists yet — honest stub per plan.
+            Some(WidgetSource::TasksDue) => ("—".into(), "no task source".into(), None),
+            Some(WidgetSource::MouseBattery) => match snap.mouse_battery {
+                Some((pct, charging)) => (
+                    format!("{pct}%"),
+                    if charging {
+                        "charging".into()
+                    } else {
+                        "MX Master 4".into()
+                    },
+                    None,
+                ),
+                None => ("—".into(), "no daemon".into(), None),
+            },
+            None => ("—".into(), "no source".into(), None),
+        };
+
+    let (tr, tg, tb, _) = parse_hex_rgba(&palette.text).unwrap_or((1.0, 1.0, 1.0, 1.0));
+    let text_c = Color::from_rgba(tr as f32, tg as f32, tb as f32, mo);
+    let (s0r, s0g, s0b, _) = parse_hex_rgba(&palette.subtext0).unwrap_or((0.6, 0.65, 0.7, 1.0));
+    let sub_c = Color::from_rgba(s0r as f32, s0g as f32, s0b as f32, mo);
+    let (s1r, s1g, s1b, _) = parse_hex_rgba(&palette.subtext1).unwrap_or((0.78, 0.8, 0.85, 1.0));
+    let label_c = Color::from_rgba(s1r as f32, s1g as f32, s1b as f32, mo);
+    let value_c = if hl > 0.5 {
+        Color {
+            a: mo,
+            ..slot_color
+        }
+    } else {
+        text_c
+    };
+
+    // Vertical stack centred on the icon point: value, sparkline,
+    // sublabel, uppercase label — proportions from radial.jsx
+    // scaled to the 150 px ring.
+    let mut y = icon_pos.y - 14.0;
+    draw_centered_text(
+        frame,
+        &big,
+        Point::new(icon_pos.x, y),
+        18.0,
+        value_c,
+        iced::Font {
+            weight: iced::font::Weight::Bold,
+            ..Default::default()
+        },
+    );
+    y += 13.0;
+
+    if let Some(history) = spark {
+        if history.len() >= 2 {
+            let w = 40.0;
+            let h = 10.0;
+            let max = history.iter().cloned().fold(1.0_f32, f32::max);
+            let step = w / (history.len() - 1) as f32;
+            let path = Path::new(|b| {
+                for (j, v) in history.iter().enumerate() {
+                    let px = icon_pos.x - w / 2.0 + j as f32 * step;
+                    let py = y + h - (v / max).clamp(0.0, 1.0) * h;
+                    if j == 0 {
+                        b.move_to(Point::new(px, py));
+                    } else {
+                        b.line_to(Point::new(px, py));
+                    }
+                }
+            });
+            frame.stroke(
+                &path,
+                Stroke::default()
+                    .with_color(Color {
+                        a: 0.85 * mo,
+                        ..slot_color
+                    })
+                    .with_width(1.5),
+            );
+            y += h + 3.0;
+        }
+    }
+
+    if !small.is_empty() {
+        draw_centered_text(
+            frame,
+            &small,
+            Point::new(icon_pos.x, y + 4.0),
+            8.5,
+            sub_c,
+            iced::Font::DEFAULT,
+        );
+        y += 11.0;
+    }
+
+    let label = slice.label.to_uppercase();
+    if !label.is_empty() {
+        draw_centered_text(
+            frame,
+            &label,
+            Point::new(icon_pos.x, y + 6.0),
+            8.0,
+            if hl > 0.5 {
+                Color {
+                    a: mo,
+                    ..slot_color
+                }
+            } else {
+                label_c
+            },
+            iced::Font {
+                weight: iced::font::Weight::Semibold,
+                ..Default::default()
+            },
+        );
     }
 }
 
