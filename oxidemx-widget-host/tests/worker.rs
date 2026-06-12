@@ -14,8 +14,9 @@ use std::time::Duration;
 
 use oxidemx_shared::config::AppConfig;
 use oxidemx_widget_host::http::HttpFetcher;
+use oxidemx_widget_host::stats::StatsSource;
 use oxidemx_widget_host::worker::{self, HostCtl, HostEvent, InstanceId, SliceEvent};
-use oxidemx_widget_proto::{Prim, Scene, WedgeGeom};
+use oxidemx_widget_proto::{Prim, Scene, SystemStatsSnapshot, WedgeGeom};
 
 // ---------------------------------------------------------------------------
 // helpers
@@ -176,6 +177,25 @@ impl HttpFetcher for CountingFetcher {
     }
 }
 
+// ---------------------------------------------------------------------------
+// stats doubles
+// ---------------------------------------------------------------------------
+
+/// Deterministic stats source: cpu_pct counts up from `next` on every
+/// sample, so each push is distinguishable in the rendered scene.
+struct FakeStats {
+    next: f32,
+}
+
+impl StatsSource for FakeStats {
+    fn sample(&mut self) -> SystemStatsSnapshot {
+        let mut snap = SystemStatsSnapshot::default();
+        snap.cpu_pct = Some(self.next);
+        self.next += 1.0;
+        snap
+    }
+}
+
 fn spawn_worker(
     root: PathBuf,
     fetcher: Box<dyn HttpFetcher>,
@@ -184,10 +204,62 @@ fn spawn_worker(
     async_channel::Receiver<HostEvent>,
     tokio::task::JoinHandle<()>,
 ) {
+    spawn_worker_with_stats(root, fetcher, Box::new(FakeStats { next: 0.0 }))
+}
+
+fn spawn_worker_with_stats(
+    root: PathBuf,
+    fetcher: Box<dyn HttpFetcher>,
+    stats: Box<dyn StatsSource>,
+) -> (
+    async_channel::Sender<HostCtl>,
+    async_channel::Receiver<HostEvent>,
+    tokio::task::JoinHandle<()>,
+) {
     let (ctl_tx, ctl_rx) = async_channel::unbounded();
     let (ev_tx, ev_rx) = async_channel::unbounded();
-    let handle = worker::spawn_with(ctl_rx, ev_tx, root, fetcher);
+    let handle = worker::spawn_with(ctl_rx, ev_tx, root, fetcher, stats);
     (ctl_tx, ev_rx, handle)
+}
+
+/// Paused-clock helper: yield-pump the runtime and collect the big values
+/// of every Scene currently in the channel (never awaits → never lets the
+/// paused clock auto-advance).
+async fn drain_scene_values(events: &async_channel::Receiver<HostEvent>) -> Vec<String> {
+    let mut out = Vec::new();
+    for _ in 0..10_000 {
+        tokio::task::yield_now().await;
+        match events.try_recv() {
+            Ok(HostEvent::Scene { scene, .. }) => {
+                if let Some(v) = scene_value(&scene) {
+                    out.push(v.to_string());
+                }
+            }
+            Ok(_) => continue,
+            Err(async_channel::TryRecvError::Empty) => continue,
+            Err(async_channel::TryRecvError::Closed) => panic!("worker died"),
+        }
+    }
+    out
+}
+
+/// Paused-clock helper: yield-pump until a Scene with big value `want`
+/// arrives (panics after the pump budget runs out).
+async fn wait_scene_value(events: &async_channel::Receiver<HostEvent>, want: &str) {
+    for _ in 0..100_000 {
+        tokio::task::yield_now().await;
+        match events.try_recv() {
+            Ok(HostEvent::Scene { scene, .. }) => {
+                if scene_value(&scene) == Some(want) {
+                    return;
+                }
+            }
+            Ok(_) => continue,
+            Err(async_channel::TryRecvError::Empty) => continue,
+            Err(async_channel::TryRecvError::Closed) => panic!("worker died"),
+        }
+    }
+    panic!("no scene with value {want:?} arrived");
 }
 
 // ---------------------------------------------------------------------------
@@ -424,4 +496,106 @@ async fn settings_resolution_reaches_widget() {
         Some("new-val"),
         "reloaded instance must render the new setting value"
     );
+}
+
+// ---------------------------------------------------------------------------
+// system-stats push feed (plan 4 Task 2)
+// ---------------------------------------------------------------------------
+
+/// Config that puts the fixture into its stats mode (renders cpu_pct as
+/// the big value).
+fn stats_cfg() -> Arc<AppConfig> {
+    cfg(
+        serde_json::json!([custom_slice("apps.slot0")]),
+        serde_json::json!({ "global": { "pdk-widget": { "mode": "stats" } } }),
+    )
+}
+
+/// With the `system-stats` permission and the menu open, the instance
+/// gets one push immediately on MenuOpened and another on each 1s tick.
+#[tokio::test(start_paused = true)]
+async fn stats_pushed_while_menu_open() {
+    let Some(wasm) = common::fixture_wasm("pdk-widget") else { return };
+    let root = tmp("stats-open");
+    install_pdk(&root, &wasm, 900_000, &["system-stats"]);
+    let (ctl, events, _h) = spawn_worker_with_stats(
+        root,
+        Box::new(NoFetch),
+        Box::new(FakeStats { next: 42.0 }),
+    );
+
+    ctl.send(HostCtl::ConfigChanged(stats_cfg())).await.unwrap();
+    // Initial render: no stats arrived yet → the fixture's stub value.
+    wait_scene_value(&events, "--").await;
+
+    // MenuOpened → an immediate push (first sample: 42).
+    ctl.send(HostCtl::MenuOpened { page: "Apps".into() }).await.unwrap();
+    wait_scene_value(&events, "42").await;
+
+    // Each 1s tick while open pushes a fresh sample.
+    tokio::time::advance(Duration::from_secs(1)).await;
+    wait_scene_value(&events, "43").await;
+    tokio::time::advance(Duration::from_secs(1)).await;
+    wait_scene_value(&events, "44").await;
+}
+
+/// No pushes while the menu is closed: the 1s feed must stay idle.
+#[tokio::test(start_paused = true)]
+async fn no_stats_while_closed() {
+    let Some(wasm) = common::fixture_wasm("pdk-widget") else { return };
+    let root = tmp("stats-closed");
+    install_pdk(&root, &wasm, 900_000, &["system-stats"]);
+    let (ctl, events, _h) = spawn_worker_with_stats(
+        root,
+        Box::new(NoFetch),
+        Box::new(FakeStats { next: 42.0 }),
+    );
+
+    ctl.send(HostCtl::ConfigChanged(stats_cfg())).await.unwrap();
+    wait_scene_value(&events, "--").await;
+
+    // Menu never opens; several seconds pass; nothing may render.
+    for _ in 0..5 {
+        tokio::time::advance(Duration::from_secs(1)).await;
+        let values = drain_scene_values(&events).await;
+        assert!(values.is_empty(), "no stats push while the menu is closed: {values:?}");
+    }
+
+    // ...and after an open/close cycle the feed stops again.
+    ctl.send(HostCtl::MenuOpened { page: "Apps".into() }).await.unwrap();
+    wait_scene_value(&events, "42").await;
+    ctl.send(HostCtl::MenuClosed).await.unwrap();
+    let _ = drain_scene_values(&events).await; // flush the MenuClosed pump
+    for _ in 0..5 {
+        tokio::time::advance(Duration::from_secs(1)).await;
+        let values = drain_scene_values(&events).await;
+        assert!(values.is_empty(), "no stats push after MenuClosed: {values:?}");
+    }
+}
+
+/// Without the `system-stats` permission the instance never receives the
+/// event — neither on MenuOpened nor from the tick.
+#[tokio::test(start_paused = true)]
+async fn no_stats_without_permission() {
+    let Some(wasm) = common::fixture_wasm("pdk-widget") else { return };
+    let root = tmp("stats-noperm");
+    install_pdk(&root, &wasm, 900_000, &[]); // no system-stats
+    let (ctl, events, _h) = spawn_worker_with_stats(
+        root,
+        Box::new(NoFetch),
+        Box::new(FakeStats { next: 42.0 }),
+    );
+
+    ctl.send(HostCtl::ConfigChanged(stats_cfg())).await.unwrap();
+    wait_scene_value(&events, "--").await;
+
+    ctl.send(HostCtl::MenuOpened { page: "Apps".into() }).await.unwrap();
+    for _ in 0..3 {
+        tokio::time::advance(Duration::from_secs(1)).await;
+        let values = drain_scene_values(&events).await;
+        assert!(
+            values.is_empty(),
+            "instance without system-stats must never see the event: {values:?}"
+        );
+    }
 }

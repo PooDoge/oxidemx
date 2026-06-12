@@ -12,6 +12,9 @@
 //! - `fetch_url` (Str): init issues `http_get("h", url)`; the response is
 //!   re-rendered as value `h<status>` with the body as the sublabel — this
 //!   is how the host tests observe permission denials and cache hits.
+//! - `mode` = `"stats"` (Str): SystemStats pushes update the rendered
+//!   value to `cpu_pct` (rounded; `"--"` until the first push) — this is
+//!   how the host tests observe the system-stats feed.
 
 use oxidemx_widget_api::{tile, Ctx, Event, Scene, WedgeGeom, Widget};
 
@@ -21,6 +24,8 @@ pub struct PdkWidget {
     echo: Option<String>,
     http_status: Option<u16>,
     http_body: Option<String>,
+    stats_mode: bool,
+    cpu_pct: Option<f32>,
 }
 
 impl Widget for PdkWidget {
@@ -28,6 +33,7 @@ impl Widget for PdkWidget {
         ctx.log("pdk-widget init");
         ctx.set_timer("refresh", 60);
         self.echo = ctx.setting_str("echo").map(str::to_string);
+        self.stats_mode = ctx.setting_str("mode") == Some("stats");
         if let Some(secs) = ctx.setting_u64("timer_secs") {
             ctx.set_timer("t", secs);
         }
@@ -52,12 +58,18 @@ impl Widget for PdkWidget {
                 self.http_body = Some(String::from_utf8_lossy(&body).into_owned());
                 true
             }
+            Event::SystemStats(snap) if self.stats_mode => {
+                self.cpu_pct = snap.cpu_pct;
+                true
+            }
             _ => false,
         }
     }
 
     fn render(&self, geom: WedgeGeom) -> Scene {
-        let value = if let Some(echo) = &self.echo {
+        let value = if self.stats_mode {
+            self.cpu_pct.map(|v| format!("{v:.0}")).unwrap_or_else(|| "--".into())
+        } else if let Some(echo) = &self.echo {
             echo.clone()
         } else if let Some(status) = self.http_status {
             format!("h{status}")

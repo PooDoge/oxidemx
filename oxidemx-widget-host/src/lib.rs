@@ -11,9 +11,11 @@ pub mod http;
 pub mod instance;
 pub mod registry;
 pub mod signing;
+pub mod stats;
 pub mod worker;
 
 pub use http::{HttpCache, HttpFetcher, ReqwestFetcher};
 pub use instance::{CallOutcome, InstanceError, WidgetInstance};
 pub use registry::{InstalledWidget, SignatureState, WidgetRegistry, WidgetState};
+pub use stats::{ProcStatsSource, StatsSource};
 pub use worker::{spawn, HostCtl, HostEvent, InstanceId, SliceEvent, WidgetSummary};

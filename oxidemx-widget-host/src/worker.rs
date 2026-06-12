@@ -28,6 +28,7 @@ use oxidemx_widget_proto::{Event, HostCmd, Scene, WedgeGeom};
 use crate::http::{CacheResult, HttpCache, HttpFetcher, ReqwestFetcher};
 use crate::instance::{CallOutcome, WidgetInstance};
 use crate::registry::{WidgetRegistry, WidgetState};
+use crate::stats::{ProcStatsSource, StatsSource};
 
 /// UI → worker.
 pub enum HostCtl {
@@ -94,7 +95,8 @@ const DEFAULT_GEOM: WedgeGeom = WedgeGeom {
     hovered: 0.0,
 };
 
-/// Spawn the worker with the default install dir and the reqwest fetcher.
+/// Spawn the worker with the default install dir, the reqwest fetcher,
+/// and the /proc-backed stats source.
 pub fn spawn(
     ctl: async_channel::Receiver<HostCtl>,
     events: async_channel::Sender<HostEvent>,
@@ -103,17 +105,25 @@ pub fn spawn(
         log::warn!("cannot resolve the widgets dir (no HOME?); using ./widgets");
         PathBuf::from("widgets")
     });
-    spawn_with(ctl, events, dir, Box::new(ReqwestFetcher::new()))
+    spawn_with(
+        ctl,
+        events,
+        dir,
+        Box::new(ReqwestFetcher::new()),
+        Box::new(ProcStatsSource::new()),
+    )
 }
 
-/// Test/embedding entry point: explicit widgets dir + fetcher.
+/// Test/embedding entry point: explicit widgets dir + fetcher + stats
+/// source. Must be called from a tokio runtime context.
 pub fn spawn_with(
     ctl: async_channel::Receiver<HostCtl>,
     events: async_channel::Sender<HostEvent>,
     widgets_dir: PathBuf,
     fetcher: Box<dyn HttpFetcher>,
+    stats: Box<dyn StatsSource>,
 ) -> tokio::task::JoinHandle<()> {
-    tokio::spawn(Worker::new(ctl, events, widgets_dir, fetcher.into()).run())
+    tokio::spawn(Worker::new(ctl, events, widgets_dir, fetcher.into(), stats).run())
 }
 
 // ---------------------------------------------------------------------------
@@ -154,6 +164,9 @@ struct Meta {
     timers: HashMap<String, TimerState>,
 }
 
+/// Stats push period while the menu is open (spec §16: 1 Hz).
+const STATS_PERIOD: Duration = Duration::from_secs(1);
+
 struct Worker {
     ctl: async_channel::Receiver<HostCtl>,
     events: async_channel::Sender<HostEvent>,
@@ -162,6 +175,10 @@ struct Worker {
     instances: HashMap<InstanceId, (WidgetInstance, Meta)>,
     cache: HttpCache<(InstanceId, String)>,
     fetcher: Arc<dyn HttpFetcher>,
+    stats: Box<dyn StatsSource>,
+    /// 1 s system-stats tick. Only polled while `menu_open` (select guard)
+    /// and reset on MenuOpened, so a long closed gap never bursts pushes.
+    stats_tick: tokio::time::Interval,
     menu_open: bool,
     last_cfg: Option<Arc<AppConfig>>,
     internal_tx: tokio::sync::mpsc::UnboundedSender<Internal>,
@@ -174,8 +191,11 @@ impl Worker {
         events: async_channel::Sender<HostEvent>,
         widgets_dir: PathBuf,
         fetcher: Arc<dyn HttpFetcher>,
+        stats: Box<dyn StatsSource>,
     ) -> Self {
         let (internal_tx, internal_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut stats_tick = tokio::time::interval(STATS_PERIOD);
+        stats_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         Worker {
             ctl,
             events,
@@ -184,6 +204,8 @@ impl Worker {
             instances: HashMap::new(),
             cache: HttpCache::new(),
             fetcher,
+            stats,
+            stats_tick,
             menu_open: false,
             last_cfg: None,
             internal_tx,
@@ -200,6 +222,7 @@ impl Worker {
                     Err(_) => break, // UI dropped the control channel
                 },
                 Some(msg) = self.internal_rx.recv() => self.handle_internal(msg).await,
+                _ = self.stats_tick.tick(), if self.menu_open => self.push_stats().await,
             }
         }
         // Dropping `instances` aborts every timer via TimerState::drop.
@@ -244,6 +267,12 @@ impl Worker {
                     .map(|id| (id, Event::MenuOpened { page: page.clone() }))
                     .collect();
                 self.pump(queue).await;
+                // Spec §16: one immediate stats push on open, then the 1 s
+                // tick (reset so the first interval push is a full period
+                // away — the unpolled-while-closed interval would otherwise
+                // fire an overdue tick right after this).
+                self.stats_tick.reset();
+                self.push_stats().await;
             }
             HostCtl::MenuClosed => {
                 self.menu_open = false;
@@ -500,6 +529,31 @@ impl Worker {
             // HostCmd is #[non_exhaustive]: a newer proto could add variants.
             other => log::debug!("unhandled widget cmd: {other:?}"),
         }
+    }
+
+    // -- system-stats push feed (spec §16) --------------------------------------
+
+    /// Sample once and push `Event::SystemStats` to every instance whose
+    /// manifest permissions contain `"system-stats"`. Skips sampling
+    /// entirely when no instance holds the permission (no df/systemctl
+    /// spawns for nothing). needs_render flows through `pump` like every
+    /// other event.
+    async fn push_stats(&mut self) {
+        let ids: Vec<InstanceId> = self
+            .instances
+            .iter()
+            .filter(|(_, (_, meta))| has_permission(&meta.permissions, "system-stats"))
+            .map(|(id, _)| id.clone())
+            .collect();
+        if ids.is_empty() {
+            return;
+        }
+        let snap = self.stats.sample();
+        let queue: VecDeque<_> = ids
+            .into_iter()
+            .map(|id| (id, Event::SystemStats(snap.clone())))
+            .collect();
+        self.pump(queue).await;
     }
 
     // -- output ---------------------------------------------------------------

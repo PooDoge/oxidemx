@@ -218,6 +218,7 @@ fn spawn_preview(state: &mut State, desired: Desired) -> Task<Message> {
             ev_tx,
             widgets_dir,
             Box::new(ReqwestFetcher::new()),
+            Box::new(oxidemx_widget_host::ProcStatsSource::new()),
         );
         let _ = ctl_tx.send(HostCtl::ConfigChanged(cfg)).await;
         let _ = ctl_tx
