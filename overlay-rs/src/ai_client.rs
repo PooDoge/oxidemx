@@ -106,7 +106,7 @@ impl StreamSink {
 }
 
 mod sse;
-mod tools;
+pub mod tools;
 
 use sse::stream_round;
 use tools::{activity_for_tool, agent_tool_declarations, execute_local_tool};
@@ -176,14 +176,33 @@ impl AgentMode {
     }
 
     /// Full system instruction for this mode: the static persona
-    /// text plus the user's saved-memories block (when any exist),
-    /// so both modes can recall facts the user asked us to keep.
-    pub fn system_instruction(&self) -> String {
+    /// text plus the user's saved-memories block — pinned entries
+    /// plus the entries most relevant to `query` — so both modes can
+    /// recall facts the user asked us to keep.
+    pub fn system_instruction(&self, query: &str) -> String {
         let base = match self {
             AgentMode::GeneralChat => {
                 "You are OxideMX-AI, a helpful conversational desktop assistant. \
                  You can answer questions, explain concepts, and query the web to ground your responses in real-time. \
-                 Keep your responses concise, user-friendly, and format them in markdown."
+                 Keep your responses concise, user-friendly, and format them in markdown.\n\n\
+                 MEMORY RULES\n\
+                 You have a memory tool. Save a memory (action=save) ONLY when ALL of these hold:\n\
+                 1. DURABLE - the fact will still be true and useful in 2+ weeks (preferences, \
+                 hardware/setup facts, decisions, corrections, recurring projects, names). \
+                 Not today's task details, transient state, or anything trivially re-derivable.\n\
+                 2. ACTIONABLE - knowing it would change how you respond in a future, unrelated \
+                 conversation.\n\
+                 3. NOT ALREADY KNOWN - check the saved-memories block first. If a memory exists \
+                 on the topic, save the corrected/updated wording instead of a duplicate (the \
+                 store supersedes near-duplicates automatically).\n\
+                 Always save when the user explicitly says remember/note/don't forget. Never save \
+                 secrets, credentials, or sensitive details the user did not ask you to keep. \
+                 Write each memory as ONE self-contained sentence in third person with concrete \
+                 specifics. Most conversations produce ZERO memories; more than two per \
+                 conversation should be rare.\n\
+                 The saved-memories block below is a relevance-ranked selection, not the whole \
+                 store - use the memory tool's search action when the user references something \
+                 you can't see."
             }
             AgentMode::SettingsCustomizer => {
                 "You are the OxideMX Settings Customizer. You specialize in configuring \
@@ -203,7 +222,7 @@ impl AgentMode {
                  Keep your text replies clean, direct, and focused on layout modification."
             }
         };
-        match crate::agent::memory::injection_block() {
+        match crate::agent::memory::injection_block_for(query) {
             Some(block) => format!("{base}\n\n{block}"),
             None => base.to_string(),
         }
@@ -447,7 +466,7 @@ pub async fn ask_ai(
             "model": model,
             "input": input,
             "tools": tools,
-            "system_instruction": mode.system_instruction(),
+            "system_instruction": mode.system_instruction(prompt),
         });
         if let Some(prev) = &session_id {
             req_body["previous_interaction_id"] = json!(prev);

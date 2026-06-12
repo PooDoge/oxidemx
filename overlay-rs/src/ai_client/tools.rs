@@ -82,13 +82,13 @@ pub(super) fn agent_tool_declarations() -> Vec<serde_json::Value> {
         json!({
             "type": "function",
             "name": "memory",
-            "description": "Persist and recall small facts about the user across conversations. `save` needs text (and optionally scope); `delete`/`pin`/`unpin` need id; `list` returns all entries as JSON. Unpinned memories expire after 90 days of disuse; pinned ones are kept until deleted.",
+            "description": "Persist and recall small facts about the user across conversations. `save` needs text (and optionally scope); `delete`/`pin`/`unpin` need id; `list` returns all entries as JSON; `search` needs query and returns the 5 most relevant entries; `consolidate` merges duplicates and distils stale entries (use when the user asks to tidy/optimise memories). Unpinned memories expire after 90 days of disuse; pinned ones are kept until deleted.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "action": {
                         "type": "string",
-                        "enum": ["save", "list", "delete", "pin", "unpin"],
+                        "enum": ["save", "list", "delete", "pin", "unpin", "search", "consolidate"],
                         "description": "What to do"
                     },
                     "text": {
@@ -485,6 +485,17 @@ async fn memory_tool(
             Ok(format!("Memory saved with id {}.", entry.id))
         }
         "list" => Ok(serde_json::to_string(&crate::agent::memory::load_all())?),
+        "search" => {
+            let query = args["query"]
+                .as_str()
+                .or_else(|| args["text"].as_str())
+                .ok_or("query argument required for search")?;
+            Ok(serde_json::to_string(&crate::agent::memory::search(query))?)
+        }
+        "consolidate" => {
+            send_activity(sink, "Consolidating memories…".to_string()).await;
+            consolidate_memories().await
+        }
         "delete" => {
             let id = id()?;
             send_activity(sink, "Deleting memory…".to_string()).await;
@@ -517,5 +528,69 @@ async fn memory_tool(
             }
         }
         other => Err(format!("Unknown memory action: {other}").into()),
+    }
+}
+
+/// Consolidation ("dreaming"): one nested flash-tier interaction
+/// rewrites the unpinned store — merge duplicates, resolve
+/// contradictions (newest wins), generalise clusters, expire
+/// time-bound leftovers. `agent::memory::apply_consolidation` owns
+/// the safety rails (pinned excluded, full id ledger required,
+/// shrink floor, archive tombstones, .bak backup); a plan that
+/// fails validation leaves the store untouched.
+pub async fn consolidate_memories() -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+    let input = crate::agent::memory::consolidation_input();
+    if input.len() < 6 {
+        return Ok("Memory store is small and tidy; nothing to consolidate.".to_string());
+    }
+    let api_key = load_api_key()?;
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(60))
+        .build()?;
+    let entries_json = serde_json::to_string(&input)?;
+    let req = json!({
+        "model": "gemini-2.5-flash",
+        "input": format!(
+            "You are a memory consolidator for a desktop assistant. Below is a JSON array of \
+             saved memory entries (id, text, scope, timestamps). Rewrite the store:\n\
+             1. MERGE duplicates/near-duplicates into one entry (keep the most specific wording).\n\
+             2. Resolve contradictions by keeping the newest fact.\n\
+             3. GENERALISE clusters of related entries into one durable fact only when no \
+             decision-relevant detail is lost.\n\
+             4. EXPIRE entries that are clearly time-bound and past their window.\n\
+             5. Keep everything else untouched. Trimming 10-30% is normal; never more than half.\n\
+             Reply with ONLY a JSON object, no prose, no code fences:\n\
+             {{\"ledger\": {{\"<every input id>\": \"keep|merged|superseded|expired\"}}, \
+             \"entries\": [{{\"text\": \"...\", \"scope\": \"...\"}}]}}\n\
+             where entries are ONLY the new merged/generalised facts (not the kept ones).\n\n\
+             {entries_json}"
+        ),
+        "store": false,
+    });
+    let body = post_interaction(&client, &api_key, &req).await?;
+    let text = collect_output_text(&body);
+    let cleaned = text
+        .trim()
+        .trim_start_matches("```json")
+        .trim_start_matches("```")
+        .trim_end_matches("```")
+        .trim();
+    let plan: serde_json::Value = serde_json::from_str(cleaned)
+        .map_err(|e| format!("consolidation plan was not valid JSON: {e}"))?;
+    crate::agent::memory::apply_consolidation(&plan).map_err(Into::into)
+}
+
+/// Boot-time hook: run a consolidation pass when the store is due
+/// (size or age trigger) — app start is the closest thing a desktop
+/// overlay has to idle time, and it never collides with an active
+/// conversation. Failures are logged and ignored; the store's rails
+/// guarantee nothing is lost.
+pub async fn auto_consolidate_if_due() {
+    if !crate::agent::memory::consolidation_due() {
+        return;
+    }
+    match consolidate_memories().await {
+        Ok(summary) => tracing::info!("memory auto-consolidation: {summary}"),
+        Err(e) => tracing::warn!("memory auto-consolidation skipped: {e}"),
     }
 }

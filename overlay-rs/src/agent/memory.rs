@@ -46,6 +46,11 @@ pub struct MemoryEntry {
     /// Unix seconds; refreshed whenever the entry is injected into a
     /// prompt. Drives the 90-day retention window.
     pub last_used_at: u64,
+    /// How many prompts this entry has been injected into — a small
+    /// usage boost in recall scoring (capped so favourites can't
+    /// permanently crowd out new facts).
+    #[serde(default)]
+    pub times_injected: u32,
 }
 
 // =============================================================================
@@ -92,8 +97,58 @@ fn make_id(text: &str, created_at: u64) -> String {
     format!("{:08x}", hasher.finish() as u32)
 }
 
+/// Lowercased word tokens minus trivial stopwords — shared by the
+/// write-time dedupe and the recall scorer.
+fn tokens(text: &str) -> std::collections::HashSet<String> {
+    const STOP: &[&str] = &[
+        "the", "a", "an", "is", "are", "was", "were", "to", "of", "in", "on", "and", "or", "for",
+        "with", "that", "this", "it", "as", "at", "be", "by", "has", "have", "his", "her", "their",
+        "my", "your", "user", "users",
+    ];
+    text.to_lowercase()
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|t| t.len() > 1 && !STOP.contains(t))
+        .map(str::to_string)
+        .collect()
+}
+
+/// Jaccard similarity of the two texts' token sets.
+fn jaccard(a: &str, b: &str) -> f32 {
+    let (ta, tb) = (tokens(a), tokens(b));
+    if ta.is_empty() || tb.is_empty() {
+        return 0.0;
+    }
+    let inter = ta.intersection(&tb).count() as f32;
+    let union = (ta.len() + tb.len()) as f32 - inter;
+    inter / union.max(1.0)
+}
+
+/// Write-time triage (mem0's ADD/UPDATE collapsed to two outcomes):
+/// a save whose token set substantially overlaps an existing entry
+/// in the same scope UPDATES that entry (newest wording wins, id and
+/// `created_at` survive) instead of appending a near-duplicate.
+const DEDUPE_THRESHOLD: f32 = 0.7;
+
 fn save_entry_at(path: &Path, text: &str, scope: &str, now: u64) -> MemoryEntry {
     let mut entries = load_from(path);
+
+    // UPDATE path: replace the most-similar same-scope entry above
+    // the threshold. Corrections kill stale facts immediately —
+    // staleness, not volume, is what users notice.
+    let best = entries
+        .iter_mut()
+        .filter(|e| e.scope == scope)
+        .map(|e| (jaccard(&e.text, text), e))
+        .filter(|(sim, _)| *sim >= DEDUPE_THRESHOLD)
+        .max_by(|(a, _), (b, _)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    if let Some((_, existing)) = best {
+        existing.text = text.to_string();
+        existing.last_used_at = now;
+        let updated = existing.clone();
+        save_to(path, &entries);
+        return updated;
+    }
+
     let entry = MemoryEntry {
         id: make_id(text, now),
         text: text.to_string(),
@@ -101,6 +156,7 @@ fn save_entry_at(path: &Path, text: &str, scope: &str, now: u64) -> MemoryEntry 
         pinned: false,
         created_at: now,
         last_used_at: now,
+        times_injected: 0,
     };
     entries.push(entry.clone());
     save_to(path, &entries);
@@ -146,40 +202,251 @@ fn sweep_expired_at(path: &Path, now: u64) -> usize {
     removed
 }
 
-/// Build the system-prompt block: all pinned entries first, then the
-/// 10 most-recently-used unpinned ones. Marks every included entry
-/// as used (`last_used_at = now`) and persists, so injection itself
-/// keeps memories alive. `None` when the store is empty.
-fn injection_block_at(path: &Path, now: u64) -> Option<String> {
+/// Recall score (Generative-Agents shape): relevance to the query,
+/// recency with a 30-day half-life, and a capped usage boost.
+fn score(entry: &MemoryEntry, query_tokens: &std::collections::HashSet<String>, now: u64) -> f32 {
+    let etoks = tokens(&entry.text);
+    let relevance = if query_tokens.is_empty() || etoks.is_empty() {
+        0.0
+    } else {
+        let inter = etoks.intersection(query_tokens).count() as f32;
+        // Normalise by entry length so short atomic facts aren't
+        // drowned out by long rambly ones.
+        inter / (etoks.len() as f32).sqrt()
+    };
+    let age_days = now.saturating_sub(entry.last_used_at.max(entry.created_at)) as f32 / 86_400.0;
+    let recency = 0.5_f32.powf(age_days / 30.0);
+    let usage = (entry.times_injected.min(5)) as f32 / 5.0;
+    0.6 * relevance + 0.25 * recency + 0.15 * usage
+}
+
+/// Approximate character budget for the unpinned tier of the
+/// injection block (~900 tokens). Pinned entries always inject and
+/// don't count against this.
+const INJECT_CHAR_BUDGET: usize = 3600;
+
+/// `YYYY-MM-DD` from unix seconds (Howard Hinnant's civil-from-days;
+/// no chrono dependency for one date stamp).
+fn unix_to_date(secs: u64) -> String {
+    let days = (secs / 86_400) as i64 + 719_468;
+    let era = if days >= 0 { days } else { days - 146_096 } / 146_097;
+    let doe = days - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = if m <= 2 { y + 1 } else { y };
+    format!("{y:04}-{m:02}-{d:02}")
+}
+
+/// Build the system-prompt block. Tier 0: every pinned entry, always
+/// (pins are sacred). Tier 1: unpinned entries ranked against the
+/// user's prompt by `score`, filling a ~900-token budget. Each line
+/// carries its date so the model can reason about staleness. Marks
+/// included entries as used and bumps `times_injected`. `None` when
+/// the store is empty.
+fn injection_block_at(path: &Path, query: &str, now: u64) -> Option<String> {
     let mut entries = load_from(path);
     if entries.is_empty() {
         return None;
     }
 
-    // Collect ids in render order: pinned (save order), then
-    // unpinned by recency.
+    let qtoks = tokens(query);
     let pinned: Vec<&MemoryEntry> = entries.iter().filter(|e| e.pinned).collect();
-    let mut unpinned: Vec<&MemoryEntry> = entries.iter().filter(|e| !e.pinned).collect();
-    unpinned.sort_by_key(|e| std::cmp::Reverse(e.last_used_at));
-    unpinned.truncate(INJECT_RECENT_CAP);
+    let mut unpinned: Vec<(&MemoryEntry, f32)> = entries
+        .iter()
+        .filter(|e| !e.pinned)
+        .map(|e| (e, score(e, &qtoks, now)))
+        .collect();
+    unpinned.sort_by(|(_, a), (_, b)| b.partial_cmp(a).unwrap_or(std::cmp::Ordering::Equal));
 
-    let mut block = String::from("The user's saved memories:");
+    let mut block = String::from("The user's saved memories (dated; older facts may be stale):");
     let mut injected_ids = Vec::new();
-    for e in pinned.iter().chain(unpinned.iter()) {
-        block.push_str(&format!("\n- [{}] {}", e.scope, e.text));
+    for e in &pinned {
+        block.push_str(&format!(
+            "\n- [{} · {}] {}",
+            e.scope,
+            unix_to_date(e.created_at),
+            e.text
+        ));
+        injected_ids.push(e.id.clone());
+    }
+    let mut budget = INJECT_CHAR_BUDGET;
+    for (taken, (e, _)) in unpinned.iter().enumerate() {
+        if taken >= INJECT_RECENT_CAP || e.text.len() + 24 > budget {
+            break;
+        }
+        budget -= e.text.len() + 24;
+        block.push_str(&format!(
+            "\n- [{} · {}] {}",
+            e.scope,
+            unix_to_date(e.created_at),
+            e.text
+        ));
         injected_ids.push(e.id.clone());
     }
 
     // Touch the injected entries so use, not just creation, drives
-    // the retention window.
+    // the retention window and the usage boost.
     for e in &mut entries {
         if injected_ids.contains(&e.id) {
             e.last_used_at = now;
+            e.times_injected = e.times_injected.saturating_add(1);
         }
     }
     save_to(path, &entries);
 
     Some(block)
+}
+
+/// Top-`k` entries for a free-text query — the `search` action's
+/// backend and the long-tail escape hatch beyond the injected block.
+/// Does NOT touch usage stats (search ≠ injection).
+fn search_at(path: &Path, query: &str, now: u64, k: usize) -> Vec<MemoryEntry> {
+    let entries = load_from(path);
+    let qtoks = tokens(query);
+    let mut scored: Vec<(f32, MemoryEntry)> = entries
+        .into_iter()
+        .map(|e| (score(&e, &qtoks, now), e))
+        .collect();
+    scored.sort_by(|(a, _), (b, _)| b.partial_cmp(a).unwrap_or(std::cmp::Ordering::Equal));
+    scored.into_iter().take(k).map(|(_, e)| e).collect()
+}
+
+// =============================================================================
+// CONSOLIDATION ("dreaming") — apply side. The LLM call lives in
+// ai_client::tools; this module owns the rails: pinned entries never
+// enter the plan, every input id must be accounted for, results that
+// shrink the store too aggressively are rejected, and retired
+// entries are tombstoned to an archive file instead of deleted.
+// =============================================================================
+
+/// Trigger thresholds: a store with this many unpinned entries (or
+/// this much time since the last pass, given a non-trivial store)
+/// is due for consolidation.
+const CONSOLIDATE_COUNT_TRIGGER: usize = 40;
+const CONSOLIDATE_INTERVAL_SECS: u64 = 14 * 24 * 3600;
+const CONSOLIDATE_MIN_ENTRIES: usize = 12;
+
+#[derive(Default, serde::Serialize, serde::Deserialize)]
+struct MemoryMeta {
+    #[serde(default)]
+    last_consolidated_at: u64,
+}
+
+fn load_meta(path: &Path) -> MemoryMeta {
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default()
+}
+
+fn save_meta(path: &Path, meta: &MemoryMeta) {
+    if let Ok(json) = serde_json::to_string(meta) {
+        let _ = std::fs::write(path, json);
+    }
+}
+
+fn consolidation_due_at(store: &Path, meta: &Path, now: u64) -> bool {
+    let unpinned = load_from(store).iter().filter(|e| !e.pinned).count();
+    if unpinned >= CONSOLIDATE_COUNT_TRIGGER {
+        return true;
+    }
+    unpinned >= CONSOLIDATE_MIN_ENTRIES
+        && now.saturating_sub(load_meta(meta).last_consolidated_at) >= CONSOLIDATE_INTERVAL_SECS
+}
+
+/// Apply a consolidation plan produced by the LLM. Plan shape:
+/// `{"ledger": {"<id>": "keep|merged|superseded|expired"},
+///   "entries": [{"text": "...", "scope": "..."}]}` where `entries`
+/// are the NEW merged/rewritten facts. All-or-nothing: any
+/// validation failure leaves the store untouched.
+fn apply_consolidation_at(
+    store: &Path,
+    archive: &Path,
+    plan: &serde_json::Value,
+    now: u64,
+) -> Result<String, String> {
+    let entries = load_from(store);
+    let (pinned, unpinned): (Vec<MemoryEntry>, Vec<MemoryEntry>) =
+        entries.into_iter().partition(|e| e.pinned);
+
+    let ledger = plan["ledger"]
+        .as_object()
+        .ok_or("plan missing ledger object")?;
+    // Rail 1: every unpinned id must be accounted for.
+    for e in &unpinned {
+        if !ledger.contains_key(&e.id) {
+            return Err(format!("ledger missing id {}", e.id));
+        }
+    }
+
+    let mut kept: Vec<MemoryEntry> = Vec::new();
+    let mut retired: Vec<MemoryEntry> = Vec::new();
+    for e in unpinned.iter() {
+        match ledger[&e.id].as_str().unwrap_or("keep") {
+            "keep" => kept.push(e.clone()),
+            _ => retired.push(e.clone()),
+        }
+    }
+    let mut new_entries: Vec<MemoryEntry> = Vec::new();
+    for ne in plan["entries"].as_array().into_iter().flatten() {
+        let Some(text) = ne["text"].as_str().filter(|t| !t.trim().is_empty()) else {
+            continue;
+        };
+        let scope = ne["scope"].as_str().unwrap_or("general");
+        new_entries.push(MemoryEntry {
+            id: make_id(text, now),
+            text: text.to_string(),
+            scope: scope.to_string(),
+            pinned: false,
+            created_at: now,
+            last_used_at: now,
+            times_injected: 0,
+        });
+    }
+
+    // Rail 2: shrink-only with a floor — a hallucinating
+    // consolidator nukes everything; a sane one trims 10–30%.
+    let before = unpinned.len();
+    let after = kept.len() + new_entries.len();
+    if before >= 6 && after * 2 < before {
+        return Err(format!(
+            "plan shrinks store too aggressively ({before} -> {after}); rejected"
+        ));
+    }
+
+    // Rail 3: tombstone, don't delete. Retired originals go to the
+    // archive file with their retirement time.
+    let mut archived: Vec<serde_json::Value> = std::fs::read_to_string(archive)
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default();
+    for e in &retired {
+        archived.push(serde_json::json!({
+            "retired_at": now,
+            "entry": e,
+        }));
+    }
+    if let Ok(json) = serde_json::to_string_pretty(&archived) {
+        let _ = std::fs::write(archive, json);
+    }
+
+    // One-deep backup of the pre-consolidation store, then swap.
+    if let Ok(orig) = std::fs::read_to_string(store) {
+        let _ = std::fs::write(store.with_extension("json.bak"), orig);
+    }
+    let mut result = pinned;
+    result.extend(kept);
+    result.extend(new_entries);
+    let summary = format!(
+        "Consolidated: {before} unpinned entries -> {after} ({} retired to archive).",
+        retired.len()
+    );
+    save_to(store, &result);
+    Ok(summary)
 }
 
 // =============================================================================
@@ -252,12 +519,58 @@ pub fn sweep_expired(now: u64) -> usize {
     sweep_expired_at(&store_path(), now)
 }
 
-/// The memory block appended to the agent's system instruction, or
-/// `None` when there's nothing saved. Touches `last_used_at` on the
-/// injected entries.
-pub fn injection_block() -> Option<String> {
+/// The memory block appended to the agent's system instruction —
+/// pinned entries plus the unpinned entries most relevant to
+/// `query` — or `None` when there's nothing saved. Touches usage
+/// stats on the injected entries.
+pub fn injection_block_for(query: &str) -> Option<String> {
     sweep_once();
-    injection_block_at(&store_path(), unix_now())
+    injection_block_at(&store_path(), query, unix_now())
+}
+
+/// Top-5 entries for a free-text query (the memory tool's `search`
+/// action).
+pub fn search(query: &str) -> Vec<MemoryEntry> {
+    sweep_once();
+    search_at(&store_path(), query, unix_now(), 5)
+}
+
+fn meta_path() -> PathBuf {
+    store_path().with_file_name("memories_meta.json")
+}
+
+fn archive_path() -> PathBuf {
+    store_path().with_file_name("memories_archive.json")
+}
+
+/// Whether the store is due for a consolidation pass (size or age
+/// trigger). Checked at app start — never mid-conversation.
+pub fn consolidation_due() -> bool {
+    consolidation_due_at(&store_path(), &meta_path(), unix_now())
+}
+
+/// The unpinned entries a consolidation plan may operate on. Pinned
+/// entries are physically excluded — user-controlled, immutable by
+/// machinery.
+pub fn consolidation_input() -> Vec<MemoryEntry> {
+    load_from(&store_path())
+        .into_iter()
+        .filter(|e| !e.pinned)
+        .collect()
+}
+
+/// Validate + apply an LLM-produced consolidation plan and stamp the
+/// meta timestamp. All-or-nothing; see `apply_consolidation_at`.
+pub fn apply_consolidation(plan: &serde_json::Value) -> Result<String, String> {
+    let now = unix_now();
+    let summary = apply_consolidation_at(&store_path(), &archive_path(), plan, now)?;
+    save_meta(
+        &meta_path(),
+        &MemoryMeta {
+            last_consolidated_at: now,
+        },
+    );
+    Ok(summary)
 }
 
 #[cfg(test)]
@@ -339,13 +652,14 @@ mod tests {
         let pinned = save_entry_at(&path, "pinned one", "c", 5);
         assert!(set_pinned_at(&path, &pinned.id, true));
 
-        let block = injection_block_at(&path, 1000).unwrap();
+        let block = injection_block_at(&path, "", 1000).unwrap();
         let lines: Vec<&str> = block.lines().collect();
-        assert_eq!(lines[0], "The user's saved memories:");
-        // Pinned first, then unpinned by recency (new before old).
-        assert_eq!(lines[1], "- [c] pinned one");
-        assert_eq!(lines[2], "- [b] new unpinned");
-        assert_eq!(lines[3], "- [a] old unpinned");
+        assert!(lines[0].starts_with("The user's saved memories"));
+        // Pinned first; unpinned by score (recency dominates an
+        // empty query, so new before old).
+        assert!(lines[1].contains("pinned one") && lines[1].starts_with("- [c"));
+        assert!(lines[2].contains("new unpinned"));
+        assert!(lines[3].contains("old unpinned"));
 
         // All injected entries were touched.
         for e in load_from(&path) {
@@ -358,18 +672,169 @@ mod tests {
     fn injection_block_caps_unpinned_at_ten() {
         let path = temp_store("cap");
         for i in 0..12u64 {
-            save_entry_at(&path, &format!("entry {i}"), "s", i);
+            // Distinct token sets per entry — texts this similar
+            // would otherwise (correctly) collapse via the
+            // write-time dedupe.
+            save_entry_at(&path, &format!("entry topic{i} detail{i}"), "s", i);
         }
-        let block = injection_block_at(&path, 100).unwrap();
+        let block = injection_block_at(&path, "", 100).unwrap();
         // Header + 10 bullets; the two oldest (0, 1) fall off.
         assert_eq!(block.lines().count(), 11);
-        assert!(!block.contains("entry 0\n") && !block.ends_with("entry 0"));
-        assert!(block.contains("entry 11"));
+        assert!(!block.contains("topic0 "));
+        assert!(block.contains("topic11"));
     }
 
     #[test]
     fn injection_block_empty_store_is_none() {
         let path = temp_store("empty");
-        assert_eq!(injection_block_at(&path, 1), None);
+        assert_eq!(injection_block_at(&path, "", 1), None);
+    }
+}
+
+#[cfg(test)]
+mod recall_tests {
+    use super::*;
+
+    fn temp_store(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "oxidemx-memory-recall-{tag}-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir.join("memories.json")
+    }
+
+    #[test]
+    fn near_duplicate_save_updates_instead_of_appending() {
+        let path = temp_store("dedupe");
+        let a = save_entry_at(
+            &path,
+            "Jim prefers dark color themes everywhere",
+            "prefs",
+            100,
+        );
+        let b = save_entry_at(
+            &path,
+            "Jim prefers dark color themes everywhere, especially teal",
+            "prefs",
+            200,
+        );
+        assert_eq!(a.id, b.id, "near-duplicate should update in place");
+        let all = load_from(&path);
+        assert_eq!(all.len(), 1);
+        assert!(all[0].text.contains("teal"));
+        assert_eq!(all[0].created_at, 100, "created_at survives updates");
+
+        // A genuinely different fact still appends.
+        save_entry_at(
+            &path,
+            "Jim's mouse is an MX Master 4 on Bazzite",
+            "prefs",
+            300,
+        );
+        assert_eq!(load_from(&path).len(), 2);
+    }
+
+    #[test]
+    fn injection_ranks_relevant_entries_first() {
+        let path = temp_store("rank");
+        // Old but relevant vs new but irrelevant.
+        save_entry_at(
+            &path,
+            "Jim's weather widget shows Huntington Station",
+            "w",
+            100,
+        );
+        save_entry_at(&path, "Jim plays guitar on weekends", "hobby", 9_000_000);
+        let block =
+            injection_block_at(&path, "change the weather widget location", 10_000_000).unwrap();
+        let weather_pos = block.find("weather widget").unwrap();
+        let guitar_pos = block.find("guitar").unwrap();
+        assert!(
+            weather_pos < guitar_pos,
+            "query-relevant entry should rank above newer irrelevant one"
+        );
+    }
+
+    #[test]
+    fn search_returns_relevant_top_k() {
+        let path = temp_store("search");
+        for i in 0..8 {
+            save_entry_at(
+                &path,
+                &format!("filler subject{i} detail{i} extra{i}"),
+                "s",
+                i,
+            );
+        }
+        save_entry_at(
+            &path,
+            "the daemon battery fix uses try_initial_connect",
+            "dev",
+            50,
+        );
+        let hits = search_at(&path, "battery daemon connect", 100, 5);
+        assert_eq!(hits.len(), 5);
+        assert!(hits[0].text.contains("battery"));
+    }
+
+    #[test]
+    fn consolidation_rails_hold() {
+        let path = temp_store("consolidate");
+        let archive = path.with_file_name("memories_archive.json");
+        let mut ids = Vec::new();
+        for i in 0..8 {
+            ids.push(save_entry_at(&path, &format!("unique fact {i} alpha{i}"), "s", i).id);
+        }
+        let pinned = save_entry_at(&path, "sacred pinned fact", "s", 0);
+        assert!(set_pinned_at(&path, &pinned.id, true));
+
+        // Rail 1: missing id in ledger -> rejected, store untouched.
+        let bad = serde_json::json!({"ledger": {ids[0].clone(): "keep"}, "entries": []});
+        assert!(apply_consolidation_at(&path, &archive, &bad, 1000).is_err());
+        assert_eq!(load_from(&path).len(), 9);
+
+        // Rail 2: nuking everything -> rejected.
+        let mut nuke_ledger = serde_json::Map::new();
+        for id in &ids {
+            nuke_ledger.insert(id.clone(), serde_json::json!("expired"));
+        }
+        let nuke = serde_json::json!({"ledger": nuke_ledger, "entries": []});
+        assert!(apply_consolidation_at(&path, &archive, &nuke, 1000).is_err());
+
+        // Valid plan: merge two entries into one, keep the rest.
+        let mut ledger = serde_json::Map::new();
+        for (i, id) in ids.iter().enumerate() {
+            ledger.insert(
+                id.clone(),
+                serde_json::json!(if i < 2 { "merged" } else { "keep" }),
+            );
+        }
+        let plan = serde_json::json!({
+            "ledger": ledger,
+            "entries": [{"text": "facts 0 and 1, merged", "scope": "s"}],
+        });
+        let summary = apply_consolidation_at(&path, &archive, &plan, 1000).unwrap();
+        assert!(summary.contains("8 unpinned entries -> 7"));
+        let after = load_from(&path);
+        // 1 pinned + 6 kept + 1 merged = 8; pinned untouched.
+        assert_eq!(after.len(), 8);
+        assert!(after
+            .iter()
+            .any(|e| e.pinned && e.text == "sacred pinned fact"));
+        assert!(after.iter().any(|e| e.text == "facts 0 and 1, merged"));
+        // Tombstones in the archive, originals gone from the store.
+        let archived: Vec<serde_json::Value> =
+            serde_json::from_str(&std::fs::read_to_string(&archive).unwrap()).unwrap();
+        assert_eq!(archived.len(), 2);
+        assert!(!after.iter().any(|e| e.text == "unique fact 0 alpha0"));
+    }
+
+    #[test]
+    fn unix_to_date_known_values() {
+        assert_eq!(unix_to_date(0), "1970-01-01");
+        assert_eq!(unix_to_date(1_781_222_400), "2026-06-12");
     }
 }

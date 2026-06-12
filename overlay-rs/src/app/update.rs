@@ -527,7 +527,20 @@ pub(super) fn update(state: &mut RadialState, message: Message) -> Task<Message>
                     state.vision_force_hover(slot);
                 }
             }
-            Task::none()
+            // One-shot boot hook: consolidate the agent memory store
+            // when it's due (size/age trigger). App start is the
+            // overlay's idle time — never collides with a live
+            // conversation. The rails in agent::memory make a bad
+            // pass a no-op rather than data loss.
+            static CONSOLIDATE_ONCE: std::sync::Once = std::sync::Once::new();
+            let mut task = Task::none();
+            CONSOLIDATE_ONCE.call_once(|| {
+                task = Task::future(async {
+                    crate::ai_client::tools::auto_consolidate_if_due().await;
+                })
+                .discard();
+            });
+            task
         }
         Message::AiEditorAction(action) => {
             state.ai_editor.perform(action);
