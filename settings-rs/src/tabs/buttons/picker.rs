@@ -154,6 +154,116 @@ pub fn widget_config_for_pick(source: WidgetSource, page_name: &str, slot: usize
     }
 }
 
+/// Bundled-plugin id for a native widget source (spec §16): the six
+/// converted built-ins map to the `widgets/builtin/<id>` plugins
+/// seeded at startup. `MouseBattery` stays native (needs daemon
+/// battery data in the host — followups.md) and `Custom` is already
+/// a plugin, so both return `None`.
+pub fn builtin_plugin_id(source: &WidgetSource) -> Option<&'static str> {
+    match source {
+        WidgetSource::Weather => Some("weather"),
+        WidgetSource::Cpu => Some("cpu"),
+        WidgetSource::Memory => Some("memory"),
+        WidgetSource::Network => Some("network"),
+        WidgetSource::Disk => Some("disk"),
+        WidgetSource::TasksDue => Some("tasks"),
+        WidgetSource::MouseBattery | WidgetSource::Custom(_) => None,
+    }
+}
+
+/// Is the plugin `id` installed AND `Ready`? (An incompatible install
+/// must not hide the canned native tile or offer conversion — the
+/// native render path still works, the plugin doesn't.)
+pub fn plugin_ready(registry: &[WidgetSummaryLite], id: &str) -> bool {
+    registry.iter().any(|w| w.id == id && w.ready)
+}
+
+/// The canned native tiles that should still show in the picker:
+/// a tile is hidden when its mapped bundled plugin is installed and
+/// ready (the registry tile covers it — new picks produce Custom
+/// widgets, spec §16). MouseBattery has no mapping and always shows.
+pub fn visible_builtin_tiles(registry: &[WidgetSummaryLite]) -> Vec<BuiltinTile> {
+    builtin_tiles()
+        .into_iter()
+        .filter(|t| match builtin_plugin_id(&t.source) {
+            Some(id) => !plugin_ready(registry, id),
+            None => true,
+        })
+        .collect()
+}
+
+/// `Some(plugin id)` when `slice` is a legacy NATIVE widget slice
+/// whose bundled plugin replacement is installed and ready — drives
+/// the "Convert" hint row under the behavior chip.
+pub fn convertible_plugin_id(
+    slice: &Slice,
+    registry: &[WidgetSummaryLite],
+) -> Option<&'static str> {
+    if slice.kind != ActionKind::Widget {
+        return None;
+    }
+    let id = builtin_plugin_id(&slice.widget.as_ref()?.source)?;
+    plugin_ready(registry, id).then_some(id)
+}
+
+/// One-click legacy-slice conversion (spec §16): rewrite the native
+/// `WidgetSource` to `Custom(<plugin id>)`, keeping the slice's label,
+/// colour and icon untouched. Returns the plugin id, or `None` when
+/// the slice isn't a convertible native widget.
+///
+/// * `scope` stays `Instance` and a fresh `instance_key` is assigned
+///   so the per-slice settings bag has an address.
+/// * `format` is dropped (set to `None`): native format strings have
+///   no plugin equivalent — the plugins reproduce the default native
+///   typography, which is what `format: None` rendered anyway.
+/// * Weather lifts the legacy global overlay fields into the new
+///   INSTANCE bag (mirroring `oxidemx_shared::migrate`'s shapes:
+///   `location: {name, lat, lon}`, `units: "c"|"f"`) — but only when
+///   `overlay.weather_location` is actually set, and never clobbering
+///   values already present in the bag.
+pub fn convert_slice_to_plugin(
+    slice: &mut Slice,
+    overlay: &oxidemx_shared::OverlayConfig,
+    widgets: &mut oxidemx_shared::widgets::WidgetStore,
+    page_name: &str,
+    slot: usize,
+) -> Option<String> {
+    if slice.kind != ActionKind::Widget {
+        return None;
+    }
+    let cfg = slice.widget.as_mut()?;
+    let id = builtin_plugin_id(&cfg.source)?.to_string();
+    let was_weather = matches!(cfg.source, WidgetSource::Weather);
+    let ikey = oxidemx_shared::widgets::instance_key(page_name, slot);
+    cfg.source = WidgetSource::Custom(id.clone());
+    cfg.scope = WidgetScope::Instance;
+    cfg.instance_key = Some(ikey.clone());
+    cfg.format = None;
+
+    if was_weather {
+        if let Some((lat, lon)) = overlay.weather_location {
+            let place = overlay.weather_place.clone().unwrap_or_default();
+            let celsius = overlay.weather_celsius;
+            let bag = widgets
+                .instances
+                .entry(ikey)
+                .or_default()
+                .entry(id.clone())
+                .or_default();
+            bag.entry("location".to_string()).or_insert_with(|| {
+                serde_json::json!({
+                    "name": place,
+                    "lat": lat,
+                    "lon": lon,
+                })
+            });
+            bag.entry("units".to_string())
+                .or_insert_with(|| serde_json::json!(if celsius { "c" } else { "f" }));
+        }
+    }
+    Some(id)
+}
+
 /// Display name of a built-in widget source.
 pub fn builtin_widget_name(source: &WidgetSource) -> &'static str {
     match source {
@@ -303,7 +413,7 @@ pub fn builtin_tiles() -> Vec<BuiltinTile> {
         BuiltinTile { source: WidgetSource::Memory, name: "Memory", value: "11.2", sub: "of 32 GB" },
         BuiltinTile { source: WidgetSource::Network, name: "Network rate", value: "84↓", sub: "12↑ Mb/s" },
         BuiltinTile { source: WidgetSource::Disk, name: "Disk free", value: "412", sub: "GB free" },
-        BuiltinTile { source: WidgetSource::TasksDue, name: "Tasks due", value: "3", sub: "due today" },
+        BuiltinTile { source: WidgetSource::TasksDue, name: "Tasks due", value: "3", sub: "due in 24h" },
         BuiltinTile { source: WidgetSource::MouseBattery, name: "Mouse battery", value: "78%", sub: "MX Master 4" },
     ]
 }
@@ -349,13 +459,43 @@ const TILES_PER_ROW: usize = 3;
 pub fn behavior_section<'a>(state: &'a State, idx: usize, slice: &'a Slice) -> Element<'a, Message> {
     let open = state.picker_open == Some(idx);
     let chip = behavior_chip(state, idx, slice, open);
-    if open {
-        column![chip, picker_panel(state, idx, slice)]
-            .spacing(8)
-            .into()
-    } else {
-        chip
+    let convertible = convertible_plugin_id(slice, &state.widget_registry).is_some();
+    if !open && !convertible {
+        return chip;
     }
+    let mut col = column![chip].spacing(8);
+    if convertible {
+        col = col.push(convert_hint_row(state, idx));
+    }
+    if open {
+        col = col.push(picker_panel(state, idx, slice));
+    }
+    col.into()
+}
+
+/// One-line hint under the chip of a legacy native widget slice whose
+/// bundled plugin replacement is installed (spec §16): explains the
+/// situation + a single "Convert" button. Conversion keeps label and
+/// colour; the slice simply starts rendering through the plugin.
+fn convert_hint_row(state: &State, idx: usize) -> Element<'_, Message> {
+    let pal = &state.palette;
+    container(
+        row![
+            text("A plugin version of this widget is installed — converting keeps your label and colour.")
+                .size(10)
+                .style(style::text_dim(pal)),
+            Space::new().width(Length::Fill),
+            button(text("Convert").size(11))
+                .style(style::btn_primary(pal))
+                .on_press(Message::ConvertSliceToPlugin(idx)),
+        ]
+        .align_y(Alignment::Center)
+        .spacing(8),
+    )
+    .padding([6, 8])
+    .width(Length::Fill)
+    .style(style::card_quiet(pal))
+    .into()
 }
 
 /// Collapsed behavior chip (spec §10b): icon tile · title · summary
@@ -599,7 +739,12 @@ fn picker_panel<'a>(state: &'a State, idx: usize, slice: &'a Slice) -> Element<'
         .size(12);
 
     let actions = filter_actions(action_tiles(), query);
-    let builtins = filter_builtins(builtin_tiles(), query);
+    // Canned native tiles whose bundled plugin is installed+ready are
+    // hidden — the registry tile covers them (spec §16; new picks
+    // produce Custom widgets).
+    let visible_builtins = visible_builtin_tiles(&state.widget_registry);
+    let visible_builtin_count = visible_builtins.len();
+    let builtins = filter_builtins(visible_builtins, query);
     let registry = filter_registry(&state.widget_registry, query);
 
     let mut panel = column![search].spacing(10);
@@ -616,7 +761,7 @@ fn picker_panel<'a>(state: &'a State, idx: usize, slice: &'a Slice) -> Element<'
 
     // Group 2 — widgets (built-in sources + installed registry).
     if !builtins.is_empty() || !registry.is_empty() {
-        let installed = builtin_tiles().len() + state.widget_registry.len();
+        let installed = visible_builtin_count + state.widget_registry.len();
         panel = panel.push(group_header(pal, format!("Widgets · {installed} installed")));
         let mut tiles: Vec<Element<Message>> = builtins
             .into_iter()
@@ -1132,6 +1277,200 @@ mod tests {
     }
 
     // --- display names ---
+
+    // --- builtin → bundled-plugin mapping (spec §16) ---
+
+    #[test]
+    fn builtin_plugin_id_maps_six_sources_battery_stays_native() {
+        assert_eq!(builtin_plugin_id(&WidgetSource::Weather), Some("weather"));
+        assert_eq!(builtin_plugin_id(&WidgetSource::Cpu), Some("cpu"));
+        assert_eq!(builtin_plugin_id(&WidgetSource::Memory), Some("memory"));
+        assert_eq!(builtin_plugin_id(&WidgetSource::Network), Some("network"));
+        assert_eq!(builtin_plugin_id(&WidgetSource::Disk), Some("disk"));
+        assert_eq!(builtin_plugin_id(&WidgetSource::TasksDue), Some("tasks"));
+        assert_eq!(builtin_plugin_id(&WidgetSource::MouseBattery), None);
+        assert_eq!(builtin_plugin_id(&WidgetSource::Custom("cpu".into())), None);
+    }
+
+    #[test]
+    fn visible_builtin_tiles_hides_ready_plugins_only() {
+        // nothing installed → all 7 canned tiles
+        assert_eq!(visible_builtin_tiles(&[]).len(), 7);
+
+        // cpu installed + ready → its canned tile is hidden
+        let reg = vec![lite("cpu", "CPU usage", "OxideMX", true)];
+        let visible = visible_builtin_tiles(&reg);
+        assert_eq!(visible.len(), 6);
+        assert!(!visible.iter().any(|t| t.source == WidgetSource::Cpu));
+
+        // installed but NOT ready → the native tile stays
+        let reg = vec![lite("cpu", "CPU usage", "OxideMX", false)];
+        assert_eq!(visible_builtin_tiles(&reg).len(), 7);
+
+        // MouseBattery never hides, even with a same-named plugin
+        let reg = vec![lite("mouse-battery", "Mouse battery", "X", true)];
+        let visible = visible_builtin_tiles(&reg);
+        assert!(visible.iter().any(|t| t.source == WidgetSource::MouseBattery));
+    }
+
+    // --- convert-to-plugin (spec §16 back-compat affordance) ---
+
+    fn native_widget_slice(source: WidgetSource) -> Slice {
+        let mut s = slice(ActionKind::Widget, "My label");
+        s.color = "teal".into();
+        s.widget = Some(WidgetConfig {
+            source,
+            format: Some("custom %s".into()),
+            scope: WidgetScope::Instance,
+            instance_key: None,
+        });
+        s
+    }
+
+    #[test]
+    fn convertible_only_when_native_source_has_ready_plugin() {
+        let ready = vec![lite("cpu", "CPU usage", "OxideMX", true)];
+        let not_ready = vec![lite("cpu", "CPU usage", "OxideMX", false)];
+
+        let s = native_widget_slice(WidgetSource::Cpu);
+        assert_eq!(convertible_plugin_id(&s, &ready), Some("cpu"));
+        assert_eq!(convertible_plugin_id(&s, &not_ready), None);
+        assert_eq!(convertible_plugin_id(&s, &[]), None);
+
+        // Custom slices are already plugins; battery has no mapping;
+        // non-widget slices never convert.
+        let c = native_widget_slice(WidgetSource::Custom("cpu".into()));
+        assert_eq!(convertible_plugin_id(&c, &ready), None);
+        let b = native_widget_slice(WidgetSource::MouseBattery);
+        assert_eq!(convertible_plugin_id(&b, &ready), None);
+        let e = slice(ActionKind::Exec, "x");
+        assert_eq!(convertible_plugin_id(&e, &ready), None);
+    }
+
+    #[test]
+    fn convert_cpu_rewrites_source_and_keeps_label_color() {
+        let mut s = native_widget_slice(WidgetSource::Cpu);
+        let overlay = oxidemx_shared::OverlayConfig::default();
+        let mut store = oxidemx_shared::widgets::WidgetStore::default();
+
+        let id = convert_slice_to_plugin(&mut s, &overlay, &mut store, "Apps", 2);
+        assert_eq!(id.as_deref(), Some("cpu"));
+
+        let w = s.widget.as_ref().unwrap();
+        assert_eq!(w.source, WidgetSource::Custom("cpu".into()));
+        assert_eq!(w.scope, WidgetScope::Instance);
+        assert_eq!(w.instance_key.as_deref(), Some("apps.slot2"));
+        // format has no plugin equivalent — dropped
+        assert_eq!(w.format, None);
+        // label/colour untouched
+        assert_eq!(s.label, "My label");
+        assert_eq!(s.color, "teal");
+        // cpu has no legacy settings — no bags created
+        assert!(store.is_empty());
+    }
+
+    #[test]
+    fn convert_weather_lifts_overlay_settings_into_instance_bag() {
+        let mut s = native_widget_slice(WidgetSource::Weather);
+        let overlay = oxidemx_shared::OverlayConfig {
+            weather_location: Some((59.91, 10.75)),
+            weather_place: Some("Oslo, NO".into()),
+            weather_celsius: true,
+            ..Default::default()
+        };
+        let mut store = oxidemx_shared::widgets::WidgetStore::default();
+
+        let id = convert_slice_to_plugin(&mut s, &overlay, &mut store, "Apps", 4);
+        assert_eq!(id.as_deref(), Some("weather"));
+        assert_eq!(
+            s.widget.as_ref().unwrap().instance_key.as_deref(),
+            Some("apps.slot4")
+        );
+
+        // Same shapes as oxidemx_shared::migrate's lift, but into the
+        // INSTANCE bag (the converted slice's scope is Instance).
+        let bag = &store.instances["apps.slot4"]["weather"];
+        assert_eq!(bag["location"]["name"], serde_json::json!("Oslo, NO"));
+        assert_eq!(bag["location"]["lat"], serde_json::json!(59.91));
+        assert_eq!(bag["location"]["lon"], serde_json::json!(10.75));
+        assert_eq!(bag["units"], serde_json::json!("c"));
+
+        // celsius=false → "f"
+        let mut s2 = native_widget_slice(WidgetSource::Weather);
+        let overlay_f = oxidemx_shared::OverlayConfig {
+            weather_location: Some((40.7, -74.0)),
+            weather_place: None,
+            weather_celsius: false,
+            ..Default::default()
+        };
+        convert_slice_to_plugin(&mut s2, &overlay_f, &mut store, "Apps", 5);
+        let bag = &store.instances["apps.slot5"]["weather"];
+        assert_eq!(bag["units"], serde_json::json!("f"));
+        assert_eq!(bag["location"]["name"], serde_json::json!(""));
+    }
+
+    #[test]
+    fn convert_weather_without_overlay_fields_writes_no_bag() {
+        let mut s = native_widget_slice(WidgetSource::Weather);
+        let overlay = oxidemx_shared::OverlayConfig::default();
+        let mut store = oxidemx_shared::widgets::WidgetStore::default();
+        let id = convert_slice_to_plugin(&mut s, &overlay, &mut store, "Apps", 4);
+        assert_eq!(id.as_deref(), Some("weather"));
+        assert!(store.is_empty());
+    }
+
+    #[test]
+    fn convert_weather_never_clobbers_existing_bag_values() {
+        let mut s = native_widget_slice(WidgetSource::Weather);
+        let overlay = oxidemx_shared::OverlayConfig {
+            weather_location: Some((59.91, 10.75)),
+            weather_place: Some("Oslo, NO".into()),
+            weather_celsius: true,
+            ..Default::default()
+        };
+        let mut store = oxidemx_shared::widgets::WidgetStore::default();
+        store
+            .instances
+            .entry("apps.slot4".into())
+            .or_default()
+            .entry("weather".into())
+            .or_default()
+            .insert("units".into(), serde_json::json!("f"));
+
+        convert_slice_to_plugin(&mut s, &overlay, &mut store, "Apps", 4);
+        let bag = &store.instances["apps.slot4"]["weather"];
+        // user's existing value wins; the missing key is still lifted
+        assert_eq!(bag["units"], serde_json::json!("f"));
+        assert_eq!(bag["location"]["name"], serde_json::json!("Oslo, NO"));
+    }
+
+    #[test]
+    fn convert_refuses_non_convertible_slices() {
+        let overlay = oxidemx_shared::OverlayConfig::default();
+        let mut store = oxidemx_shared::widgets::WidgetStore::default();
+
+        let mut battery = native_widget_slice(WidgetSource::MouseBattery);
+        assert_eq!(
+            convert_slice_to_plugin(&mut battery, &overlay, &mut store, "Apps", 1),
+            None
+        );
+        assert_eq!(
+            battery.widget.as_ref().unwrap().source,
+            WidgetSource::MouseBattery
+        );
+
+        let mut custom = native_widget_slice(WidgetSource::Custom("cpu".into()));
+        assert_eq!(
+            convert_slice_to_plugin(&mut custom, &overlay, &mut store, "Apps", 1),
+            None
+        );
+
+        let mut exec = slice(ActionKind::Exec, "x");
+        assert_eq!(
+            convert_slice_to_plugin(&mut exec, &overlay, &mut store, "Apps", 1),
+            None
+        );
+    }
 
     #[test]
     fn widget_display_name_prefers_registry_name() {

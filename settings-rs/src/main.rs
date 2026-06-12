@@ -504,6 +504,12 @@ pub enum Message {
     /// Re-scan `~/.config/oxidemx/widgets` into the settings-side
     /// registry cache. Triggered after store install/uninstall.
     RescanWidgets,
+    /// "Convert" on a legacy NATIVE widget slice whose bundled
+    /// plugin replacement is installed+ready (spec §16): rewrites
+    /// `source` → `Custom(id)`, assigns an instance_key, lifts
+    /// legacy weather settings into the instance bag. Label and
+    /// colour are kept.
+    ConvertSliceToPlugin(usize),
 
     // --- Widget store / downloader dialog (spec §11) ---
     /// Back button on the store panel (also the "Settings" jump on
@@ -3084,6 +3090,35 @@ fn update_inner(state: &mut State, message: Message) -> Task<Message> {
         }
         Message::RescanWidgets => {
             rescan_widgets(state);
+            Task::none()
+        }
+        Message::ConvertSliceToPlugin(i) => {
+            use tabs::buttons::picker::{convert_slice_to_plugin, convertible_plugin_id};
+            let page_name = state
+                .config
+                .radial_menu
+                .pages
+                .get(state.active_page)
+                .map(|p| p.name.clone())
+                .unwrap_or_default();
+            let overlay = state.config.overlay.clone();
+            let registry = state.widget_registry.clone();
+            // The store is taken out so the conversion fn can write the
+            // weather lift while the slice is borrowed mutably from the
+            // same `state.config`.
+            let mut store = std::mem::take(&mut state.config.widgets);
+            let converted = state.active_slices_mut().get_mut(i).and_then(|slice| {
+                // Re-check the gate (installed + Ready) — the message
+                // only comes from the hint button, but the registry may
+                // have changed between render and click.
+                convertible_plugin_id(slice, &registry)?;
+                convert_slice_to_plugin(slice, &overlay, &mut store, &page_name, i)
+            });
+            state.config.widgets = store;
+            if let Some(id) = converted {
+                info!("converted slice {i} to bundled plugin widget {id:?}");
+                state.touch();
+            }
             Task::none()
         }
 
