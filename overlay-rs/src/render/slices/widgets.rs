@@ -1,12 +1,26 @@
-//! Live-data widget wedges (`draw_widget_wedge`) and the shared
-//! centred-text helper.
+//! Live-data widget wedges (`draw_widget_wedge`), the plugin-scene
+//! replay path (`draw_custom_widget` + `draw_custom_fallback`), and
+//! the shared centred-text helper.
 
 use iced::widget::canvas::{Frame, Path, Stroke};
 use iced::{Color, Point, Size};
 use oxidemx_shared::theme::{parse_hex_rgba, ThemeColors};
 use oxidemx_shared::Slice;
+use oxidemx_widget_host::{InstanceId, WidgetSummary};
+use oxidemx_widget_proto::{Prim, Scene, TextAlign, TextWeight, WedgeGeom};
 
 use super::rgba;
+
+/// Per-ring view of the custom-widget runtime state the painter
+/// hands down to `draw_slice`: the page name (derived instance
+/// keys), the replay store, the failure set, and the installed-
+/// widget registry (fallback icons).
+pub struct CustomWidgets<'a> {
+    pub page_name: &'a str,
+    pub scenes: &'a std::collections::HashMap<InstanceId, (Scene, u64)>,
+    pub failed: &'a std::collections::HashMap<InstanceId, String>,
+    pub registry: &'a std::collections::HashMap<String, WidgetSummary>,
+}
 
 /// Approximate-width centred single-line canvas text (the canvas
 /// API has no measure pass; 0.55 em/char matches `draw_center`).
@@ -263,6 +277,307 @@ pub(super) fn draw_widget_wedge(
                 weight: iced::font::Weight::Semibold,
                 ..Default::default()
             },
+        );
+    }
+}
+
+/// Replay a plugin widget's retained [`Scene`] into the wedge. The
+/// scene was decoded + validated on the worker thread; this walk is
+/// pure canvas drawing — no wasm, no allocation beyond iced paths
+/// (spec §8 frame-path rule).
+///
+/// Scene coordinates are wedge-local: origin at the icon anchor,
+/// +y down (`oxidemx_widget_proto::scene` docs), so the whole walk
+/// runs inside one translated `with_save` scope. `Color::Palette`
+/// keys resolve through the active theme; `"accent"` and unknown
+/// keys resolve to the slice's configured colour — same fallback
+/// chain `draw_slice` uses for icon tinting.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn draw_custom_widget(
+    frame: &mut Frame,
+    scene: &Scene,
+    _geom: &WedgeGeom,
+    anchor: Point,
+    palette: &ThemeColors,
+    _hover: f32,
+    slice_color: Color,
+    mo: f32,
+) {
+    frame.with_save(|f| {
+        f.translate(iced::Vector::new(anchor.x, anchor.y));
+        draw_prims(f, &scene.prims, palette, slice_color, mo);
+    });
+}
+
+/// Recursive prim walk (groups translate/scale their children).
+fn draw_prims(frame: &mut Frame, prims: &[Prim], palette: &ThemeColors, slice_color: Color, mo: f32) {
+    for prim in prims {
+        match prim {
+            Prim::Path { ops, stroke, fill } => {
+                use oxidemx_widget_proto::PathOp;
+                let path = Path::new(|b| {
+                    for op in ops {
+                        match op {
+                            PathOp::MoveTo(x, y) => b.move_to(Point::new(*x, *y)),
+                            PathOp::LineTo(x, y) => b.line_to(Point::new(*x, *y)),
+                            PathOp::QuadTo(cx, cy, x, y) => {
+                                b.quadratic_curve_to(Point::new(*cx, *cy), Point::new(*x, *y))
+                            }
+                            PathOp::CubicTo(c1x, c1y, c2x, c2y, x, y) => b.bezier_curve_to(
+                                Point::new(*c1x, *c1y),
+                                Point::new(*c2x, *c2y),
+                                Point::new(*x, *y),
+                            ),
+                            PathOp::Close => b.close(),
+                        }
+                    }
+                });
+                paint_path(frame, &path, stroke.as_ref(), fill.as_ref(), palette, slice_color, mo);
+            }
+            Prim::Arc { cx, cy, radius, start_angle, end_angle, stroke, fill } => {
+                let path = Path::new(|b| {
+                    b.arc(iced::widget::canvas::path::Arc {
+                        center: Point::new(*cx, *cy),
+                        radius: *radius,
+                        start_angle: iced::Radians(*start_angle),
+                        end_angle: iced::Radians(*end_angle),
+                    })
+                });
+                paint_path(frame, &path, stroke.as_ref(), fill.as_ref(), palette, slice_color, mo);
+            }
+            Prim::Text { x, y, content, size, color, weight, align } => {
+                // Same 0.55 em/char width heuristic + vertical
+                // centring as `draw_centered_text` (the canvas API
+                // has no measure pass).
+                let approx_w = content.chars().count() as f32 * size * 0.55;
+                let px = match align {
+                    TextAlign::Left => *x,
+                    TextAlign::Center => x - approx_w / 2.0,
+                    TextAlign::Right => x - approx_w,
+                };
+                frame.fill_text(iced::widget::canvas::Text {
+                    content: content.clone(),
+                    position: Point::new(px, y - size / 2.0),
+                    color: resolve_scene_color(color, palette, slice_color, mo),
+                    size: (*size).into(),
+                    font: iced::Font {
+                        weight: match weight {
+                            TextWeight::Regular => iced::font::Weight::Normal,
+                            TextWeight::Medium => iced::font::Weight::Medium,
+                            TextWeight::Semibold => iced::font::Weight::Semibold,
+                            TextWeight::Bold => iced::font::Weight::Bold,
+                        },
+                        ..Default::default()
+                    },
+                    ..iced::widget::canvas::Text::default()
+                });
+            }
+            Prim::Sparkline { x, y, w, h, points, color } => {
+                // Normalised 0..=1 samples drawn like the built-in
+                // CPU sparkline: polyline across `w`, peak at the
+                // top of the `h` band.
+                if points.len() >= 2 {
+                    let step = w / (points.len() - 1) as f32;
+                    let path = Path::new(|b| {
+                        for (j, v) in points.iter().enumerate() {
+                            let px = x + j as f32 * step;
+                            let py = y + h - v.clamp(0.0, 1.0) * h;
+                            if j == 0 {
+                                b.move_to(Point::new(px, py));
+                            } else {
+                                b.line_to(Point::new(px, py));
+                            }
+                        }
+                    });
+                    frame.stroke(
+                        &path,
+                        Stroke::default()
+                            .with_color(resolve_scene_color(color, palette, slice_color, mo))
+                            .with_width(1.5),
+                    );
+                }
+            }
+            Prim::Image { x, y, w, h, asset } => {
+                // Canvas-side image replay needs a decode + handle
+                // cache that doesn't exist yet — Plan 3 follow-up.
+                // Draw a quiet placeholder so the layout reads, and
+                // say so once per session, not per frame.
+                static IMAGE_ONCE: std::sync::Once = std::sync::Once::new();
+                IMAGE_ONCE.call_once(|| {
+                    tracing::warn!(
+                        asset,
+                        "Prim::Image replay is not implemented yet — rendering a \
+                         placeholder rect (Plan 3 follow-up)"
+                    );
+                });
+                let rect = Path::new(|b| {
+                    b.rounded_rectangle(Point::new(*x, *y), Size::new(*w, *h), 3.0.into());
+                });
+                frame.fill(&rect, Color { a: 0.25 * mo, ..slice_color });
+                frame.stroke(
+                    &rect,
+                    Stroke::default()
+                        .with_color(Color { a: 0.6 * mo, ..slice_color })
+                        .with_width(1.0),
+                );
+            }
+            Prim::Group { dx, dy, scale, children } => {
+                frame.with_save(|f| {
+                    f.translate(iced::Vector::new(*dx, *dy));
+                    if (*scale - 1.0).abs() > 1e-4 {
+                        f.scale(*scale);
+                    }
+                    draw_prims(f, children, palette, slice_color, mo);
+                });
+            }
+            // `Prim` is #[non_exhaustive]: a newer proto revision can
+            // add variants this overlay doesn't know. Skip them, say
+            // so once per session.
+            other => {
+                static UNKNOWN_ONCE: std::sync::Once = std::sync::Once::new();
+                UNKNOWN_ONCE.call_once(|| {
+                    tracing::warn!(
+                        ?other,
+                        "unknown scene primitive — skipped (update OxideMX to render it)"
+                    );
+                });
+            }
+        }
+    }
+}
+
+/// Shared fill/stroke application for Path + Arc prims.
+fn paint_path(
+    frame: &mut Frame,
+    path: &Path,
+    stroke: Option<&oxidemx_widget_proto::Stroke>,
+    fill: Option<&oxidemx_widget_proto::Color>,
+    palette: &ThemeColors,
+    slice_color: Color,
+    mo: f32,
+) {
+    if let Some(c) = fill {
+        frame.fill(path, resolve_scene_color(c, palette, slice_color, mo));
+    }
+    if let Some(s) = stroke {
+        frame.stroke(
+            path,
+            Stroke::default()
+                .with_color(resolve_scene_color(&s.color, palette, slice_color, mo))
+                .with_width(s.width),
+        );
+    }
+}
+
+/// `oxidemx_widget_proto::Color` → iced colour, modulated by the
+/// menu opacity. `Palette("accent")` and unknown palette keys map
+/// to the slice's configured colour — the same resolution chain
+/// `draw_slice` runs for icon tints, so a default `tile()` scene
+/// matches the built-in wedge styling.
+fn resolve_scene_color(
+    color: &oxidemx_widget_proto::Color,
+    palette: &ThemeColors,
+    slice_color: Color,
+    mo: f32,
+) -> Color {
+    match color {
+        oxidemx_widget_proto::Color::Rgba(r, g, b, a) => Color::from_rgba(
+            *r as f32 / 255.0,
+            *g as f32 / 255.0,
+            *b as f32 / 255.0,
+            (*a as f32 / 255.0) * mo,
+        ),
+        oxidemx_widget_proto::Color::Palette(key) => {
+            if key == "accent" {
+                return Color { a: mo, ..slice_color };
+            }
+            match palette.lookup(key).and_then(parse_hex_rgba) {
+                Some((r, g, b, a)) => {
+                    Color::from_rgba(r as f32, g as f32, b as f32, a as f32 * mo)
+                }
+                None => Color { a: mo, ..slice_color },
+            }
+        }
+    }
+}
+
+/// Fallback wedge for a disabled / missing / not-yet-rendered
+/// plugin instance (spec §9): the manifest's `fallback_icon` (or
+/// the widget's own icon) dimmed on a faint disc, a ⚠ badge at the
+/// disc's top-right, and the slice label below — the same
+/// icon+caption layout `draw_slice` paints for placeholder slots.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn draw_custom_fallback(
+    frame: &mut Frame,
+    icon_pos: Point,
+    slice: &Slice,
+    summary: Option<&WidgetSummary>,
+    palette: &ThemeColors,
+    mo: f32,
+    slot_color: Color,
+    icons: &crate::render::icons::IconCache,
+    icon_bg_radius: f32,
+) {
+    let dim = 0.45 * mo;
+
+    // Faint icon-background disc (the regular widget path skips the
+    // icon furniture; the fallback brings it back so the wedge
+    // reads as "a slot with a problem", not "empty").
+    let (s1r, s1g, s1b, _) = parse_hex_rgba(&palette.surface1).unwrap_or((0.2, 0.2, 0.25, 1.0));
+    frame.fill(
+        &Path::circle(icon_pos, icon_bg_radius),
+        Color::from_rgba(s1r as f32, s1g as f32, s1b as f32, 0.5 * mo),
+    );
+
+    // fallback_icon (XDG name) first, then the bundle's own icon
+    // file (absolute path) — IconCache resolves both shapes.
+    let source: Option<String> = summary
+        .and_then(|s| s.fallback_icon.clone())
+        .or_else(|| summary.map(|s| s.icon_path.display().to_string()));
+    let tint = (slot_color.r, slot_color.g, slot_color.b, 1.0);
+    let glyph_size = (icon_bg_radius * 1.4).max(8.0);
+    let drew_icon = source
+        .and_then(|src| icons.resolve(&src, super::GLYPH_RASTER_PX, tint))
+        .map(|handle| {
+            crate::render::icons::draw_icon(
+                frame, icon_pos.x, icon_pos.y, glyph_size, &handle, dim,
+            );
+        })
+        .is_some();
+    if !drew_icon {
+        // Not installed / icon unloadable — placeholder dot, same as
+        // draw_slice's icon-miss path, dimmed.
+        frame.fill(
+            &Path::circle(icon_pos, icon_bg_radius * 0.35),
+            Color { a: dim, ..slot_color },
+        );
+    }
+
+    // ⚠ badge at the disc's top-right (theme yellow).
+    let (yr, yg, yb, _) = parse_hex_rgba(&palette.yellow).unwrap_or((0.96, 0.76, 0.25, 1.0));
+    draw_centered_text(
+        frame,
+        "⚠",
+        Point::new(
+            icon_pos.x + icon_bg_radius * 0.78,
+            icon_pos.y - icon_bg_radius * 0.78,
+        ),
+        12.0,
+        Color::from_rgba(yr as f32, yg as f32, yb as f32, mo),
+        iced::Font::DEFAULT,
+    );
+
+    // Caption below the disc — slice label (dimmed), mirroring the
+    // under-icon caption of regular slices.
+    if !slice.label.trim().is_empty() {
+        let (tr, tg, tb, _) = parse_hex_rgba(&palette.subtext1).unwrap_or((0.8, 0.8, 0.8, 1.0));
+        draw_centered_text(
+            frame,
+            &slice.label,
+            Point::new(icon_pos.x, icon_pos.y + icon_bg_radius + 4.0),
+            10.0,
+            Color::from_rgba(tr as f32, tg as f32, tb as f32, 0.9 * dim),
+            iced::Font::DEFAULT,
         );
     }
 }

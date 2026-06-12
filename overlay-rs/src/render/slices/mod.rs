@@ -29,7 +29,7 @@ pub use center::{
 pub use ring::draw_ring_transformed;
 pub use submenu::draw_submenu;
 pub use tooltip::{draw_arc_tooltip, ArcTooltipStyle};
-pub use widgets::draw_weather_popup;
+pub use widgets::{draw_weather_popup, CustomWidgets};
 
 /// Fixed rasterization size for slice icons (ICON_BG_RADIUS × 1.4
 /// at rest scale). Icons are always rasterized at THIS size and the

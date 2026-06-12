@@ -263,9 +263,9 @@ Behavioral requirements:
 5. Click on a Custom widget slice: `actions.rs dispatch` gains a `WidgetSource::Custom` arm sending `HostCtl::Slice{Click}` (non-blocking try_send). Scroll over the slice (where Dial slices hook `adjust_dial`) sends `Scroll(delta)`. Hover enter/leave from the painter's existing hover tracking sends `Hover(bool)` with the live `WedgeGeom{hovered}`.
 6. Menu open/close transitions (wherever the overlay decides show/hide — find the state machine in `radial/mod.rs`/`update.rs`) send MenuOpened{page}/MenuClosed.
 
-- [ ] `cargo check -p oxidemx-overlay` then `cargo build -p oxidemx-overlay`
-- [ ] Smoke script `scripts/widget-smoke.sh`: builds the weather example, installs it into a temp XDG_CONFIG_HOME with a config.json placing it on slot 4 (set `weather.location` global bag inline), runs the overlay binary headless-checked — if the overlay can't run headless, the script just asserts the worker boots and a Scene event arrives via a `--widget-smoke` debug flag that prints scene revision to stdout and exits (add the flag behind `cfg(debug_assertions)`).
-- [ ] Commit: `feat(overlay): custom widget slices — host worker, scene replay, event routing`
+- [x] `cargo check -p oxidemx-overlay` then `cargo build -p oxidemx-overlay`
+- [x] Smoke script `scripts/widget-smoke.sh`: builds the weather example, installs it into a temp XDG_CONFIG_HOME with a config.json placing it on slot 4 (set `weather.location` global bag inline), runs the overlay binary headless-checked — if the overlay can't run headless, the script just asserts the worker boots and a Scene event arrives via a `--widget-smoke` debug flag that prints scene revision to stdout and exits (add the flag behind `cfg(debug_assertions)`).
+- [x] Commit: `feat(overlay): custom widget slices — host worker, scene replay, event routing`
 
 ---
 

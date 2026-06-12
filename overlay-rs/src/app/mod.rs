@@ -138,6 +138,16 @@ pub enum Message {
         idx: usize,
         direction: i32,
     },
+    /// Event from the widget-host worker: a fresh scene for the
+    /// painter's replay store, an instance failure, or the
+    /// installed-widget registry (Plan 3's picker).
+    WidgetHost(oxidemx_widget_host::HostEvent),
+    /// Wheel over a Custom-widget slice — forwarded to the guest as
+    /// `Event::Scroll { delta }` via the host worker.
+    WidgetScroll {
+        idx: usize,
+        delta: f32,
+    },
     /// Monitor size arrived for the debounced chat-size persist —
     /// clamp below the output before writing the config.
     ChatSizePersist((f32, f32), Option<Size>),

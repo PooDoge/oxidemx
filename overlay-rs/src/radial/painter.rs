@@ -103,6 +103,21 @@ impl<'a> canvas::Program<crate::app::Message> for Painter<'a> {
                             direction,
                         }));
                     }
+                    // Wheel over a Custom-widget wedge forwards the
+                    // raw delta to the plugin (Event::Scroll).
+                    if self
+                        .state
+                        .slices
+                        .get(idx)
+                        .and_then(|s| s.widget.as_ref())
+                        .map(|w| matches!(w.source, oxidemx_shared::WidgetSource::Custom(_)))
+                        .unwrap_or(false)
+                    {
+                        return Some(Action::publish(crate::app::Message::WidgetScroll {
+                            idx,
+                            delta: dy_scroll,
+                        }));
+                    }
                     return None;
                 }
                 // Scroll up (positive y) → next page; scroll down →
@@ -324,6 +339,33 @@ impl<'a> canvas::Program<crate::app::Message> for Painter<'a> {
             (old_t, new_t)
         };
 
+        // Custom-widget replay context: page name (for derived
+        // instance keys), the scene store, failures, and registry —
+        // one per ring because the outgoing ring still belongs to
+        // the previous page.
+        let active_page_name = self
+            .state
+            .pages
+            .get(self.state.active_page)
+            .map(|p| p.name.as_str())
+            .unwrap_or("Default");
+        let custom_active = crate::render::slices::CustomWidgets {
+            page_name: active_page_name,
+            scenes: &self.state.widget_scenes,
+            failed: &self.state.widget_failed,
+            registry: &self.state.widget_registry,
+        };
+        let custom_outgoing = crate::render::slices::CustomWidgets {
+            page_name: self
+                .state
+                .previous_page_name
+                .as_deref()
+                .unwrap_or(active_page_name),
+            scenes: &self.state.widget_scenes,
+            failed: &self.state.widget_failed,
+            registry: &self.state.widget_registry,
+        };
+
         // Outgoing ring — only when actively transitioning.
         if pt_active {
             if let Some(old_slices) = self.state.previous_slices.as_ref() {
@@ -348,6 +390,7 @@ impl<'a> canvas::Program<crate::app::Message> for Painter<'a> {
                         self.state.active_slot_count(),
                         wfm,
                         &self.state.widgets,
+                        &custom_outgoing,
                     );
                 }
             }
@@ -397,6 +440,7 @@ impl<'a> canvas::Program<crate::app::Message> for Painter<'a> {
             self.state.active_slot_count(),
             wfm,
             &self.state.widgets,
+            &custom_active,
         );
 
         // Centre label + description: prefer the hovered submenu

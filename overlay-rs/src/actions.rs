@@ -84,10 +84,14 @@ pub fn dispatch(slice: &Slice) {
             }
         }
         ActionKind::Widget | ActionKind::Dial => {
-            // Display-only / scroll-adjusted wedges. Widgets render
-            // live data; dials adjust on wheel-over-slice. Neither
-            // has a release action (a Widget slice with a submenu is
-            // routed through the Submenu hover path like any other).
+            // Display-only / scroll-adjusted wedges. Built-in widgets
+            // render live data; dials adjust on wheel-over-slice.
+            // Neither has a release action here (a Widget slice with
+            // a submenu is routed through the Submenu hover path like
+            // any other). `WidgetSource::Custom` slices never reach
+            // this arm — `RadialState::dispatch_and_close` routes
+            // their clicks through `dispatch_custom_widget` so the
+            // plugin gets an `Event::Click`.
         }
         ActionKind::Power => {
             // Session power actions go through the desktop session's
@@ -142,6 +146,29 @@ pub fn dispatch(slice: &Slice) {
         }
         ActionKind::None => {}
     }
+}
+
+/// Click on a `WidgetSource::Custom` wedge: forward an
+/// `Event::Click` to the plugin via the host worker, with the live
+/// wedge geometry so a render triggered by the click uses what the
+/// painter laid out. Non-blocking (`try_send` under the hood) —
+/// widget code can never stall the dispatch path.
+pub fn dispatch_custom_widget(
+    slice: &Slice,
+    instance: oxidemx_widget_host::InstanceId,
+    geom: oxidemx_widget_proto::WedgeGeom,
+) {
+    info!(
+        label = %slice.label,
+        widget = %instance.widget_id,
+        key = %instance.instance_key,
+        "dispatching custom-widget click"
+    );
+    crate::widget_host::send(oxidemx_widget_host::HostCtl::Slice {
+        instance,
+        ev: oxidemx_widget_host::SliceEvent::Click,
+        geom,
+    });
 }
 
 /// Adjust a dial slice's target by one ±5 % step. Brightness goes

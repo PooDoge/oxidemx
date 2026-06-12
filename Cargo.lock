@@ -4465,6 +4465,8 @@ dependencies = [
  "once_cell",
  "oxidemx-icons",
  "oxidemx-shared",
+ "oxidemx-widget-host",
+ "oxidemx-widget-proto",
  "oxidemx-window",
  "percent-encoding",
  "reqwest",

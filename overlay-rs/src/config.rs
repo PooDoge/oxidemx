@@ -187,3 +187,86 @@ pub fn watch_stream() -> impl futures_util::stream::Stream<Item = oxidemx_shared
 
     rx.boxed()
 }
+
+/// Watch the widgets install dir (`~/.config/oxidemx/widgets/`) and
+/// invoke `on_change` after each debounced burst of filesystem
+/// events — installs, uninstalls, and manifest edits all land here.
+/// The widget-host bridge passes a closure that try_sends
+/// `HostCtl::RescanWidgets` at the worker.
+///
+/// Must be called from a tokio runtime context (uses
+/// `spawn_blocking`, like `watch_stream`). Watches recursively:
+/// bundles unpack as `<id>/widget.json` + assets, and the events we
+/// care about are one level down.
+pub fn spawn_widgets_dir_watcher(on_change: impl Fn() + Send + 'static) {
+    use notify::{RecommendedWatcher, RecursiveMode, Watcher};
+    use std::time::{Duration, Instant};
+
+    let Some(dir) = oxidemx_widget_host::WidgetRegistry::widgets_dir() else {
+        tracing::warn!("widgets dir unresolvable (no HOME?); rescan watcher disabled");
+        return;
+    };
+
+    let (raw_tx, raw_rx) = std::sync::mpsc::channel::<()>();
+    let watch_dir = dir.clone();
+    tokio::task::spawn_blocking(move || {
+        let mut watcher: RecommendedWatcher =
+            match notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
+                if let Ok(event) = res {
+                    use notify::EventKind;
+                    if matches!(
+                        event.kind,
+                        EventKind::Modify(_) | EventKind::Create(_) | EventKind::Remove(_)
+                    ) {
+                        let _ = raw_tx.send(());
+                    }
+                }
+            }) {
+                Ok(w) => w,
+                Err(e) => {
+                    tracing::warn!("widgets watcher init failed: {e}");
+                    return;
+                }
+            };
+        if let Err(e) = std::fs::create_dir_all(&watch_dir) {
+            tracing::warn!("widgets watcher: couldn't ensure {}: {e}", watch_dir.display());
+            return;
+        }
+        if let Err(e) = watcher.watch(&watch_dir, RecursiveMode::Recursive) {
+            tracing::warn!("widgets watcher: failed to watch {}: {e}", watch_dir.display());
+            return;
+        }
+        std::thread::park();
+        drop(watcher); // explicit
+    });
+
+    // Debounce: an install unpacks several files back-to-back; one
+    // rescan per burst is plenty (the registry scan re-reads every
+    // manifest).
+    let debounce = Duration::from_millis(400);
+    tokio::task::spawn_blocking(move || {
+        let mut last_event = Instant::now();
+        let mut pending = false;
+        loop {
+            let recv = raw_rx.recv_timeout(if pending {
+                debounce
+            } else {
+                Duration::from_millis(250)
+            });
+            match recv {
+                Ok(()) => {
+                    pending = true;
+                    last_event = Instant::now();
+                }
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                    if pending && last_event.elapsed() >= debounce {
+                        pending = false;
+                        tracing::info!("widgets dir changed — requesting rescan");
+                        on_change();
+                    }
+                }
+                Err(_) => return,
+            }
+        }
+    });
+}

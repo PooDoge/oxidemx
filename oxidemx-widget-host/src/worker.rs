@@ -78,6 +78,9 @@ pub struct WidgetSummary {
     pub state: String,
     pub has_options: bool,
     pub icon_path: PathBuf,
+    /// XDG icon name for the disabled/missing fallback wedge
+    /// (spec §9), from `manifest.slice.fallback_icon`.
+    pub fallback_icon: Option<String>,
 }
 
 /// Wedge geometry assumed before the painter has sent a real one.
@@ -551,6 +554,7 @@ impl Worker {
                 },
                 has_options: !w.manifest.options.is_empty(),
                 icon_path: w.dir.join(&w.manifest.icon),
+                fallback_icon: w.manifest.slice.fallback_icon.clone(),
             })
             .collect();
         let _ = self.events.send(HostEvent::RegistryChanged(summaries)).await;

@@ -22,6 +22,10 @@ pub(super) fn subscription(state: &RadialState) -> Subscription<Message> {
             .map(|cfg| Message::ConfigReloaded(Box::new(cfg))),
         Subscription::run(ai_question_stream),
         Subscription::run(ai_stream_stream),
+        // Widget-host worker: spawned once (stable fn identity keeps
+        // the subscription alive across rebuilds); yields
+        // Message::WidgetHost scene/failure/registry events.
+        Subscription::run(crate::widget_host::stream),
         iced::time::every(std::time::Duration::from_millis(16)).map(|_| Message::Tick),
         iced::window::events().map(|(id, event)| match event {
             iced::window::Event::Opened { .. } => Message::WindowOpened(id),

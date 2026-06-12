@@ -498,7 +498,49 @@ pub(super) fn update(state: &mut RadialState, message: Message) -> Task<Message>
         }
         Message::ConfigReloaded(cfg) => {
             info!("config reloaded — refreshing theme + slices");
+            // The widget-host worker re-derives its desired instance
+            // set (load/drop/SettingsChanged) from the same config
+            // the UI just applied.
+            crate::widget_host::send(oxidemx_widget_host::HostCtl::ConfigChanged(
+                std::sync::Arc::new((*cfg).clone()),
+            ));
             state.reload_from(&cfg);
+            Task::none()
+        }
+        Message::WidgetHost(ev) => {
+            match ev {
+                oxidemx_widget_host::HostEvent::Scene { instance, scene, revision } => {
+                    // A live scene clears any earlier failure (the
+                    // worker reloaded the instance after a rescan or
+                    // config edit). Storing it is all a redraw needs:
+                    // the painter rebuilds its Frame every draw and
+                    // the cache_epsilon buster (do NOT remove it)
+                    // keeps iced's layer cache from resurrecting
+                    // stale frames — same path the sampler's
+                    // WidgetSample updates ride.
+                    state.widget_failed.remove(&instance);
+                    state.widget_scenes.insert(instance, (scene, revision));
+                }
+                oxidemx_widget_host::HostEvent::InstanceFailed { instance, error } => {
+                    warn!(
+                        widget = %instance.widget_id,
+                        key = %instance.instance_key,
+                        error,
+                        "widget instance failed — rendering fallback wedge"
+                    );
+                    state.widget_scenes.remove(&instance);
+                    state.widget_failed.insert(instance, error);
+                }
+                oxidemx_widget_host::HostEvent::RegistryChanged(list) => {
+                    debug!(count = list.len(), "widget registry updated");
+                    state.widget_registry =
+                        list.into_iter().map(|s| (s.id.clone(), s)).collect();
+                }
+            }
+            Task::none()
+        }
+        Message::WidgetScroll { idx, delta } => {
+            state.send_widget_slice_event(idx, oxidemx_widget_host::SliceEvent::Scroll(delta));
             Task::none()
         }
         Message::WindowOpened(id) => {
@@ -917,6 +959,15 @@ fn classify(slice: &oxidemx_shared::Slice) -> DispatchOutcome {
     // user gets `invalid` feedback for that confused state.
     if matches!(slice.kind, oxidemx_shared::ActionKind::Submenu) && !slice.submenu.is_empty() {
         return DispatchOutcome::Unactionable;
+    }
+    // Custom-widget wedges dispatch a real Event::Click to the
+    // plugin even though their `command` is empty — confirm, not
+    // invalid.
+    if matches!(
+        slice.widget.as_ref().map(|w| &w.source),
+        Some(oxidemx_shared::WidgetSource::Custom(_))
+    ) {
+        return DispatchOutcome::Actionable;
     }
     if slice.command.trim().is_empty() {
         return DispatchOutcome::Unactionable;
