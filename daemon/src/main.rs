@@ -456,7 +456,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let dbus_connection = match init_dbus_service_with_device(
         battery_state.clone(),
         shared_config.clone(),
-        haptic_manager,
+        haptic_manager.clone(),
         device_mode.clone(),
         device_name.clone(),
         gaming_mode,
@@ -589,6 +589,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
 
     let overlay_spawner_for_events = overlay_spawner.clone();
+    let haptic_manager_for_events = haptic_manager.clone();
     // Spawn event processing task with D-Bus connection
     let event_handle = tokio::spawn(async move {
         process_gesture_events(
@@ -597,6 +598,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             trigger_map_for_events,
             macro_engine_for_events,
             overlay_spawner_for_events,
+            haptic_manager_for_events,
         )
         .await
     });
@@ -1085,6 +1087,7 @@ async fn process_gesture_events(
     trigger_map: Arc<std::sync::RwLock<oxidemxd::macros::TriggerMap>>,
     macro_engine: Arc<Mutex<oxidemxd::macros::MacroEngine>>,
     overlay_spawner: Arc<oxidemxd::overlay_spawner::OverlaySpawner>,
+    haptic_manager: oxidemxd::hidpp::SharedHapticManager,
 ) {
     while let Some(event) = event_rx.recv().await {
         match event {
@@ -1164,7 +1167,9 @@ async fn process_gesture_events(
             GestureEvent::ButtonActionEvent { action, pressed } => {
                 if pressed {
                     info!(%action, "Button action triggered");
-                    match oxidemxd::actions::execute_button_action(action).await {
+                    match oxidemxd::actions::execute_button_action(action, Some(&haptic_manager))
+                        .await
+                    {
                         Ok(true) => {
                             // Action was handled directly
                         }

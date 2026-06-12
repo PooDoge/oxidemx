@@ -475,6 +475,66 @@ async fn blocking_round(
 /// History note: the original Antigravity-era client targeted this
 /// API at `v1beta2` (404) and was temporarily ported to stateless
 /// `generateContent`; this is the proper `v1beta` transport.
+/// One headless heartbeat turn (see agent/heartbeat.rs for the
+/// contract). Tool-less single round: persona + memories +
+/// checklist in, plain text out. Returns `None` when the agent
+/// answered HEARTBEAT_OK (nothing needs attention) or when no
+/// checklist exists; `Some(alert)` otherwise.
+pub async fn run_heartbeat() -> Result<Option<String>, Box<dyn std::error::Error + Send + Sync>> {
+    let Some(checklist) = crate::agent::heartbeat::checklist() else {
+        return Ok(None);
+    };
+    let api_key = load_api_key()?;
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(90))
+        .build()?;
+
+    let mut system = String::from(
+        "You are OxideMX-AI on a periodic background heartbeat tick. You have NO tools \
+         this turn. Review the user's checklist below against the current date/time and \
+         your knowledge of the user. If NOTHING needs their attention right now, reply \
+         with exactly HEARTBEAT_OK and nothing else. Otherwise reply with ONE short \
+         notification-sized message (no markdown headers) describing only what needs \
+         attention.",
+    );
+    if let Some(soul) = crate::agent::persona::soul_block("general") {
+        system.push_str("\n\nPERSONA:\n");
+        system.push_str(&soul);
+    }
+    if let Some(user) = crate::agent::persona::user_block("general") {
+        system.push_str("\n\nABOUT THE USER:\n");
+        system.push_str(&user);
+    }
+    if let Some(mem) = crate::agent::memory::injection_block_for(&checklist) {
+        system.push_str("\n\n");
+        system.push_str(&mem);
+    }
+    system.push_str("\n\nHEARTBEAT CHECKLIST (user-authored heartbeat.md):\n");
+    system.push_str(&checklist);
+
+    // Give the model the wall clock — it has no other way to judge
+    // time-conditional checklist lines.
+    let now = std::process::Command::new("date")
+        .arg("+%A %Y-%m-%d %H:%M %Z")
+        .output()
+        .ok()
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .unwrap_or_default();
+
+    let req = json!({
+        "model": "gemini-2.5-flash",
+        "system_instruction": system,
+        "input": format!("Heartbeat tick at {now}."),
+        "store": false,
+    });
+    let outcome = blocking_round(&client, &api_key, &req).await?;
+    let text = outcome.text.trim().to_string();
+    if text.is_empty() || text == "HEARTBEAT_OK" || text.starts_with("HEARTBEAT_OK") {
+        return Ok(None);
+    }
+    Ok(Some(text))
+}
+
 pub async fn ask_ai(
     api_key: &str,
     mode: AgentMode,
