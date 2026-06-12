@@ -86,6 +86,12 @@ impl WidgetRegistry {
         self.widgets.values().filter(|w| w.state == WidgetState::Ready)
     }
 
+    /// Every installed widget, Ready or not (the picker shows
+    /// incompatible ones with their reason).
+    pub fn iter(&self) -> impl Iterator<Item = &InstalledWidget> {
+        self.widgets.values()
+    }
+
     /// `~/.config/oxidemx/widgets`
     pub fn widgets_dir() -> Option<PathBuf> {
         let base = std::env::var_os("XDG_CONFIG_HOME")

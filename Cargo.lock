@@ -4541,11 +4541,16 @@ dependencies = [
 name = "oxidemx-widget-host"
 version = "0.1.0"
 dependencies = [
+ "async-channel",
  "log",
+ "oxidemx-shared",
  "oxidemx-widget-proto",
  "postcard",
+ "reqwest",
  "serde",
  "serde_json",
+ "tokio",
+ "url",
  "wasmi",
  "wasmi_wasi",
 ]

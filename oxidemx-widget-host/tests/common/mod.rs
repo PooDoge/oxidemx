@@ -67,6 +67,7 @@ pub fn fixture_wasm(name: &str) -> Option<PathBuf> {
 /// Build a crate at an arbitrary path (outside `fixtures/`) and return the
 /// wasm artifact. `key` is a unique cache key; `crate_dir` is the directory
 /// containing `Cargo.toml`; `bin_stem` is the wasm file name without extension.
+#[allow(dead_code)] // not every test binary uses both helpers
 pub fn build_wasm_at(key: &str, crate_dir: PathBuf, bin_stem: &str) -> Option<PathBuf> {
     if !target_installed() {
         eprintln!(
