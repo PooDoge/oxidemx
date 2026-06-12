@@ -136,6 +136,7 @@ pub fn view<'a>(state: &'a RadialState, kit: &Kit) -> Element<'a, Message> {
     column![
         header,
         scrollable(container(rows).padding(iced::Padding::default().right(12.0)))
+            .style(kit.scrollable_style())
             .height(Length::Fill),
         container(footnote).padding(iced::Padding {
             top: 4.0,

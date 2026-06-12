@@ -79,6 +79,33 @@ impl Kit {
             ..c
         }
     }
+
+    /// Subtle themed scrollbar shared by every chat scrollable —
+    /// thin transparent rail with an `overlay0` scroller (the iced
+    /// default is a bright wide bar that fights the design).
+    pub fn scrollable_style(
+        &self,
+    ) -> impl Fn(&iced::Theme, iced::widget::scrollable::Status) -> iced::widget::scrollable::Style
+    {
+        let kit = *self;
+        move |theme, status| {
+            let mut s = iced::widget::scrollable::default(theme, status);
+            let rail = iced::widget::scrollable::Rail {
+                background: None,
+                border: iced::border::Border::default(),
+                scroller: iced::widget::scrollable::Scroller {
+                    background: iced::Background::Color(kit.fade(kit.overlay0, 0.8)),
+                    border: iced::border::Border {
+                        radius: 2.0.into(),
+                        ..Default::default()
+                    },
+                },
+            };
+            s.vertical_rail = rail;
+            s.horizontal_rail = rail;
+            s
+        }
+    }
 }
 
 /// Assemble the whole chat surface. Region layout mirrors the

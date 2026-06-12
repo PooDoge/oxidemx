@@ -252,10 +252,17 @@ impl<'a> canvas::Program<crate::app::Message> for CapsPainter<'a> {
         if self.state.chat_resize.is_some() {
             return match event {
                 Event::Mouse(mouse::Event::CursorMoved { .. }) => {
-                    let p = cursor.position_in(bounds)?;
+                    // The grip sits at the window corner, so growing
+                    // immediately takes the pointer OUTSIDE the
+                    // window. Wayland's implicit grab keeps the
+                    // motion events coming, but `position_in` filters
+                    // to inside-bounds and would freeze the drag at
+                    // the edge — use the raw window-coordinate
+                    // position instead.
+                    let p = cursor.position()?;
                     Some(Action::publish(crate::app::Message::ChatResizeMove {
-                        x: p.x as f64,
-                        y: p.y as f64,
+                        x: (p.x - bounds.x) as f64,
+                        y: (p.y - bounds.y) as f64,
                     }))
                 }
                 Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
@@ -387,10 +394,15 @@ impl<'a> canvas::Program<crate::app::Message> for CapsPainter<'a> {
         if t < INTERACTIVE_T {
             return mouse::Interaction::default();
         }
+        // An in-flight resize keeps the diagonal cursor even while
+        // the pointer is dragged past the window edge.
+        if self.state.chat_resize.is_some() {
+            return mouse::Interaction::ResizingDiagonallyDown;
+        }
         let Some(p) = cursor.position_in(bounds) else {
             return mouse::Interaction::default();
         };
-        if self.state.chat_resize.is_some() || hit_grip(p, bounds.width, bounds.height) {
+        if hit_grip(p, bounds.width, bounds.height) {
             return mouse::Interaction::ResizingDiagonallyDown;
         }
         let rects = cap_rects(t, bounds.width, bounds.height);

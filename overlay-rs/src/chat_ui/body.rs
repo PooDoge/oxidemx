@@ -138,6 +138,7 @@ pub fn conversation<'a>(state: &'a RadialState, kit: &Kit) -> Element<'a, Messag
     }
     scrollable(container(list).padding(iced::Padding::default().right(12.0)))
         .id(CHAT_SCROLL_ID)
+        .style(kit.scrollable_style())
         .height(Length::Fill)
         .into()
 }
@@ -336,6 +337,7 @@ pub fn threads_list<'a>(state: &'a RadialState, kit: &Kit) -> Element<'a, Messag
         );
     }
     scrollable(container(list).padding(iced::Padding::default().right(12.0)))
+        .style(kit.scrollable_style())
         .height(Length::Fill)
         .into()
 }

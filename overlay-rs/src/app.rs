@@ -1629,7 +1629,7 @@ fn view(state: &RadialState) -> Element<'_, Message> {
             .height(Length::Fill)
             .style(move |_| iced::widget::container::Style {
                 background: Some(iced::Background::Color(Color {
-                    a: 0.94 * body_a,
+                    a: body_a,
                     ..base_c
                 })),
                 border: iced::border::Border {

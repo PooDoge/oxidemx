@@ -92,6 +92,7 @@ pub fn view<'a>(state: &'a RadialState, kit: &Kit) -> Element<'a, Message> {
             })
             .color(kit.fade(kit.text, 1.0)),
         scrollable(container(rows).padding(iced::Padding::default().right(12.0)))
+            .style(kit.scrollable_style())
             .height(Length::Fill),
         Space::new().height(Length::Fixed(0.0)),
     ]

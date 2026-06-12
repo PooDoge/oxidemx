@@ -9,23 +9,32 @@ use crate::app::Message;
 use crate::radial::RadialState;
 
 /// How many recent threads render as chips before the "…" chip
-/// hands off to the full list view.
-const MAX_CHIPS: usize = 3;
+/// hands off to the full list view. Two keeps the strip inside the
+/// default 484 px window next to the mode pill + flash indicator.
+const MAX_CHIPS: usize = 2;
 
 pub fn strip<'a>(state: &'a RadialState, kit: &Kit) -> Element<'a, Message> {
     let kit = *kit;
 
     let chip = move |label: String, active: bool, dim: bool, msg: Message| {
-        button(text(label).size(11.5).color(kit.fade(
-            if active {
-                kit.accent
-            } else if dim {
-                kit.subtext0
-            } else {
-                kit.subtext1
-            },
-            1.0,
-        )))
+        button(
+            text(label)
+                .size(11.5)
+                // A chip must never wrap into a second line — the
+                // strip is one fixed-height row; long titles are
+                // pre-truncated with an ellipsis.
+                .wrapping(iced::widget::text::Wrapping::None)
+                .color(kit.fade(
+                    if active {
+                        kit.accent
+                    } else if dim {
+                        kit.subtext0
+                    } else {
+                        kit.subtext1
+                    },
+                    1.0,
+                )),
+        )
         .padding([5, 12])
         .style(move |_, _status| button::Style {
             background: Some(iced::Background::Color(if active {
@@ -69,8 +78,8 @@ pub fn strip<'a>(state: &'a RadialState, kit: &Kit) -> Element<'a, Message> {
         } else {
             t.title.clone()
         };
-        if label.chars().count() > 18 {
-            label = label.chars().take(17).collect::<String>() + "…";
+        if label.chars().count() > 14 {
+            label = label.chars().take(13).collect::<String>() + "…";
         }
         bar = bar.push(chip(
             label,
@@ -111,13 +120,10 @@ pub fn strip<'a>(state: &'a RadialState, kit: &Kit) -> Element<'a, Message> {
     let is_pro = state.chat().model == crate::ai_client::PRO_MODEL;
     bar = bar.push(
         button(
-            text(if is_pro {
-                "✦ Pro mode"
-            } else {
-                "✦ Flash mode"
-            })
-            .size(10.5)
-            .color(kit.fade(if is_pro { kit.accent } else { kit.subtext0 }, 1.0)),
+            text(if is_pro { "✦ Pro" } else { "✦ Flash" })
+                .size(10.5)
+                .wrapping(iced::widget::text::Wrapping::None)
+                .color(kit.fade(if is_pro { kit.accent } else { kit.subtext0 }, 1.0)),
         )
         .padding([4, 6])
         .style(|_, _| button::Style::default())
@@ -126,6 +132,9 @@ pub fn strip<'a>(state: &'a RadialState, kit: &Kit) -> Element<'a, Message> {
 
     iced::widget::container(bar)
         .width(Length::Fill)
+        // Anything that still doesn't fit clips at the window edge
+        // instead of painting outside the body.
+        .clip(true)
         .padding(iced::Padding {
             top: 10.0,
             right: 16.0,
