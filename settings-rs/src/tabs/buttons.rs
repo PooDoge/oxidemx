@@ -11,11 +11,13 @@
 
 use crate::radial_preview::radial_preview_widget;
 use crate::{Message, State};
-use oxidemx_widgets::style;
-use oxidemx_widgets::widgets::section_header;
-use iced::widget::{button, column, container, pick_list, row, rule, text, text_input, toggler, Space};
+use iced::widget::{
+    button, column, container, pick_list, row, rule, text, text_input, toggler, Space,
+};
 use iced::{Alignment, Element, Length};
 use oxidemx_shared::{ActionKind, Condition, RadialPage, Slice};
+use oxidemx_widgets::style;
+use oxidemx_widgets::widgets::section_header;
 
 // ============================================================================
 // View entry
@@ -47,10 +49,14 @@ fn page_picker_card(state: &State) -> Element<'_, Message> {
     // Defensive — should never happen post-`normalize_pages`, but
     // an empty pages list would otherwise show an empty picker.
     if pages.is_empty() {
-        return container(text("(no pages — internal error)").size(11).style(style::text_dim(pal)))
-            .padding(14)
-            .style(style::card(pal))
-            .into();
+        return container(
+            text("(no pages — internal error)")
+                .size(11)
+                .style(style::text_dim(pal)),
+        )
+        .padding(14)
+        .style(style::card(pal))
+        .into();
     }
 
     let options: Vec<PageChoice> = pages
@@ -63,9 +69,11 @@ fn page_picker_card(state: &State) -> Element<'_, Message> {
         .collect();
     let active = state.active_page.min(pages.len() - 1);
     let selected = options.get(active).cloned();
-    let picker = pick_list(options, selected, |c: PageChoice| Message::SetActivePage(c.idx))
-        .style(style::pick_list_style(pal))
-        .text_size(13);
+    let picker = pick_list(options, selected, |c: PageChoice| {
+        Message::SetActivePage(c.idx)
+    })
+    .style(style::pick_list_style(pal))
+    .text_size(13);
 
     let intro = text(
         "Multi-page menu: scroll the wheel over the centre puck to \
@@ -131,7 +139,9 @@ fn page_move_buttons(state: &State, active: usize) -> Element<'_, Message> {
     if state.config.radial_menu.pages.len() > 1 {
         delete_btn = delete_btn.on_press(Message::DeletePage(active));
     }
-    row![left_btn, right_btn, dup_btn, delete_btn].spacing(6).into()
+    row![left_btn, right_btn, dup_btn, delete_btn]
+        .spacing(6)
+        .into()
 }
 
 fn page_props_editor(state: &State, active: usize) -> Element<'_, Message> {
@@ -143,7 +153,10 @@ fn page_props_editor(state: &State, active: usize) -> Element<'_, Message> {
 
     let active_for_name = active;
     let name_input = text_input("Page name", page.name.as_str())
-        .on_input(move |v| Message::SetPageName { page: active_for_name, name: v })
+        .on_input(move |v| Message::SetPageName {
+            page: active_for_name,
+            name: v,
+        })
         .padding(6)
         .size(12);
 
@@ -180,8 +193,8 @@ fn page_props_editor(state: &State, active: usize) -> Element<'_, Message> {
         // ticking countdown would need its own subscription. The
         // sample fires automatically after 4 s so a static label
         // is enough — the status bar already says "Sampling in 4s".
-        let waiting_btn = button(text("Switch to target app… (4s)").size(11))
-            .style(style::btn_secondary(pal));
+        let waiting_btn =
+            button(text("Switch to target app… (4s)").size(11)).style(style::btn_secondary(pal));
         let cancel_btn = button(text("Cancel").size(11))
             .style(style::btn_danger(pal))
             .on_press(Message::CancelFocusedClassDetect);
@@ -199,19 +212,20 @@ fn page_props_editor(state: &State, active: usize) -> Element<'_, Message> {
             .into()
     };
 
-    let context_hint = if page.app_classes.is_empty() {
-        text("Global page — always reachable via the scroll cycle.")
-            .size(11)
-            .style(style::text_faint(pal))
-    } else {
-        text(format!(
+    let context_hint =
+        if page.app_classes.is_empty() {
+            text("Global page — always reachable via the scroll cycle.")
+                .size(11)
+                .style(style::text_faint(pal))
+        } else {
+            text(format!(
             "App-context page — auto-selects when one of these classes is focused ({} class{}).",
             page.app_classes.len(),
             if page.app_classes.len() == 1 { "" } else { "es" }
         ))
-        .size(11)
-        .style(style::text_faint(pal))
-    };
+            .size(11)
+            .style(style::text_faint(pal))
+        };
 
     // Include-in-scroll toggle is only meaningful for app-context
     // pages — global pages are always in the cycle.
@@ -271,9 +285,15 @@ fn page_props_editor(state: &State, active: usize) -> Element<'_, Message> {
     .align_y(Alignment::Center)
     .spacing(12);
 
-    column![name_input, classes_row, context_hint, scroll_row, slot_count_row]
-        .spacing(8)
-        .into()
+    column![
+        name_input,
+        classes_row,
+        context_hint,
+        scroll_row,
+        slot_count_row
+    ]
+    .spacing(8)
+    .into()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -311,11 +331,19 @@ fn format_page_label(idx: usize, page: &RadialPage) -> String {
         .iter()
         .filter(|s| !s.label.trim().is_empty() || !s.command.trim().is_empty())
         .count();
-    let count_str = format!("{slice_count} slice{}", if slice_count == 1 { "" } else { "s" });
+    let count_str = format!(
+        "{slice_count} slice{}",
+        if slice_count == 1 { "" } else { "s" }
+    );
     if page.app_classes.is_empty() {
         format!("{}: {} — {}", idx + 1, display_name, count_str)
     } else {
-        let preview: Vec<&str> = page.app_classes.iter().take(2).map(String::as_str).collect();
+        let preview: Vec<&str> = page
+            .app_classes
+            .iter()
+            .take(2)
+            .map(String::as_str)
+            .collect();
         let suffix = if page.app_classes.len() > preview.len() {
             format!("{}, …", preview.join(", "))
         } else {
@@ -406,7 +434,12 @@ fn selected_slice_editor(state: &State) -> Element<'_, Message> {
     };
 
     container(
-        column![header, rule::horizontal(1).style(style::rule_style(pal)), body].spacing(8),
+        column![
+            header,
+            rule::horizontal(1).style(style::rule_style(pal)),
+            body
+        ]
+        .spacing(8),
     )
     .padding(14)
     .style(style::card(pal))
@@ -508,22 +541,23 @@ fn slice_editor_row<'a>(
     } else {
         ColorOption(slice.color.clone())
     };
-    let color_picker = pick_list(
-        color_options(),
-        Some(selected_color),
-        move |opt| Message::SetSliceColor(idx, opt.0),
-    )
+    let color_picker = pick_list(color_options(), Some(selected_color), move |opt| {
+        Message::SetSliceColor(idx, opt.0)
+    })
     .style(style::pick_list_style(pal))
     .text_size(12);
 
     // Icon name + a "Browse" button that opens the visual picker.
     // Text input still works for icons outside the curated
     // catalogue (paste any freedesktop name or absolute path).
-    let icon_input = text_input("Icon (e.g. \"system-run-symbolic\" or /path/to/icon.svg)", slice.icon.as_str())
-        .on_input(move |s| Message::SetSliceIcon(idx, s))
-        .padding(6)
-        .size(12)
-        .width(Length::Fill);
+    let icon_input = text_input(
+        "Icon (e.g. \"system-run-symbolic\" or /path/to/icon.svg)",
+        slice.icon.as_str(),
+    )
+    .on_input(move |s| Message::SetSliceIcon(idx, s))
+    .padding(6)
+    .size(12)
+    .width(Length::Fill);
     let icon_browse_target = crate::icon_picker::IconPickerTarget::Slice(idx);
     let icon_browse = button(text("Browse…").size(11))
         .style(style::btn_secondary(pal))
@@ -606,7 +640,10 @@ fn slice_editor_row<'a>(
         col = col.push(submenu_editor(state, idx, &slice.submenu));
     }
 
-    container(col).padding(10).style(style::card_quiet(pal)).into()
+    container(col)
+        .padding(10)
+        .style(style::card_quiet(pal))
+        .into()
 }
 
 // =============================================================================
@@ -740,13 +777,11 @@ impl VisibilityTarget {
                 slice: idx,
                 condition,
             },
-            VisibilityTarget::SubItem { parent, idx } => {
-                Message::SetSubItemVisibility {
-                    parent,
-                    idx,
-                    condition,
-                }
-            }
+            VisibilityTarget::SubItem { parent, idx } => Message::SetSubItemVisibility {
+                parent,
+                idx,
+                condition,
+            },
         }
     }
 }
@@ -903,11 +938,7 @@ fn visibility_editor<'a>(
     column![header, args].spacing(4).into()
 }
 
-fn submenu_editor<'a>(
-    state: &'a State,
-    parent: usize,
-    items: &'a [Slice],
-) -> Element<'a, Message> {
+fn submenu_editor<'a>(state: &'a State, parent: usize, items: &'a [Slice]) -> Element<'a, Message> {
     let pal = &state.palette;
     let header = row![
         text("Sub-items").size(11).style(style::text_dim(pal)),
@@ -919,8 +950,7 @@ fn submenu_editor<'a>(
     .align_y(Alignment::Center)
     .spacing(6);
 
-    let mut col = column![header, rule::horizontal(1).style(style::rule_style(pal))]
-        .spacing(6);
+    let mut col = column![header, rule::horizontal(1).style(style::rule_style(pal))].spacing(6);
     if items.is_empty() {
         col = col.push(
             text("No sub-items yet. Click \"+ Add item\" to create one.")
@@ -933,10 +963,7 @@ fn submenu_editor<'a>(
             col = col.push(submenu_item_row(state, parent, i, item, last));
         }
     }
-    container(col)
-        .padding(8)
-        .style(style::card(pal))
-        .into()
+    container(col).padding(8).style(style::card(pal)).into()
 }
 
 fn submenu_item_row<'a>(
@@ -963,11 +990,9 @@ fn submenu_item_row<'a>(
     } else {
         ColorOption(item.color.clone())
     };
-    let color_picker = pick_list(
-        color_options(),
-        Some(selected_color),
-        move |opt| Message::SetSubItemColor(parent, idx, opt.0),
-    )
+    let color_picker = pick_list(color_options(), Some(selected_color), move |opt| {
+        Message::SetSubItemColor(parent, idx, opt.0)
+    })
     .style(style::pick_list_style(pal))
     .text_size(11);
 
@@ -1039,9 +1064,15 @@ fn submenu_item_row<'a>(
         ]
         .align_y(Alignment::Center)
         .spacing(6),
-        row![kind_picker, icon_input.width(Length::Fill), sub_app_btn, sub_browse_btn, sub_file_btn]
-            .align_y(Alignment::Center)
-            .spacing(6),
+        row![
+            kind_picker,
+            icon_input.width(Length::Fill),
+            sub_app_btn,
+            sub_browse_btn,
+            sub_file_btn
+        ]
+        .align_y(Alignment::Center)
+        .spacing(6),
         visibility_editor(
             state,
             VisibilityTarget::SubItem { parent, idx },
@@ -1065,11 +1096,7 @@ fn submenu_item_row<'a>(
 /// pick_lists so the user doesn't have to remember an opaque id.
 /// Shortcut keeps a text input but with a kind-specific
 /// placeholder hint.
-fn action_value_editor<'a>(
-    state: &'a State,
-    idx: usize,
-    slice: &'a Slice,
-) -> Element<'a, Message> {
+fn action_value_editor<'a>(state: &'a State, idx: usize, slice: &'a Slice) -> Element<'a, Message> {
     let pal = &state.palette;
     match slice.kind {
         ActionKind::Macro => {
@@ -1131,11 +1158,9 @@ fn action_value_editor<'a>(
                 .on_input(move |s| Message::SetSliceCommand(idx, s))
                 .padding(6)
                 .size(12);
-            let capture_btn = button(
-                text(if capturing { "Cancel" } else { "Capture" }).size(11),
-            )
-            .style(style::btn_secondary(pal))
-            .on_press(Message::BeginShortcutCapture(target));
+            let capture_btn = button(text(if capturing { "Cancel" } else { "Capture" }).size(11))
+                .style(style::btn_secondary(pal))
+                .on_press(Message::BeginShortcutCapture(target));
             row![input.width(Length::Fill), capture_btn]
                 .align_y(Alignment::Center)
                 .spacing(6)
@@ -1145,6 +1170,34 @@ fn action_value_editor<'a>(
             .size(11)
             .style(style::text_dim(pal))
             .into(),
+        ActionKind::Power => {
+            let selected = POWER_OPTIONS.iter().find(|o| o.0 == slice.command).copied();
+            pick_list(POWER_OPTIONS.to_vec(), selected, move |opt: PowerOption| {
+                Message::SetSliceCommand(idx, opt.0.to_string())
+            })
+            .style(style::pick_list_style(pal))
+            .text_size(12)
+            .placeholder("Pick power action…")
+            .into()
+        }
+        ActionKind::MouseSetting => text_input(
+            "dpi:1600 | smartshift | haptics | gaming",
+            slice.command.as_str(),
+        )
+        .on_input(move |s| Message::SetSliceCommand(idx, s))
+        .padding(6)
+        .size(12)
+        .into(),
+        ActionKind::NightLight => text("(no command — toggles GNOME night light)")
+            .size(11)
+            .style(style::text_dim(pal))
+            .into(),
+        ActionKind::Widget | ActionKind::Dial => {
+            text("(live wedge — data source set in config.json's widget/dial fields)")
+                .size(11)
+                .style(style::text_dim(pal))
+                .into()
+        }
         ActionKind::None => text("(no action)")
             .size(11)
             .style(style::text_dim(pal))
@@ -1228,11 +1281,9 @@ fn sub_item_value_editor<'a>(
                 .on_input(move |s| Message::SetSubItemCommand(parent, idx, s))
                 .padding(5)
                 .size(11);
-            let capture_btn = button(
-                text(if capturing { "Cancel" } else { "Capture" }).size(10),
-            )
-            .style(style::btn_secondary(pal))
-            .on_press(Message::BeginShortcutCapture(target));
+            let capture_btn = button(text(if capturing { "Cancel" } else { "Capture" }).size(10))
+                .style(style::btn_secondary(pal))
+                .on_press(Message::BeginShortcutCapture(target));
             row![input.width(Length::Fill), capture_btn]
                 .align_y(Alignment::Center)
                 .spacing(4)
@@ -1242,6 +1293,34 @@ fn sub_item_value_editor<'a>(
             .size(10)
             .style(style::text_dim(pal))
             .into(),
+        ActionKind::Power => {
+            let selected = POWER_OPTIONS.iter().find(|o| o.0 == item.command).copied();
+            pick_list(POWER_OPTIONS.to_vec(), selected, move |opt: PowerOption| {
+                Message::SetSubItemCommand(parent, idx, opt.0.to_string())
+            })
+            .style(style::pick_list_style(pal))
+            .text_size(11)
+            .placeholder("Pick power action…")
+            .into()
+        }
+        ActionKind::MouseSetting => text_input(
+            "dpi:1600 | smartshift | haptics | gaming",
+            item.command.as_str(),
+        )
+        .on_input(move |s| Message::SetSubItemCommand(parent, idx, s))
+        .padding(5)
+        .size(11)
+        .into(),
+        ActionKind::NightLight => text("(no command — toggles GNOME night light)")
+            .size(10)
+            .style(style::text_dim(pal))
+            .into(),
+        ActionKind::Widget | ActionKind::Dial => {
+            text("(live wedge — data source set in config.json)")
+                .size(10)
+                .style(style::text_dim(pal))
+                .into()
+        }
         ActionKind::None => text("(no action)")
             .size(10)
             .style(style::text_dim(pal))
@@ -1349,12 +1428,17 @@ impl std::fmt::Display for KindOption {
             ActionKind::Settings => "Open Settings",
             ActionKind::Emoji => "Emoji picker",
             ActionKind::Shortcut => "Keyboard shortcut",
+            ActionKind::Widget => "Live widget",
+            ActionKind::Dial => "Dial (scroll-adjust)",
+            ActionKind::Power => "Power action",
+            ActionKind::NightLight => "Night light toggle",
+            ActionKind::MouseSetting => "Mouse quick setting",
             ActionKind::None => "Do nothing",
         })
     }
 }
 
-const KIND_OPTIONS: [KindOption; 8] = [
+const KIND_OPTIONS: [KindOption; 13] = [
     KindOption(ActionKind::Exec),
     KindOption(ActionKind::Submenu),
     KindOption(ActionKind::Macro),
@@ -1362,7 +1446,32 @@ const KIND_OPTIONS: [KindOption; 8] = [
     KindOption(ActionKind::EasySwitch),
     KindOption(ActionKind::Settings),
     KindOption(ActionKind::Emoji),
+    KindOption(ActionKind::Widget),
+    KindOption(ActionKind::Dial),
+    KindOption(ActionKind::Power),
+    KindOption(ActionKind::NightLight),
+    KindOption(ActionKind::MouseSetting),
     KindOption(ActionKind::None),
+];
+
+/// One row of the Power-action picker — wraps the command string so
+/// the pick_list can show a friendly label while storing the
+/// machine value in `slice.command`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct PowerOption(&'static str, &'static str);
+
+impl std::fmt::Display for PowerOption {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.1)
+    }
+}
+
+const POWER_OPTIONS: [PowerOption; 5] = [
+    PowerOption("lock", "Lock"),
+    PowerOption("logoff", "Log off"),
+    PowerOption("suspend", "Suspend"),
+    PowerOption("restart", "Restart"),
+    PowerOption("shutdown", "Shut down"),
 ];
 
 /// Sentinel string used in the colour pick_list to signal "render

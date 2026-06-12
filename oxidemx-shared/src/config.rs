@@ -73,6 +73,48 @@ pub struct Slice {
     /// visible. See the `conditions` module for the variants.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub visible_if: Option<Condition>,
+
+    /// Live-data binding for `ActionKind::Widget` slices. `None` on
+    /// every other kind (and on widget slices hand-edited without a
+    /// source — those render the stub placeholder).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub widget: Option<WidgetConfig>,
+
+    /// Adjustment target for `ActionKind::Dial` slices. `None` on
+    /// every other kind.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dial: Option<DialKind>,
+}
+
+/// Data binding for a live widget wedge (Splice Widgets page).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WidgetConfig {
+    pub source: WidgetSource,
+    /// Optional format override for the big value (e.g. "{}%").
+    /// `None` = the source's default formatting.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub format: Option<String>,
+}
+
+/// Which live data feed a widget wedge renders.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WidgetSource {
+    Weather,
+    Cpu,
+    Memory,
+    Network,
+    Disk,
+    TasksDue,
+    MouseBattery,
+}
+
+/// What an `ActionKind::Dial` slice adjusts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DialKind {
+    Brightness,
+    Volume,
 }
 
 /// One page of a multi-page radial menu — a named slice list with
@@ -298,30 +340,30 @@ pub struct VisualSettings {
 
     /// Intensity of the centre-dome shader (0..=1). 0 disables.
     /// > 0 turns the centre puck into a Phong-shaded sphere with
-    /// directional Lambert wash + tight specular highlight.
+    /// > directional Lambert wash + tight specular highlight.
     #[serde(default = "default_center_dome_intensity")]
     pub center_dome_intensity: f32,
 
     /// Intensity of the slice-bevel shader (0..=1). 0 disables.
     /// > 0 paints carved grooves between every wedge with
-    /// directional rim lighting — each slice reads as its own
-    /// raised 3D button.
+    /// > directional rim lighting — each slice reads as its own
+    /// > raised 3D button.
     #[serde(default = "default_slice_bevel_intensity")]
     pub slice_bevel_intensity: f32,
 
     /// Intensity of the drop-shadow shader (0..=1). 0 disables.
     /// > 0 paints a soft falloff shadow OUTSIDE the disc, offset
-    /// away from the light source. Reads as the menu casting a
-    /// real cast shadow onto whatever is behind it — turns the
-    /// ring from "painted on the screen" into a floating object.
+    /// > away from the light source. Reads as the menu casting a
+    /// > real cast shadow onto whatever is behind it — turns the
+    /// > ring from "painted on the screen" into a floating object.
     #[serde(default = "default_drop_shadow_intensity")]
     pub drop_shadow_intensity: f32,
 
     /// Intensity of the specular-sweep shader (0..=1). 0 disables.
     /// > 0 paints an animated narrow band of light that slowly
-    /// rotates around the disc rim — like a polished surface
-    /// catching ambient light. Lit-side gated so the sweep
-    /// fades out on the shadow hemisphere.
+    /// > rotates around the disc rim — like a polished surface
+    /// > catching ambient light. Lit-side gated so the sweep
+    /// > fades out on the shadow hemisphere.
     #[serde(default = "default_specular_sweep_intensity")]
     pub specular_sweep_intensity: f32,
 
@@ -399,12 +441,13 @@ pub struct VisualSettings {
 /// What the dispatch-burst shader looks like. Selectable from
 /// the GPU shaders card in settings — each style is a different
 /// fragment-shader branch in `dispatch_burst.wgsl`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum DispatchBurstStyle {
     /// Bright particles fly outward from the activated slice in
     /// scattered directions, fading as they expand. Reads as
     /// "this action sparked".
+    #[default]
     Sparks,
     /// Multiple concentric rings expand from the activated
     /// slice's icon — more emphatic version of the haptic
@@ -413,12 +456,6 @@ pub enum DispatchBurstStyle {
     /// Single bright flash centred on the activated slice that
     /// fades quickly. Subtle, fastest visual feedback.
     Glow,
-}
-
-impl Default for DispatchBurstStyle {
-    fn default() -> Self {
-        DispatchBurstStyle::Sparks
-    }
 }
 
 /// Helper for `#[serde(skip_serializing_if = ...)]` on the
@@ -724,6 +761,59 @@ pub struct AppConfig {
     /// Stored in the `popup` table of `config.json`; absent = defaults.
     #[serde(default)]
     pub popup: crate::popup::PopupConfig,
+
+    /// Overlay-window preferences (AI chat size, agent knobs).
+    /// Absent = defaults.
+    #[serde(default)]
+    pub overlay: OverlayConfig,
+}
+
+/// Overlay-window preferences persisted in the `overlay` table of
+/// `config.json`.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct OverlayConfig {
+    /// Persisted AI chat window size `(width, height)` in logical px,
+    /// saved when the user releases the chat's resize grip. `None` =
+    /// the legacy fixed 484×640. The overlay clamps to its minimum
+    /// (420×560) on read so a hand-edited tiny value can't produce
+    /// broken geometry.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chat_size: Option<(u32, u32)>,
+
+    /// `(latitude, longitude)` for the Weather widget's Open-Meteo
+    /// lookup. `None` = the weather wedge renders its stub.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub weather_location: Option<(f64, f64)>,
+
+    /// AI agent knobs.
+    #[serde(default)]
+    pub ai: AiConfig,
+}
+
+/// AI agent configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AiConfig {
+    /// Command prefixes the `execute_command` agent tool may run
+    /// without per-call confirmation. Matched against the leading
+    /// tokens of the requested command (whole-token prefix match,
+    /// not substring). Anything else requires an explicit user
+    /// confirmation chip in the chat.
+    #[serde(default = "default_command_allowlist")]
+    pub command_allowlist: Vec<String>,
+}
+
+impl Default for AiConfig {
+    fn default() -> Self {
+        AiConfig {
+            command_allowlist: default_command_allowlist(),
+        }
+    }
+}
+
+fn default_command_allowlist() -> Vec<String> {
+    ["brightnessctl", "wpctl", "systemctl --user"]
+        .map(String::from)
+        .to_vec()
 }
 
 /// Default location of the user's main config: `~/.config/oxidemx/config.json`.
@@ -864,6 +954,84 @@ mod tests {
         assert_eq!(cfg.radial_menu.page_for_class(Some("Code")), 1);
         assert_eq!(cfg.radial_menu.page_for_class(Some("firefox")), 0);
         assert_eq!(cfg.radial_menu.page_for_class(None), 0);
+    }
+
+    #[test]
+    fn default_config_round_trips_losslessly() {
+        // The bundled starter config must survive a parse → serialize →
+        // parse cycle without dropping slices/pages or inventing
+        // widget/dial keys on plain slices.
+        let mut cfg: AppConfig = serde_json::from_str(DEFAULT_CONFIG_JSON).unwrap();
+        cfg.radial_menu.normalize_pages();
+        let json = serde_json::to_string(&cfg).unwrap();
+        let mut back: AppConfig = serde_json::from_str(&json).unwrap();
+        back.radial_menu.normalize_pages();
+        assert_eq!(cfg.radial_menu.pages.len(), back.radial_menu.pages.len());
+        for (a, b) in cfg
+            .radial_menu
+            .pages
+            .iter()
+            .zip(back.radial_menu.pages.iter())
+        {
+            assert_eq!(a.name, b.name);
+            assert_eq!(a.slices.len(), b.slices.len());
+            for (sa, sb) in a.slices.iter().zip(b.slices.iter()) {
+                assert_eq!(sa.label, sb.label);
+                assert_eq!(sa.kind, sb.kind);
+                assert_eq!(sa.command, sb.command);
+            }
+        }
+        // Plain slices must not gain widget/dial keys on disk.
+        assert!(!json.contains("\"widget\""), "widget key leaked: {json}");
+        assert!(!json.contains("\"dial\""), "dial key leaked: {json}");
+    }
+
+    #[test]
+    fn widget_and_dial_slices_round_trip() {
+        let json = r#"{
+            "radial_menu": { "pages": [ { "name": "Widgets", "slices": [
+                {"label": "CPU", "type": "widget", "color": "teal",
+                 "widget": {"source": "cpu"}},
+                {"label": "Net", "type": "widget", "color": "blue",
+                 "widget": {"source": "network", "format": "{} Mb/s"}},
+                {"label": "Brightness", "type": "dial", "color": "yellow",
+                 "dial": "brightness"}
+            ] } ] }
+        }"#;
+        let cfg: AppConfig = serde_json::from_str(json).unwrap();
+        let s = &cfg.radial_menu.pages[0].slices;
+        assert_eq!(s[0].kind, ActionKind::Widget);
+        assert_eq!(s[0].widget.as_ref().unwrap().source, WidgetSource::Cpu);
+        assert_eq!(s[0].widget.as_ref().unwrap().format, None);
+        assert_eq!(s[1].widget.as_ref().unwrap().source, WidgetSource::Network);
+        assert_eq!(
+            s[1].widget.as_ref().unwrap().format.as_deref(),
+            Some("{} Mb/s")
+        );
+        assert_eq!(s[2].kind, ActionKind::Dial);
+        assert_eq!(s[2].dial, Some(DialKind::Brightness));
+        let back = serde_json::to_string(&cfg).unwrap();
+        assert!(back.contains(r#""source":"cpu""#));
+        assert!(back.contains(r#""dial":"brightness""#));
+    }
+
+    #[test]
+    fn overlay_section_defaults_and_round_trips() {
+        // Absent section → defaults (legacy size, stock allowlist).
+        let cfg: AppConfig = serde_json::from_str("{}").unwrap();
+        assert_eq!(cfg.overlay.chat_size, None);
+        assert_eq!(
+            cfg.overlay.ai.command_allowlist,
+            vec!["brightnessctl", "wpctl", "systemctl --user"]
+        );
+        // Populated section survives the round trip.
+        let json = r#"{"overlay": {"chat_size": [560, 720],
+                       "ai": {"command_allowlist": ["echo"]}}}"#;
+        let cfg: AppConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(cfg.overlay.chat_size, Some((560, 720)));
+        assert_eq!(cfg.overlay.ai.command_allowlist, vec!["echo"]);
+        let back = serde_json::to_string(&cfg).unwrap();
+        assert!(back.contains(r#""chat_size":[560,720]"#));
     }
 
     #[test]

@@ -29,6 +29,15 @@ trait Haptic {
     fn execute_shortcut(&self, keys: &str) -> zbus::Result<()>;
     fn execute_macro(&self, id: &str) -> zbus::Result<()>;
     fn set_host(&self, host_index: u8) -> zbus::Result<bool>;
+    fn set_dpi(&self, dpi: u16) -> zbus::Result<()>;
+    fn get_wheel_mode(&self) -> zbus::Result<(String, u8)>;
+    fn set_wheel_mode(&self, mode: &str, threshold: u8) -> zbus::Result<()>;
+    fn set_haptics_enabled(&self, enabled: bool) -> zbus::Result<()>;
+    fn get_gaming_mode(&self) -> zbus::Result<bool>;
+    fn set_gaming_mode(&self, enabled: bool) -> zbus::Result<()>;
+    fn get_battery_status(&self) -> zbus::Result<(u8, bool)>;
+    #[zbus(property)]
+    fn haptics_enabled(&self) -> zbus::Result<bool>;
 }
 
 /// Tell the daemon a new slice slot is hovered. Kept around as a
@@ -149,6 +158,74 @@ async fn try_set_host(host_index: u8) -> zbus::Result<()> {
     let proxy = HapticProxy::new(&conn).await?;
     let _ = proxy.set_host(host_index).await?;
     Ok(())
+}
+
+/// Apply a mouse quick setting from a `MouseSetting` slice. The
+/// `setting` string is the slice's `command`:
+///
+///   * `dpi:<value>` — set sensor DPI
+///   * `smartshift` — toggle the scroll wheel between smartshift
+///     and freespin (threshold preserved by the daemon)
+///   * `haptics` — toggle haptic feedback on/off
+///   * `gaming` — toggle gaming mode
+///
+/// Toggles read current state first; fire-and-forget like every
+/// other daemon call here.
+pub fn mouse_setting_blocking(setting: String) {
+    let rt = match tokio::runtime::Handle::try_current() {
+        Ok(h) => h,
+        Err(_) => return,
+    };
+    rt.spawn(async move {
+        if let Err(e) = try_mouse_setting(&setting).await {
+            warn!(
+                "MouseSetting({setting}) D-Bus call failed: {e} \
+                 (daemon {DAEMON_SERVICE} not running?)"
+            );
+        }
+    });
+}
+
+async fn try_mouse_setting(setting: &str) -> zbus::Result<()> {
+    let conn = Connection::session().await?;
+    let proxy = HapticProxy::new(&conn).await?;
+    if let Some(dpi) = setting.strip_prefix("dpi:") {
+        let dpi: u16 = dpi
+            .trim()
+            .parse()
+            .map_err(|_| zbus::Error::Failure(format!("bad dpi value in {setting:?}")))?;
+        return proxy.set_dpi(dpi).await;
+    }
+    match setting {
+        "smartshift" => {
+            let (mode, threshold) = proxy.get_wheel_mode().await?;
+            let next = if mode == "freespin" {
+                "smartshift"
+            } else {
+                "freespin"
+            };
+            proxy.set_wheel_mode(next, threshold).await
+        }
+        "haptics" => {
+            let on = proxy.haptics_enabled().await.unwrap_or(true);
+            proxy.set_haptics_enabled(!on).await
+        }
+        "gaming" => {
+            let on = proxy.get_gaming_mode().await?;
+            proxy.set_gaming_mode(!on).await
+        }
+        other => Err(zbus::Error::Failure(format!(
+            "unknown mouse setting {other:?} (want dpi:<n>|smartshift|haptics|gaming)"
+        ))),
+    }
+}
+
+/// One-shot battery read for the MouseBattery widget. Returns
+/// `None` when the daemon isn't reachable.
+pub async fn battery_status() -> Option<(u8, bool)> {
+    let conn = Connection::session().await.ok()?;
+    let proxy = HapticProxy::new(&conn).await.ok()?;
+    proxy.get_battery_status().await.ok()
 }
 
 #[allow(dead_code)]

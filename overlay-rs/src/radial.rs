@@ -83,11 +83,8 @@ impl SubmenuState {
             .map(|c| c.stagger_ms as f32)
             .unwrap_or(0.0);
         let mut enter = anim.enter.clone();
-        enter.duration_ms = crate::anim::extended_chain_duration_ms(
-            enter.duration_ms,
-            item_count,
-            stagger,
-        );
+        enter.duration_ms =
+            crate::anim::extended_chain_duration_ms(enter.duration_ms, item_count, stagger);
         progress.set_target(1.0, &enter);
         Self {
             parent,
@@ -110,11 +107,8 @@ impl SubmenuState {
             .map(|c| c.stagger_ms as f32)
             .unwrap_or(0.0);
         let mut exit = anim.exit.clone();
-        exit.duration_ms = crate::anim::extended_chain_duration_ms(
-            exit.duration_ms,
-            self.item_count,
-            stagger,
-        );
+        exit.duration_ms =
+            crate::anim::extended_chain_duration_ms(exit.duration_ms, self.item_count, stagger);
         self.progress.set_target(0.0, &exit);
     }
 }
@@ -233,10 +227,7 @@ pub fn load_chat_threads() -> Vec<ChatThread> {
 /// over the cap). Small file, sync write — called on response /
 /// thread-management events, not per keystroke.
 pub fn save_chat_threads(threads: &[ChatThread]) {
-    let keep: Vec<&ChatThread> = threads
-        .iter()
-        .filter(|t| !t.history.is_empty())
-        .collect();
+    let keep: Vec<&ChatThread> = threads.iter().filter(|t| !t.history.is_empty()).collect();
     let start = keep.len().saturating_sub(MAX_SAVED_CHATS);
     let path = chats_path();
     if let Some(dir) = path.parent() {
@@ -800,7 +791,6 @@ impl RadialState {
         self.menu.current.clamp(0.0, 1.0)
     }
 
-
     fn refresh_active_slices(&mut self) {
         self.slices = self
             .pages
@@ -827,9 +817,7 @@ impl RadialState {
         if debounce_ms > 0 {
             let now = Instant::now();
             if let Some(last) = self.last_cycle {
-                if now.duration_since(last)
-                    < Duration::from_millis(debounce_ms as u64)
-                {
+                if now.duration_since(last) < Duration::from_millis(debounce_ms as u64) {
                     return;
                 }
             }
@@ -874,7 +862,8 @@ impl RadialState {
             // visible" each transition, regardless of where the
             // last one settled.
             self.page_transition = Tween::at(0.0);
-            self.page_transition.set_target(1.0, &pt_cfg.as_transition_config());
+            self.page_transition
+                .set_target(1.0, &pt_cfg.as_transition_config());
         } else {
             // Animation disabled or duration 0: clear any stale
             // transition state and skip straight to the new page.
@@ -1008,11 +997,7 @@ impl RadialState {
             if let Some(child_idx) = sub.highlighted {
                 if let Some(parent) = self.slices.get(sub.parent) {
                     if let Some(child) = parent.submenu.get(child_idx) {
-                        let allowed = child
-                            .visible_if
-                            .as_ref()
-                            .map(|c| c.eval())
-                            .unwrap_or(true);
+                        let allowed = child.visible_if.as_ref().map(|c| c.eval()).unwrap_or(true);
                         if allowed {
                             crate::actions::dispatch(child);
                         }
@@ -1027,11 +1012,7 @@ impl RadialState {
         let selected = self.target_slice;
         if let Some(idx) = selected {
             if let Some(slice) = self.slices.get(idx) {
-                let visible = slice
-                    .visible_if
-                    .as_ref()
-                    .map(|c| c.eval())
-                    .unwrap_or(true);
+                let visible = slice.visible_if.as_ref().map(|c| c.eval()).unwrap_or(true);
                 if visible {
                     crate::actions::dispatch(slice);
                 }
@@ -1141,9 +1122,7 @@ impl RadialState {
             let hit = subitem_at(dx, dy, sub.parent, &self.slices);
             if hit.is_some() {
                 sub.highlighted = hit;
-            } else if raw_target == Some(sub.parent)
-                || dist > crate::geometry::MENU_RADIUS
-            {
+            } else if raw_target == Some(sub.parent) || dist > crate::geometry::MENU_RADIUS {
                 sub.highlighted = None;
             } else {
                 should_close = true;
@@ -1162,10 +1141,7 @@ impl RadialState {
         let entering_new_submenu = should_close
             && raw_target
                 .and_then(|i| self.slices.get(i))
-                .map(|s| {
-                    matches!(s.kind, ActionKind::Submenu)
-                        && !s.submenu.is_empty()
-                })
+                .map(|s| matches!(s.kind, ActionKind::Submenu) && !s.submenu.is_empty())
                 .unwrap_or(false);
         if should_close {
             if entering_new_submenu {
@@ -1178,18 +1154,14 @@ impl RadialState {
         if may_open_submenu {
             if let Some(idx) = raw_target {
                 if let Some(slice) = self.slices.get(idx) {
-                    if matches!(slice.kind, ActionKind::Submenu)
-                        && !slice.submenu.is_empty()
-                    {
+                    if matches!(slice.kind, ActionKind::Submenu) && !slice.submenu.is_empty() {
                         // Skip if the same submenu is already open
                         // and not exiting — `progress.target > 0.5`
                         // = "open or opening", < 0.5 = "exiting".
                         let already_open = self
                             .submenu
                             .as_ref()
-                            .map(|s| {
-                                s.parent == idx && s.progress.target > 0.5
-                            })
+                            .map(|s| s.parent == idx && s.progress.target > 0.5)
                             .unwrap_or(false);
                         if !already_open {
                             let item_count = slice.submenu.len();
@@ -1222,19 +1194,20 @@ impl RadialState {
         // Slice-highlight transition driven by effective_target.
         if effective_target != self.target_slice {
             if let Some(prev) = self.target_slice {
-                self.highlights[prev]
-                    .set_target(0.0, &self.anim_config.slice_highlight.exit);
+                self.highlights[prev].set_target(0.0, &self.anim_config.slice_highlight.exit);
             }
             if let Some(next) = effective_target {
-                self.highlights[next]
-                    .set_target(1.0, &self.anim_config.slice_highlight.enter);
+                self.highlights[next].set_target(1.0, &self.anim_config.slice_highlight.enter);
             }
             self.target_slice = effective_target;
             // Reset the tooltip dwell timer on every target
             // change. Some(now) when entering a new slice, None
             // when leaving all slices.
-            self.target_slice_since =
-                if effective_target.is_some() { Some(Instant::now()) } else { None };
+            self.target_slice_since = if effective_target.is_some() {
+                Some(Instant::now())
+            } else {
+                None
+            };
         }
     }
 
@@ -1381,6 +1354,8 @@ fn pages_from_config(config: &AppConfig) -> Vec<RadialPage> {
                 description: String::new(),
                 submenu: vec![],
                 visible_if: None,
+                widget: None,
+                dial: None,
             },
             Slice {
                 action_id: None,
@@ -1393,6 +1368,8 @@ fn pages_from_config(config: &AppConfig) -> Vec<RadialPage> {
                 description: String::new(),
                 submenu: vec![],
                 visible_if: None,
+                widget: None,
+                dial: None,
             },
         ],
         app_classes: vec![],
@@ -1410,9 +1387,9 @@ fn match_page_for_class(pages: &[RadialPage], class: &str) -> Option<usize> {
         return None;
     }
     let lc = class.to_lowercase();
-    pages.iter().position(|p| {
-        p.app_classes.iter().any(|c| c.to_lowercase() == lc)
-    })
+    pages
+        .iter()
+        .position(|p| p.app_classes.iter().any(|c| c.to_lowercase() == lc))
 }
 
 /// Hit-test the sub-items of slot `parent`. Returns the index of the
@@ -1585,11 +1562,7 @@ impl<'a> canvas::Program<crate::app::Message> for Painter<'a> {
         // preset path) bypass the matrix updates entirely. Scale
         // (uniform) keeps living in `mscale` so radii baked into
         // the wedge math still work without doubling up.
-        crate::render::animation::apply_composed_transform(
-            &mut frame,
-            center,
-            &menu_t,
-        );
+        crate::render::animation::apply_composed_transform(&mut frame, center, &menu_t);
 
         // The user's static "background opacity" knob multiplies
         // into the halo + base wedge fills (everything that draws
@@ -1602,17 +1575,9 @@ impl<'a> canvas::Program<crate::app::Message> for Painter<'a> {
         // draw_ring_transformed → draw_slice → fill alphas. At
         // SDF intensity 0 this is 1.0 and the canvas behaves
         // exactly as it always has.
-        let sdf_intensity = self
-            .state
-            .visuals
-            .sdf_ring_intensity
-            .clamp(0.0, 1.0);
+        let sdf_intensity = self.state.visuals.sdf_ring_intensity.clamp(0.0, 1.0);
         let wfm = 1.0 - sdf_intensity;
-        let highlight_op = self
-            .state
-            .visuals
-            .slice_highlight_opacity
-            .clamp(0.0, 1.0);
+        let highlight_op = self.state.visuals.slice_highlight_opacity.clamp(0.0, 1.0);
 
         // Faint shadow halo so the disc reads against transparent
         // backgrounds.
@@ -1647,8 +1612,8 @@ impl<'a> canvas::Program<crate::app::Message> for Painter<'a> {
         let pt_dir = self.state.page_transition_dir;
         let pt_rot_max = pt_cfg.rotation_deg.to_radians();
 
-        let pt_uses_custom_tracks = pt_cfg.animation.enter.is_custom()
-            || pt_cfg.animation.exit.is_custom();
+        let pt_uses_custom_tracks =
+            pt_cfg.animation.enter.is_custom() || pt_cfg.animation.exit.is_custom();
 
         let (old_t, new_t) = if !pt_active {
             // No transition in flight — incoming ring at rest, no
@@ -1774,12 +1739,7 @@ impl<'a> canvas::Program<crate::app::Message> for Painter<'a> {
                     &self.state.anim_config.slice_highlight.exit,
                 )
             });
-        let slice_uses_custom_tracks = self
-            .state
-            .anim_config
-            .slice_highlight
-            .enter
-            .is_custom()
+        let slice_uses_custom_tracks = self.state.anim_config.slice_highlight.enter.is_custom()
             || self.state.anim_config.slice_highlight.exit.is_custom();
         let slot_transforms_arg = if slice_uses_custom_tracks {
             Some(&slot_transforms)
@@ -1884,18 +1844,14 @@ impl<'a> canvas::Program<crate::app::Message> for Painter<'a> {
         // the puck during a page-cycle transition. Peaks at the
         // halfway point so the eye lands on the centre as the new
         // ring's first frame appears. No effect for other styles.
-        let pulse_factor = if pt_active
-            && matches!(
-                pt_style,
-                oxidemx_shared::PageTransitionStyle::CenterPulse
-            ) {
-            // Triangle wave: 0 at p=0, 1 at p=0.5, 0 at p=1.
-            1.0 - (2.0 * pt_progress - 1.0).abs()
-        } else {
-            0.0
-        };
-        let center_radius =
-            (geom.center_radius as f32) * mscale * (1.0 + 0.18 * pulse_factor);
+        let pulse_factor =
+            if pt_active && matches!(pt_style, oxidemx_shared::PageTransitionStyle::CenterPulse) {
+                // Triangle wave: 0 at p=0, 1 at p=0.5, 0 at p=1.
+                1.0 - (2.0 * pt_progress - 1.0).abs()
+            } else {
+                0.0
+            };
+        let center_radius = (geom.center_radius as f32) * mscale * (1.0 + 0.18 * pulse_factor);
         crate::render::slices::draw_center(
             &mut frame,
             center,
@@ -1983,11 +1939,7 @@ impl<'a> canvas::Program<crate::app::Message> for Painter<'a> {
                 &self.state.anim_config.submenu.exit,
             );
             frame.with_save(|f| {
-                crate::render::animation::apply_composed_transform(
-                    f,
-                    center,
-                    &submenu_t,
-                );
+                crate::render::animation::apply_composed_transform(f, center, &submenu_t);
                 crate::render::slices::draw_submenu(
                     f,
                     center,
@@ -2018,8 +1970,7 @@ impl<'a> canvas::Program<crate::app::Message> for Painter<'a> {
                 if elapsed_ms >= delay && font_size > 0.5 {
                     // Fade in over 150 ms once the delay expires.
                     const FADE_MS: f32 = 150.0;
-                    let alpha = ((elapsed_ms - delay) as f32 / FADE_MS)
-                        .clamp(0.0, 1.0);
+                    let alpha = ((elapsed_ms - delay) as f32 / FADE_MS).clamp(0.0, 1.0);
                     let outer_r = ((MENU_RADIUS as f32) - RING_OUTER_INSET) * mscale;
                     let v = &self.state.visuals;
                     let font = if v.tooltip_use_monospace {
@@ -2038,12 +1989,10 @@ impl<'a> canvas::Program<crate::app::Message> for Painter<'a> {
                     let fg_hex = palette
                         .lookup(&v.tooltip_text_color)
                         .unwrap_or(palette.text.as_str());
-                    let (br, bg_g, bb, ba) =
-                        oxidemx_shared::theme::parse_hex_rgba(bg_hex)
-                            .unwrap_or((0.0, 0.0, 0.0, 1.0));
-                    let (fr, fg_g, fb, fa) =
-                        oxidemx_shared::theme::parse_hex_rgba(fg_hex)
-                            .unwrap_or((1.0, 1.0, 1.0, 1.0));
+                    let (br, bg_g, bb, ba) = oxidemx_shared::theme::parse_hex_rgba(bg_hex)
+                        .unwrap_or((0.0, 0.0, 0.0, 1.0));
+                    let (fr, fg_g, fb, fa) = oxidemx_shared::theme::parse_hex_rgba(fg_hex)
+                        .unwrap_or((1.0, 1.0, 1.0, 1.0));
                     let style = crate::render::slices::ArcTooltipStyle {
                         font,
                         monospace: v.tooltip_use_monospace,

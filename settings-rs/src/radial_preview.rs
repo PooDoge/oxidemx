@@ -15,12 +15,12 @@
 //! disc at the cursor, and release fires `SwapSlices` for the
 //! slot under the release point.
 
-use oxidemx_widgets::palette::Palette;
 use iced::widget::canvas::{self, path::Builder, Frame, Geometry, Image, Path, Stroke, Text};
 use iced::widget::image::Handle;
 use iced::{mouse, Color, Length, Point, Rectangle, Renderer, Theme};
 use oxidemx_icons::{IconCache, RasterIcon};
 use oxidemx_shared::{ActionKind, Slice};
+use oxidemx_widgets::palette::Palette;
 use std::cell::RefCell;
 use std::collections::HashMap;
 
@@ -189,8 +189,7 @@ pub fn resolve_icon_handle(
     if let Some(h) = iced_handles.borrow().get(&key) {
         return Some(h.clone());
     }
-    let icon: RasterIcon =
-        icons.resolve(source, size_px, (tint.r, tint.g, tint.b, tint.a))?;
+    let icon: RasterIcon = icons.resolve(source, size_px, (tint.r, tint.g, tint.b, tint.a))?;
     let handle = Handle::from_rgba(icon.size, icon.size, icon.rgba);
     iced_handles.borrow_mut().insert(key, handle.clone());
     Some(handle)
@@ -214,11 +213,10 @@ impl RadialPreview {
             return Some(h.clone());
         }
         let icon: RasterIcon =
-            self.icons.resolve(source, size_px, (tint.r, tint.g, tint.b, tint.a))?;
+            self.icons
+                .resolve(source, size_px, (tint.r, tint.g, tint.b, tint.a))?;
         let handle = Handle::from_rgba(icon.size, icon.size, icon.rgba);
-        self.iced_handles
-            .borrow_mut()
-            .insert(key, handle.clone());
+        self.iced_handles.borrow_mut().insert(key, handle.clone());
         Some(handle)
     }
 
@@ -240,9 +238,7 @@ impl RadialPreview {
         }
         let icon: RasterIcon = self.icons.resolve_untinted(source, size_px)?;
         let handle = Handle::from_rgba(icon.size, icon.size, icon.rgba);
-        self.iced_handles
-            .borrow_mut()
-            .insert(key, handle.clone());
+        self.iced_handles.borrow_mut().insert(key, handle.clone());
         Some(handle)
     }
 }
@@ -384,10 +380,7 @@ where
                 let approx_w = label.chars().count() as f32 * label_size * 0.55;
                 frame.fill_text(Text {
                     content: label,
-                    position: Point::new(
-                        center.x - approx_w / 2.0,
-                        center.y - label_size / 2.0,
-                    ),
+                    position: Point::new(center.x - approx_w / 2.0, center.y - label_size / 2.0),
                     color: pal.text,
                     size: label_size.into(),
                     font: self.font,
@@ -407,9 +400,7 @@ where
                     let ring = Path::circle(cursor, 23.0);
                     frame.stroke(
                         &ring,
-                        Stroke::default()
-                            .with_color(Color::WHITE)
-                            .with_width(2.0),
+                        Stroke::default().with_color(Color::WHITE).with_width(2.0),
                     );
                     frame.fill_text(Text {
                         content: short_label(&slice.label),
@@ -539,10 +530,7 @@ fn draw_slot(
                 let approx_w = glyph.chars().count() as f32 * size * 0.55;
                 frame.fill_text(Text {
                     content: glyph.to_string(),
-                    position: Point::new(
-                        icon_pos.x - approx_w / 2.0,
-                        icon_pos.y - size / 2.0,
-                    ),
+                    position: Point::new(icon_pos.x - approx_w / 2.0, icon_pos.y - size / 2.0),
                     color: tint,
                     size: size.into(),
                     ..Text::default()
@@ -572,13 +560,7 @@ fn draw_slot(
     }
 }
 
-fn wedge_path(
-    center: Point,
-    inner_r: f32,
-    outer_r: f32,
-    start_deg: f32,
-    end_deg: f32,
-) -> Path {
+fn wedge_path(center: Point, inner_r: f32, outer_r: f32, start_deg: f32, end_deg: f32) -> Path {
     let start = start_deg.to_radians();
     let end = end_deg.to_radians();
     let mut b = Builder::new();
@@ -663,6 +645,11 @@ fn glyph_for_slice(s: &Slice) -> &'static str {
         ActionKind::Emoji => "☻",
         ActionKind::Shortcut => "⌘",
         ActionKind::Exec => "▶",
+        ActionKind::Widget => "◔",
+        ActionKind::Dial => "◑",
+        ActionKind::Power => "⏻",
+        ActionKind::NightLight => "☾",
+        ActionKind::MouseSetting => "🖱",
         ActionKind::None => "•",
     }
 }

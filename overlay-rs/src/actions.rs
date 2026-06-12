@@ -55,7 +55,10 @@ pub fn dispatch(slice: &Slice) {
             // `ActionExecutor::execute_shortcut` does the rest.
             let keys = slice.command.trim();
             if keys.is_empty() {
-                warn!("Shortcut slice '{}' has no key chord — skipping", slice.label);
+                warn!(
+                    "Shortcut slice '{}' has no key chord — skipping",
+                    slice.label
+                );
                 return;
             }
             info!(label = %slice.label, keys, "dispatching shortcut");
@@ -79,6 +82,63 @@ pub fn dispatch(slice: &Slice) {
                     );
                 }
             }
+        }
+        ActionKind::Widget | ActionKind::Dial => {
+            // Display-only / scroll-adjusted wedges. Widgets render
+            // live data; dials adjust on wheel-over-slice. Neither
+            // has a release action (a Widget slice with a submenu is
+            // routed through the Submenu hover path like any other).
+        }
+        ActionKind::Power => {
+            // Session power actions go through the desktop session's
+            // own CLI surfaces (logind + gnome-session) — the daemon
+            // is HID-only on purpose. Fixed command table; the
+            // slice's `command` only selects which row.
+            let action = slice.command.trim();
+            let cmd = match action {
+                "lock" => "loginctl lock-session",
+                "logoff" => "gnome-session-quit --logout --no-prompt",
+                "suspend" => "systemctl suspend",
+                "restart" => "systemctl reboot",
+                "shutdown" => "systemctl poweroff",
+                other => {
+                    warn!(
+                        "Power slice '{}' has unknown action {other:?} \
+                         (want lock|logoff|suspend|restart|shutdown)",
+                        slice.label
+                    );
+                    return;
+                }
+            };
+            spawn_shell(cmd, &slice.label);
+        }
+        ActionKind::NightLight => {
+            // Toggle GNOME night light in place. One shell round trip
+            // so read + invert + write can't race the overlay's UI
+            // thread; the wedge's state dot re-reads the key via the
+            // sampler on its next tick.
+            const KEY: &str = "org.gnome.settings-daemon.plugins.color night-light-enabled";
+            let cmd = format!(
+                "if [ \"$(gsettings get {KEY})\" = \"true\" ]; \
+                 then gsettings set {KEY} false; \
+                 else gsettings set {KEY} true; fi"
+            );
+            spawn_shell(&cmd, &slice.label);
+        }
+        ActionKind::MouseSetting => {
+            // `command` carries the setting: "dpi:<value>" |
+            // "smartshift" | "haptics" | "gaming". All of these are
+            // daemon D-Bus surface (the daemon owns the device).
+            let setting = slice.command.trim();
+            if setting.is_empty() {
+                warn!(
+                    "MouseSetting slice '{}' has no setting — skipping",
+                    slice.label
+                );
+                return;
+            }
+            info!(label = %slice.label, setting, "dispatching mouse setting");
+            crate::haptic_client::mouse_setting_blocking(setting.to_string());
         }
         ActionKind::None => {}
     }

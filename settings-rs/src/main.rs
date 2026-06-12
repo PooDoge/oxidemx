@@ -27,9 +27,7 @@ mod animation_editor;
 mod app_picker;
 mod battery;
 mod bundle;
-mod ui_state;
 mod color_canvas;
-mod theme_customiser;
 mod cursor_helper;
 mod daemon;
 mod fonts;
@@ -40,6 +38,8 @@ mod radial_preview;
 mod raise;
 mod recents;
 mod singleton;
+mod theme_customiser;
+mod ui_state;
 
 use iced::widget::{button, column, container, row, rule, scrollable, text, Space};
 use iced::{Element, Length, Subscription, Task};
@@ -408,12 +408,19 @@ pub enum Message {
     /// metadata; not currently rendered in the overlay.
     SetSliceDescription(usize, String),
     /// Same for a submenu sub-item.
-    SetSubItemDescription { parent: usize, idx: usize, value: String },
+    SetSubItemDescription {
+        parent: usize,
+        idx: usize,
+        value: String,
+    },
     /// Replace a slice's visibility predicate. `None` clears the
     /// predicate (slice is always visible). `Some(Always)` is
     /// equivalent at runtime; we write the slimmer `None` shape on
     /// disk for that case.
-    SetSliceVisibility { slice: usize, condition: Option<oxidemx_shared::Condition> },
+    SetSliceVisibility {
+        slice: usize,
+        condition: Option<oxidemx_shared::Condition>,
+    },
     /// Sub-item analogue of `SetSliceVisibility`. Same shape, just
     /// addressed under a parent slice's submenu.
     SetSubItemVisibility {
@@ -429,11 +436,17 @@ pub enum Message {
     /// useful to test in isolation.
     TestSliceAction(usize),
     /// Same as TestSliceAction but for a submenu sub-item.
-    TestSubItemAction { parent: usize, idx: usize },
+    TestSubItemAction {
+        parent: usize,
+        idx: usize,
+    },
     /// Radial preview interactions.
     SelectSlice(usize),
     DismissSliceSelection,
-    SwapSlices { from: usize, to: usize },
+    SwapSlices {
+        from: usize,
+        to: usize,
+    },
 
     // --- Haptics tab ---
     SetHapticsEnabled(bool),
@@ -504,7 +517,11 @@ pub enum Message {
     /// Open inline edit form for an existing macro.
     StartEditMacro(String),
     /// User typed in the rename or trigger field.
-    EditMacroField { id: String, field: MacroEditField, value: String },
+    EditMacroField {
+        id: String,
+        field: MacroEditField,
+        value: String,
+    },
     /// Persist changes to disk.
     CommitMacroEdit(String),
     /// Cancel without writing.
@@ -563,7 +580,10 @@ pub enum Message {
 
     // --- Per-app profile bindings (Settings tab) ---
     /// User typed in the WIP "app class" or "profile name" fields.
-    SetAppBindingDraft { class: String, profile: String },
+    SetAppBindingDraft {
+        class: String,
+        profile: String,
+    },
     /// Save the current draft as a new app→profile entry.
     AddAppBinding,
     /// Remove the binding for `class`.
@@ -572,7 +592,10 @@ pub enum Message {
     // --- Custom theme palette editor (Settings tab → Theme card) ---
     /// Set the wedge count for a specific radial page. Clamped to
     /// 2..=8 by the overlay's `RadialPage::effective_slot_count`.
-    SetPageSlotCount { page: usize, count: u8 },
+    SetPageSlotCount {
+        page: usize,
+        count: u8,
+    },
     /// Toggle the "Customise theme" expander.
     ToggleThemeCustomiser,
     /// Remove a user-saved theme from disk. Bundled themes can't
@@ -589,7 +612,10 @@ pub enum Message {
     /// Edit one palette field. Field name is one of the
     /// ThemeColors keys ("crust", "accent", etc.); value is the
     /// new "#rrggbb" hex.
-    SetThemeColor { field: String, value: String },
+    SetThemeColor {
+        field: String,
+        value: String,
+    },
     /// Open the inline color-picker for a named palette field, or
     /// close it when the same field is already open. Clicking a
     /// row's swatch toggles it.
@@ -636,14 +662,23 @@ pub enum Message {
     /// always retains at least one entry).
     DeletePage(usize),
     /// Rename the page at `idx`.
-    SetPageName { page: usize, name: String },
+    SetPageName {
+        page: usize,
+        name: String,
+    },
     /// Update the comma-separated app-classes list for `page`.
     /// Empty string clears the list (turns the page into a global
     /// page); non-empty makes it an app-context page.
-    SetPageAppClasses { page: usize, value: String },
+    SetPageAppClasses {
+        page: usize,
+        value: String,
+    },
     /// Toggle whether an app-context page also participates in the
     /// scroll-wheel cycle.
-    SetPageIncludeInScroll { page: usize, value: bool },
+    SetPageIncludeInScroll {
+        page: usize,
+        value: bool,
+    },
     /// Move page left in the order (lower index → earlier in cycle).
     MovePageLeft(usize),
     /// Move page right in the order.
@@ -663,7 +698,11 @@ pub enum Message {
     /// the target page's app_classes; when `None`, surface a hint
     /// in the status bar. `generation` filters stale results from
     /// a previously-cancelled run.
-    DetectedFocusedClass { page: usize, generation: u64, class: Option<String> },
+    DetectedFocusedClass {
+        page: usize,
+        generation: u64,
+        class: Option<String>,
+    },
     /// Cancel an in-flight detect (the user changed their mind
     /// before the 4-second sample fired).
     CancelFocusedClassDetect,
@@ -712,11 +751,7 @@ pub enum Message {
     AnimationEditorDeleteTrack(animation_editor::AnimEditorDirection, usize),
     /// Replace a track's `kind` while preserving timing + easing.
     /// Used by the type picker in the parameter editor.
-    AnimationEditorChangeKind(
-        animation_editor::AnimEditorDirection,
-        usize,
-        &'static str,
-    ),
+    AnimationEditorChangeKind(animation_editor::AnimEditorDirection, usize, &'static str),
     /// Mutate a single field of the selected track. The
     /// `TrackParam` enum collapses ~8 different setters into one
     /// message so the update handler stays compact.
@@ -746,7 +781,11 @@ pub enum Message {
     /// line (placeholder %F/%U/etc. stripped), icon string, and
     /// display name so the handler doesn't need to look back into
     /// the apps cache.
-    PickAppForCommand { command: String, icon: String, label: String },
+    PickAppForCommand {
+        command: String,
+        icon: String,
+        label: String,
+    },
     /// Async write of the recents list completed; result is the
     /// updated list (most-recent first). Used to update the
     /// in-memory `recent_icons` so the picker re-renders with
@@ -759,7 +798,10 @@ pub enum Message {
     BrowseIconFile(icon_picker::IconPickerTarget),
     /// Result of the file dialog. `Some(path)` = user picked a
     /// file, `None` = cancelled.
-    IconFileChosen { target: icon_picker::IconPickerTarget, path: Option<String> },
+    IconFileChosen {
+        target: icon_picker::IconPickerTarget,
+        path: Option<String>,
+    },
     /// Bulk-rasterise the icon-picker catalogue off the UI thread.
     /// Carries the tint colour (so the worker thread can tint
     /// without referencing palette state) and reports back via
@@ -888,9 +930,7 @@ impl AnimElement {
     pub fn description(&self) -> &'static str {
         match self {
             AnimElement::Menu => "The whole radial wheel — open + close.",
-            AnimElement::Submenu => {
-                "Sub-item arc that pops out when hovering a submenu slice."
-            }
+            AnimElement::Submenu => "Sub-item arc that pops out when hovering a submenu slice.",
             AnimElement::SliceHighlight => {
                 "Per-slice hover glow — fades in when the cursor enters a slice."
             }
@@ -1096,7 +1136,9 @@ pub struct State {
     /// Iced-Handle cache layered on top — saves the GPU-upload step
     /// every render, keyed by (source, size, colour).
     pub iced_handles: std::rc::Rc<
-        std::cell::RefCell<std::collections::HashMap<radial_preview::IconKey, iced::widget::image::Handle>>,
+        std::cell::RefCell<
+            std::collections::HashMap<radial_preview::IconKey, iced::widget::image::Handle>,
+        >,
     >,
     /// Latest gamepad-rumble → haptic diagnostic report, shown in
     /// the Gaming tab after the user clicks "Diagnose". `None` until
@@ -1400,11 +1442,7 @@ where
     };
     let current = theme_field_value(&editor.working, field);
     let (r, g, b) = parse_hex_channels(&current);
-    let (h, s, v) = color_canvas::rgb_to_hsv(
-        r as f32 / 255.0,
-        g as f32 / 255.0,
-        b as f32 / 255.0,
-    );
+    let (h, s, v) = color_canvas::rgb_to_hsv(r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0);
     let (nh, ns, nv) = transform(h, s, v);
     let (nr, ng, nb) = color_canvas::hsv_to_rgb(nh, ns, nv);
     let hex = format!(
@@ -1462,10 +1500,7 @@ fn run_test_action(state: &mut State, slice: Option<&oxidemx_shared::Slice>) {
                 state.status = "Cannot test: command is empty.".into();
                 return;
             }
-            match std::process::Command::new("sh")
-                .args(["-c", cmd])
-                .spawn()
-            {
+            match std::process::Command::new("sh").args(["-c", cmd]).spawn() {
                 Ok(child) => {
                     state.status = format!("Spawned (PID {}): {}", child.id(), cmd);
                 }
@@ -1477,8 +1512,7 @@ fn run_test_action(state: &mut State, slice: Option<&oxidemx_shared::Slice>) {
         ActionKind::Settings => {
             // Test would just re-launch this very window. Skip the
             // spawn but tell the user what would happen.
-            state.status =
-                "Settings slice opens this window; already here.".into();
+            state.status = "Settings slice opens this window; already here.".into();
         }
         ActionKind::Macro => {
             if cmd.is_empty() {
@@ -1501,20 +1535,43 @@ fn run_test_action(state: &mut State, slice: Option<&oxidemx_shared::Slice>) {
             tokio::spawn(daemon::trigger_shortcut(keys.clone()));
             state.status = format!("Sending shortcut \"{keys}\" via daemon");
         }
-        ActionKind::EasySwitch => {
-            match cmd.parse::<u8>() {
-                Ok(idx) if (1..=3).contains(&idx) => {
-                    tokio::spawn(daemon::trigger_set_host(idx));
-                    state.status = format!("Switching to host {idx} via daemon");
-                }
-                _ => {
-                    state.status =
-                        format!("Easy-Switch host must be 1, 2, or 3 (got {cmd:?})");
-                }
+        ActionKind::EasySwitch => match cmd.parse::<u8>() {
+            Ok(idx) if (1..=3).contains(&idx) => {
+                tokio::spawn(daemon::trigger_set_host(idx));
+                state.status = format!("Switching to host {idx} via daemon");
             }
-        }
+            _ => {
+                state.status = format!("Easy-Switch host must be 1, 2, or 3 (got {cmd:?})");
+            }
+        },
         ActionKind::Submenu => {
             state.status = "Submenu slices have no action — test sub-items individually.".into();
+        }
+        ActionKind::Widget => {
+            state.status =
+                "Widget slices render live data in the overlay — nothing to test here.".into();
+        }
+        ActionKind::Dial => {
+            state.status =
+                "Dial slices adjust on scroll/drag in the overlay — nothing to test here.".into();
+        }
+        ActionKind::Power => {
+            // Never actually fire a power action from the editor's
+            // Test button — locking/suspending the session mid-edit
+            // is hostile. Describe what it would do instead.
+            state.status = format!(
+                "Power slice would run \"{}\" — not fired from the editor.",
+                if cmd.is_empty() { "(unset)" } else { cmd }
+            );
+        }
+        ActionKind::NightLight => {
+            state.status = "Night-light slice toggles GNOME night light in the overlay.".into();
+        }
+        ActionKind::MouseSetting => {
+            state.status = format!(
+                "Mouse-setting slice applies \"{}\" via the daemon — test from the overlay.",
+                if cmd.is_empty() { "(unset)" } else { cmd }
+            );
         }
         ActionKind::None => {
             state.status = "This slice has no action configured.".into();
@@ -1652,9 +1709,7 @@ impl From<radial_preview::Action> for Message {
         match a {
             radial_preview::Action::SelectSlice(i) => Message::SelectSlice(i),
             radial_preview::Action::DismissSelection => Message::DismissSliceSelection,
-            radial_preview::Action::SwapSlices { from, to } => {
-                Message::SwapSlices { from, to }
-            }
+            radial_preview::Action::SwapSlices { from, to } => Message::SwapSlices { from, to },
         }
     }
 }
@@ -1742,7 +1797,6 @@ impl State {
             .unwrap_or(&[])
     }
 
-
     fn maybe_save(&mut self) -> Option<Task<Message>> {
         let last = self.last_edit?;
         if !self.saved_pending {
@@ -1788,71 +1842,55 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
         Message::SetVisual(field, v) => {
             match field {
                 VisualField::MenuBackgroundOpacity => {
-                    state.config.radial_menu.visuals.menu_background_opacity =
-                        v.clamp(0.0, 1.0);
+                    state.config.radial_menu.visuals.menu_background_opacity = v.clamp(0.0, 1.0);
                 }
                 VisualField::SliceHighlightOpacity => {
-                    state.config.radial_menu.visuals.slice_highlight_opacity =
-                        v.clamp(0.0, 1.0);
+                    state.config.radial_menu.visuals.slice_highlight_opacity = v.clamp(0.0, 1.0);
                 }
                 VisualField::CenterLabelSize => {
                     // 0 = disabled (the renderer skips drawing); cap
                     // at 32 so an accidental drag doesn't spawn
                     // ridiculous text.
-                    state.config.radial_menu.visuals.center_label_size =
-                        v.clamp(0.0, 32.0);
+                    state.config.radial_menu.visuals.center_label_size = v.clamp(0.0, 32.0);
                 }
                 VisualField::TooltipFontSize => {
-                    state.config.radial_menu.visuals.tooltip_font_size =
-                        v.clamp(0.0, 24.0);
+                    state.config.radial_menu.visuals.tooltip_font_size = v.clamp(0.0, 24.0);
                 }
                 VisualField::AuroraIntensity => {
-                    state.config.radial_menu.visuals.aurora_intensity =
-                        v.clamp(0.0, 1.0);
+                    state.config.radial_menu.visuals.aurora_intensity = v.clamp(0.0, 1.0);
                 }
                 VisualField::RippleIntensity => {
-                    state.config.radial_menu.visuals.ripple_intensity =
-                        v.clamp(0.0, 1.0);
+                    state.config.radial_menu.visuals.ripple_intensity = v.clamp(0.0, 1.0);
                 }
                 VisualField::HoverGlowIntensity => {
-                    state.config.radial_menu.visuals.hover_glow_intensity =
-                        v.clamp(0.0, 1.0);
+                    state.config.radial_menu.visuals.hover_glow_intensity = v.clamp(0.0, 1.0);
                 }
                 VisualField::DispatchBurstIntensity => {
-                    state.config.radial_menu.visuals.dispatch_burst_intensity =
-                        v.clamp(0.0, 1.0);
+                    state.config.radial_menu.visuals.dispatch_burst_intensity = v.clamp(0.0, 1.0);
                 }
                 VisualField::SdfRingIntensity => {
-                    state.config.radial_menu.visuals.sdf_ring_intensity =
-                        v.clamp(0.0, 1.0);
+                    state.config.radial_menu.visuals.sdf_ring_intensity = v.clamp(0.0, 1.0);
                 }
                 VisualField::HoverTiltIntensity => {
-                    state.config.radial_menu.visuals.hover_tilt_intensity =
-                        v.clamp(0.0, 1.0);
+                    state.config.radial_menu.visuals.hover_tilt_intensity = v.clamp(0.0, 1.0);
                 }
                 VisualField::HoverTiltShadow => {
-                    state.config.radial_menu.visuals.hover_tilt_shadow =
-                        v.clamp(0.0, 1.0);
+                    state.config.radial_menu.visuals.hover_tilt_shadow = v.clamp(0.0, 1.0);
                 }
                 VisualField::HoverTiltSharpness => {
-                    state.config.radial_menu.visuals.hover_tilt_sharpness =
-                        v.clamp(0.0, 1.0);
+                    state.config.radial_menu.visuals.hover_tilt_sharpness = v.clamp(0.0, 1.0);
                 }
                 VisualField::DiscBevelIntensity => {
-                    state.config.radial_menu.visuals.disc_bevel_intensity =
-                        v.clamp(0.0, 1.0);
+                    state.config.radial_menu.visuals.disc_bevel_intensity = v.clamp(0.0, 1.0);
                 }
                 VisualField::CenterDomeIntensity => {
-                    state.config.radial_menu.visuals.center_dome_intensity =
-                        v.clamp(0.0, 1.0);
+                    state.config.radial_menu.visuals.center_dome_intensity = v.clamp(0.0, 1.0);
                 }
                 VisualField::SliceBevelIntensity => {
-                    state.config.radial_menu.visuals.slice_bevel_intensity =
-                        v.clamp(0.0, 1.0);
+                    state.config.radial_menu.visuals.slice_bevel_intensity = v.clamp(0.0, 1.0);
                 }
                 VisualField::DropShadowIntensity => {
-                    state.config.radial_menu.visuals.drop_shadow_intensity =
-                        v.clamp(0.0, 1.0);
+                    state.config.radial_menu.visuals.drop_shadow_intensity = v.clamp(0.0, 1.0);
                 }
                 VisualField::LightAngleRad => {
                     // Wrap to (-π, π] so the value stays in a
@@ -1868,14 +1906,12 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                     state.config.radial_menu.visuals.light_angle_rad = a;
                 }
                 VisualField::SpecularSweepIntensity => {
-                    state.config.radial_menu.visuals.specular_sweep_intensity =
-                        v.clamp(0.0, 1.0);
+                    state.config.radial_menu.visuals.specular_sweep_intensity = v.clamp(0.0, 1.0);
                 }
                 VisualField::SpecularSweepPeriod => {
                     // Clamp to a sane range — too fast looks
                     // like a strobe; too slow looks frozen.
-                    state.config.radial_menu.visuals.specular_sweep_period_s =
-                        v.clamp(1.0, 30.0);
+                    state.config.radial_menu.visuals.specular_sweep_period_s = v.clamp(1.0, 30.0);
                 }
             }
             state.touch();
@@ -1902,22 +1938,19 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             // Cap at 4s — beyond that the flash starts feeling
             // less like an announcement and more like a static
             // label.
-            state.config.radial_menu.visuals.page_name_visible_ms =
-                ms.min(4000);
+            state.config.radial_menu.visuals.page_name_visible_ms = ms.min(4000);
             state.touch();
             Task::none()
         }
         Message::SetPageNameTransitionMs(ms) => {
             // Floor at 50 ms (the slide animation needs at least
             // that to feel intentional) and cap at 1 s.
-            state.config.radial_menu.visuals.page_name_transition_ms =
-                ms.clamp(50, 1000);
+            state.config.radial_menu.visuals.page_name_transition_ms = ms.clamp(50, 1000);
             state.touch();
             Task::none()
         }
         Message::SetPageNameSlideDistance(px) => {
-            state.config.radial_menu.visuals.page_name_slide_distance_px =
-                px.clamp(0.0, 200.0);
+            state.config.radial_menu.visuals.page_name_slide_distance_px = px.clamp(0.0, 200.0);
             state.touch();
             Task::none()
         }
@@ -2144,17 +2177,14 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                     .pick_file()
                     .await;
                 let handle = chosen.ok_or_else(|| "cancelled".to_string())?;
-                let bytes = std::fs::read(handle.path())
-                    .map_err(|e| format!("read: {e}"))?;
+                let bytes = std::fs::read(handle.path()).map_err(|e| format!("read: {e}"))?;
                 // parse_and_install handles both the new bundle
                 // format and the older bare-AppConfig export,
                 // unpacking macros + themes to disk as a side
                 // effect of the bundle path.
                 let (mut cfg, errors) = bundle::parse_and_install(&bytes)?;
                 cfg.radial_menu.normalize_pages();
-                Ok::<(Box<oxidemx_shared::AppConfig>, Vec<String>), String>(
-                    (Box::new(cfg), errors),
-                )
+                Ok::<(Box<oxidemx_shared::AppConfig>, Vec<String>), String>((Box::new(cfg), errors))
             },
             Message::ConfigImported,
         ),
@@ -2220,8 +2250,7 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                         .save_file()
                         .await;
                     let handle = chosen.ok_or_else(|| "cancelled".to_string())?;
-                    std::fs::write(handle.path(), json)
-                        .map_err(|e| format!("write: {e}"))?;
+                    std::fs::write(handle.path(), json).map_err(|e| format!("write: {e}"))?;
                     Ok::<String, String>(handle.path().display().to_string())
                 },
                 Message::ThemeExported,
@@ -2276,10 +2305,7 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             ) {
                 Some(t) => t,
                 None => {
-                    state.status = format!(
-                        "Rename failed: could not load \"{}\"",
-                        rename.original
-                    );
+                    state.status = format!("Rename failed: could not load \"{}\"", rename.original);
                     return Task::none();
                 }
             };
@@ -2288,17 +2314,14 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             // Save under new slug, then delete the old file. Doing
             // it in this order means a partial failure leaves both
             // copies on disk rather than losing the theme.
-            let _ = oxidemx_shared::theme::save_user_theme(&new_slug, &theme)
-                .map_err(|e| {
-                    state.status = format!("Rename save failed: {e}");
-                });
-            let _ = oxidemx_shared::theme::delete_user_theme(&original)
-                .map_err(|e| {
-                    state.status = format!("Rename cleanup failed: {e}");
-                });
+            let _ = oxidemx_shared::theme::save_user_theme(&new_slug, &theme).map_err(|e| {
+                state.status = format!("Rename save failed: {e}");
+            });
+            let _ = oxidemx_shared::theme::delete_user_theme(&original).map_err(|e| {
+                state.status = format!("Rename cleanup failed: {e}");
+            });
             if was_active {
-                state.config.theme =
-                    oxidemx_shared::theme::ThemeName::from(new_slug.as_str());
+                state.config.theme = oxidemx_shared::theme::ThemeName::from(new_slug.as_str());
                 state.palette = palette::Palette::resolve(&state.config.theme);
                 state.touch();
             }
@@ -2328,8 +2351,7 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                 if slug.is_empty() {
                     return Err("filename gives empty slug".to_string());
                 }
-                let bytes = std::fs::read(handle.path())
-                    .map_err(|e| format!("read: {e}"))?;
+                let bytes = std::fs::read(handle.path()).map_err(|e| format!("read: {e}"))?;
                 let theme: oxidemx_shared::theme::Theme =
                     serde_json::from_slice(&bytes).map_err(|e| format!("parse: {e}"))?;
                 oxidemx_shared::theme::save_user_theme(&slug, &theme)
@@ -2357,10 +2379,7 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             let path = oxidemx_shared::config::default_config_path()
                 .and_then(|p| p.parent().map(|q| q.to_path_buf()))
                 .unwrap_or_else(|| std::path::PathBuf::from("."));
-            match std::process::Command::new("xdg-open")
-                .arg(&path)
-                .spawn()
-            {
+            match std::process::Command::new("xdg-open").arg(&path).spawn() {
                 Ok(_) => {
                     state.status = format!("Opening {}", path.display());
                 }
@@ -2379,7 +2398,8 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             // smaller displays. The user can always click to
             // dismiss and re-trigger via their bound mouse button
             // for a real cursor-anchored test.
-            state.status = "Opening radial menu… scroll wheel over centre puck to test transitions".into();
+            state.status =
+                "Opening radial menu… scroll wheel over centre puck to test transitions".into();
             Task::perform(daemon::show_radial_at(960, 540), |_| {
                 Message::OverlayPreviewFired
             })
@@ -2408,12 +2428,10 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             if armed {
                 state.config.radial_menu.animation = AnimationConfig::default();
                 state.config.radial_menu.visuals = VisualSettings::default();
-                state.config.haptics =
-                    oxidemx_shared::haptics::HapticsConfig::default();
+                state.config.haptics = oxidemx_shared::haptics::HapticsConfig::default();
                 state.reset_armed_at = None;
                 state.status =
-                    "Reset complete — animation + visuals + haptics back to defaults"
-                        .into();
+                    "Reset complete — animation + visuals + haptics back to defaults".into();
                 state.touch();
             } else {
                 state.reset_armed_at = Some(now);
@@ -2495,6 +2513,8 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                 visible_if: None,
                 icon_untinted: false,
                 description: String::new(),
+                widget: None,
+                dial: None,
             });
             state.touch();
             Task::none()
@@ -2611,7 +2631,11 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             }
             Task::none()
         }
-        Message::SetSubItemVisibility { parent, idx, condition } => {
+        Message::SetSubItemVisibility {
+            parent,
+            idx,
+            condition,
+        } => {
             if let Some(item) = state
                 .active_slices_mut()
                 .get_mut(parent)
@@ -2672,8 +2696,10 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                     icon: String::new(),
                     submenu: Vec::new(),
                     visible_if: None,
-                icon_untinted: false,
-                description: String::new(),
+                    icon_untinted: false,
+                    description: String::new(),
+                    widget: None,
+                    dial: None,
                 });
             }
             if from < slices.len() && to < slices.len() {
@@ -2854,8 +2880,7 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                         .save_file()
                         .await;
                     let handle = chosen.ok_or_else(|| "cancelled".to_string())?;
-                    std::fs::write(handle.path(), json)
-                        .map_err(|e| format!("write: {e}"))?;
+                    std::fs::write(handle.path(), json).map_err(|e| format!("write: {e}"))?;
                     Ok::<String, String>(handle.path().display().to_string())
                 },
                 Message::MacroExported,
@@ -2891,12 +2916,10 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                 if id.is_empty() {
                     return Err("filename gives empty id".to_string());
                 }
-                let bytes = std::fs::read(handle.path())
-                    .map_err(|e| format!("read: {e}"))?;
+                let bytes = std::fs::read(handle.path()).map_err(|e| format!("read: {e}"))?;
                 let value: serde_json::Value =
                     serde_json::from_slice(&bytes).map_err(|e| format!("parse: {e}"))?;
-                tabs::macros::write_raw(&id, &value)
-                    .map_err(|e| format!("write: {e}"))?;
+                tabs::macros::write_raw(&id, &value).map_err(|e| format!("write: {e}"))?;
                 Ok::<String, String>(id)
             },
             Message::MacroImported,
@@ -2956,7 +2979,8 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                     state.config.scroll.smartshift = want_smartshift;
                     state.touch();
                 }
-                if want_smartshift && *threshold > 0
+                if want_smartshift
+                    && *threshold > 0
                     && state.config.scroll.smartshift_threshold != *threshold as u32
                 {
                     state.config.scroll.smartshift_threshold = *threshold as u32;
@@ -3268,7 +3292,11 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             Task::none()
         }
         Message::SetHapticRedirectHardHide(on) => {
-            state.config.gaming.haptic_redirect.hard_hide_real_controller = on;
+            state
+                .config
+                .gaming
+                .haptic_redirect
+                .hard_hide_real_controller = on;
             state.touch();
             Task::none()
         }
@@ -3338,8 +3366,7 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                     // alone — the catalogue will have one fewer
                     // entry on next render.
                     if state.config.theme.as_str() == slug {
-                        state.config.theme =
-                            oxidemx_shared::theme::ThemeName::CatppuccinMocha;
+                        state.config.theme = oxidemx_shared::theme::ThemeName::CatppuccinMocha;
                         state.palette = palette::Palette::resolve(&state.config.theme);
                         state.touch();
                     }
@@ -3429,7 +3456,11 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             });
             Task::none()
         }
-        Message::SetThemeColorChannel { field, channel, value } => {
+        Message::SetThemeColorChannel {
+            field,
+            channel,
+            value,
+        } => {
             if let Some(editor) = state.theme_editor.as_mut() {
                 let current = theme_field_value(&editor.working, &field);
                 let (mut r, mut g, mut b) = parse_hex_channels(&current);
@@ -3516,8 +3547,10 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                     icon: String::new(),
                     submenu: Vec::new(),
                     visible_if: None,
-                icon_untinted: false,
-                description: String::new(),
+                    icon_untinted: false,
+                    description: String::new(),
+                    widget: None,
+                    dial: None,
                 });
                 state.touch();
             }
@@ -3628,13 +3661,17 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             Task::none()
         }
         Message::AddPage => {
-            state.config.radial_menu.pages.push(oxidemx_shared::RadialPage {
-                name: format!("Page {}", state.config.radial_menu.pages.len() + 1),
-                slices: Vec::new(),
-                app_classes: Vec::new(),
-                include_in_scroll: true,
-                slot_count: 8,
-            });
+            state
+                .config
+                .radial_menu
+                .pages
+                .push(oxidemx_shared::RadialPage {
+                    name: format!("Page {}", state.config.radial_menu.pages.len() + 1),
+                    slices: Vec::new(),
+                    app_classes: Vec::new(),
+                    include_in_scroll: true,
+                    slot_count: 8,
+                });
             state.active_page = state.config.radial_menu.pages.len() - 1;
             state.app_classes_drafts.clear();
             state.selected_slice = None;
@@ -3766,9 +3803,8 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                 deadline: Instant::now() + Duration::from_secs(delay_secs),
                 generation,
             });
-            state.status = format!(
-                "Switch to your target app — sampling focused window in {delay_secs}s…"
-            );
+            state.status =
+                format!("Switch to your target app — sampling focused window in {delay_secs}s…");
             Task::perform(
                 async move {
                     let class = crate::cursor_helper::detect_focused_class_after(delay_secs).await;
@@ -3820,8 +3856,7 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                         pending
                             .into_iter()
                             .map(|name| {
-                                let icon =
-                                    oxidemx_icons::rasterize_icon_untinted(&name, size);
+                                let icon = oxidemx_icons::rasterize_icon_untinted(&name, size);
                                 (name, icon)
                             })
                             .collect::<Vec<_>>()
@@ -3837,8 +3872,7 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             Task::none()
         }
         Message::OpenAnimationEditor(el) => {
-            state.animation_editor =
-                Some(animation_editor::AnimationEditorState::new(el));
+            state.animation_editor = Some(animation_editor::AnimationEditorState::new(el));
             Task::none()
         }
         Message::CloseAnimationEditor => {
@@ -3947,21 +3981,17 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             };
             if let Some(track) = cfg.custom_tracks.get_mut(idx) {
                 track.easing = match opt {
-                    animation_editor::EasingPickOption::Linear =>
-                        oxidemx_shared::Easing::Linear,
-                    animation_editor::EasingPickOption::EaseIn =>
-                        oxidemx_shared::Easing::EaseIn,
-                    animation_editor::EasingPickOption::EaseOut =>
-                        oxidemx_shared::Easing::EaseOut,
-                    animation_editor::EasingPickOption::EaseInOut =>
-                        oxidemx_shared::Easing::EaseInOut,
+                    animation_editor::EasingPickOption::Linear => oxidemx_shared::Easing::Linear,
+                    animation_editor::EasingPickOption::EaseIn => oxidemx_shared::Easing::EaseIn,
+                    animation_editor::EasingPickOption::EaseOut => oxidemx_shared::Easing::EaseOut,
+                    animation_editor::EasingPickOption::EaseInOut => {
+                        oxidemx_shared::Easing::EaseInOut
+                    }
                     animation_editor::EasingPickOption::Spring => {
                         // Preserve old stiffness/damping if already
                         // a spring; otherwise use Motion.dev "gentle"
                         // defaults.
-                        if let oxidemx_shared::Easing::Spring { .. } =
-                            track.easing
-                        {
+                        if let oxidemx_shared::Easing::Spring { .. } = track.easing {
                             track.easing
                         } else {
                             oxidemx_shared::Easing::Spring {
@@ -4001,7 +4031,11 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             }
             Task::none()
         }
-        Message::PickAppForCommand { command, icon, label } => {
+        Message::PickAppForCommand {
+            command,
+            icon,
+            label,
+        } => {
             // Read the picker's flags BEFORE we take() it, so the
             // replace_icon toggle is honoured.
             let (target, replace_icon) = match state.app_command_picker.take() {
@@ -4112,7 +4146,8 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                                 pending
                                     .into_iter()
                                     .map(|name| {
-                                        let icon = oxidemx_icons::rasterize_icon(&name, size, color);
+                                        let icon =
+                                            oxidemx_icons::rasterize_icon(&name, size, color);
                                         (name, icon)
                                     })
                                     .collect::<Vec<_>>()
@@ -4172,9 +4207,8 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                                         // fine — the picker
                                         // shouldn't have many
                                         // symbolic-only apps.
-                                        let icon = oxidemx_icons::rasterize_icon_untinted(
-                                            &name, size,
-                                        );
+                                        let icon =
+                                            oxidemx_icons::rasterize_icon_untinted(&name, size);
                                         (name, icon)
                                     })
                                     .collect::<Vec<_>>()
@@ -4315,7 +4349,11 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             state.status = "Detect cancelled.".into();
             Task::none()
         }
-        Message::DetectedFocusedClass { page, generation, class } => {
+        Message::DetectedFocusedClass {
+            page,
+            generation,
+            class,
+        } => {
             // Drop stale samples from runs the user cancelled or
             // restarted before this one finished.
             let in_flight = state.detect_in_flight;
@@ -4403,7 +4441,10 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             Task::none()
         }
         Message::PopupToggleAdd(id) => {
-            if !oxidemx_shared::QUICK_TOGGLE_CATALOG.iter().any(|q| q.id == id) {
+            if !oxidemx_shared::QUICK_TOGGLE_CATALOG
+                .iter()
+                .any(|q| q.id == id)
+            {
                 warn!("PopupToggleAdd: unknown id {id:?} — not in QUICK_TOGGLE_CATALOG");
                 return Task::none();
             }
@@ -4419,18 +4460,12 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             Task::none()
         }
         Message::PopupSliderMoveUp(id) => {
-            oxidemx_shared::PopupConfig::move_up(
-                &mut state.config.popup.power_sliders,
-                &id,
-            );
+            oxidemx_shared::PopupConfig::move_up(&mut state.config.popup.power_sliders, &id);
             state.touch();
             Task::none()
         }
         Message::PopupSliderMoveDown(id) => {
-            oxidemx_shared::PopupConfig::move_down(
-                &mut state.config.popup.power_sliders,
-                &id,
-            );
+            oxidemx_shared::PopupConfig::move_down(&mut state.config.popup.power_sliders, &id);
             state.touch();
             Task::none()
         }
@@ -4440,7 +4475,10 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             Task::none()
         }
         Message::PopupSliderAdd(id) => {
-            if !oxidemx_shared::QUICK_SLIDER_CATALOG.iter().any(|q| q.id == id) {
+            if !oxidemx_shared::QUICK_SLIDER_CATALOG
+                .iter()
+                .any(|q| q.id == id)
+            {
                 warn!("PopupSliderAdd: unknown id {id:?} — not in QUICK_SLIDER_CATALOG");
                 return Task::none();
             }
@@ -4513,9 +4551,19 @@ fn view(state: &State) -> Element<'_, Message> {
     // whichever tab the user was on. Order matters: app-command
     // picker wins over icon picker if both are somehow open.
     let body: Element<Message> = if let Some(p) = state.app_command_picker.as_ref() {
-        full_panel(state, "Pick app for command", app_picker::view(state, p), Message::CloseAppCommandPicker)
+        full_panel(
+            state,
+            "Pick app for command",
+            app_picker::view(state, p),
+            Message::CloseAppCommandPicker,
+        )
     } else if let Some(p) = state.icon_picker.as_ref() {
-        full_panel(state, "Pick an icon", icon_picker::view(state, p), Message::CloseIconPicker)
+        full_panel(
+            state,
+            "Pick an icon",
+            icon_picker::view(state, p),
+            Message::CloseIconPicker,
+        )
     } else if let Some(editor) = state.theme_editor.as_ref() {
         full_panel(
             state,
@@ -4540,7 +4588,8 @@ fn view(state: &State) -> Element<'_, Message> {
             Tab::Haptic => tabs::haptics::view(state),
             Tab::Devices => tabs::devices::view(state),
             Tab::EasySwitch => tabs::easyswitch::view(state),
-            Tab::Flow => tabs::placeholder::view(state,
+            Tab::Flow => tabs::placeholder::view(
+                state,
                 "Flow",
                 "Cross-machine cursor-and-clipboard hand-off. Coming soon.",
             ),
@@ -4552,8 +4601,7 @@ fn view(state: &State) -> Element<'_, Message> {
     let main_area = row![
         sidebar,
         container(
-            scrollable(container(body).padding(20))
-                .style(style::scrollable_style(&state.palette))
+            scrollable(container(body).padding(20)).style(style::scrollable_style(&state.palette))
         )
         .padding(0)
         .style(style::page(&state.palette))
@@ -4724,8 +4772,7 @@ fn footer_view(state: &State) -> Element<'_, Message> {
                     let into_tail = elapsed
                         .saturating_sub(STATUS_LIFETIME - STATUS_FADE_TAIL)
                         .as_secs_f32();
-                    let normalised = (into_tail / STATUS_FADE_TAIL.as_secs_f32())
-                        .clamp(0.0, 1.0);
+                    let normalised = (into_tail / STATUS_FADE_TAIL.as_secs_f32()).clamp(0.0, 1.0);
                     // 1 - t^3: linger near full alpha for most of
                     // the tail (~88 % visible at the halfway mark),
                     // then accelerate the decay. Reads as a soft
@@ -4805,10 +4852,7 @@ fn subscription(state: &State) -> Subscription<Message> {
         })
         .unwrap_or(false);
     if in_fade {
-        subs.push(
-            iced::time::every(Duration::from_millis(50))
-                .map(|_| Message::StatusFadeTick),
-        );
+        subs.push(iced::time::every(Duration::from_millis(50)).map(|_| Message::StatusFadeTick));
     }
     if FOCUS_RX.get().is_some() {
         // The singleton handshake gave us a receiver — wire it in
@@ -4836,9 +4880,7 @@ fn shortcut_capture_filter(
 ) -> Option<Message> {
     use iced::keyboard::{key, Event as KbdEvent, Key};
     let (key, modifiers) = match event {
-        iced::Event::Keyboard(KbdEvent::KeyPressed {
-            key, modifiers, ..
-        }) => (key, modifiers),
+        iced::Event::Keyboard(KbdEvent::KeyPressed { key, modifiers, .. }) => (key, modifiers),
         _ => return None,
     };
     // Esc cancels.
@@ -4943,10 +4985,7 @@ fn main() -> iced::Result {
     // raised instead of a duplicate.
     match singleton::try_acquire_or_focus_existing() {
         singleton::Acquisition::Primary(rx) => {
-            FOCUS_RX
-                .set(rx)
-                .map_err(|_| ())
-                .expect("FOCUS_RX set once");
+            FOCUS_RX.set(rx).map_err(|_| ()).expect("FOCUS_RX set once");
         }
         singleton::Acquisition::SecondaryFocused => {
             info!("Existing settings instance focused; exiting.");
@@ -4978,7 +5017,11 @@ fn main() -> iced::Result {
             // the accent and surface colour from this theme.
             let pal = &state.palette;
             iced::Theme::custom(
-                if pal.is_dark { "OxideMX Dark" } else { "OxideMX Light" },
+                if pal.is_dark {
+                    "OxideMX Dark"
+                } else {
+                    "OxideMX Light"
+                },
                 iced::theme::Palette {
                     background: pal.base,
                     text: pal.text,

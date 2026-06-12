@@ -27,28 +27,26 @@ pub mod theme;
 pub use action::ActionKind;
 pub use animation::{
     AnimationConfig, AnimationTrack, Axis, ChainConfig, ComposedTransform, Easing,
-    ElementAnimation, PageTransitionConfig, PageTransitionShaderConfig,
-    PageTransitionShaderStyle, PageTransitionStyle, TrackKind, TransitionConfig,
-    TransitionDirection, TransitionKind,
+    ElementAnimation, PageTransitionConfig, PageTransitionShaderConfig, PageTransitionShaderStyle,
+    PageTransitionStyle, TrackKind, TransitionConfig, TransitionDirection, TransitionKind,
 };
 pub use applications::{
     clean_exec_line, enumerate_applications, parse_desktop_file, parse_desktop_string,
     search as search_applications, DesktopEntry,
 };
+pub use buttons::{ButtonAction, ButtonsConfig, MouseButton};
 pub use conditions::Condition;
 pub use config::{
-    AppConfig, DispatchBurstStyle, RadialMenuConfig, RadialPage, Slice, VisualSettings,
+    AiConfig, AppConfig, DialKind, DispatchBurstStyle, OverlayConfig, RadialMenuConfig, RadialPage,
+    Slice, VisualSettings, WidgetConfig, WidgetSource,
 };
-pub use buttons::{ButtonAction, ButtonsConfig, MouseButton};
 pub use gaming::{
-    GamingConfig, HapticEventMode, HapticRedirectConfig, HapticRedirectCurve,
-    HapticRedirectMode,
+    GamingConfig, HapticEventMode, HapticRedirectConfig, HapticRedirectCurve, HapticRedirectMode,
 };
 pub use haptics::{HapticsConfig, PerEventPatterns, HAPTIC_PATTERNS};
 pub use pointer::{PointerConfig, ScrollConfig};
 pub use popup::{
-    HostLabelStyle, PopupConfig, PopupMode, QuickEntry,
-    QUICK_SLIDER_CATALOG, QUICK_TOGGLE_CATALOG,
+    HostLabelStyle, PopupConfig, PopupMode, QuickEntry, QUICK_SLIDER_CATALOG, QUICK_TOGGLE_CATALOG,
 };
 pub use profiles::ProfileResolver;
 pub use theme::{Theme, ThemeName};
