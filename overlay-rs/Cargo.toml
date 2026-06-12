@@ -18,6 +18,9 @@ oxidemx-window = { path = "../oxidemx-window" }
 # painter replays (Scene/Prim/WedgeGeom).
 oxidemx-widget-host = { path = "../oxidemx-widget-host" }
 oxidemx-widget-proto = { path = "../oxidemx-widget-proto" }
+# Shared Scene replay (prim walk + palette resolution) — same code
+# path the settings app uses for its options-card wedge preview.
+oxidemx-scene-render = { path = "../oxidemx-scene-render" }
 # REST client for Interactions API
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "stream"] }
 url = "2"

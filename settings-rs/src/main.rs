@@ -41,6 +41,7 @@ mod recents;
 mod singleton;
 mod theme_customiser;
 mod ui_state;
+mod widget_preview;
 mod widget_store;
 
 use iced::widget::{button, column, container, row, rule, scrollable, text, Space};
@@ -575,6 +576,9 @@ pub enum Message {
         lat: f64,
         lon: f64,
     },
+    /// Event from the options-card live-preview worker (Task 5):
+    /// fresh scenes + instance failures, streamed via `Task::run`.
+    WidgetPreviewEvent(oxidemx_widget_host::HostEvent),
 
     // --- Haptics tab ---
     SetHapticsEnabled(bool),
@@ -1322,6 +1326,10 @@ pub struct State {
     /// open — takes over the content area via the same full-panel
     /// chrome as the icon picker; dropped wholesale on close.
     pub widget_store: Option<widget_store::WidgetStoreState>,
+    /// Live wedge preview worker for the open widget options card
+    /// (Plan 3 Task 5). Reconciled by `widget_preview::sync` after
+    /// every update; `None` whenever the card isn't showing.
+    pub widget_preview: Option<widget_preview::PreviewHandle>,
 }
 
 /// Where the AI Assistant's Gemini API key lives. Mirrors the
@@ -1414,6 +1422,7 @@ impl Default for State {
             widget_loc_results: Vec::new(),
             widget_loc_searching: false,
             widget_store: None,
+            widget_preview: None,
         }
     }
 }
@@ -2148,6 +2157,15 @@ fn rescan_widgets(state: &mut State) {
 }
 
 fn update(state: &mut State, message: Message) -> Task<Message> {
+    let task = update_inner(state, message);
+    // Reconcile the options-card live preview against whatever the
+    // message just changed (selection, option edits, tab switches,
+    // uninstalls…). Cheap when no custom-widget slice is selected.
+    let preview = widget_preview::sync(state);
+    Task::batch([task, preview])
+}
+
+fn update_inner(state: &mut State, message: Message) -> Task<Message> {
     match message {
         Message::SwitchTab(t) => {
             state.tab = t;
@@ -3304,6 +3322,10 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                 state.status = format!("Location set: {name}");
                 state.touch();
             }
+            Task::none()
+        }
+        Message::WidgetPreviewEvent(event) => {
+            widget_preview::on_event(state, event);
             Task::none()
         }
         Message::SetSliceDial(i, kind) => {
@@ -6170,5 +6192,30 @@ mod widget_flow_tests {
             Some(expected_ikey.as_str())
         );
         assert_eq!(slice.widget.as_ref().unwrap().scope, WidgetScope::Global);
+
+        // --- live-preview lifecycle (Task 5): the post-update sync
+        // spawns a preview handle when the options card becomes
+        // visible (Menu tab + custom widget slice selected) and
+        // drops it on deselect. The worker itself runs inside the
+        // returned Task's stream — not polled here, so no wasm
+        // executes; the lifecycle is what's under test.
+        let _ = update(&mut state, Message::SwitchTab(Tab::Menu));
+        let _ = update(&mut state, Message::SelectSlice(4));
+        {
+            let p = state
+                .widget_preview
+                .as_ref()
+                .expect("preview handle spawned for the visible options card");
+            assert_eq!(p.instance.widget_id, "weather");
+            assert_eq!(p.instance.instance_key, expected_ikey);
+        }
+        // Selecting a non-widget slice tears the preview down.
+        let _ = update(&mut state, Message::SelectSlice(0));
+        assert!(state.widget_preview.is_none());
+        // …and so does deselecting entirely.
+        let _ = update(&mut state, Message::SelectSlice(4));
+        assert!(state.widget_preview.is_some());
+        let _ = update(&mut state, Message::DismissSliceSelection);
+        assert!(state.widget_preview.is_none());
     }
 }

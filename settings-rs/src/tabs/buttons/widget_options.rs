@@ -359,7 +359,21 @@ fn options_card<'a>(
 
     col = col.push(footer_row(pal, scope, &manifest.id, &ikey));
 
-    container(col)
+    // Live wedge preview on the right column while the preview
+    // worker tracks this instance (Plan 3 Task 5). `None` for one
+    // frame after selection until the post-update sync spawns it.
+    let body: Element<Message> =
+        match crate::widget_preview::preview_element(state, &manifest.id, &ikey, slice) {
+            Some(preview) => row![
+                container(col).width(Length::FillPortion(3)),
+                container(preview).padding([4, 0]),
+            ]
+            .spacing(12)
+            .into(),
+            None => col.into(),
+        };
+
+    container(body)
         .padding(12)
         .width(Length::Fill)
         .style(card_accent(pal))
@@ -1069,8 +1083,9 @@ fn swatch_style(
 }
 
 /// Slice palette token → display colour (same lookup the radial
-/// preview uses for slice tints).
-fn palette_color(pal: &Palette, key: &str) -> iced::Color {
+/// preview uses for slice tints). Shared with the live wedge
+/// preview (`widget_preview.rs`) for the wedge's hover wash.
+pub(crate) fn palette_color(pal: &Palette, key: &str) -> iced::Color {
     match key {
         "green" => pal.green,
         "yellow" => pal.yellow,

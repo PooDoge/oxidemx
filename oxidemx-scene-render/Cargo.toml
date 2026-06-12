@@ -1,0 +1,27 @@
+# Shared scene-replay renderer for widget-plugin Scenes: the prim
+# walk (`Path` / `Arc` / `Text` / `Sparkline` / `Image` / `Group`)
+# plus theme-palette colour resolution, drawn into an iced canvas
+# Frame. Extracted from overlay-rs (Plan 3 Task 5) so the settings
+# app's live wedge preview replays the exact pixels the overlay
+# would draw — without dragging any overlay deps along.
+
+[package]
+name = "oxidemx-scene-render"
+version = "0.0.1"
+edition = "2021"
+license = "GPL-3.0"
+description = "Widget-plugin Scene replay onto an iced canvas Frame"
+repository = "https://github.com/PooDoge/oxidemx"
+
+[dependencies]
+oxidemx-shared = { path = "../oxidemx-shared" }
+oxidemx-widget-proto = { path = "../oxidemx-widget-proto" }
+
+# Same iced 0.14 as every other workspace UI crate; canvas only —
+# consumers bring their own windowing/backend features (additive
+# feature unification keeps this cheap).
+iced = { version = "0.14", features = ["canvas"] }
+
+# Both consumers (overlay-rs, settings-rs) run a tracing subscriber,
+# so the once-per-session "unknown prim" warnings stay visible.
+tracing = "0.1"

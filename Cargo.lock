@@ -4713,6 +4713,7 @@ dependencies = [
  "notify",
  "once_cell",
  "oxidemx-icons",
+ "oxidemx-scene-render",
  "oxidemx-shared",
  "oxidemx-widget-host",
  "oxidemx-widget-proto",
@@ -4752,6 +4753,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "oxidemx-scene-render"
+version = "0.0.1"
+dependencies = [
+ "iced 0.14.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "oxidemx-shared",
+ "oxidemx-widget-proto",
+ "tracing",
+]
+
+[[package]]
 name = "oxidemx-settings"
 version = "0.0.1"
 dependencies = [
@@ -4760,6 +4771,7 @@ dependencies = [
  "iced 0.14.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "image",
  "oxidemx-icons",
+ "oxidemx-scene-render",
  "oxidemx-shared",
  "oxidemx-widget-cli",
  "oxidemx-widget-host",
