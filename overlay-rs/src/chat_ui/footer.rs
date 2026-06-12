@@ -20,7 +20,11 @@ pub fn view<'a>(state: &'a RadialState, kit: &Kit) -> Element<'a, Message> {
                 .width(Length::Fixed(5.0))
                 .height(Length::Fixed(5.0))
                 .style(move |_| iced::widget::container::Style {
-                    background: Some(iced::Background::Color(kit.fade(kit.accent, 1.0))),
+                    // Breathes with the shared status pulse so the
+                    // "working" state is alive, not a static dot.
+                    background: Some(iced::Background::Color(
+                        kit.fade(kit.accent, 0.45 + 0.55 * kit.pulse),
+                    )),
                     border: iced::border::Border {
                         radius: 3.0.into(),
                         ..Default::default()
@@ -81,12 +85,12 @@ pub fn view<'a>(state: &'a RadialState, kit: &Kit) -> Element<'a, Message> {
 
     // Send flips to Stop while a turn is in flight.
     let action_btn = if state.ai_loading {
-        button(
+        button(iced::widget::center(
             text("■")
-                .size(19)
-                .color(kit.fade(kit.crust, 1.0))
-                .align_x(iced::alignment::Horizontal::Center),
-        )
+                .size(18)
+                .line_height(1.0)
+                .color(kit.fade(kit.crust, 1.0)),
+        ))
         .width(Length::Fixed(40.0))
         .height(Length::Fixed(40.0))
         .padding(0)
@@ -100,12 +104,12 @@ pub fn view<'a>(state: &'a RadialState, kit: &Kit) -> Element<'a, Message> {
         })
         .on_press(Message::AiStopRequest)
     } else {
-        button(
+        button(iced::widget::center(
             text("➤")
-                .size(20)
-                .color(kit.fade(kit.crust, 1.0))
-                .align_x(iced::alignment::Horizontal::Center),
-        )
+                .size(22)
+                .line_height(1.0)
+                .color(kit.fade(kit.crust, 1.0)),
+        ))
         .width(Length::Fixed(40.0))
         .height(Length::Fixed(40.0))
         .padding(0)

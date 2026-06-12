@@ -59,8 +59,12 @@ pub fn view<'a>(state: &'a RadialState, kit: &Kit) -> Element<'a, Message> {
         button(
             text(glyph)
                 .size(19)
-                .color(kit.fade(if tip_active { kit.accent } else { kit.subtext0 }, 1.0))
-                .align_x(iced::alignment::Horizontal::Center),
+                .line_height(1.0)
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .align_x(iced::alignment::Horizontal::Center)
+                .align_y(iced::alignment::Vertical::Center)
+                .color(kit.fade(if tip_active { kit.accent } else { kit.subtext0 }, 1.0)),
         )
         .width(Length::Fixed(32.0))
         .height(Length::Fixed(32.0))
@@ -85,12 +89,20 @@ pub fn view<'a>(state: &'a RadialState, kit: &Kit) -> Element<'a, Message> {
         .on_press(msg)
     };
 
-    // Close: light filled circle with a dark ×, per the design.
+    // Close: light filled circle with a bold, dead-centre ×.
     let close_btn = button(
         text("✕")
-            .size(16)
-            .color(kit.fade(kit.crust, 1.0))
-            .align_x(iced::alignment::Horizontal::Center),
+            .size(18)
+            .line_height(1.0)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .align_x(iced::alignment::Horizontal::Center)
+            .align_y(iced::alignment::Vertical::Center)
+            .font(iced::Font {
+                weight: iced::font::Weight::Bold,
+                ..Default::default()
+            })
+            .color(kit.fade(kit.crust, 1.0)),
     )
     .width(Length::Fixed(32.0))
     .height(Length::Fixed(32.0))

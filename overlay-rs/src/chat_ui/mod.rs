@@ -29,6 +29,10 @@ use crate::radial::RadialState;
 #[derive(Clone, Copy)]
 pub struct Kit {
     pub alpha: f32,
+    /// 0‥1 wall-clock sine shared with the window chrome's status
+    /// cues — drives the activity dot's breathing while a turn is
+    /// in flight.
+    pub pulse: f32,
     pub crust: Color,
     pub mantle: Color,
     pub surface0: Color,
@@ -55,6 +59,13 @@ impl Kit {
         };
         Kit {
             alpha,
+            pulse: state
+                .show_time
+                .map(|t| {
+                    let secs = t.elapsed().as_secs_f32();
+                    ((secs * std::f32::consts::TAU / 1.4).sin() + 1.0) / 2.0
+                })
+                .unwrap_or(0.0),
             crust: c(&p.crust, Color::from_rgb(0.04, 0.05, 0.06)),
             mantle: c(&p.mantle, Color::from_rgb(0.06, 0.07, 0.09)),
             surface0: c(&p.surface0, Color::from_rgb(0.10, 0.11, 0.14)),
