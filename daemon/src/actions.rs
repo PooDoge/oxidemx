@@ -395,7 +395,10 @@ pub fn detect_desktop() -> &'static str {
 /// Execute a button action directly.
 /// Returns Ok(true) if the action was handled, Ok(false) if it should use the
 /// radial menu flow (caller handles ShowMenu/HideMenu).
-pub async fn execute_button_action(action: ButtonAction) -> Result<bool, ActionError> {
+pub async fn execute_button_action(
+    action: ButtonAction,
+    haptic: Option<&crate::hidpp::SharedHapticManager>,
+) -> Result<bool, ActionError> {
     match action {
         ButtonAction::RadialMenu => {
             // Caller handles the radial menu show/hide flow
@@ -407,11 +410,40 @@ pub async fn execute_button_action(action: ButtonAction) -> Result<bool, ActionE
         }
         ButtonAction::None => Ok(true),
         ButtonAction::Smartshift => {
-            tracing::warn!("SmartShift button action not yet implemented (requires HID++ write)");
-            Ok(true)
+            // Toggle the wheel between freespin (1) and ratchet (2)
+            // via the same 0x2110 write path the settings slider
+            // uses. Runs on the blocking pool — HID++ I/O.
+            let Some(haptic) = haptic.cloned() else {
+                tracing::warn!("SmartShift toggle skipped: no haptic manager handle");
+                return Ok(true);
+            };
+            let toggled = tokio::task::spawn_blocking(move || {
+                let mut mgr = haptic.lock().unwrap_or_else(|p| p.into_inner());
+                let current = mgr.get_smartshift().map(|(mode, _, _)| mode).unwrap_or(2);
+                let next = if current == 2 { 1u8 } else { 2u8 };
+                mgr.set_smartshift(next, 0, 0).map(|_| next)
+            })
+            .await
+            .map_err(|e| ActionError::ExecutionFailed(format!("join: {e}")))?;
+            match toggled {
+                Ok(next) => {
+                    tracing::info!(
+                        mode = if next == 2 { "ratchet" } else { "freespin" },
+                        "SmartShift toggled via button"
+                    );
+                    Ok(true)
+                }
+                Err(e) => Err(ActionError::ExecutionFailed(format!(
+                    "SmartShift toggle: {e}"
+                ))),
+            }
         }
         ButtonAction::Custom => {
-            tracing::warn!("Custom button action not yet implemented");
+            // Deliberately unimplemented: `Custom` has no payload in
+            // the config schema yet (what command/keys?). Needs a
+            // schema field before it can mean anything — tracked in
+            // docs/plans/followups.md.
+            tracing::warn!("Custom button action has no payload schema yet — ignoring");
             Ok(true)
         }
         // All other actions map to keyboard shortcuts

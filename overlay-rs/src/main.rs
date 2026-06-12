@@ -64,6 +64,28 @@ mod tray;
 mod widget_host;
 
 fn main() -> iced::Result {
+    // Headless heartbeat tick (run by a systemd user timer; see
+    // agent/heartbeat.rs). Handled before the iced app boots: no
+    // window, no D-Bus listener, no bus-name claim — so the
+    // single-instance guard and a live overlay are both untouched.
+    if std::env::args().any(|a| a == "--heartbeat") {
+        let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
+        let code = rt.block_on(async {
+            match ai_client::run_heartbeat().await {
+                Ok(None) => 0,
+                Ok(Some(alert)) => {
+                    agent::heartbeat::deliver_alert(&alert);
+                    0
+                }
+                Err(e) => {
+                    eprintln!("heartbeat failed: {e}");
+                    1
+                }
+            }
+        });
+        std::process::exit(code);
+    }
+
     // Default filter: info-level for our crates, error-only for usvg
     // (which spams "Failed to parse marker-start value: 'none'." for
     // every freedesktop icon — the parser warns on perfectly valid

@@ -9,6 +9,7 @@
 //! going through the model.
 
 pub mod commands;
+pub mod heartbeat;
 pub mod memory;
 pub mod persona;
 pub mod tasks;
