@@ -273,3 +273,70 @@ impl iced::widget::shader::Pipeline for AuroraPipeline {
         }
     }
 }
+
+// =============================================================================
+// Chat-window variant
+// =============================================================================
+//
+// iced stores custom-shader pipelines in per-TYPE storage: every
+// `shader::Primitive` with the same `Pipeline` type shares ONE
+// pipeline instance — including its uniform buffer. The disc's
+// aurora and the chat's full-window aurora therefore clobbered each
+// other's uniforms whenever both were on screen (any morph frame),
+// each drawing with whichever instance prepared last. These thin
+// newtypes give the chat pass its own pipeline (and uniform buffer)
+// while reusing all of the aurora's actual code.
+
+pub struct ChatAuroraProgram(pub AuroraProgram);
+
+impl<Message> shader::Program<Message> for ChatAuroraProgram {
+    type State = ();
+    type Primitive = ChatAuroraPrimitive;
+
+    fn update(
+        &self,
+        _state: &mut (),
+        _event: &Event,
+        _bounds: Rectangle,
+        _cursor: mouse::Cursor,
+    ) -> Option<shader::Action<Message>> {
+        Some(shader::Action::request_redraw())
+    }
+
+    fn draw(&self, state: &(), cursor: mouse::Cursor, bounds: Rectangle) -> Self::Primitive {
+        ChatAuroraPrimitive(shader::Program::<Message>::draw(
+            &self.0, state, cursor, bounds,
+        ))
+    }
+}
+
+#[derive(Debug)]
+pub struct ChatAuroraPrimitive(AuroraPrimitive);
+
+pub struct ChatAuroraPipeline(AuroraPipeline);
+
+impl iced::widget::shader::Pipeline for ChatAuroraPipeline {
+    fn new(device: &wgpu::Device, queue: &wgpu::Queue, format: wgpu::TextureFormat) -> Self {
+        ChatAuroraPipeline(AuroraPipeline::new(device, queue, format))
+    }
+}
+
+impl Primitive for ChatAuroraPrimitive {
+    type Pipeline = ChatAuroraPipeline;
+
+    fn prepare(
+        &self,
+        pipeline: &mut Self::Pipeline,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        bounds: &Rectangle,
+        viewport: &shader::Viewport,
+    ) {
+        self.0
+            .prepare(&mut pipeline.0, device, queue, bounds, viewport);
+    }
+
+    fn draw(&self, pipeline: &Self::Pipeline, render_pass: &mut wgpu::RenderPass<'_>) -> bool {
+        self.0.draw(&pipeline.0, render_pass)
+    }
+}

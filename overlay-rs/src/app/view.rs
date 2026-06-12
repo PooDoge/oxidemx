@@ -623,23 +623,28 @@ pub(super) fn view(state: &RadialState) -> Element<'_, Message> {
         // shader the disc uses, stretched over the whole window.
         // Its radial falloff discards past the inscribed ellipse,
         // so nothing spills into the transparent rounded corners.
-        if intensity > 0.001 && body_a > 0.001 {
+        // OXIDEMX_NO_CHAT_AURORA=1 disables this layer — diagnostic
+        // escape hatch for isolating post-resize compositing issues.
+        let chat_aurora_enabled = std::env::var_os("OXIDEMX_NO_CHAT_AURORA").is_none();
+        if chat_aurora_enabled && intensity > 0.001 && body_a > 0.001 {
             let accent2 = oxidemx_shared::theme::parse_hex_rgba(&palette.accent2)
                 .map(|(r, g, b, a)| [r as f32, g as f32, b as f32, a as f32])
                 .unwrap_or(accent_rgba);
             let accent_dim = oxidemx_shared::theme::parse_hex_rgba(&palette.accent_dim)
                 .map(|(r, g, b, a)| [r as f32, g as f32, b as f32, a as f32])
                 .unwrap_or(accent_rgba);
-            let chat_aurora = iced::widget::Shader::new(crate::render::aurora::AuroraProgram::new(
-                state.show_time.unwrap_or_else(std::time::Instant::now),
-                accent_rgba,
-                accent2,
-                accent_dim,
-                // Quiet backdrop at rest; brightens and breathes
-                // while a turn is in flight so "the AI is working"
-                // is visible from across the room.
-                intensity * if thinking { 0.5 + 0.3 * pulse } else { 0.22 } * body_a,
-                crate::render::animation::MenuXformRaw::IDENTITY,
+            let chat_aurora = iced::widget::Shader::new(crate::render::aurora::ChatAuroraProgram(
+                crate::render::aurora::AuroraProgram::new(
+                    state.show_time.unwrap_or_else(std::time::Instant::now),
+                    accent_rgba,
+                    accent2,
+                    accent_dim,
+                    // Quiet backdrop at rest; brightens and breathes
+                    // while a turn is in flight so "the AI is working"
+                    // is visible from across the room.
+                    intensity * if thinking { 0.5 + 0.3 * pulse } else { 0.22 } * body_a,
+                    crate::render::animation::MenuXformRaw::IDENTITY,
+                ),
             ))
             .width(Length::Fill)
             .height(Length::Fill);
