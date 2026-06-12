@@ -47,7 +47,7 @@ pub(super) fn draw_widget_wedge(
 ) {
     use oxidemx_shared::WidgetSource;
     let snap = &widgets.snap;
-    let source = slice.widget.as_ref().map(|w| w.source);
+    let source = slice.widget.as_ref().map(|w| w.source.clone());
 
     let (s1r, s1g, s1b, _) = parse_hex_rgba(&palette.subtext1).unwrap_or((0.78, 0.8, 0.85, 1.0));
     let label_c = Color::from_rgba(s1r as f32, s1g as f32, s1b as f32, mo);
@@ -168,6 +168,7 @@ pub(super) fn draw_widget_wedge(
                 ),
                 None => ("—".into(), "no daemon".into(), None),
             },
+            Some(WidgetSource::Custom(_)) => ("—".into(), "plugin".into(), None),
             None => ("—".into(), "no source".into(), None),
         };
 

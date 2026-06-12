@@ -1192,9 +1192,9 @@ fn action_value_editor<'a>(state: &'a State, idx: usize, slice: &'a Slice) -> El
             .style(style::text_dim(pal))
             .into(),
         ActionKind::Widget => {
-            let selected = slice.widget.as_ref().map(|w| WidgetSourceOption(w.source));
+            let selected = slice.widget.as_ref().map(|w| WidgetSourceOption(w.source.clone()));
             pick_list(
-                WIDGET_SOURCE_OPTIONS.to_vec(),
+                widget_source_options(),
                 selected,
                 move |o: WidgetSourceOption| Message::SetSliceWidgetSource(idx, o.0),
             )
@@ -1482,13 +1482,13 @@ impl std::fmt::Display for PowerOption {
 }
 
 /// Pick-list wrapper for a widget wedge's data source.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WidgetSourceOption(pub oxidemx_shared::WidgetSource);
 
 impl std::fmt::Display for WidgetSourceOption {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         use oxidemx_shared::WidgetSource as W;
-        f.write_str(match self.0 {
+        f.write_str(match &self.0 {
             W::Weather => "Weather",
             W::Cpu => "CPU usage",
             W::Memory => "Memory",
@@ -1496,19 +1496,22 @@ impl std::fmt::Display for WidgetSourceOption {
             W::Disk => "Disk free",
             W::TasksDue => "Tasks due",
             W::MouseBattery => "Mouse battery",
+            W::Custom(_) => "Custom widget",
         })
     }
 }
 
-const WIDGET_SOURCE_OPTIONS: [WidgetSourceOption; 7] = [
-    WidgetSourceOption(oxidemx_shared::WidgetSource::Weather),
-    WidgetSourceOption(oxidemx_shared::WidgetSource::Cpu),
-    WidgetSourceOption(oxidemx_shared::WidgetSource::Memory),
-    WidgetSourceOption(oxidemx_shared::WidgetSource::Network),
-    WidgetSourceOption(oxidemx_shared::WidgetSource::Disk),
-    WidgetSourceOption(oxidemx_shared::WidgetSource::TasksDue),
-    WidgetSourceOption(oxidemx_shared::WidgetSource::MouseBattery),
-];
+fn widget_source_options() -> Vec<WidgetSourceOption> {
+    vec![
+        WidgetSourceOption(oxidemx_shared::WidgetSource::Weather),
+        WidgetSourceOption(oxidemx_shared::WidgetSource::Cpu),
+        WidgetSourceOption(oxidemx_shared::WidgetSource::Memory),
+        WidgetSourceOption(oxidemx_shared::WidgetSource::Network),
+        WidgetSourceOption(oxidemx_shared::WidgetSource::Disk),
+        WidgetSourceOption(oxidemx_shared::WidgetSource::TasksDue),
+        WidgetSourceOption(oxidemx_shared::WidgetSource::MouseBattery),
+    ]
+}
 
 /// Pick-list wrapper for a dial wedge's target.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

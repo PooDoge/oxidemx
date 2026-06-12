@@ -2713,6 +2713,8 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                 slice.widget = Some(oxidemx_shared::WidgetConfig {
                     source,
                     format: None,
+                    scope: oxidemx_shared::WidgetScope::Instance,
+                    instance_key: None,
                 });
                 state.touch();
             }

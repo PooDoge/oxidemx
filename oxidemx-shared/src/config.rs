@@ -86,18 +86,38 @@ pub struct Slice {
     pub dial: Option<DialKind>,
 }
 
-/// Data binding for a live widget wedge (Splice Widgets page).
+/// Data binding for a live widget wedge.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct WidgetConfig {
     pub source: WidgetSource,
     /// Optional format override for the big value (e.g. "{}%").
-    /// `None` = the source's default formatting.
+    /// `None` = the source's default formatting. Built-ins only.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub format: Option<String>,
+    /// Where the options card writes (spec §6). Reads always merge
+    /// defaults ← global ← instance regardless.
+    #[serde(default)]
+    pub scope: WidgetScope,
+    /// Key into `AppConfig::widgets.instances` — `<page-slug>.slot<N>`,
+    /// assigned by the settings editor when a custom widget is placed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub instance_key: Option<String>,
+}
+
+/// Which level of the two-bag widget settings store an options card
+/// writes to. Resolution always reads through both (spec §6).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WidgetScope {
+    #[default]
+    Instance,
+    Global,
 }
 
 /// Which live data feed a widget wedge renders.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+///
+/// NOTE: no longer `Copy` — `Custom` carries the installed widget id.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum WidgetSource {
     Weather,
@@ -107,6 +127,8 @@ pub enum WidgetSource {
     Disk,
     TasksDue,
     MouseBattery,
+    /// Installed plugin widget, by manifest id (e.g. "weather2").
+    Custom(String),
 }
 
 /// What an `ActionKind::Dial` slice adjusts.
@@ -1119,7 +1141,7 @@ mod tests {
         assert!(widgets
             .slices
             .iter()
-            .any(|s| s.widget.as_ref().map(|w| w.source) == Some(WidgetSource::Cpu)));
+            .any(|s| s.widget.as_ref().map(|w| w.source.clone()) == Some(WidgetSource::Cpu)));
     }
 
     #[test]
@@ -1176,5 +1198,40 @@ mod tests {
         assert_eq!(cfg.theme, ThemeName::Custom("my-cool-theme".into()));
         let back = serde_json::to_string(&cfg).unwrap();
         assert!(back.contains(r#""theme":"my-cool-theme""#));
+    }
+
+    #[test]
+    fn custom_widget_slice_round_trips() {
+        let json = r#"{
+            "label": "Weather",
+            "type": "widget",
+            "widget": { "source": { "custom": "weather" },
+                        "scope": "global",
+                        "instance_key": "apps.slot4" },
+            "color": "yellow"
+        }"#;
+        let s: Slice = serde_json::from_str(json).unwrap();
+        let w = s.widget.as_ref().unwrap();
+        assert_eq!(w.source, WidgetSource::Custom("weather".into()));
+        assert_eq!(w.scope, WidgetScope::Global);
+        assert_eq!(w.instance_key.as_deref(), Some("apps.slot4"));
+        let back = serde_json::to_string(&s).unwrap();
+        let s2: Slice = serde_json::from_str(&back).unwrap();
+        assert_eq!(s.widget, s2.widget);
+    }
+
+    #[test]
+    fn legacy_builtin_widget_slice_still_parses() {
+        // Pre-v3 shape: no scope / instance_key fields.
+        let json = r#"{
+            "label": "CPU",
+            "type": "widget",
+            "widget": { "source": "cpu" }
+        }"#;
+        let s: Slice = serde_json::from_str(json).unwrap();
+        let w = s.widget.as_ref().unwrap();
+        assert_eq!(w.source, WidgetSource::Cpu);
+        assert_eq!(w.scope, WidgetScope::Instance); // default
+        assert_eq!(w.instance_key, None);
     }
 }
