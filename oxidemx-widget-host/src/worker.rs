@@ -467,8 +467,8 @@ impl Worker {
                 }
             }
             HostCmd::OpenUrl(url) => {
-                if !meta.permissions.iter().any(|p| p == "open-url") {
-                    log::warn!("widget {:?} lacks the open-url permission", id.widget_id);
+                if let Err(reason) = check_open_url(&meta.permissions, &url) {
+                    log::warn!("widget {:?}: {reason}", id.widget_id);
                     return;
                 }
                 if let Err(e) = std::process::Command::new("xdg-open").arg(&url).spawn() {
@@ -476,7 +476,7 @@ impl Worker {
                 }
             }
             HostCmd::Exec(command) => {
-                if !meta.permissions.iter().any(|p| p == "exec") {
+                if !has_permission(&meta.permissions, "exec") {
                     log::warn!("widget {:?} lacks the exec permission", id.widget_id);
                     return;
                 }
@@ -487,6 +487,10 @@ impl Worker {
                 }
             }
             HostCmd::HapticPulse(pattern) => {
+                if !has_permission(&meta.permissions, "haptics") {
+                    log::warn!("widget {:?} lacks the haptics permission", id.widget_id);
+                    return;
+                }
                 // TODO Plan 3: route to daemon haptic_client.
                 log::info!(target: "widget", "haptic pulse {pattern:?} (stub)");
             }
@@ -599,6 +603,27 @@ fn desired_instances(cfg: &AppConfig) -> HashMap<InstanceId, WidgetScope> {
     out
 }
 
+/// Exact-name permission lookup (`"exec"`, `"open-url"`, `"haptics"`).
+fn has_permission(permissions: &[String], name: &str) -> bool {
+    permissions.iter().any(|p| p == name)
+}
+
+/// `open-url` gate: the permission must be declared AND the URL must be a
+/// well-formed http/https URL — handing arbitrary schemes (`file:`,
+/// `javascript:`, custom protocol handlers) to `xdg-open` is an obvious
+/// escalation path.
+fn check_open_url(permissions: &[String], url: &str) -> Result<(), String> {
+    if !has_permission(permissions, "open-url") {
+        return Err("denied: manifest lacks the open-url permission".into());
+    }
+    let parsed =
+        url::Url::parse(url).map_err(|e| format!("denied: {url:?} does not parse: {e}"))?;
+    match parsed.scheme() {
+        "http" | "https" => Ok(()),
+        s => Err(format!("denied: open-url allows only http/https (got scheme {s:?})")),
+    }
+}
+
 /// `net:<host>` allowlist check: https only, exact host match (spec §8).
 fn check_net_permission(permissions: &[String], url: &str) -> Result<(), String> {
     let parsed =
@@ -697,6 +722,34 @@ mod tests {
         // unrelated host + garbage
         assert!(check_net_permission(&perms, "https://example.com/").is_err());
         assert!(check_net_permission(&perms, "not a url").is_err());
+    }
+
+    #[test]
+    fn open_url_requires_permission_and_web_scheme() {
+        let perms = vec!["open-url".to_string()];
+        assert!(check_open_url(&perms, "https://example.com/page?x=1").is_ok());
+        assert!(check_open_url(&perms, "http://example.com/").is_ok());
+        // scheme escapes must be refused even with the permission
+        assert!(check_open_url(&perms, "file:///etc/passwd").is_err());
+        assert!(check_open_url(&perms, "javascript:alert(1)").is_err());
+        assert!(check_open_url(&perms, "vscode://malicious/payload").is_err());
+        assert!(check_open_url(&perms, "not a url").is_err());
+        // missing / wrong permission
+        assert!(check_open_url(&[], "https://example.com/").is_err());
+        let other = vec!["net:example.com".to_string()];
+        assert!(check_open_url(&other, "https://example.com/").is_err());
+    }
+
+    #[test]
+    fn haptics_and_exec_gates_are_exact_name_permissions() {
+        let perms = vec!["haptics".to_string(), "open-url".to_string()];
+        assert!(has_permission(&perms, "haptics"));
+        assert!(!has_permission(&perms, "exec"));
+        assert!(!has_permission(&[], "haptics"));
+        // no prefix/substring confusion
+        let odd = vec!["haptics-extra".to_string(), "my-exec".to_string()];
+        assert!(!has_permission(&odd, "haptics"));
+        assert!(!has_permission(&odd, "exec"));
     }
 
     #[test]

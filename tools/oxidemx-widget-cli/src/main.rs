@@ -33,7 +33,8 @@ enum Commands {
     Install {
         /// Path to the `.oxw` bundle.
         bundle: PathBuf,
-        /// Replace an existing widget with the same id.
+        /// Consent to installing an unsigned/unknown-signer bundle, and
+        /// replace an existing widget with the same id.
         #[arg(long)]
         force: bool,
     },
@@ -96,6 +97,32 @@ fn main() -> ExitCode {
                 }
                 Err(oxidemx_widget_cli::CliError::IdCollision(id)) => {
                     eprintln!("error: widget id {id:?} already installed; use --force to replace");
+                    ExitCode::FAILURE
+                }
+                Err(oxidemx_widget_cli::CliError::NeedsConsent { reason, permissions }) => {
+                    match reason {
+                        oxidemx_widget_cli::ConsentReason::Unsigned => {
+                            eprintln!("refused: bundle has no SIGNATURE entry (unsigned)");
+                        }
+                        oxidemx_widget_cli::ConsentReason::UnknownKey(fp) => {
+                            eprintln!(
+                                "refused: bundle is signed by an unknown key \
+                                 (fingerprint: {fp}), not the OxideMX registry key"
+                            );
+                        }
+                    }
+                    if permissions.is_empty() {
+                        eprintln!("the widget's manifest declares no permissions");
+                    } else {
+                        eprintln!("the widget's manifest declares these permissions:");
+                        for p in &permissions {
+                            eprintln!("  - {p}");
+                        }
+                    }
+                    eprintln!(
+                        "permissions are self-declared by the widget author; \
+                         re-run with --force to install anyway"
+                    );
                     ExitCode::FAILURE
                 }
                 Err(e) => {

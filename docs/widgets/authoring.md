@@ -254,3 +254,27 @@ cargo test --manifest-path examples/widgets/weather/Cargo.toml
 The weather example has full native unit tests for JSON parsing,
 settings accessors, event handling, render output shape, and °F
 conversion — use it as a template for your own test suite.
+
+---
+
+## Security posture (v1)
+
+- **Install-time consent.** `oxidemx-widget install` only installs
+  registry-signed (pinned-key) bundles unconditionally.  Unsigned
+  bundles and bundles signed by any other key (including your dev key)
+  are refused with the signer fingerprint **and the manifest's full
+  permission list** printed; pass `--force` to consent and install
+  anyway (spec §4).  The settings UI install dialog shows the same
+  permission list (Plan 3).
+- **Permissions are self-declared.** `exec`, `open-url`, `haptics`, and
+  `net:<host>` come straight from the widget's own manifest — they are
+  declarations, not verified capabilities, and they are surfaced to the
+  user at install time only.  In particular `exec` runs arbitrary shell
+  commands: read the permission list before forcing an install.
+- **Runtime enforcement.** The host gates every command at the moment
+  of use: `net:<host>` fetches are https-only with exact-host matching,
+  `open-url` accepts only http/https URLs (no `file:`/`javascript:`/
+  custom schemes reach `xdg-open`), `exec` and `haptics` require their
+  permissions, bundle extraction rejects zip-slip entry names, guest →
+  host command payloads are capped at 64 KB, and the resource caps in
+  the table above apply to every call.

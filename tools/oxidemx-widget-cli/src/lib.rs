@@ -15,6 +15,18 @@ use oxidemx_widget_host::SignatureState;
 
 // ── Error type ───────────────────────────────────────────────────────────────
 
+/// Why an install needs explicit consent (`--force`), spec §4: sideloaded
+/// bundles — unsigned or signed by a key other than the pinned registry
+/// key — must not install silently.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ConsentReason {
+    /// The bundle has no SIGNATURE entry.
+    Unsigned,
+    /// The bundle is validly signed, but by an unknown (non-pinned) key.
+    /// Carries the signer's hex fingerprint.
+    UnknownKey(String),
+}
+
 #[derive(Debug)]
 pub enum CliError {
     Io(std::io::Error),
@@ -23,6 +35,12 @@ pub enum CliError {
     InvalidSignature(String),
     IdCollision(String),
     BadKeyFile(String),
+    /// Sideload refused without `--force` (spec §4). Carries the manifest's
+    /// self-declared permission list so the caller can surface it in the
+    /// consent prompt.
+    NeedsConsent { reason: ConsentReason, permissions: Vec<String> },
+    /// A zip entry's name escapes the extraction dir (zip-slip).
+    UnsafePath(String),
 }
 
 impl std::fmt::Display for CliError {
@@ -36,6 +54,19 @@ impl std::fmt::Display for CliError {
                 write!(f, "widget id {id:?} already installed; use --force to replace")
             }
             CliError::BadKeyFile(s) => write!(f, "key file error: {s}"),
+            CliError::NeedsConsent { reason, .. } => match reason {
+                ConsentReason::Unsigned => {
+                    write!(f, "bundle is unsigned; use --force to install anyway")
+                }
+                ConsentReason::UnknownKey(fp) => write!(
+                    f,
+                    "bundle is signed by an unknown key (fingerprint: {fp}); \
+                     use --force to install anyway"
+                ),
+            },
+            CliError::UnsafePath(name) => {
+                write!(f, "bundle entry {name:?} escapes the install dir (zip-slip)")
+            }
         }
     }
 }
@@ -218,6 +249,9 @@ pub fn pack(widget_dir: &Path, out_path: Option<&Path>) -> Result<PackResult, Cl
                 let mut f = archive2
                     .by_index(i)
                     .map_err(|e| CliError::Bundle(BundleError::Zip(e.to_string())))?;
+                // Zip-slip guard (defence in depth — we wrote these entries
+                // ourselves moments ago, but never re-emit an unsafe name).
+                safe_entry_path(f.name(), f.enclosed_name())?;
                 let entry_options = zip::write::SimpleFileOptions::default()
                     .compression_method(zip::CompressionMethod::Deflated);
                 zw.start_file(f.name(), entry_options)
@@ -241,6 +275,24 @@ pub fn pack(widget_dir: &Path, out_path: Option<&Path>) -> Result<PackResult, Cl
 
     std::fs::write(&out, &final_zip).map_err(CliError::Io)?;
     Ok(PackResult { path: out, fingerprint: fp })
+}
+
+/// Zip-slip guard: return the entry's safe *relative* path or hard-error.
+///
+/// `enclosed_name()` (zip crate) already returns `None` for absolute paths,
+/// `..` traversal, and Windows prefix components; the explicit component
+/// walk on top is belt-and-suspenders so a future zip-crate behaviour
+/// change cannot silently weaken the guard.
+fn safe_entry_path(raw_name: &str, enclosed: Option<PathBuf>) -> Result<PathBuf, CliError> {
+    let Some(path) = enclosed else {
+        return Err(CliError::UnsafePath(raw_name.to_string()));
+    };
+    let all_normal =
+        path.components().all(|c| matches!(c, std::path::Component::Normal(_)));
+    if !all_normal {
+        return Err(CliError::UnsafePath(raw_name.to_string()));
+    }
+    Ok(path)
 }
 
 fn collect_files_for_zip(
@@ -336,12 +388,18 @@ pub struct InstallResult {
 
 /// Install a `.oxw` bundle into `widgets_dir()`.
 ///
-/// Verifies the bundle first.  If the signature is Unknown (dev key or
-/// unrecognised key), the installation proceeds — it is the caller's
-/// responsibility to gate on `--force` appropriately.
+/// Verifies the bundle first.  Spec §4 (sideloads need consent): only
+/// bundles signed by the pinned registry key install unconditionally.
+/// Unsigned bundles and bundles signed by an unknown key (e.g. a dev key)
+/// return [`CliError::NeedsConsent`] — carrying the manifest's declared
+/// permission list — unless `force` is true.
 ///
 /// If `force` is false and the widget id already exists in `install_root`,
 /// returns [`CliError::IdCollision`].
+///
+/// Every zip entry name is validated against zip-slip (absolute paths,
+/// `..` traversal) before anything is written; an unsafe entry hard-errors
+/// with [`CliError::UnsafePath`] and writes nothing.
 pub fn install(
     bundle_path: &Path,
     force: bool,
@@ -382,6 +440,33 @@ pub fn install(
         return Err(CliError::IdCollision(id));
     }
 
+    // Sideload consent gate (spec §4): only the pinned registry key may
+    // install without --force.
+    if !force {
+        let reason = match &ver.state {
+            SignatureState::Pinned => None,
+            SignatureState::Unknown(fp) => Some(ConsentReason::UnknownKey(fp.clone())),
+            SignatureState::Unsigned => Some(ConsentReason::Unsigned),
+        };
+        if let Some(reason) = reason {
+            return Err(CliError::NeedsConsent {
+                reason,
+                permissions: manifest.permissions.clone(),
+            });
+        }
+    }
+
+    // Open the archive again for extraction and validate *every* entry
+    // name (zip-slip guard) before writing anything to disk.
+    let mut archive2 = zip::ZipArchive::new(std::io::Cursor::new(&bytes))
+        .map_err(|e| CliError::Bundle(BundleError::Zip(e.to_string())))?;
+    for i in 0..archive2.len() {
+        let file = archive2
+            .by_index(i)
+            .map_err(|e| CliError::Bundle(BundleError::Zip(e.to_string())))?;
+        safe_entry_path(file.name(), file.enclosed_name())?;
+    }
+
     // Remove existing dir if force.
     if dest.exists() {
         std::fs::remove_dir_all(&dest)?;
@@ -389,9 +474,6 @@ pub fn install(
     std::fs::create_dir_all(&dest)?;
 
     // Extract all entries (including SIGNATURE) from the zip.
-    let mut archive2 = zip::ZipArchive::new(std::io::Cursor::new(&bytes))
-        .map_err(|e| CliError::Bundle(BundleError::Zip(e.to_string())))?;
-
     for i in 0..archive2.len() {
         let mut file = archive2
             .by_index(i)
@@ -399,11 +481,11 @@ pub fn install(
         if file.is_dir() {
             continue;
         }
-        let name = file.name().to_string();
+        let rel = safe_entry_path(file.name(), file.enclosed_name())?;
         let mut content = Vec::new();
         file.read_to_end(&mut content)
             .map_err(|e| CliError::Bundle(BundleError::Io(e.to_string())))?;
-        let target = dest.join(&name);
+        let target = dest.join(&rel);
         if let Some(parent) = target.parent() {
             std::fs::create_dir_all(parent)?;
         }

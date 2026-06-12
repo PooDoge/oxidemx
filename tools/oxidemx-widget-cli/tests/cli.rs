@@ -5,9 +5,10 @@
 //! is overridden per-test to point at a temp dir so `widgets_dir()` returns a
 //! sandboxed path.
 
+use std::io::Write;
 use std::path::Path;
 
-use oxidemx_widget_cli::{install, pack, verify, CliError};
+use oxidemx_widget_cli::{install, pack, verify, CliError, ConsentReason};
 use oxidemx_widget_host::{SignatureState, WidgetRegistry};
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -39,6 +40,33 @@ fn set_dev_key_path(xdg: &Path) {
     let key_path = xdg.join("oxidemx").join("dev-signing.key");
     std::env::set_var("OXIDEMX_DEV_KEY_PATH", &key_path);
 }
+
+/// Hand-craft a raw `.oxw` zip from `(name, bytes)` entries — no SIGNATURE,
+/// no name sanitisation.  Used to build unsigned and hostile bundles.
+fn write_raw_bundle(path: &Path, entries: &[(&str, &[u8])]) {
+    let mut buf = Vec::<u8>::new();
+    {
+        let mut zw = zip::ZipWriter::new(std::io::Cursor::new(&mut buf));
+        let options = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Stored);
+        for (name, bytes) in entries {
+            zw.start_file(*name, options).unwrap();
+            zw.write_all(bytes).unwrap();
+        }
+        zw.finish().unwrap();
+    }
+    std::fs::write(path, &buf).unwrap();
+}
+
+const WEATHER_MANIFEST: &str = r#"{
+  "id": "weather",
+  "name": "Weather",
+  "version": "1.0.0",
+  "author": "test",
+  "api_version": 1,
+  "entry": "widget.wasm",
+  "icon": "icon.svg"
+}"#;
 
 // ── Tests ────────────────────────────────────────────────────────────────────
 
@@ -124,7 +152,9 @@ fn install_then_scan_shows_unknown_signature() {
     let install_root = xdg.join("oxidemx").join("widgets");
     std::fs::create_dir_all(&install_root).unwrap();
 
-    let result = install(&out, false, Some(&install_root)).expect("install should succeed");
+    // Dev-key bundles verify as Unknown → sideload consent is required,
+    // so the install must pass force=true.
+    let result = install(&out, true, Some(&install_root)).expect("install should succeed");
     assert_eq!(result.id, "weather");
     assert!(result.install_dir.exists(), "install dir should exist");
     assert!(result.install_dir.join("widget.json").exists());
@@ -176,10 +206,11 @@ fn id_collision_refused_and_forced() {
     let install_root = xdg.join("oxidemx").join("widgets");
     std::fs::create_dir_all(&install_root).unwrap();
 
-    // First install — should succeed.
-    install(&out, false, Some(&install_root)).expect("first install should succeed");
+    // First install — needs force (dev key = Unknown signer needs consent).
+    install(&out, true, Some(&install_root)).expect("first install should succeed");
 
-    // Second install without force — should fail with IdCollision.
+    // Second install without force — should fail with IdCollision (the
+    // collision check runs before the sideload consent gate).
     let err = install(&out, false, Some(&install_root))
         .expect_err("second install without --force should fail");
     match err {
@@ -191,4 +222,109 @@ fn id_collision_refused_and_forced() {
     let result = install(&out, true, Some(&install_root))
         .expect("install with --force should succeed");
     assert_eq!(result.id, "weather");
+}
+
+/// Unsigned bundle: refused without --force (NeedsConsent::Unsigned, with
+/// the manifest's permission list attached); installs with --force.
+#[test]
+fn unsigned_bundle_refused_without_force_installs_with_force() {
+    let tmp = tempfile::tempdir().unwrap();
+    let bundle = tmp.path().join("weather.oxw");
+    write_raw_bundle(
+        &bundle,
+        &[
+            ("widget.json", WEATHER_MANIFEST.as_bytes()),
+            ("icon.svg", b"<svg/>"),
+            ("widget.wasm", b"\x00asm\x01\x00\x00\x00"),
+        ],
+    );
+
+    let install_root = tmp.path().join("widgets");
+    std::fs::create_dir_all(&install_root).unwrap();
+
+    // Without --force: refused with the Unsigned consent reason.
+    let err = install(&bundle, false, Some(&install_root))
+        .expect_err("unsigned bundle without --force must be refused");
+    match err {
+        CliError::NeedsConsent { reason, .. } => assert_eq!(reason, ConsentReason::Unsigned),
+        other => panic!("expected NeedsConsent, got {other:?}"),
+    }
+    assert!(
+        !install_root.join("weather").exists(),
+        "nothing must be written when consent is refused"
+    );
+
+    // With --force: installs, reporting Unsigned.
+    let result = install(&bundle, true, Some(&install_root))
+        .expect("unsigned bundle with --force should install");
+    assert_eq!(result.id, "weather");
+    assert_eq!(result.signature_state, SignatureState::Unsigned);
+    assert!(result.install_dir.join("widget.json").exists());
+}
+
+/// Dev-key (unknown signer) bundle: refused without --force with the
+/// signer's fingerprint in the consent reason.
+#[test]
+fn unknown_key_bundle_refused_without_force() {
+    let tmp = tempfile::tempdir().unwrap();
+    let widget_dir = tmp.path().join("weather");
+    std::fs::create_dir_all(&widget_dir).unwrap();
+    make_weather_fixture(&widget_dir);
+
+    let xdg = tmp.path().join("xdg");
+    std::fs::create_dir_all(&xdg).unwrap();
+    set_dev_key_path(&xdg);
+
+    let out = tmp.path().join("weather.oxw");
+    let pack_result = pack(&widget_dir, Some(&out)).expect("pack should succeed");
+
+    let install_root = tmp.path().join("widgets");
+    std::fs::create_dir_all(&install_root).unwrap();
+
+    let err = install(&out, false, Some(&install_root))
+        .expect_err("unknown-key bundle without --force must be refused");
+    match err {
+        CliError::NeedsConsent { reason: ConsentReason::UnknownKey(fp), .. } => {
+            assert_eq!(fp, pack_result.fingerprint, "consent must carry the signer fingerprint");
+        }
+        other => panic!("expected NeedsConsent::UnknownKey, got {other:?}"),
+    }
+    assert!(!install_root.join("weather").exists());
+}
+
+/// Zip-slip: a bundle entry named `../evil.txt` must hard-error the install
+/// and must never materialise outside (or inside) the install dir.
+#[test]
+fn zip_slip_entry_is_rejected_and_writes_nothing() {
+    let tmp = tempfile::tempdir().unwrap();
+    let bundle = tmp.path().join("evil.oxw");
+    // The zip writer happily records raw traversal names — exactly what a
+    // hostile bundle would carry.
+    write_raw_bundle(
+        &bundle,
+        &[
+            ("widget.json", WEATHER_MANIFEST.as_bytes()),
+            ("../evil.txt", b"pwned"),
+        ],
+    );
+
+    let install_root = tmp.path().join("widgets");
+    std::fs::create_dir_all(&install_root).unwrap();
+
+    // force=true so the (unsigned) consent gate doesn't mask the path check.
+    let err = install(&bundle, true, Some(&install_root))
+        .expect_err("zip-slip bundle must be refused");
+    match err {
+        CliError::UnsafePath(name) => assert_eq!(name, "../evil.txt"),
+        other => panic!("expected UnsafePath, got {other:?}"),
+    }
+
+    // dest would be <install_root>/weather, so "../evil.txt" would land in
+    // install_root; check there, one level up, and the temp root.
+    assert!(!install_root.join("evil.txt").exists(), "escaped file in install root");
+    assert!(!tmp.path().join("evil.txt").exists(), "escaped file in temp root");
+    assert!(
+        !install_root.join("weather").exists(),
+        "names are validated before anything is extracted"
+    );
 }

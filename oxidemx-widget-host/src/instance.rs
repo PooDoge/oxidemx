@@ -31,6 +31,15 @@ pub const RENDER_FUEL: u64 = 2_000_000;
 /// Strikes before the instance is disabled for the session.
 pub const MAX_STRIKES: u8 = 3;
 
+/// Byte cap on a single `omx_cmd` payload (mirrors `MAX_SCENE_BYTES`).
+/// Without it a guest can pass `len = u32::MAX` and force a 4 GB host
+/// allocation before any bounds check runs.  An over-cap or out-of-bounds
+/// cmd is logged and ignored rather than counted as a strike: the strike
+/// counter lives on [`WidgetInstance`], which the `omx_cmd` host-fn
+/// callback cannot reach (the store is borrowed by the in-flight call),
+/// and a dropped cmd is already harmless to the host.
+pub const MAX_CMD_BYTES: usize = 64 * 1024;
+
 /// Budget for instantiation (data segments) + `omx_api_version` + `omx_init`.
 const LOAD_FUEL: u64 = 50_000_000;
 
@@ -114,8 +123,21 @@ impl WidgetInstance {
                         log::warn!("widget called omx_cmd without exporting memory");
                         return;
                     };
-                    let mut buf = vec![0u8; len as usize];
-                    if mem.read(&caller, ptr as usize, &mut buf).is_err() {
+                    let (ptr, len) = (ptr as usize, len as usize);
+                    if len > MAX_CMD_BYTES {
+                        log::warn!("widget cmd is {len} bytes (max {MAX_CMD_BYTES}); ignored");
+                        return;
+                    }
+                    // Bounds-check ptr+len against the guest memory BEFORE
+                    // allocating, so a hostile (ptr, len) never costs a
+                    // host-side buffer.
+                    let mem_size = mem.data(&caller).len();
+                    if ptr.checked_add(len).is_none_or(|end| end > mem_size) {
+                        log::warn!("widget cmd ptr/len out of bounds");
+                        return;
+                    }
+                    let mut buf = vec![0u8; len];
+                    if mem.read(&caller, ptr, &mut buf).is_err() {
                         log::warn!("widget cmd ptr/len out of bounds");
                         return;
                     }
