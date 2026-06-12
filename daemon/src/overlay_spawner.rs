@@ -56,8 +56,15 @@ impl OverlaySpawner {
         if name_owned(&proxy, OVERLAY_BUS_NAME).await {
             return Ok(());
         }
+        // Wayland-first, always: forcing the X11 backend (which a
+        // stray edit introduced) runs the overlay through Xwayland,
+        // where the override-redirect window centres on the whole
+        // stacked X *screen* (straddling monitors) and composites
+        // opaque — the menu showed as a giant black rectangle.
+        // Fedora/Bazzite are removing X11 anyway. Pin the backend
+        // so a stray user environment can't push us back.
         match Command::new("oxidemx-overlay")
-            .env("WINIT_UNIX_BACKEND", "x11")
+            .env("WINIT_UNIX_BACKEND", "wayland")
             .spawn()
         {
             Ok(child) => {
