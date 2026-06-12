@@ -17,7 +17,6 @@ use iced::widget::{
 use iced::{Alignment, Element, Length};
 use oxidemx_shared::{ActionKind, Condition, RadialPage, Slice};
 use oxidemx_widgets::style;
-use oxidemx_widgets::widgets::section_header;
 
 // ============================================================================
 // View entry

@@ -358,6 +358,40 @@ pub fn draw_slice(
             );
         }
 
+        // Submenu badge: small surface bubble with a chevron at the
+        // icon disc's bottom-right, per the design.
+        if matches!(s.kind, oxidemx_shared::ActionKind::Submenu) && !s.submenu.is_empty() {
+            let badge = Point::new(
+                icon_pos.x + icon_bg_radius * 0.78,
+                icon_pos.y + icon_bg_radius * 0.78,
+            );
+            let (b1r, b1g, b1b, _) =
+                parse_hex_rgba(&palette.surface1).unwrap_or((0.2, 0.2, 0.25, 1.0));
+            frame.fill(
+                &Path::circle(badge, 8.0),
+                Color::from_rgba(b1r as f32, b1g as f32, b1b as f32, 0.95 * mo),
+            );
+            frame.stroke(
+                &Path::circle(badge, 8.0),
+                Stroke::default()
+                    .with_color(Color::from_rgba(1.0, 1.0, 1.0, 0.12 * mo))
+                    .with_width(1.0),
+            );
+            let (str_, stg, stb, _) =
+                parse_hex_rgba(&palette.subtext1).unwrap_or((0.8, 0.8, 0.85, 1.0));
+            let chevron = Path::new(|b| {
+                b.move_to(Point::new(badge.x - 1.5, badge.y - 3.0));
+                b.line_to(Point::new(badge.x + 1.8, badge.y));
+                b.line_to(Point::new(badge.x - 1.5, badge.y + 3.0));
+            });
+            frame.stroke(
+                &chevron,
+                Stroke::default()
+                    .with_color(Color::from_rgba(str_ as f32, stg as f32, stb as f32, mo))
+                    .with_width(1.6),
+            );
+        }
+
         // Toggle-state dot (night light): small glowing green dot at
         // the icon disc's top-right while the setting is on.
         if matches!(s.kind, oxidemx_shared::ActionKind::NightLight)

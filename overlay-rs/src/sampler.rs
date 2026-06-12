@@ -191,15 +191,26 @@ fn read_cpu_temp() -> Option<f32> {
     None
 }
 
-/// Free bytes on `/` via `df` (avoids a libc statvfs binding).
+/// Free bytes on the user's data filesystem via `df` (avoids a
+/// libc statvfs binding). Measures `/home` rather than `/` — on
+/// atomic/ostree systems the root is a read-only composefs that
+/// reports 0 available.
 fn read_disk_free() -> Option<f32> {
-    let out = std::process::Command::new("df")
-        .args(["-B1", "--output=avail", "/"])
-        .output()
-        .ok()?;
-    let s = String::from_utf8_lossy(&out.stdout);
-    let bytes: u64 = s.lines().nth(1)?.trim().parse().ok()?;
-    Some(bytes as f32 / 1_000_000_000.0)
+    for mount in ["/home", "/var", "/"] {
+        let Ok(out) = std::process::Command::new("df")
+            .args(["-B1", "--output=avail", mount])
+            .output()
+        else {
+            continue;
+        };
+        let s = String::from_utf8_lossy(&out.stdout);
+        if let Some(bytes) = s.lines().nth(1).and_then(|l| l.trim().parse::<u64>().ok()) {
+            if bytes > 0 {
+                return Some(bytes as f32 / 1_000_000_000.0);
+            }
+        }
+    }
+    None
 }
 
 async fn read_night_light() -> Option<bool> {

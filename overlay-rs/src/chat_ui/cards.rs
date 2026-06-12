@@ -19,7 +19,7 @@ pub fn view<'a>(card: &'a AgentCardData, kit: &Kit) -> Element<'a, Message> {
             let head = command.split_whitespace().next().unwrap_or("sh");
             (
                 kit.green,
-                "❯",
+                "$",
                 "Command executed",
                 format!("{head} · exit {exit_code}"),
             )
@@ -32,7 +32,7 @@ pub fn view<'a>(card: &'a AgentCardData, kit: &Kit) -> Element<'a, Message> {
         ),
         AgentCardData::Memory { retention, .. } => (
             kit.mauve,
-            "🧠",
+            "✱",
             "Memory saved",
             format!("retention: {retention}"),
         ),

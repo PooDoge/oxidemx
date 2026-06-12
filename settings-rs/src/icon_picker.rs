@@ -471,9 +471,7 @@ pub fn view<'a>(state: &'a crate::State, picker: &'a IconPickerState) -> Element
                     .style(style::text_dim(pal))
                     .into()
             } else {
-                build_grid(matched.into_iter().map(|n| *n), |name| {
-                    icon_cell(state, name)
-                })
+                build_grid(matched.into_iter().copied(), |name| icon_cell(state, name))
             }
         }
         IconSource::Apps => {

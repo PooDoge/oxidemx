@@ -318,7 +318,7 @@ pub fn threads_list<'a>(state: &'a RadialState, kit: &Kit) -> Element<'a, Messag
             row![
                 open_btn,
                 rename_btn,
-                small_btn("🗑", Message::AiDeleteThread(idx)),
+                small_btn("✕", Message::AiDeleteThread(idx)),
             ]
             .spacing(4)
             .align_y(Alignment::Center),

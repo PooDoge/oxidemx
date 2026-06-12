@@ -497,6 +497,10 @@ pub struct RadialState {
     /// Latest widget sample + sparkline ring buffers, fed by the
     /// 1 s sampler subscription while the menu is drawable.
     pub widgets: WidgetData,
+
+    /// Vision-loop dev hook: set once the OXIDEMX_VISION_SHOT
+    /// capture has been scheduled so it fires exactly once.
+    pub vision_shot_taken: bool,
 }
 
 /// Live widget data for the Splice Widgets page. Sparkline ring
@@ -658,6 +662,7 @@ impl RadialState {
             ai_show_tasks: false,
             ai_tasks: Vec::new(),
             widgets: WidgetData::default(),
+            vision_shot_taken: false,
         }
     }
 

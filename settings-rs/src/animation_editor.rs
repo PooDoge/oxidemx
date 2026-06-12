@@ -78,7 +78,7 @@ impl AnimationEditorState {
 
 /// Resolve the active `ElementAnimation` from config. Used by the
 /// view + the main.rs handlers to read/write the right slot.
-pub fn element_animation<'a>(state: &'a State, el: AnimEditorElement) -> &'a ElementAnimation {
+pub fn element_animation(state: &State, el: AnimEditorElement) -> &ElementAnimation {
     let cfg = &state.config.radial_menu.animation;
     match el {
         AnimEditorElement::Menu => &cfg.menu,
@@ -89,10 +89,7 @@ pub fn element_animation<'a>(state: &'a State, el: AnimEditorElement) -> &'a Ele
     }
 }
 
-pub fn element_animation_mut<'a>(
-    state: &'a mut State,
-    el: AnimEditorElement,
-) -> &'a mut ElementAnimation {
+pub fn element_animation_mut(state: &mut State, el: AnimEditorElement) -> &mut ElementAnimation {
     let cfg = &mut state.config.radial_menu.animation;
     match el {
         AnimEditorElement::Menu => &mut cfg.menu,

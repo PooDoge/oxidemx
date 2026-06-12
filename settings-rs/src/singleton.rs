@@ -1,20 +1,20 @@
 //! Single-instance enforcement via D-Bus name ownership.
 //!
 //! Flow:
-//!   1. Spawn a dedicated thread with its own tokio runtime.
-//!   2. The thread connects to the session bus and tries to claim
-//!      `org.oxidemx.Settings` with `DoNotQueue`.
-//!   3a. If we get the name → register a `Focus` method handler at
-//!       `/org/oxidemx/Settings`. Each call writes `()`
-//!       into an async-channel that iced consumes via a
-//!       `Subscription::run` stream. The thread parks forever to
-//!       keep the connection + service alive.
-//!   3b. If the name is taken → connect a Proxy to the existing
-//!       owner, call `Focus` on it, exit(0).
-//!   4. main() blocks until the worker reports its outcome via a
-//!      sync mpsc channel. If we lost the race, exit immediately;
-//!      otherwise return the focus-event receiver to wire into
-//!      iced's subscription.
+//! 1. Spawn a dedicated thread with its own tokio runtime.
+//! 2. The thread connects to the session bus and tries to claim
+//!    `org.oxidemx.Settings` with `DoNotQueue`.
+//! 3. If we get the name → register a `Focus` method handler at
+//!    `/org/oxidemx/Settings`. Each call writes `()`
+//!    into an async-channel that iced consumes via a
+//!    `Subscription::run` stream. The thread parks forever to
+//!    keep the connection + service alive.
+//!    If the name is taken → connect a Proxy to the existing
+//!    owner, call `Focus` on it, exit(0).
+//! 4. main() blocks until the worker reports its outcome via a
+//!    sync mpsc channel. If we lost the race, exit immediately;
+//!    otherwise return the focus-event receiver to wire into
+//!    iced's subscription.
 //!
 //! The session bus is the only dep — works on any Linux desktop
 //! that has dbus-broker / dbus-daemon (i.e. all of them). No

@@ -1083,7 +1083,7 @@ pub struct State {
     pub app_classes_drafts: std::collections::BTreeMap<usize, String>,
     /// In-flight focused-class detection: which page asked + when
     /// the sample fires. The view uses this to render a countdown
-    /// + Cancel button while waiting; the deferred Task::perform
+    /// and a Cancel button while waiting; the deferred Task::perform
     /// races independently. `None` = no detect in flight.
     pub detect_in_flight: Option<DetectInFlight>,
     /// Visual icon-picker dialog state. `Some` while the picker
@@ -1293,16 +1293,11 @@ pub struct RenameThemeDraft {
 /// `Family(name)` is one installed family. Display impl drives the
 /// combo_box's filtering + on-screen text, and PartialEq is used by
 /// iced to look up the currently-selected entry.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum FontChoice {
+    #[default]
     Default,
     Family(String),
-}
-
-impl Default for FontChoice {
-    fn default() -> Self {
-        FontChoice::Default
-    }
 }
 
 impl FontChoice {
@@ -3009,7 +3004,7 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             Task::perform(daemon::set_dpi(dpi), Message::DpiSet)
         }
         Message::DpiSet(Ok(_)) => {
-            state.status = format!("DPI updated");
+            state.status = "DPI updated".to_string();
             Task::none()
         }
         Message::DpiSet(Err(e)) => {
@@ -3025,7 +3020,7 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             Task::perform(daemon::set_host(idx), Message::HostSwitched)
         }
         Message::HostSwitched(Ok(_)) => {
-            state.status = format!("Host switched");
+            state.status = "Host switched".to_string();
             // Re-poll so we get the device's actual confirmed slot.
             Task::perform(daemon::poll(), Message::DaemonSnapshotReceived)
         }
@@ -4115,10 +4110,9 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                     // Catalogue source: rasterise tinted variants
                     // of curated icons + recents.
                     let tint = state.palette.text;
-                    let mut candidates: Vec<&str> =
-                        icon_picker::COMMON_ICONS.iter().copied().collect();
+                    let mut candidates: Vec<&str> = icon_picker::COMMON_ICONS.to_vec();
                     for r in state.recent_icons.iter() {
-                        if !candidates.iter().any(|c| *c == r.as_str()) {
+                        if !candidates.contains(&r.as_str()) {
                             candidates.push(r.as_str());
                         }
                     }
@@ -4996,8 +4990,10 @@ fn main() -> iced::Result {
         }
     }
 
-    let mut window = iced::window::Settings::default();
-    window.size = iced::Size::new(1280.0, 820.0);
+    let mut window = iced::window::Settings {
+        size: iced::Size::new(1280.0, 820.0),
+        ..Default::default()
+    };
     window.platform_specific.application_id = "org.oxidemx.settings".into();
 
     iced::application(boot, update, view)

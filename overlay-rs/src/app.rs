@@ -141,6 +141,8 @@ pub enum Message {
         idx: usize,
         direction: i32,
     },
+    /// Vision-loop dev hook: the window screenshot arrived.
+    VisionShot(iced::window::Screenshot),
     /// Toggle the memories management view (header brain button).
     AiToggleMemories,
     /// Live edit of the memories view's search filter.
@@ -251,6 +253,24 @@ fn update(state: &mut RadialState, message: Message) -> Task<Message> {
     match message {
         Message::Tick => {
             state.advance_animations();
+            // Vision-loop dev hook: one screenshot after the delay,
+            // then exit in the save handler.
+            if !state.vision_shot_taken {
+                if let (Ok(_), Some(t0), Some(id)) = (
+                    std::env::var("OXIDEMX_VISION_SHOT"),
+                    state.show_time,
+                    state.window_id,
+                ) {
+                    let delay_ms: u64 = std::env::var("OXIDEMX_VISION_DELAY_MS")
+                        .ok()
+                        .and_then(|v| v.parse().ok())
+                        .unwrap_or(1500);
+                    if t0.elapsed() >= std::time::Duration::from_millis(delay_ms) {
+                        state.vision_shot_taken = true;
+                        return iced::window::screenshot(id).map(Message::VisionShot);
+                    }
+                }
+            }
             // Focus the chat's text input as soon as its widgets are
             // actually mounted in the tree (they fade in mid-morph —
             // a focus operation issued at page-change time would
@@ -527,6 +547,21 @@ fn update(state: &mut RadialState, message: Message) -> Task<Message> {
             state.widgets.apply(snap);
             Task::none()
         }
+        Message::VisionShot(shot) => {
+            // Dev-only: encode + save, then exit — each vision run
+            // captures exactly one surface state.
+            let path = std::env::var("OXIDEMX_VISION_SHOT")
+                .unwrap_or_else(|_| "/tmp/oxidemx-vision.png".into());
+            let (w, h) = (shot.size.width, shot.size.height);
+            match image::RgbaImage::from_raw(w, h, shot.rgba.to_vec()) {
+                Some(img) => match img.save(&path) {
+                    Ok(()) => info!(path, "vision screenshot saved"),
+                    Err(e) => error!(%e, "vision screenshot save failed"),
+                },
+                None => error!("vision screenshot: byte size mismatch"),
+            }
+            std::process::exit(0);
+        }
         Message::DialAdjust { idx, direction } => {
             if let Some(kind) = state.slices.get(idx).and_then(|s| s.dial) {
                 crate::actions::adjust_dial(kind, direction);
@@ -580,6 +615,21 @@ fn update(state: &mut RadialState, message: Message) -> Task<Message> {
         Message::WindowOpened(id) => {
             info!("WindowOpened event received: {:?}", id);
             state.window_id = Some(id);
+            // Vision-loop dev hook (OXIDEMX_VISION_SHOT=<png path>):
+            // self-show without any daemon signal, optionally jump
+            // to OXIDEMX_START_PAGE, and let the Tick handler take
+            // a window screenshot after OXIDEMX_VISION_DELAY_MS.
+            // Used by the design-comparison loop; inert in normal
+            // runs.
+            if std::env::var("OXIDEMX_VISION_SHOT").is_ok() {
+                state.show();
+                if let Some(page) = std::env::var("OXIDEMX_START_PAGE")
+                    .ok()
+                    .and_then(|p| p.parse::<usize>().ok())
+                {
+                    state.set_active_page(page);
+                }
+            }
             Task::none()
         }
         Message::AiEditorAction(action) => {
@@ -1621,7 +1671,7 @@ fn view(state: &RadialState) -> Element<'_, Message> {
                 accent_dim,
                 // Quieter than the disc's pass — it's a backdrop
                 // for reading text, not a hero element.
-                intensity * 0.45 * body_a,
+                intensity * 0.22 * body_a,
                 crate::render::animation::MenuXformRaw::IDENTITY,
             ))
             .width(Length::Fill)

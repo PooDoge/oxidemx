@@ -65,7 +65,7 @@ impl ConfigBundle {
     /// Apply every section of a bundle: write macros + themes to
     /// their respective directories, then return the AppConfig so
     /// the caller can install it into State. Errors are collected
-    /// + returned; partial success is the norm here (one bad
+    /// and returned; partial success is the norm here (one bad
     /// macro shouldn't block restoring everything else).
     pub fn install(self) -> (oxidemx_shared::AppConfig, Vec<String>) {
         let mut errors = Vec::new();

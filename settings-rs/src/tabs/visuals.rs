@@ -2,9 +2,7 @@
 //! highlight intensity).
 
 use crate::{FontChoice, Message, State, VisualField};
-use iced::widget::{
-    button, column, combo_box, container, pick_list, row, text, text_input, toggler, Space,
-};
+use iced::widget::{button, column, combo_box, container, pick_list, row, text, toggler, Space};
 use iced::{Alignment, Element, Length};
 use oxidemx_widgets::style;
 use oxidemx_widgets::widgets::{labeled_int_slider, labeled_slider};

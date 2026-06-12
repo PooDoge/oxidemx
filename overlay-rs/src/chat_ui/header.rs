@@ -111,8 +111,8 @@ pub fn view<'a>(state: &'a RadialState, kit: &Kit) -> Element<'a, Message> {
         Space::new().width(Length::Fixed(14.0 + 32.0 + 10.0)),
         title_block,
         Space::new().width(Length::Fill),
-        icon_btn("🧠", state.ai_show_memories, Message::AiToggleMemories),
-        icon_btn("🕓", state.ai_show_tasks, Message::AiToggleTasks),
+        icon_btn("✱", state.ai_show_memories, Message::AiToggleMemories),
+        icon_btn("◔", state.ai_show_tasks, Message::AiToggleTasks),
         icon_btn("＋", false, Message::AiNewChat),
         close_btn,
     ]

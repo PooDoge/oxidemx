@@ -417,6 +417,7 @@ where
     }
 }
 
+#[allow(clippy::too_many_arguments)] // mirrors the painter's full per-slot surface
 fn draw_slot(
     frame: &mut Frame,
     center: Point,
@@ -742,6 +743,7 @@ fn hit_slot(p: Point, center: Point, bounds: Rectangle) -> Option<usize> {
 /// caches are passed in by the parent (typically owned by `State`)
 /// so they survive across re-renders — recreating the cache every
 /// frame would force every icon back through resvg/tiny-skia.
+#[allow(clippy::too_many_arguments)] // the preview's full configuration surface
 pub fn radial_preview_widget<'a, Message>(
     palette: &Palette,
     slices: &[Slice],

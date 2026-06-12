@@ -77,7 +77,7 @@ pub fn list() -> Vec<MacroSummary> {
             serde_json::from_slice::<MacroSummary>(&bytes).ok()
         })
         .collect();
-    out.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    out.sort_by_key(|a| a.name.to_lowercase());
     out
 }
 
