@@ -259,8 +259,10 @@ pub struct RadialState {
     /// revision) per placed plugin instance, filed by
     /// `Message::WidgetHost`. The painter replays these on every
     /// frame — the frame path never calls wasm (spec §8).
-    pub widget_scenes:
-        std::collections::HashMap<oxidemx_widget_host::InstanceId, (oxidemx_widget_proto::Scene, u64)>,
+    pub widget_scenes: std::collections::HashMap<
+        oxidemx_widget_host::InstanceId,
+        (oxidemx_widget_proto::Scene, u64),
+    >,
 
     /// Instances the worker reported dead (3 strikes / load
     /// failure) with their last error. These render the dimmed

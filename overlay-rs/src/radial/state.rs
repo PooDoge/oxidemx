@@ -123,11 +123,7 @@ impl RadialState {
     /// Live wedge geometry for slot `idx` — painter layout math at
     /// rest scale plus the slot's current hover-tween progress.
     pub(crate) fn widget_geom(&self, idx: usize) -> oxidemx_widget_proto::WedgeGeom {
-        let hovered = self
-            .highlights
-            .get(idx)
-            .map(|t| t.current)
-            .unwrap_or(0.0);
+        let hovered = self.highlights.get(idx).map(|t| t.current).unwrap_or(0.0);
         crate::widget_host::wedge_geom_for_slot(idx, self.active_slot_count(), hovered)
     }
 
@@ -549,10 +545,7 @@ impl RadialState {
             self.previous_slices = Some(self.slices.clone());
             // Keep the outgoing ring's page name so its custom
             // widgets still derive the right instance keys mid-spin.
-            self.previous_page_name = self
-                .pages
-                .get(self.active_page)
-                .map(|p| p.name.clone());
+            self.previous_page_name = self.pages.get(self.active_page).map(|p| p.name.clone());
             self.page_transition_dir = (direction.signum()) as f32;
             // Reset to 0 so the eased value starts from "old fully
             // visible" each transition, regardless of where the

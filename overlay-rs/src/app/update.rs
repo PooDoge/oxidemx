@@ -528,7 +528,7 @@ pub(super) fn update(state: &mut RadialState, message: Message) -> Task<Message>
                     for (slot, slice) in slices.iter().enumerate() {
                         let Some(w) = &slice.widget else { continue };
                         let oxidemx_shared::WidgetSource::Custom(widget_id) = &w.source else {
-                            continue
+                            continue;
                         };
                         let instance_key = w.instance_key.clone().unwrap_or_else(|| {
                             oxidemx_shared::widgets::instance_key(page_name, slot)
@@ -547,7 +547,11 @@ pub(super) fn update(state: &mut RadialState, message: Message) -> Task<Message>
         }
         Message::WidgetHost(ev) => {
             match ev {
-                oxidemx_widget_host::HostEvent::Scene { instance, scene, revision } => {
+                oxidemx_widget_host::HostEvent::Scene {
+                    instance,
+                    scene,
+                    revision,
+                } => {
                     // A live scene clears any earlier failure (the
                     // worker reloaded the instance after a rescan or
                     // config edit). Storing it is all a redraw needs:
@@ -581,8 +585,7 @@ pub(super) fn update(state: &mut RadialState, message: Message) -> Task<Message>
                     state
                         .widget_failed
                         .retain(|id, _| installed_ids.contains(id.widget_id.as_str()));
-                    state.widget_registry =
-                        list.into_iter().map(|s| (s.id.clone(), s)).collect();
+                    state.widget_registry = list.into_iter().map(|s| (s.id.clone(), s)).collect();
                 }
             }
             Task::none()

@@ -229,11 +229,17 @@ pub fn spawn_widgets_dir_watcher(on_change: impl Fn() + Send + 'static) {
                 }
             };
         if let Err(e) = std::fs::create_dir_all(&watch_dir) {
-            tracing::warn!("widgets watcher: couldn't ensure {}: {e}", watch_dir.display());
+            tracing::warn!(
+                "widgets watcher: couldn't ensure {}: {e}",
+                watch_dir.display()
+            );
             return;
         }
         if let Err(e) = watcher.watch(&watch_dir, RecursiveMode::Recursive) {
-            tracing::warn!("widgets watcher: failed to watch {}: {e}", watch_dir.display());
+            tracing::warn!(
+                "widgets watcher: failed to watch {}: {e}",
+                watch_dir.display()
+            );
             return;
         }
         std::thread::park();

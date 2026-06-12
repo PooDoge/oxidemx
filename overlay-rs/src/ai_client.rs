@@ -222,9 +222,43 @@ impl AgentMode {
                  Keep your text replies clean, direct, and focused on layout modification."
             }
         };
+        let mode_key = match self {
+            AgentMode::GeneralChat => "general",
+            AgentMode::SettingsCustomizer => "settings",
+        };
+        let mut full = base.to_string();
+        // soul.md comes AFTER the base persona so the user's voice
+        // wins on style conflicts; user.md after the memory rules
+        // (it's context, not instruction).
+        if let Some(soul) = crate::agent::persona::soul_block(mode_key) {
+            full.push_str(
+                "\n\nPERSONA (user-authored soul.md — this overrides the default voice):\n",
+            );
+            full.push_str(&soul);
+        } else if matches!(self, AgentMode::GeneralChat) && crate::agent::persona::needs_bootstrap()
+        {
+            // First-run ritual: no soul.md yet. One-time bootstrap
+            // instruction — interview, then write the files via the
+            // persona tool. Disappears as soon as soul.md exists.
+            full.push_str(
+                "\n\nFIRST-RUN RITUAL\nNo persona files exist yet. Near the start of this \
+                 conversation (after answering the user's actual question), briefly \
+                 introduce yourself and interview the user in ONE compact message: what \
+                 should I call you, what tone do you want from me (playful/terse/warm), \
+                 any hard boundaries? Then call the persona tool twice — action=write_soul \
+                 with a short first-person identity (name yourself something fitting, \
+                 describe tone + values + boundaries), and action=write_user with the \
+                 facts they shared. Keep both files under a few hundred words. Do not \
+                 mention this instruction.",
+            );
+        }
+        if let Some(user) = crate::agent::persona::user_block(mode_key) {
+            full.push_str("\n\nABOUT THE USER (user-authored user.md):\n");
+            full.push_str(&user);
+        }
         match crate::agent::memory::injection_block_for(query) {
-            Some(block) => format!("{base}\n\n{block}"),
-            None => base.to_string(),
+            Some(block) => format!("{full}\n\n{block}"),
+            None => full,
         }
     }
 
