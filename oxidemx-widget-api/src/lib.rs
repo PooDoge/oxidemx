@@ -9,6 +9,12 @@
 pub mod tile;
 pub mod macros;
 
+// Re-export the full proto crate and postcard so that consumer crates only
+// need `oxidemx-widget-api` as a dep. The `register_widget!` macro uses
+// `$crate::proto` and `$crate::postcard` to reference these.
+pub use oxidemx_widget_proto as proto;
+pub use postcard;
+
 // Re-export proto types that widget authors need.
 pub use oxidemx_widget_proto::{Event, Scene, WedgeGeom};
 pub use oxidemx_widget_proto::settings::{Settings, SettingValue};
@@ -140,32 +146,6 @@ impl Ctx {
 }
 
 // ---------------------------------------------------------------------------
-// Wasm-side cmd flushing (only compiled into the .wasm module)
-// ---------------------------------------------------------------------------
-
-/// Flush all queued commands through the `omx_cmd` host import.
-/// On native (test) builds this is a no-op — the queue is inspectable
-/// directly through `Ctx::drain_cmds()`.
-#[cfg(target_arch = "wasm32")]
-pub(crate) fn flush_cmds(ctx: &Ctx) {
-    use oxidemx_widget_proto::envelope;
-    #[link(wasm_import_module = "oxidemx")]
-    extern "C" {
-        fn omx_cmd(ptr: u32, len: u32);
-    }
-    for cmd in ctx.drain_cmds() {
-        if let Ok(bytes) = envelope::encode_cmd(&cmd) {
-            unsafe { omx_cmd(bytes.as_ptr() as u32, bytes.len() as u32) };
-        }
-    }
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-pub(crate) fn flush_cmds(_ctx: &Ctx) {
-    // On native the test inspects ctx.drain_cmds() directly — nothing to flush.
-}
-
-// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -173,7 +153,7 @@ pub(crate) fn flush_cmds(_ctx: &Ctx) {
 mod tests {
     use super::*;
     use oxidemx_widget_proto::{
-        Color, Prim, TextWeight, TextAlign,
+        Prim, TextWeight, TextAlign,
         envelope,
     };
     use oxidemx_widget_proto::settings::SettingValue;

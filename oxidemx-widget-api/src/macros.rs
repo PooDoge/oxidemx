@@ -18,6 +18,10 @@
 ///
 /// All functions are only compiled for `wasm32` targets — native test builds
 /// skip the block entirely.
+///
+/// All proto and postcard references go through `$crate::proto` and
+/// `$crate::postcard` — consumer crates only need `oxidemx-widget-api`
+/// as a direct dependency.
 #[macro_export]
 macro_rules! register_widget {
     ($T:ty) => {
@@ -25,8 +29,8 @@ macro_rules! register_widget {
         mod __widget_abi {
             use super::*;
             use $crate::{Ctx, Widget};
-            use oxidemx_widget_proto::{envelope, API_VERSION};
-            use oxidemx_widget_proto::settings::Settings;
+            use $crate::proto::{envelope, API_VERSION};
+            use $crate::proto::settings::Settings;
 
             #[link(wasm_import_module = "oxidemx")]
             extern "C" {
@@ -69,7 +73,8 @@ macro_rules! register_widget {
             pub unsafe extern "C" fn omx_init(ptr: u32, len: u32) {
                 let bytes = std::slice::from_raw_parts(ptr as *const u8, len as usize);
                 // Settings arrive as raw postcard (not an Envelope).
-                let settings: Settings = postcard::from_bytes(bytes).unwrap_or_default();
+                let settings: Settings =
+                    $crate::postcard::from_bytes(bytes).unwrap_or_default();
                 let ctx = Ctx::new(settings.clone());
                 let mut widget = <$T>::default();
                 widget.init(&ctx);
@@ -102,13 +107,13 @@ macro_rules! register_widget {
                     None => return 0,
                 };
                 let bytes = std::slice::from_raw_parts(ptr as *const u8, len as usize);
-                let geom: oxidemx_widget_proto::WedgeGeom =
-                    match postcard::from_bytes(bytes) {
+                let geom: $crate::proto::WedgeGeom =
+                    match $crate::postcard::from_bytes(bytes) {
                         Ok(g) => g,
                         Err(_) => return 0,
                     };
                 let scene = state.widget.render(geom);
-                let out = match postcard::to_allocvec(&scene) {
+                let out = match $crate::postcard::to_allocvec(&scene) {
                     Ok(o) => o,
                     Err(_) => return 0,
                 };

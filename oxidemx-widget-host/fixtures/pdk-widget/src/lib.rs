@@ -13,8 +13,7 @@
 //!   re-rendered as value `h<status>` with the body as the sublabel — this
 //!   is how the host tests observe permission denials and cache hits.
 
-use oxidemx_widget_api::{tile, Ctx, Widget};
-use oxidemx_widget_proto::{Event, Scene, WedgeGeom};
+use oxidemx_widget_api::{tile, Ctx, Event, Scene, WedgeGeom, Widget};
 
 #[derive(Default)]
 pub struct PdkWidget {

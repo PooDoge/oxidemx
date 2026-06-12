@@ -231,6 +231,4 @@ name = "weather"
 version = "1.4.0"
 dependencies = [
  "oxidemx-widget-api",
- "oxidemx-widget-proto",
- "postcard",
 ]

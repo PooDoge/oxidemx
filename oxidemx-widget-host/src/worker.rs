@@ -322,10 +322,22 @@ impl Worker {
                 meta.permissions = manifest.permissions.clone();
                 meta.refresh_ms = manifest.effective_refresh_ms();
                 if meta.settings != settings {
-                    meta.settings = settings;
-                    self.pump(VecDeque::from([(id, Event::SettingsChanged)])).await;
+                    // v1: settings changes reload the instance — the ABI has no
+                    // settings-refresh path; revisit at api_version 2.
+                    // Drop the old instance (timers abort) and fall through to
+                    // the "new placement" path below, which re-inits with the
+                    // new settings bag.
+                    log::info!(
+                        "widget instance {}/{} settings changed — reloading",
+                        id.widget_id, id.instance_key
+                    );
+                    self.instances.remove(&id);
                 }
-                continue;
+                // If settings were unchanged, skip re-init; otherwise fall
+                // through (instance was just removed).
+                if self.instances.contains_key(&id) {
+                    continue;
+                }
             }
 
             // New placement: load + init + initial render.

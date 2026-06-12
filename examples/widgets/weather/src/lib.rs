@@ -8,8 +8,7 @@
 //! (`current_weather.temperature` and `current_weather.weathercode`).
 //! This keeps the guest binary tiny — no serde or serde_json dep required.
 
-use oxidemx_widget_api::{tile, Ctx, Widget};
-use oxidemx_widget_proto::{Event, Scene, WedgeGeom};
+use oxidemx_widget_api::{tile, Ctx, Event, Scene, WedgeGeom, Widget};
 
 // ---------------------------------------------------------------------------
 // WMO 4677 weather-code → short label
@@ -331,7 +330,8 @@ mod tests {
 
     #[test]
     fn render_with_data_has_value_sublabel_label() {
-        use oxidemx_widget_proto::{Prim, TextWeight, TextAlign, WedgeGeom};
+        use oxidemx_widget_api::{WedgeGeom};
+        use oxidemx_widget_api::proto::{Prim, TextWeight, TextAlign};
         let mut w = Weather::default();
         w.temp_c = Some(14.0);
         w.code = 2;
@@ -364,7 +364,7 @@ mod tests {
             Prim::Text { content, size, weight, .. } => {
                 assert_eq!(content, "WEATHER");
                 assert!((size - 8.0).abs() < 0.1);
-                assert_eq!(*weight, oxidemx_widget_proto::TextWeight::Semibold);
+                assert_eq!(*weight, oxidemx_widget_api::proto::TextWeight::Semibold);
             }
             other => panic!("prim[2] should be label Text, got {other:?}"),
         }
@@ -372,7 +372,8 @@ mod tests {
 
     #[test]
     fn render_units_f_converts_temperature() {
-        use oxidemx_widget_proto::{Prim, WedgeGeom};
+        use oxidemx_widget_api::{WedgeGeom};
+        use oxidemx_widget_api::proto::{Prim};
         let mut w = Weather::default();
         w.temp_c = Some(0.0); // 0°C = 32°F
         w.units_f = true;

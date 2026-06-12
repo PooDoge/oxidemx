@@ -368,6 +368,11 @@ async fn timer_clamps_to_refresh_floor() {
 
 /// Settings resolution layers defaults <- global <- instance bag; the
 /// instance override is what reaches the widget.
+///
+/// Also asserts the v1 reload-on-settings-change behaviour: when settings
+/// differ on reconcile the instance is dropped and re-initialised, so the
+/// widget's init-time commands (Log + SetTimer) are observable again and
+/// the scene value reflects the new `echo` setting.
 #[tokio::test(flavor = "multi_thread")]
 async fn settings_resolution_reaches_widget() {
     let Some(wasm) = common::fixture_wasm("pdk-widget") else { return };
@@ -375,6 +380,7 @@ async fn settings_resolution_reaches_widget() {
     install_pdk(&root, &wasm, 900_000, &[]);
     let (ctl, events, _h) = spawn_worker(root, Box::new(NoFetch));
 
+    // --- initial placement ---
     ctl.send(HostCtl::ConfigChanged(cfg(
         serde_json::json!([custom_slice("apps.slot0")]),
         serde_json::json!({
@@ -393,5 +399,29 @@ async fn settings_resolution_reaches_widget() {
         scene_value(&scene),
         Some("inst-val"),
         "instance bag must override the global bag (scope: instance)"
+    );
+
+    // --- settings change → instance reload (v1 semantics) ---
+    // Send a new config with a changed echo value.  The worker must drop
+    // and re-init the instance; the new scene value must reflect the new
+    // setting (proving that init ran again with the new bag).
+    ctl.send(HostCtl::ConfigChanged(cfg(
+        serde_json::json!([custom_slice("apps.slot0")]),
+        serde_json::json!({
+            "instances": { "apps.slot0": { "pdk-widget": { "echo": "new-val" } } }
+        }),
+    )))
+    .await
+    .unwrap();
+
+    let scene = scene_matching(&events, &iid("apps.slot0"), Duration::from_secs(20), |s| {
+        scene_value(s) == Some("new-val")
+    })
+    .await
+    .expect("settings change must reload the instance and produce a scene with the new echo");
+    assert_eq!(
+        scene_value(&scene),
+        Some("new-val"),
+        "reloaded instance must render the new setting value"
     );
 }
