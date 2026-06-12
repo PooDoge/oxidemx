@@ -44,23 +44,36 @@ use std::path::{Path, PathBuf};
 /// (added to the config schema in this commit).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
+#[derive(Default)]
 pub enum Condition {
+    #[default]
     Always,
     Never,
-    Executable { name: String },
-    FileExists { path: String },
-    ProcessRunning { comm: String },
-    EnvSet { var: String },
-    EnvEquals { var: String, value: String },
-    All { conditions: Vec<Condition> },
-    Any { conditions: Vec<Condition> },
-    Not { condition: Box<Condition> },
-}
-
-impl Default for Condition {
-    fn default() -> Self {
-        Condition::Always
-    }
+    Executable {
+        name: String,
+    },
+    FileExists {
+        path: String,
+    },
+    ProcessRunning {
+        comm: String,
+    },
+    EnvSet {
+        var: String,
+    },
+    EnvEquals {
+        var: String,
+        value: String,
+    },
+    All {
+        conditions: Vec<Condition>,
+    },
+    Any {
+        conditions: Vec<Condition>,
+    },
+    Not {
+        condition: Box<Condition>,
+    },
 }
 
 impl Condition {
@@ -131,11 +144,7 @@ pub fn process_with_comm(target: &str) -> Option<u32> {
         Err(_) => return None, // Non-Linux or permission-denied
     };
     for entry in proc.flatten() {
-        let pid: u32 = match entry
-            .file_name()
-            .to_str()
-            .and_then(|s| s.parse().ok())
-        {
+        let pid: u32 = match entry.file_name().to_str().and_then(|s| s.parse().ok()) {
             Some(p) => p,
             None => continue,
         };
@@ -213,10 +222,7 @@ mod tests {
     #[test]
     fn executable_finds_real_binary() {
         // `sh` is on $PATH on every supported system.
-        assert!(Condition::Executable {
-            name: "sh".into()
-        }
-        .eval());
+        assert!(Condition::Executable { name: "sh".into() }.eval());
         assert!(!Condition::Executable {
             name: "definitely-not-a-real-binary-xyzzy".into()
         }
@@ -251,10 +257,7 @@ mod tests {
     #[test]
     fn env_set_and_equals() {
         // PATH is set on every system.
-        assert!(Condition::EnvSet {
-            var: "PATH".into()
-        }
-        .eval());
+        assert!(Condition::EnvSet { var: "PATH".into() }.eval());
         assert!(!Condition::EnvSet {
             var: "OXIDEMX_TEST_NEVER_SET_xyzzy".into()
         }
@@ -281,18 +284,14 @@ mod tests {
         // test binary). We can't predict that exactly, so just sanity
         // check by looking up `init` (PID 1) which is on every Linux
         // system as either `systemd` or similar.
-        let found = process_with_comm("systemd").is_some()
-            || process_with_comm("init").is_some();
+        let found = process_with_comm("systemd").is_some() || process_with_comm("init").is_some();
         assert!(found, "no init/systemd process visible in /proc");
     }
 
     #[test]
     fn all_combines_with_and() {
         let p = Condition::All {
-            conditions: vec![
-                Condition::Always,
-                Condition::Always,
-            ],
+            conditions: vec![Condition::Always, Condition::Always],
         };
         assert!(p.eval());
         let p = Condition::All {

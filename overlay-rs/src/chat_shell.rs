@@ -297,12 +297,7 @@ impl<'a> canvas::Program<crate::app::Message> for CapsPainter<'a> {
         // Cap fill: theme accent blended toward the surface colour so
         // the caps read as "made from the disc" without shouting.
         let blend = |a: Color, b: Color, k: f32| {
-            Color::from_rgba(
-                lerp(a.r, b.r, k),
-                lerp(a.g, b.g, k),
-                lerp(a.b, b.b, k),
-                1.0,
-            )
+            Color::from_rgba(lerp(a.r, b.r, k), lerp(a.g, b.g, k), lerp(a.b, b.b, k), 1.0)
         };
         let cap_main = blend(accent, surface0, 0.55);
         let cap_deep = blend(accent, surface0, 0.82);
@@ -368,11 +363,7 @@ impl<'a> canvas::Program<crate::app::Message> for CapsPainter<'a> {
             };
             let band_r = (band_h * 0.5).min(12.0);
             let band = Path::new(|b| {
-                b.rounded_rectangle(
-                    band_rect.position(),
-                    band_rect.size(),
-                    band_r.into(),
-                );
+                b.rounded_rectangle(band_rect.position(), band_rect.size(), band_r.into());
             });
             // The band sells the dome's lighting while the caps
             // travel, but parked arcs look cleaner flat — its

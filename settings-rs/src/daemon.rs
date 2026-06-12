@@ -46,12 +46,7 @@ trait Daemon {
     /// the horizontal-scroll-reverse toggle when false.
     fn thumb_wheel_supported(&self) -> zbus::Result<bool>;
     fn get_hiresscroll_mode(&self) -> zbus::Result<(bool, bool, bool)>;
-    fn set_hiresscroll_mode(
-        &self,
-        hires: bool,
-        invert: bool,
-        target: bool,
-    ) -> zbus::Result<()>;
+    fn set_hiresscroll_mode(&self, hires: bool, invert: bool, target: bool) -> zbus::Result<()>;
     fn get_host_names(&self) -> zbus::Result<Vec<String>>;
     fn get_easy_switch_info(&self) -> zbus::Result<(u8, u8)>;
     fn set_host(&self, host_index: u8) -> zbus::Result<bool>;
@@ -118,11 +113,10 @@ pub async fn trigger_haptic_event(event: String) {
         Ok(c) => c,
         Err(_) => return,
     };
-    let proxy =
-        match DaemonProxy::builder(&conn).build().await {
-            Ok(p) => p,
-            Err(_) => return,
-        };
+    let proxy = match DaemonProxy::builder(&conn).build().await {
+        Ok(p) => p,
+        Err(_) => return,
+    };
     let _ = proxy.trigger_haptic(&event).await;
 }
 
@@ -249,18 +243,17 @@ pub async fn poll() -> DaemonSnapshot {
         Err(_) => return DaemonSnapshot::default(),
     };
 
-    let battery = proxy.get_battery_status().await.ok().and_then(|(p, c)| {
-        if p == 0 {
-            None
-        } else {
-            Some((p, c))
-        }
-    });
-    let device_name = proxy
-        .get_device_name()
-        .await
-        .ok()
-        .filter(|s| !s.is_empty());
+    let battery =
+        proxy.get_battery_status().await.ok().and_then(
+            |(p, c)| {
+                if p == 0 {
+                    None
+                } else {
+                    Some((p, c))
+                }
+            },
+        );
+    let device_name = proxy.get_device_name().await.ok().filter(|s| !s.is_empty());
 
     let dpi_supported = proxy.dpi_supported().await.unwrap_or(false);
     let dpi = if dpi_supported {
@@ -432,8 +425,7 @@ pub async fn save_macro(json: String) -> Result<(), String> {
 /// reload flow — useful for instant device feedback when the user
 /// flips a per-knob toggle. Idempotent on the daemon side.
 pub async fn set_hiresscroll(hires: bool, invert: bool, target: bool) -> Result<(), String> {
-    call_with_proxy(|p| async move { p.set_hiresscroll_mode(hires, invert, target).await })
-        .await
+    call_with_proxy(|p| async move { p.set_hiresscroll_mode(hires, invert, target).await }).await
 }
 
 async fn call_with_proxy<F, Fut>(f: F) -> Result<(), String>

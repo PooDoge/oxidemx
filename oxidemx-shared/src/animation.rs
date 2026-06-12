@@ -31,9 +31,11 @@ use serde::{Deserialize, Serialize};
 /// just shapes what happens within it).
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
+#[derive(Default)]
 pub enum Easing {
     Linear,
     EaseIn,
+    #[default]
     EaseOut,
     EaseInOut,
     /// Spring physics — `stiffness` controls oscillation frequency
@@ -52,12 +54,6 @@ fn default_spring_stiffness() -> f32 {
 }
 fn default_spring_damping() -> f32 {
     12.0
-}
-
-impl Default for Easing {
-    fn default() -> Self {
-        Easing::EaseOut
-    }
 }
 
 impl Easing {
@@ -191,15 +187,11 @@ impl Default for TransitionKind {
 /// Axis for direction-sensitive track kinds (Translate, Flip).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[derive(Default)]
 pub enum Axis {
+    #[default]
     X,
     Y,
-}
-
-impl Default for Axis {
-    fn default() -> Self {
-        Axis::X
-    }
 }
 
 /// One animation track contributing a single property to the
@@ -843,6 +835,7 @@ impl Default for AnimationConfig {
 /// What kind of motion accompanies a page swap.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[derive(Default)]
 pub enum PageTransitionStyle {
     /// No animation — slices swap instantly the moment the wheel
     /// fires. Cheapest, no risk of disorientation.
@@ -853,6 +846,7 @@ pub enum PageTransitionStyle {
     /// Whole ring rotates ~half a slice in the scroll direction
     /// while crossfading to the new page. Reads as "pages spinning
     /// past" — the most physical of the styles.
+    #[default]
     SpinCrossfade,
     /// No slice motion: the centre puck briefly enlarges + flashes
     /// the new accent colour while slices swap behind it. Minimal,
@@ -874,12 +868,6 @@ pub enum PageTransitionStyle {
     /// custom-track kind. Defaults to a horizontal flip (Y axis
     /// of rotation, X scale collapses).
     Flip,
-}
-
-impl Default for PageTransitionStyle {
-    fn default() -> Self {
-        PageTransitionStyle::SpinCrossfade
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -977,10 +965,12 @@ impl Default for PageTransitionConfig {
 /// `overlay-rs/src/render/page_fx.wgsl`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[derive(Default)]
 pub enum PageTransitionShaderStyle {
     /// No shader overlay. The canvas-only styles
     /// (`CrossfadeScale`, `SpinCrossfade`, `CenterPulse`,
     /// `None`) run on their own.
+    #[default]
     None,
     /// Animated noise-mask flash. Reads as "pixels scattering"
     /// across the disc.
@@ -988,12 +978,6 @@ pub enum PageTransitionShaderStyle {
     /// Sin/cos plasma waves washing across the menu, phase
     /// driven by transition progress. Theatrical / warp feel.
     Plasma,
-}
-
-impl Default for PageTransitionShaderStyle {
-    fn default() -> Self {
-        PageTransitionShaderStyle::None
-    }
 }
 
 /// Knobs that drive the page-transition shader. Live-reloaded
@@ -1079,10 +1063,7 @@ impl PageTransitionShaderConfig {
     /// duplicating the variant in `shader.style`. Explicit
     /// `shader.style` always wins so users can layer e.g.
     /// `style: SpinCrossfade` + `shader.style: Plasma`.
-    pub fn effective_style(
-        &self,
-        canvas_style: PageTransitionStyle,
-    ) -> PageTransitionShaderStyle {
+    pub fn effective_style(&self, canvas_style: PageTransitionStyle) -> PageTransitionShaderStyle {
         if !matches!(self.style, PageTransitionShaderStyle::None) {
             return self.style;
         }
@@ -1127,10 +1108,7 @@ mod tests {
         let cfg: AnimationConfig = serde_json::from_str("{}").unwrap();
         assert_eq!(cfg.submenu.enter.kind, TransitionKind::GrowAndFade);
         assert_eq!(cfg.menu.enter.kind, TransitionKind::GrowAndFade);
-        assert_eq!(
-            cfg.slice_highlight.enter.kind,
-            TransitionKind::GrowAndFade
-        );
+        assert_eq!(cfg.slice_highlight.enter.kind, TransitionKind::GrowAndFade);
     }
 
     #[test]
@@ -1192,7 +1170,10 @@ mod tests {
         };
         for i in 0..=100 {
             let v = s.eval(i as f32 / 100.0);
-            assert!(v <= 1.001, "critically damped should not overshoot, got {v}");
+            assert!(
+                v <= 1.001,
+                "critically damped should not overshoot, got {v}"
+            );
         }
     }
 

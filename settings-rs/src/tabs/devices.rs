@@ -10,11 +10,11 @@
 //! lands once the daemon's device-list method is wired into
 //! oxidemx-shared.
 
-use oxidemx_widgets::widgets::section_header;
 use crate::{Message, State};
-use oxidemx_widgets::style;
 use iced::widget::{column, container, row, rule, text, Space};
 use iced::{Alignment, Element, Length};
+use oxidemx_widgets::style;
+use oxidemx_widgets::widgets::section_header;
 
 pub fn view(state: &State) -> Element<'_, Message> {
     let pal = &state.palette;
@@ -43,7 +43,14 @@ pub fn view(state: &State) -> Element<'_, Message> {
         .style(style::text_dim(pal)),
         rule::horizontal(1).style(style::rule_style(pal)),
         Space::new().height(Length::Fixed(8.0)),
-        device_card(state, &name, "Logi Bolt USB", "Logitech", status, battery_pct),
+        device_card(
+            state,
+            &name,
+            "Logi Bolt USB",
+            "Logitech",
+            status,
+            battery_pct
+        ),
     ]
     .spacing(10)
     .into()

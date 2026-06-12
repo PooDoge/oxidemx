@@ -1,10 +1,10 @@
 //! Placeholder for tabs not yet implemented.
 
-use oxidemx_widgets::widgets::section_header;
 use crate::{Message, State};
-use oxidemx_widgets::style;
 use iced::widget::{column, container, rule, text, Space};
 use iced::{Element, Length};
+use oxidemx_widgets::style;
+use oxidemx_widgets::widgets::section_header;
 
 pub fn view<'a>(state: &'a State, title: &str, body: &str) -> Element<'a, Message> {
     let pal = &state.palette;

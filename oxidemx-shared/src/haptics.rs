@@ -5,7 +5,7 @@
 //!   - `enabled`            (bool)
 //!   - `default_pattern`    (one of HAPTIC_PATTERNS)
 //!   - `per_event`          ({ menu_appear, slice_change, confirm,
-//!                             invalid }) → pattern names
+//!     invalid }) → pattern names
 //!   - `debounce_ms`        (u32) overall trigger debounce
 //!   - `slice_debounce_ms`  (u32) slice-change-specific debounce
 //!   - `reentry_debounce_ms`(u32) re-entry into same slice debounce
@@ -154,11 +154,19 @@ impl Default for HapticsConfig {
 /// pattern picker.
 pub const HAPTIC_PATTERNS: &[(&str, &str, &str)] = &[
     ("sharp_state_change", "Sharp Click", "Crisp, sharp feedback"),
-    ("damp_state_change", "Soft Click", "Softer, dampened feedback"),
+    (
+        "damp_state_change",
+        "Soft Click",
+        "Softer, dampened feedback",
+    ),
     ("sharp_collision", "Sharp Bump", "Strong collision feedback"),
     ("damp_collision", "Soft Bump", "Gentle collision feedback"),
     ("subtle_collision", "Subtle", "Very light, subtle feedback"),
-    ("whisper_collision", "Whisper", "Barely perceptible feedback"),
+    (
+        "whisper_collision",
+        "Whisper",
+        "Barely perceptible feedback",
+    ),
     ("happy_alert", "Happy", "Positive notification feel"),
     ("angry_alert", "Alert", "Warning / error feel"),
     ("completed", "Complete", "Success / completion feel"),

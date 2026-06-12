@@ -125,8 +125,7 @@ impl Tween {
     /// Returns the raw normalised time *not* the eased value —
     /// apply `easing` separately if needed.
     pub fn item_progress(&self, item_offset_ms: f32, item_duration_ms: f32) -> f32 {
-        let t_after =
-            (self.elapsed_ms - self.delay_ms - item_offset_ms).max(0.0);
+        let t_after = (self.elapsed_ms - self.delay_ms - item_offset_ms).max(0.0);
         (t_after / item_duration_ms.max(1.0)).clamp(0.0, 1.0)
     }
 
@@ -154,9 +153,17 @@ pub struct Visual {
 
 impl Visual {
     #[allow(dead_code)]
-    pub const VISIBLE: Visual = Visual { progress: 1.0, scale: 1.0, opacity: 1.0 };
+    pub const VISIBLE: Visual = Visual {
+        progress: 1.0,
+        scale: 1.0,
+        opacity: 1.0,
+    };
     #[allow(dead_code)]
-    pub const HIDDEN: Visual = Visual { progress: 0.0, scale: 0.0, opacity: 0.0 };
+    pub const HIDDEN: Visual = Visual {
+        progress: 0.0,
+        scale: 0.0,
+        opacity: 0.0,
+    };
 }
 
 /// Translate a tween's current value plus the active enter/exit
@@ -291,7 +298,11 @@ fn visual_for(current: f32, cfg: &TransitionConfig) -> Visual {
         TransitionKind::Grow => Visual {
             progress: p,
             scale: lerp(cfg.initial_scale, 1.0, p),
-            opacity: if current > 0.001 { cfg.final_opacity } else { 0.0 },
+            opacity: if current > 0.001 {
+                cfg.final_opacity
+            } else {
+                0.0
+            },
         },
         TransitionKind::GrowAndFade => {
             let scale = lerp(cfg.initial_scale, 1.0, p);

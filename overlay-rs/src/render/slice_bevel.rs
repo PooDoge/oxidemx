@@ -45,12 +45,7 @@ impl<Message> shader::Program<Message> for SliceBevelProgram {
         Some(shader::Action::request_redraw())
     }
 
-    fn draw(
-        &self,
-        _state: &(),
-        _cursor: mouse::Cursor,
-        _bounds: Rectangle,
-    ) -> Self::Primitive {
+    fn draw(&self, _state: &(), _cursor: mouse::Cursor, _bounds: Rectangle) -> Self::Primitive {
         SliceBevelPrimitive {
             uniforms: SliceBevelUniformsRaw {
                 inner_r: self.inner_r,

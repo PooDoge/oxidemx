@@ -51,8 +51,7 @@ impl From<oxidemx_shared::DispatchBurstStyle> for DispatchBurstStyleGpu {
 /// between the inner and outer rim of the wedge.
 pub fn slice_origin(slot_idx: usize, slot_count: usize) -> [f32; 2] {
     let n = slot_count.max(1) as f32;
-    let angle =
-        (slot_idx as f32) * std::f32::consts::TAU / n - std::f32::consts::FRAC_PI_2;
+    let angle = (slot_idx as f32) * std::f32::consts::TAU / n - std::f32::consts::FRAC_PI_2;
     let r = 0.6;
     [r * angle.cos(), r * angle.sin()]
 }
@@ -113,12 +112,7 @@ impl<Message> shader::Program<Message> for DispatchBurstProgram {
         Some(shader::Action::request_redraw())
     }
 
-    fn draw(
-        &self,
-        _state: &(),
-        _cursor: mouse::Cursor,
-        _bounds: Rectangle,
-    ) -> Self::Primitive {
+    fn draw(&self, _state: &(), _cursor: mouse::Cursor, _bounds: Rectangle) -> Self::Primitive {
         DispatchBurstPrimitive {
             uniforms: DispatchBurstUniformsRaw {
                 progress: self.progress,
@@ -152,11 +146,7 @@ impl Primitive for DispatchBurstPrimitive {
         queue.write_buffer(&pipeline.uniforms, 0, bytemuck::bytes_of(&self.uniforms));
     }
 
-    fn draw(
-        &self,
-        pipeline: &Self::Pipeline,
-        render_pass: &mut wgpu::RenderPass<'_>,
-    ) -> bool {
+    fn draw(&self, pipeline: &Self::Pipeline, render_pass: &mut wgpu::RenderPass<'_>) -> bool {
         render_pass.set_pipeline(&pipeline.pipeline);
         render_pass.set_bind_group(0, &pipeline.bind_group, &[]);
         render_pass.draw(0..3, 0..1);
@@ -173,11 +163,7 @@ pub struct DispatchBurstPipeline {
 }
 
 impl iced::widget::shader::Pipeline for DispatchBurstPipeline {
-    fn new(
-        device: &wgpu::Device,
-        _queue: &wgpu::Queue,
-        format: wgpu::TextureFormat,
-    ) -> Self {
+    fn new(device: &wgpu::Device, _queue: &wgpu::Queue, format: wgpu::TextureFormat) -> Self {
         let uniforms = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("dispatch_burst.uniforms"),
             size: std::mem::size_of::<DispatchBurstUniformsRaw>() as u64,

@@ -3,11 +3,11 @@
 //! `ScrollConfig`; values land in `~/.config/oxidemx/config.json`
 //! under `pointer` and `scroll` keys, matching the legacy daemon.
 
-use oxidemx_widgets::widgets::{labeled_int_slider, section_header};
 use crate::{Message, State};
-use oxidemx_widgets::style;
 use iced::widget::{column, container, pick_list, row, rule, text, toggler, Space};
 use iced::{Alignment, Element, Length};
+use oxidemx_widgets::style;
+use oxidemx_widgets::widgets::{labeled_int_slider, section_header};
 
 pub fn view(state: &State) -> Element<'_, Message> {
     let pal = &state.palette;
@@ -162,7 +162,12 @@ fn dpi_card(state: &State) -> Element<'_, Message> {
     };
 
     container(
-        column![header, rule::horizontal(1).style(style::rule_style(pal)), body].spacing(10),
+        column![
+            header,
+            rule::horizontal(1).style(style::rule_style(pal)),
+            body
+        ]
+        .spacing(10),
     )
     .padding(14)
     .style(style::card(pal))

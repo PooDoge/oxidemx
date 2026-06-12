@@ -15,10 +15,12 @@
 //! the icon name.
 
 use crate::radial_preview::{peek_icon_handle, peek_icon_handle_untinted};
-use crate::{Message};
-use oxidemx_widgets::style;
-use iced::widget::{button, column, container, image, pick_list, row, scrollable, text, text_input, Space};
+use crate::Message;
+use iced::widget::{
+    button, column, container, image, pick_list, row, scrollable, text, text_input, Space,
+};
 use iced::{Alignment, Element, Length};
+use oxidemx_widgets::style;
 
 /// In-flight icon-picker state: which slice/sub-item the picked
 /// icon will be applied to + the current search filter text +
@@ -385,9 +387,13 @@ pub fn view<'a>(state: &'a crate::State, picker: &'a IconPickerState) -> Element
         Space::new().width(Length::Fixed(12.0)),
         source_picker,
         Space::new().width(Length::Fill),
-        text(format!("{} match{}", matched_count, if matched_count == 1 { "" } else { "es" }))
-            .size(10)
-            .style(style::text_faint(pal)),
+        text(format!(
+            "{} match{}",
+            matched_count,
+            if matched_count == 1 { "" } else { "es" }
+        ))
+        .size(10)
+        .style(style::text_faint(pal)),
         Space::new().width(Length::Fixed(8.0)),
         button(text("Close").size(11))
             .style(style::btn_secondary(pal))
@@ -434,9 +440,17 @@ pub fn view<'a>(state: &'a crate::State, picker: &'a IconPickerState) -> Element
         let label = row![
             text("Recently used").size(11).style(style::text_dim(pal)),
             Space::new().width(Length::Fill),
-            text(format!("{} icon{}", state.recent_icons.len(), if state.recent_icons.len() == 1 { "" } else { "s" }))
-                .size(9)
-                .style(style::text_faint(pal)),
+            text(format!(
+                "{} icon{}",
+                state.recent_icons.len(),
+                if state.recent_icons.len() == 1 {
+                    ""
+                } else {
+                    "s"
+                }
+            ))
+            .size(9)
+            .style(style::text_faint(pal)),
         ]
         .align_y(Alignment::Center);
         Some(column![label, grid].spacing(4).into())
@@ -493,7 +507,10 @@ pub fn view<'a>(state: &'a crate::State, picker: &'a IconPickerState) -> Element
     };
     col = col.push(text(body_label).size(11).style(style::text_dim(pal)));
     col = col.push(body);
-    container(col).padding(10).style(style::card_quiet(pal)).into()
+    container(col)
+        .padding(10)
+        .style(style::card_quiet(pal))
+        .into()
 }
 
 /// Wrap a sequence of cells into a 6-col scrollable grid. Pads the
@@ -622,13 +639,10 @@ fn icon_cell<'a>(state: &'a crate::State, name: &'a str) -> Element<'a, Message>
         let dot = Space::new()
             .width(Length::Fixed(THUMB_PX as f32))
             .height(Length::Fixed(THUMB_PX as f32));
-        column![
-            dot,
-            text(label).size(8).style(style::text_faint(pal)),
-        ]
-        .spacing(2)
-        .align_x(Alignment::Center)
-        .into()
+        column![dot, text(label).size(8).style(style::text_faint(pal)),]
+            .spacing(2)
+            .align_x(Alignment::Center)
+            .into()
     };
 
     button(body)

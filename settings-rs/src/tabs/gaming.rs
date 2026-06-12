@@ -19,11 +19,11 @@
 //! design of the redirect card.
 
 use crate::{Message, State};
-use oxidemx_widgets::style;
-use oxidemx_widgets::widgets::{labeled_int_slider, labeled_slider, section_header};
 use iced::widget::{button, column, container, pick_list, row, rule, text, toggler, Space};
 use iced::{Alignment, Element, Length};
 use oxidemx_shared::{HapticEventMode, HapticRedirectCurve, HapticRedirectMode};
+use oxidemx_widgets::style;
+use oxidemx_widgets::widgets::{labeled_int_slider, labeled_slider, section_header};
 
 pub fn view(state: &State) -> Element<'_, Message> {
     let pal = &state.palette;
@@ -267,7 +267,11 @@ fn redirect_card_view(state: &State) -> Element<'_, Message> {
             "Keep gamepad 'awake'",
             hr.keep_gamepad_active_secs as u32,
             0..=60,
-            |v| if v == 0 { "off".to_string() } else { format!("every {v} s") },
+            |v| if v == 0 {
+                "off".to_string()
+            } else {
+                format!("every {v} s")
+            },
             |v| Message::SetHapticRedirectKeepGamepadActive(v as u16),
         ),
     ]

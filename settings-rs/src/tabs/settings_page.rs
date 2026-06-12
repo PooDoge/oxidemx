@@ -2,12 +2,12 @@
 //! the legacy device-config sections. Hosts the Theme picker,
 //! Visuals, and Animation sub-panels stacked.
 
-use oxidemx_widgets::palette::theme_catalogue;
-use oxidemx_widgets::widgets::section_header;
 use crate::{tabs, Message, State};
-use oxidemx_widgets::style;
 use iced::widget::{button, column, container, pick_list, row, rule, text, text_input, Space};
 use iced::{Alignment, Element, Length};
+use oxidemx_widgets::palette::theme_catalogue;
+use oxidemx_widgets::style;
+use oxidemx_widgets::widgets::section_header;
 
 pub fn view(state: &State) -> Element<'_, Message> {
     let pal = &state.palette;
@@ -267,10 +267,12 @@ fn about_panel(state: &State) -> Element<'_, Message> {
         ]
         .spacing(8)
         .align_y(Alignment::Center),
-        text("Logitech MX Master 4 configuration utility — \
-              radial menu, haptics, macros, Easy-Switch.")
-            .size(11)
-            .style(style::text_dim(pal)),
+        text(
+            "Logitech MX Master 4 configuration utility — \
+              radial menu, haptics, macros, Easy-Switch."
+        )
+        .size(11)
+        .style(style::text_dim(pal)),
         rule::horizontal(1).style(style::rule_style(pal)),
         text(format!("Connected device: {device_name}"))
             .size(11)
@@ -340,8 +342,7 @@ fn cheat_row<'a>(action: &'a str, effect: &'a str) -> Element<'a, Message> {
         text(action.to_string())
             .size(11)
             .width(Length::Fixed(220.0)),
-        text(effect.to_string())
-            .size(11),
+        text(effect.to_string()).size(11),
     ]
     .spacing(8)
     .align_y(Alignment::Center)
@@ -456,9 +457,7 @@ fn theme_picker(state: &State) -> Element<'_, Message> {
 fn saved_themes_panel<'a>(state: &'a State, slugs: Vec<String>) -> Element<'a, Message> {
     let pal = &state.palette;
     let header_row = row![
-        text("Saved themes")
-            .size(13)
-            .style(style::text_dim(pal)),
+        text("Saved themes").size(13).style(style::text_dim(pal)),
         Space::new().width(Length::Fill),
         button(text("Import theme JSON…").size(11))
             .style(style::btn_secondary(pal))
@@ -483,18 +482,13 @@ fn saved_themes_panel<'a>(state: &'a State, slugs: Vec<String>) -> Element<'a, M
     let active_slug = state.config.theme.as_str().to_string();
     for slug in slugs {
         let is_active = slug == active_slug;
-        let renaming = state
-            .renaming_theme
-            .as_ref()
-            .filter(|r| r.original == slug);
+        let renaming = state.renaming_theme.as_ref().filter(|r| r.original == slug);
         let row_el = if let Some(r) = renaming {
             // Inline rename mode — replace the row with an input
             // + Save / Cancel pair so the rename feels in-place.
             let input_value = r.draft.clone();
             row![
-                text("Rename:")
-                    .size(11)
-                    .style(style::text_dim(pal)),
+                text("Rename:").size(11).style(style::text_dim(pal)),
                 text_input("New slug", &input_value)
                     .on_input(Message::SetRenameThemeDraft)
                     .on_submit(Message::CommitRenameTheme)
@@ -518,9 +512,7 @@ fn saved_themes_panel<'a>(state: &'a State, slugs: Vec<String>) -> Element<'a, M
             .map(|t| t.name)
             .unwrap_or_else(|| slug.clone());
             let active_chip = if is_active {
-                text(" — active")
-                    .size(10)
-                    .style(style::text_faint(pal))
+                text(" — active").size(10).style(style::text_faint(pal))
             } else {
                 text("")
             };
@@ -552,7 +544,6 @@ fn saved_themes_panel<'a>(state: &'a State, slugs: Vec<String>) -> Element<'a, M
         .style(style::card_quiet(pal))
         .into()
 }
-
 
 fn swatch_row(pal: &oxidemx_widgets::palette::Palette) -> Element<'static, Message> {
     let swatches = [

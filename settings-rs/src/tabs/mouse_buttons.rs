@@ -14,10 +14,10 @@
 //! lives on `Tab::Menu`.
 
 use crate::mouse_callouts::mouse_widget;
-use oxidemx_widgets::widgets::section_header;
 use crate::{style, Message, State};
 use iced::widget::{column, container, pick_list, row, text, Space};
 use iced::{Alignment, Element, Length};
+use oxidemx_widgets::widgets::section_header;
 use std::path::PathBuf;
 
 const MOUSE_IMAGE_PATH: &str = "assets/devices/logitechmouse.png";
@@ -78,10 +78,7 @@ fn locate_mouse_image() -> PathBuf {
     PathBuf::from(MOUSE_IMAGE_PATH)
 }
 
-fn button_assignment_row(
-    state: &State,
-    mb: oxidemx_shared::MouseButton,
-) -> Element<'_, Message> {
+fn button_assignment_row(state: &State, mb: oxidemx_shared::MouseButton) -> Element<'_, Message> {
     let pal = &state.palette;
     let current = mb.get(&state.config.buttons);
 

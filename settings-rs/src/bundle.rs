@@ -75,9 +75,7 @@ impl ConfigBundle {
             }
         }
         for t in self.themes {
-            if let Err(e) =
-                oxidemx_shared::theme::save_user_theme(&t.slug, &t.theme)
-            {
+            if let Err(e) = oxidemx_shared::theme::save_user_theme(&t.slug, &t.theme) {
                 errors.push(format!("theme {}: {e}", t.slug));
             }
         }
@@ -103,8 +101,7 @@ fn collect_macros() -> Vec<BundledMacro> {
             }
             let id = p.file_stem().and_then(|s| s.to_str())?.to_string();
             let bytes = std::fs::read(&p).ok()?;
-            let body: serde_json::Value =
-                serde_json::from_slice(&bytes).ok()?;
+            let body: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
             Some(BundledMacro { id, body })
         })
         .collect();
@@ -117,21 +114,19 @@ fn collect_themes() -> Vec<BundledTheme> {
     slugs
         .into_iter()
         .filter_map(|slug| {
-            oxidemx_shared::theme::Theme::load(
-                &oxidemx_shared::theme::ThemeName::from(slug.as_str()),
-            )
+            oxidemx_shared::theme::Theme::load(&oxidemx_shared::theme::ThemeName::from(
+                slug.as_str(),
+            ))
             .map(|theme| BundledTheme { slug, theme })
         })
         .collect()
 }
 
 fn write_macro(m: &BundledMacro) -> Result<(), String> {
-    let dir = crate::tabs::macros::macros_dir()
-        .ok_or_else(|| "no config dir".to_string())?;
+    let dir = crate::tabs::macros::macros_dir().ok_or_else(|| "no config dir".to_string())?;
     std::fs::create_dir_all(&dir).map_err(|e| format!("mkdir: {e}"))?;
     let path: PathBuf = dir.join(format!("{}.json", m.id));
-    let json = serde_json::to_string_pretty(&m.body)
-        .map_err(|e| format!("serialise: {e}"))?;
+    let json = serde_json::to_string_pretty(&m.body).map_err(|e| format!("serialise: {e}"))?;
     std::fs::write(&path, json).map_err(|e| format!("write: {e}"))?;
     Ok(())
 }
@@ -151,7 +146,7 @@ pub fn parse_and_install(bytes: &[u8]) -> Result<(oxidemx_shared::AppConfig, Vec
         ));
     }
     // Older format — bare AppConfig.
-    let cfg: oxidemx_shared::AppConfig = serde_json::from_slice(bytes)
-        .map_err(|e| format!("parse: {e}"))?;
+    let cfg: oxidemx_shared::AppConfig =
+        serde_json::from_slice(bytes).map_err(|e| format!("parse: {e}"))?;
     Ok((cfg, Vec::new()))
 }

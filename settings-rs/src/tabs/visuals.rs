@@ -2,12 +2,12 @@
 //! highlight intensity).
 
 use crate::{FontChoice, Message, State, VisualField};
-use oxidemx_widgets::style;
-use oxidemx_widgets::widgets::{labeled_int_slider, labeled_slider};
 use iced::widget::{
     button, column, combo_box, container, pick_list, row, text, text_input, toggler, Space,
 };
 use iced::{Alignment, Element, Length};
+use oxidemx_widgets::style;
+use oxidemx_widgets::widgets::{labeled_int_slider, labeled_slider};
 
 pub fn view(state: &State) -> Element<'_, Message> {
     let pal = &state.palette;
@@ -200,12 +200,14 @@ fn gpu_shaders_card(state: &State) -> Element<'_, Message> {
     );
     let light_card = column![
         text("Light direction").size(13),
-        text("Rotates the virtual light source for every 3D-\
+        text(
+            "Rotates the virtual light source for every 3D-\
               framing shader at once. Upper-left is the universal \
               \"this is 3D\" convention; rotate clockwise to move \
-              the highlight around.")
-            .size(11)
-            .style(style::text_dim(pal)),
+              the highlight around."
+        )
+        .size(11)
+        .style(style::text_dim(pal)),
         light_angle,
     ]
     .spacing(4);
@@ -253,11 +255,13 @@ fn gpu_shaders_card(state: &State) -> Element<'_, Message> {
     container(
         column![
             header,
-            text("Custom wgpu shaders that layer with the radial canvas. \
+            text(
+                "Custom wgpu shaders that layer with the radial canvas. \
                   Each effect has its own intensity (0 = off, no GPU work). \
-                  Settings live-preview on the running overlay.")
-                .size(11)
-                .style(style::text_dim(pal)),
+                  Settings live-preview on the running overlay."
+            )
+            .size(11)
+            .style(style::text_dim(pal)),
             light_card,
             drop_shadow,
             disc_bevel,
@@ -320,11 +324,13 @@ fn dispatch_burst_row<'a>(
 
     column![
         text("Dispatch burst").size(13),
-        text("Celebratory flourish anchored at the activated slice when \
+        text(
+            "Celebratory flourish anchored at the activated slice when \
               you fire an action. Three looks: scattered Sparks, cascading \
-              Shockwave rings, or a quick centred Glow.")
-            .size(11)
-            .style(style::text_dim(pal)),
+              Shockwave rings, or a quick centred Glow."
+        )
+        .size(11)
+        .style(style::text_dim(pal)),
         intensity,
         style_row,
     ]
@@ -365,12 +371,14 @@ fn specular_sweep_row<'a>(
 
     column![
         text("Specular sweep").size(13),
-        text("Animated narrow band of light that rotates slowly \
+        text(
+            "Animated narrow band of light that rotates slowly \
               around the disc rim — like a polished surface \
               catching ambient light. Lit-side gated so it fades \
-              on the shadow hemisphere.")
-            .size(11)
-            .style(style::text_dim(pal)),
+              on the shadow hemisphere."
+        )
+        .size(11)
+        .style(style::text_dim(pal)),
         intensity,
         period,
     ]
@@ -444,12 +452,14 @@ fn hover_tilt_row<'a>(
 
     column![
         text("Hover tilt (parallax)").size(13),
-        text("Inside the hovered slice: a soft specular highlight \
+        text(
+            "Inside the hovered slice: a soft specular highlight \
               that tracks your cursor + a darker wash on the side \
               facing away. Reads as a subtle 3D tilt without \
-              moving any geometry. Pairs with hover glow.")
-            .size(11)
-            .style(style::text_dim(pal)),
+              moving any geometry. Pairs with hover glow."
+        )
+        .size(11)
+        .style(style::text_dim(pal)),
         intensity,
         shadow,
         sharpness,
@@ -616,15 +626,12 @@ fn page_name_settings_card(state: &State) -> Element<'_, Message> {
     .align_y(Alignment::Center)
     .spacing(12);
 
-    let pn_font_selected =
-        FontChoice::from_config_value(&v.page_name_font_family);
+    let pn_font_selected = FontChoice::from_config_value(&v.page_name_font_family);
     let pn_font_combo = combo_box(
         &state.font_picker,
         "Inherit menu font…",
         Some(&pn_font_selected),
-        |choice: FontChoice| {
-            Message::SetPageNameFontFamily(choice.as_config_value())
-        },
+        |choice: FontChoice| Message::SetPageNameFontFamily(choice.as_config_value()),
     )
     .size(12)
     .width(Length::Fill);
@@ -709,11 +716,13 @@ fn tooltip_settings_card(state: &State) -> Element<'_, Message> {
     let mono_toggle = row![
         column![
             text("Monospace").size(13),
-            text("Forces a fixed-width font so each character on the arc \
+            text(
+                "Forces a fixed-width font so each character on the arc \
                   spaces evenly. Turn off to use a proportional family — \
-                  arc spacing will approximate, narrow chars may bunch.")
-                .size(11)
-                .style(style::text_dim(pal)),
+                  arc spacing will approximate, narrow chars may bunch."
+            )
+            .size(11)
+            .style(style::text_dim(pal)),
         ]
         .spacing(2),
         Space::new().width(Length::Fill),
@@ -738,11 +747,13 @@ fn tooltip_settings_card(state: &State) -> Element<'_, Message> {
     .width(Length::Fill);
     let tooltip_font_row = column![
         text("Tooltip font").size(13),
-        text("Picked from the same system font index as the menu font. \
+        text(
+            "Picked from the same system font index as the menu font. \
               Empty = inherit the menu's font_family. Ignored while \
-              \"Monospace\" is on.")
-            .size(11)
-            .style(style::text_dim(pal)),
+              \"Monospace\" is on."
+        )
+        .size(11)
+        .style(style::text_dim(pal)),
         tooltip_font_combo,
     ]
     .spacing(6);
@@ -782,11 +793,13 @@ fn tooltip_settings_card(state: &State) -> Element<'_, Message> {
                 reset_btn,
             ]
             .align_y(Alignment::Center),
-            text("Description text that arcs around the outer ring when the \
+            text(
+                "Description text that arcs around the outer ring when the \
                   user dwells on a slice. Configure size, hover delay, \
-                  font, and the dark ribbon behind the text here.")
-                .size(11)
-                .style(style::text_dim(pal)),
+                  font, and the dark ribbon behind the text here."
+            )
+            .size(11)
+            .style(style::text_dim(pal)),
             size_slider,
             delay_slider,
             mono_toggle,
@@ -803,8 +816,7 @@ fn tooltip_settings_card(state: &State) -> Element<'_, Message> {
 }
 
 const SURFACE_KEYS: &[&str] = &[
-    "crust", "mantle", "base", "surface0", "surface1", "surface2", "overlay0",
-    "overlay1",
+    "crust", "mantle", "base", "surface0", "surface1", "surface2", "overlay0", "overlay1",
 ];
 const TEXT_KEYS: &[&str] = &["text", "subtext1", "subtext0", "accent", "accent2"];
 

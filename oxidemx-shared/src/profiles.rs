@@ -91,6 +91,7 @@ impl ProfileResolver {
     ///      don't have to remember whether KWin reported "firefox"
     ///      or "Firefox").
     ///   3. Fall back to the main menu.
+    ///
     /// Missing profile files (binding present but file deleted)
     /// also fall back to the main menu.
     pub fn menu_for(&self, focused_class: Option<&str>) -> &RadialMenuConfig {
@@ -100,24 +101,17 @@ impl ProfileResolver {
         };
 
         // Direct lookup first.
-        let profile_name = self
-            .main
-            .app_profiles
-            .get(class)
-            .or_else(|| {
-                let lc = class.to_lowercase();
-                self.main
-                    .app_profiles
-                    .iter()
-                    .find(|(k, _)| k.to_lowercase() == lc)
-                    .map(|(_, v)| v)
-            });
+        let profile_name = self.main.app_profiles.get(class).or_else(|| {
+            let lc = class.to_lowercase();
+            self.main
+                .app_profiles
+                .iter()
+                .find(|(k, _)| k.to_lowercase() == lc)
+                .map(|(_, v)| v)
+        });
 
         match profile_name {
-            Some(name) => self
-                .by_profile
-                .get(name)
-                .unwrap_or(&self.main.radial_menu),
+            Some(name) => self.by_profile.get(name).unwrap_or(&self.main.radial_menu),
             None => &self.main.radial_menu,
         }
     }
@@ -202,8 +196,10 @@ impl ProfileResolver {
         // compatibility — today they only carry radial_menu, but
         // future fields (hotkeys, conditional-slice predicates)
         // should live next to the slices they relate to.
-        let mut cfg = AppConfig::default();
-        cfg.radial_menu = menu.clone();
+        let cfg = AppConfig {
+            radial_menu: menu.clone(),
+            ..Default::default()
+        };
         let path = profile_path(profiles_dir, name);
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).map_err(ConfigError::Io)?;
@@ -284,7 +280,11 @@ mod tests {
             "config.json",
             &main_with_bindings(&[("firefox", "browsing")]),
         );
-        write(&profiles_dir, "browsing.json", &profile_body("Browsing Slice"));
+        write(
+            &profiles_dir,
+            "browsing.json",
+            &profile_body("Browsing Slice"),
+        );
         let resolver = ProfileResolver::load_from(&main, &profiles_dir).unwrap();
         assert_eq!(
             resolver.menu_for(Some("firefox")).pages[0].slices[0].label,
@@ -322,7 +322,11 @@ mod tests {
             "config.json",
             &main_with_bindings(&[("Firefox", "browsing")]),
         );
-        write(&profiles_dir, "browsing.json", &profile_body("Browsing Slice"));
+        write(
+            &profiles_dir,
+            "browsing.json",
+            &profile_body("Browsing Slice"),
+        );
         let resolver = ProfileResolver::load_from(&main, &profiles_dir).unwrap();
         // Window class "firefox" (lowercase) still resolves the
         // "Firefox" (capitalised) binding.

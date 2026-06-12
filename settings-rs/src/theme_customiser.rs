@@ -18,14 +18,13 @@
 //!     chrome.
 
 use iced::widget::{
-    button, canvas, column, container, row, rule, scrollable, slider, text, text_input,
-    Space,
+    button, canvas, column, container, row, rule, scrollable, slider, text, text_input, Space,
 };
 use iced::{Alignment, Element, Length};
 
 use crate::color_canvas;
-use oxidemx_widgets::style;
 use crate::{ColorChannel, Message, State, ThemeEditor};
+use oxidemx_widgets::style;
 
 pub fn view<'a>(state: &'a State, editor: &'a ThemeEditor) -> Element<'a, Message> {
     let pal = &state.palette;
@@ -84,9 +83,13 @@ pub fn view<'a>(state: &'a State, editor: &'a ThemeEditor) -> Element<'a, Messag
     .spacing(0)
     .height(Length::Fill);
 
-    column![header, rule::horizontal(1).style(style::rule_style(pal)), split]
-        .spacing(8)
-        .into()
+    column![
+        header,
+        rule::horizontal(1).style(style::rule_style(pal)),
+        split
+    ]
+    .spacing(8)
+    .into()
 }
 
 // ============================================================================
@@ -151,17 +154,23 @@ fn mockup_window<'a>(_state: &'a State, editor: &'a ThemeEditor) -> Element<'a, 
         clickable_band(
             "surface0",
             surface0,
-            text("surface0  — card background").size(11).style(text_color(textc)),
+            text("surface0  — card background")
+                .size(11)
+                .style(text_color(textc)),
         ),
         clickable_band(
             "surface1",
             surface1,
-            text("surface1  — slightly lighter").size(11).style(text_color(textc)),
+            text("surface1  — slightly lighter")
+                .size(11)
+                .style(text_color(textc)),
         ),
         clickable_band(
             "surface2",
             surface2,
-            text("surface2  — highest in stack").size(11).style(text_color(textc)),
+            text("surface2  — highest in stack")
+                .size(11)
+                .style(text_color(textc)),
         ),
         clickable_band(
             "overlay0",
@@ -290,7 +299,9 @@ fn radial_preview_panel<'a>(state: &'a State) -> Element<'a, Message> {
     );
     container(
         column![
-            text("Radial overlay preview").size(11).style(style::text_dim(pal)),
+            text("Radial overlay preview")
+                .size(11)
+                .style(style::text_dim(pal)),
             preview,
         ]
         .spacing(6)
@@ -347,18 +358,10 @@ fn right_column<'a>(state: &'a State, editor: &'a ThemeEditor) -> Element<'a, Me
 // Gradient picker — SV square + hue strip + RGB sliders + presets
 // ============================================================================
 
-fn gradient_picker<'a>(
-    state: &'a State,
-    field: &'a str,
-    value: &str,
-) -> Element<'a, Message> {
+fn gradient_picker<'a>(state: &'a State, field: &'a str, value: &str) -> Element<'a, Message> {
     let pal = &state.palette;
     let (r, g, b) = crate::parse_hex_channels(value);
-    let (h, s, v) = color_canvas::rgb_to_hsv(
-        r as f32 / 255.0,
-        g as f32 / 255.0,
-        b as f32 / 255.0,
-    );
+    let (h, s, v) = color_canvas::rgb_to_hsv(r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0);
 
     let owned = field.to_string();
     let sv_field = owned.clone();
@@ -421,17 +424,18 @@ fn gradient_picker<'a>(
         value: v,
     });
 
-    let channel_row = |label: &'static str, current: u8, sl: iced::widget::Slider<'a, u8, Message>| {
-        row![
-            text(label).size(11).width(Length::Fixed(20.0)),
-            sl,
-            text(format!("{current:>3}"))
-                .size(11)
-                .width(Length::Fixed(30.0)),
-        ]
-        .align_y(Alignment::Center)
-        .spacing(8)
-    };
+    let channel_row =
+        |label: &'static str, current: u8, sl: iced::widget::Slider<'a, u8, Message>| {
+            row![
+                text(label).size(11).width(Length::Fixed(20.0)),
+                sl,
+                text(format!("{current:>3}"))
+                    .size(11)
+                    .width(Length::Fixed(30.0)),
+            ]
+            .align_y(Alignment::Center)
+            .spacing(8)
+        };
 
     let hex_input_field = owned.clone();
     let hex_row = row![
@@ -589,8 +593,7 @@ fn role_grouped_grid<'a>(state: &'a State, editor: &'a ThemeEditor) -> Element<'
         ),
     ];
 
-    let mut col = column![text("All theme slots").size(13).style(style::text_dim(pal))]
-        .spacing(8);
+    let mut col = column![text("All theme slots").size(13).style(style::text_dim(pal))].spacing(8);
     for (group_name, fields) in groups.iter() {
         let mut group_col = column![text(*group_name).size(12)].spacing(4);
         let mut row_acc = row![].spacing(8).align_y(Alignment::Center);
@@ -628,9 +631,7 @@ fn grid_swatch<'a>(field: &'a str, hex: &'a str, editing: bool) -> Element<'a, M
     .on_press(Message::ToggleThemeColorPicker(owned));
     row![
         chip,
-        text(field.to_string())
-            .size(11)
-            .width(Length::Fill),
+        text(field.to_string()).size(11).width(Length::Fill),
         text(hex.to_string()).size(10),
     ]
     .spacing(6)
@@ -657,11 +658,7 @@ fn clickable_band<'a>(
         .into()
 }
 
-fn clickable_text_chip(
-    field: &str,
-    color: iced::Color,
-    sample: &str,
-) -> Element<'static, Message> {
+fn clickable_text_chip(field: &str, color: iced::Color, sample: &str) -> Element<'static, Message> {
     let owned = field.to_string();
     let label = format!("{sample}  ({field})");
     button(text(label).size(12).style(text_color(color)))
@@ -698,10 +695,7 @@ fn accent_button(field: &str, color: iced::Color, label: &str) -> Element<'stati
                 _ => 1.0,
             };
             iced::widget::button::Style {
-                background: Some(iced::Background::Color(iced::Color {
-                    a: alpha,
-                    ..bg
-                })),
+                background: Some(iced::Background::Color(iced::Color { a: alpha, ..bg })),
                 border: iced::Border {
                     color: iced::Color::from_rgba(0.0, 0.0, 0.0, 0.25),
                     width: 1.0,
@@ -721,8 +715,7 @@ fn make_button_style(
 ) -> impl Fn(&iced::Theme, iced::widget::button::Status) -> iced::widget::button::Style {
     move |_, status| {
         let border_alpha = match status {
-            iced::widget::button::Status::Hovered
-            | iced::widget::button::Status::Pressed => 0.85,
+            iced::widget::button::Status::Hovered | iced::widget::button::Status::Pressed => 0.85,
             _ => {
                 if is_editing {
                     0.9

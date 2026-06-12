@@ -237,8 +237,7 @@ impl std::fmt::Display for HapticRedirectCurve {
 }
 
 impl HapticEventMode {
-    pub const ALL: [HapticEventMode; 2] =
-        [HapticEventMode::Event, HapticEventMode::Stream];
+    pub const ALL: [HapticEventMode; 2] = [HapticEventMode::Event, HapticEventMode::Stream];
 }
 
 impl std::fmt::Display for HapticEventMode {
@@ -377,9 +376,7 @@ mod tests {
     #[test]
     fn preferred_controller_guid_round_trips() {
         let cfg = HapticRedirectConfig {
-            preferred_controller_guid: Some(
-                "030000005e040000130b000005ff0000".to_string(),
-            ),
+            preferred_controller_guid: Some("030000005e040000130b000005ff0000".to_string()),
             ..Default::default()
         };
         let json = serde_json::to_string(&cfg).unwrap();

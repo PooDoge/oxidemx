@@ -38,16 +38,11 @@ pub fn ease_out_quad(t: f64) -> f64 {
 /// { apply_composed_transform(f, centre, &t); ... })` if it wants
 /// the transform to scope to a sub-region; otherwise the transform
 /// persists for the rest of the frame.
-pub fn apply_composed_transform(
-    frame: &mut Frame,
-    center: Point,
-    t: &ComposedTransform,
-) {
+pub fn apply_composed_transform(frame: &mut Frame, center: Point, t: &ComposedTransform) {
     if t.translate_x_px != 0.0 || t.translate_y_px != 0.0 {
         frame.translate(Vector::new(t.translate_x_px, t.translate_y_px));
     }
-    let needs_pivot =
-        t.rotate_rad != 0.0 || (t.flip_scale - 1.0).abs() > 1e-4;
+    let needs_pivot = t.rotate_rad != 0.0 || (t.flip_scale - 1.0).abs() > 1e-4;
     if !needs_pivot {
         return;
     }
@@ -120,10 +115,7 @@ impl MenuXformRaw {
     /// half-size (typically `WINDOW_SIZE / 2.0` = 242 px) so the
     /// translate gets normalised into the same space the shader
     /// reads UVs in (clip-space `[-1, 1]²`, half-extent units).
-    pub fn from_composed(
-        transform: &oxidemx_shared::ComposedTransform,
-        half_extent: f32,
-    ) -> Self {
+    pub fn from_composed(transform: &oxidemx_shared::ComposedTransform, half_extent: f32) -> Self {
         let flip_axis = match transform.flip_axis {
             oxidemx_shared::Axis::X => 0u32,
             oxidemx_shared::Axis::Y => 1u32,

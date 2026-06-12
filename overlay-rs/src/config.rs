@@ -59,27 +59,24 @@ pub fn watch_stream() -> impl futures_util::stream::Stream<Item = oxidemx_shared
     let (raw_tx, raw_rx) = std::sync::mpsc::channel::<()>();
     let watcher_path = path.clone();
     tokio::task::spawn_blocking(move || {
-        let mut watcher: RecommendedWatcher = match notify::recommended_watcher(
-            move |res: notify::Result<notify::Event>| {
+        let mut watcher: RecommendedWatcher =
+            match notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
                 if let Ok(event) = res {
                     use notify::EventKind;
                     if matches!(
                         event.kind,
-                        EventKind::Modify(_)
-                            | EventKind::Create(_)
-                            | EventKind::Remove(_)
+                        EventKind::Modify(_) | EventKind::Create(_) | EventKind::Remove(_)
                     ) {
                         let _ = raw_tx.send(());
                     }
                 }
-            },
-        ) {
-            Ok(w) => w,
-            Err(e) => {
-                tracing::warn!("config watcher init failed: {e}");
-                return;
-            }
-        };
+            }) {
+                Ok(w) => w,
+                Err(e) => {
+                    tracing::warn!("config watcher init failed: {e}");
+                    return;
+                }
+            };
 
         // Watch the *parent directory* — atomic-rename writes
         // (most editors) replace the inode rather than modifying
@@ -116,7 +113,11 @@ pub fn watch_stream() -> impl futures_util::stream::Stream<Item = oxidemx_shared
                 return;
             }
             // Block until at least one event arrives.
-            let recv = raw_rx.recv_timeout(if pending { debounce } else { Duration::from_millis(250) });
+            let recv = raw_rx.recv_timeout(if pending {
+                debounce
+            } else {
+                Duration::from_millis(250)
+            });
             match recv {
                 Ok(()) => {
                     pending = true;

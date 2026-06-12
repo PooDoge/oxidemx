@@ -10,10 +10,12 @@
 //! flatpak XDG application dirs).
 
 use crate::radial_preview::peek_icon_handle_untinted;
-use crate::{Message};
-use oxidemx_widgets::style;
-use iced::widget::{button, column, container, image, row, scrollable, text, text_input, toggler, Space};
+use crate::Message;
+use iced::widget::{
+    button, column, container, image, row, scrollable, text, text_input, toggler, Space,
+};
 use iced::{Alignment, Element, Length};
+use oxidemx_widgets::style;
 
 /// In-flight state of the app picker. `target` carries which
 /// slice / sub-item the picked app's command + icon will land

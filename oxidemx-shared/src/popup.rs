@@ -52,12 +52,19 @@ pub struct PopupConfig {
     pub animations: bool,
 }
 
-fn default_true() -> bool { true }
+fn default_true() -> bool {
+    true
+}
 fn default_simple_toggles() -> Vec<String> {
     vec!["gaming".into(), "haptics".into(), "radial".into()]
 }
 fn default_power_toggles() -> Vec<String> {
-    vec!["gaming".into(), "haptics".into(), "radial".into(), "flow".into()]
+    vec![
+        "gaming".into(),
+        "haptics".into(),
+        "radial".into(),
+        "flow".into(),
+    ]
 }
 fn default_power_sliders() -> Vec<String> {
     vec!["dpi".into(), "scroll".into()]
@@ -88,19 +95,69 @@ pub struct QuickEntry {
 }
 
 pub const QUICK_TOGGLE_CATALOG: &[QuickEntry] = &[
-    QuickEntry { id: "gaming",    label: "Gaming Mode",      icon: "applications-games-symbolic",          desc: "Hides the radial, bumps DPI" },
-    QuickEntry { id: "haptics",   label: "Haptic Feedback",  icon: "audio-volume-high-symbolic",           desc: "Click-and-hold ticks" },
-    QuickEntry { id: "radial",    label: "Radial Overlay",   icon: "applications-graphics-symbolic",       desc: "Toggle the radial menu" },
-    QuickEntry { id: "flow",      label: "Flow",             icon: "view-grid-symbolic",                   desc: "Cross-device scroll & paste" },
-    QuickEntry { id: "smart",     label: "SmartShift",       icon: "system-switch-user-symbolic",          desc: "Free-spin scroll wheel" },
-    QuickEntry { id: "highlight", label: "Cursor highlight", icon: "preferences-desktop-cursors-symbolic", desc: "Pulse ring on shake" },
+    QuickEntry {
+        id: "gaming",
+        label: "Gaming Mode",
+        icon: "applications-games-symbolic",
+        desc: "Hides the radial, bumps DPI",
+    },
+    QuickEntry {
+        id: "haptics",
+        label: "Haptic Feedback",
+        icon: "audio-volume-high-symbolic",
+        desc: "Click-and-hold ticks",
+    },
+    QuickEntry {
+        id: "radial",
+        label: "Radial Overlay",
+        icon: "applications-graphics-symbolic",
+        desc: "Toggle the radial menu",
+    },
+    QuickEntry {
+        id: "flow",
+        label: "Flow",
+        icon: "view-grid-symbolic",
+        desc: "Cross-device scroll & paste",
+    },
+    QuickEntry {
+        id: "smart",
+        label: "SmartShift",
+        icon: "system-switch-user-symbolic",
+        desc: "Free-spin scroll wheel",
+    },
+    QuickEntry {
+        id: "highlight",
+        label: "Cursor highlight",
+        icon: "preferences-desktop-cursors-symbolic",
+        desc: "Pulse ring on shake",
+    },
 ];
 
 pub const QUICK_SLIDER_CATALOG: &[QuickEntry] = &[
-    QuickEntry { id: "dpi",      label: "Pointer DPI",          icon: "preferences-desktop-cursors-symbolic", desc: "200 – 6,400 dpi" },
-    QuickEntry { id: "scroll",   label: "Scroll sensitivity",   icon: "system-switch-user-symbolic",          desc: "1 – 10" },
-    QuickEntry { id: "haptic_i", label: "Haptic intensity",     icon: "audio-volume-high-symbolic",           desc: "Off – Strong" },
-    QuickEntry { id: "accel",    label: "Pointer acceleration", icon: "view-grid-symbolic",                   desc: "-1.0 – 1.0" },
+    QuickEntry {
+        id: "dpi",
+        label: "Pointer DPI",
+        icon: "preferences-desktop-cursors-symbolic",
+        desc: "200 – 6,400 dpi",
+    },
+    QuickEntry {
+        id: "scroll",
+        label: "Scroll sensitivity",
+        icon: "system-switch-user-symbolic",
+        desc: "1 – 10",
+    },
+    QuickEntry {
+        id: "haptic_i",
+        label: "Haptic intensity",
+        icon: "audio-volume-high-symbolic",
+        desc: "Off – Strong",
+    },
+    QuickEntry {
+        id: "accel",
+        label: "Pointer acceleration",
+        icon: "view-grid-symbolic",
+        desc: "-1.0 – 1.0",
+    },
 ];
 
 impl PopupConfig {
@@ -152,8 +209,19 @@ mod tests {
         assert_eq!(p.mode, PopupMode::Simple);
         assert!(p.show_host_buttons);
         assert_eq!(p.host_label_style, HostLabelStyle::Hostname);
-        assert_eq!(p.simple_toggles, vec!["gaming".to_string(), "haptics".into(), "radial".into()]);
-        assert_eq!(p.power_toggles, vec!["gaming".to_string(), "haptics".into(), "radial".into(), "flow".into()]);
+        assert_eq!(
+            p.simple_toggles,
+            vec!["gaming".to_string(), "haptics".into(), "radial".into()]
+        );
+        assert_eq!(
+            p.power_toggles,
+            vec![
+                "gaming".to_string(),
+                "haptics".into(),
+                "radial".into(),
+                "flow".into()
+            ]
+        );
         assert_eq!(p.power_sliders, vec!["dpi".to_string(), "scroll".into()]);
         assert!(p.volume_on_scroll);
         assert!(!p.close_on_action);
@@ -186,7 +254,13 @@ mod tests {
     fn move_up_swaps_with_predecessor() {
         let mut v: Vec<String> = vec!["a".into(), "b".into(), "c".into()];
         PopupConfig::move_up(&mut v, "b");
-        assert_eq!(v, vec!["b", "a", "c"].into_iter().map(String::from).collect::<Vec<_>>());
+        assert_eq!(
+            v,
+            vec!["b", "a", "c"]
+                .into_iter()
+                .map(String::from)
+                .collect::<Vec<_>>()
+        );
     }
 
     #[test]
@@ -200,7 +274,13 @@ mod tests {
     fn move_down_swaps_with_successor() {
         let mut v: Vec<String> = vec!["a".into(), "b".into(), "c".into()];
         PopupConfig::move_down(&mut v, "b");
-        assert_eq!(v, vec!["a", "c", "b"].into_iter().map(String::from).collect::<Vec<_>>());
+        assert_eq!(
+            v,
+            vec!["a", "c", "b"]
+                .into_iter()
+                .map(String::from)
+                .collect::<Vec<_>>()
+        );
     }
 
     #[test]

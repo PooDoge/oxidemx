@@ -11,10 +11,10 @@
 //! control over chip placement, connector geometry, and palette-
 //! aware colouring without fighting iced's layout system.
 
-use oxidemx_widgets::palette::Palette;
 use iced::widget::canvas::{self, path::Builder, Frame, Geometry, Path, Stroke, Text};
 use iced::widget::image as iced_image;
 use iced::{mouse, Color, Length, Point, Rectangle, Renderer, Size, Theme, Vector};
+use oxidemx_widgets::palette::Palette;
 
 /// Where the connector line attaches relative to the dot on the
 /// photo. Mirrors the legacy `line_from` strings.
@@ -235,9 +235,7 @@ fn draw_callout(frame: &mut Frame, img_rect: &Rectangle, c: &Callout, painter: &
     // Connector line.
     frame.stroke(
         &line_path,
-        Stroke::default()
-            .with_color(painter.accent)
-            .with_width(1.5),
+        Stroke::default().with_color(painter.accent).with_width(1.5),
     );
 
     // Connector dot at the button position.
@@ -264,23 +262,11 @@ fn rounded_rect(x: f32, y: f32, w: f32, h: f32, r: f32) -> Path {
     let mut b = Builder::new();
     b.move_to(Point::new(x + r, y));
     b.line_to(Point::new(x + w - r, y));
-    b.arc_to(
-        Point::new(x + w, y),
-        Point::new(x + w, y + r),
-        r,
-    );
+    b.arc_to(Point::new(x + w, y), Point::new(x + w, y + r), r);
     b.line_to(Point::new(x + w, y + h - r));
-    b.arc_to(
-        Point::new(x + w, y + h),
-        Point::new(x + w - r, y + h),
-        r,
-    );
+    b.arc_to(Point::new(x + w, y + h), Point::new(x + w - r, y + h), r);
     b.line_to(Point::new(x + r, y + h));
-    b.arc_to(
-        Point::new(x, y + h),
-        Point::new(x, y + h - r),
-        r,
-    );
+    b.arc_to(Point::new(x, y + h), Point::new(x, y + h - r), r);
     b.line_to(Point::new(x, y + r));
     b.arc_to(Point::new(x, y), Point::new(x + r, y), r);
     b.close();

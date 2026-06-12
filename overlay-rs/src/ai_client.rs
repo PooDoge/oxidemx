@@ -1,7 +1,7 @@
-use serde_json::json;
-use tokio::sync::mpsc;
-use std::sync::Mutex;
 use once_cell::sync::Lazy;
+use serde_json::json;
+use std::sync::Mutex;
+use tokio::sync::mpsc;
 use tracing::{error, info};
 
 // =============================================================================
@@ -16,10 +16,12 @@ pub struct PendingQuestion {
 }
 
 /// Channel to send pending multiple choice questions to the UI event loop.
-pub static QUESTION_TX: Lazy<Mutex<Option<mpsc::Sender<PendingQuestion>>>> = Lazy::new(|| Mutex::new(None));
+pub static QUESTION_TX: Lazy<Mutex<Option<mpsc::Sender<PendingQuestion>>>> =
+    Lazy::new(|| Mutex::new(None));
 
 /// Channel to notify the UI loop of configuration changes made by the agent.
-pub static CONFIG_CHANGED_TX: Lazy<Mutex<Option<mpsc::Sender<String>>>> = Lazy::new(|| Mutex::new(None));
+pub static CONFIG_CHANGED_TX: Lazy<Mutex<Option<mpsc::Sender<String>>>> =
+    Lazy::new(|| Mutex::new(None));
 
 /// Live progress events for an in-flight agent turn, tagged with the
 /// chat-thread index that issued the request so late events file
@@ -87,7 +89,7 @@ pub fn load_api_key() -> Result<String, Box<dyn std::error::Error + Send + Sync>
             return Ok(key);
         }
     }
-    
+
     let home = std::env::var("HOME").unwrap_or_else(|_| "/home/jim".to_string());
     let path = std::path::Path::new(&home).join(".config/oxidemx/gemini.key");
     if path.exists() {
@@ -97,7 +99,7 @@ pub fn load_api_key() -> Result<String, Box<dyn std::error::Error + Send + Sync>
             return Ok(trimmed);
         }
     }
-    
+
     let path_legacy = std::path::Path::new(&home).join(".config/juhradial/gemini.key");
     if path_legacy.exists() {
         let key = std::fs::read_to_string(path_legacy)?;
@@ -106,7 +108,7 @@ pub fn load_api_key() -> Result<String, Box<dyn std::error::Error + Send + Sync>
             return Ok(trimmed);
         }
     }
-    
+
     Err("Gemini API key not found. Please set GEMINI_API_KEY or save it in ~/.config/oxidemx/gemini.key".into())
 }
 
@@ -243,8 +245,8 @@ impl AgentMode {
                         },
                         "required": ["question", "options"]
                     }
-                })
-            ]
+                }),
+            ],
         }
     }
 }
@@ -551,7 +553,8 @@ pub async fn ask_ai(
                 };
                 info!("Executing local tool '{}' (call_id={})", name, call_id);
                 if let Some(s) = &sink {
-                    s.send(StreamEvent::Activity(activity_for_tool(&name))).await;
+                    s.send(StreamEvent::Activity(activity_for_tool(&name)))
+                        .await;
                 }
                 let result_text = match execute_local_tool(&name, args).await {
                     Ok(t) => t,
@@ -624,9 +627,7 @@ mod sse_tests {
 /// satisfies it with a second interaction that uses Google's
 /// built-in search grounding. Same API key, no third-party search
 /// service.
-async fn grounded_search(
-    query: &str,
-) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+async fn grounded_search(query: &str) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
     let api_key = load_api_key()?;
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(45))
@@ -672,15 +673,15 @@ async fn execute_local_tool(
             let config_json = args["config_json"]
                 .as_str()
                 .ok_or("config_json argument missing or not a string")?;
-            
+
             // Validate JSON format
             let _: serde_json::Value = serde_json::from_str(config_json)?;
             let path = get_config_path();
-            
+
             if let Some(parent) = path.parent() {
                 tokio::fs::create_dir_all(parent).await?;
             }
-            
+
             // Notify UI
             {
                 let tx_opt = CONFIG_CHANGED_TX.lock().unwrap().clone();
@@ -688,24 +689,21 @@ async fn execute_local_tool(
                     let _ = tx.send(config_json.to_string()).await;
                 }
             }
-            
+
             tokio::fs::write(&path, config_json).await?;
             Ok("Configuration saved successfully".to_string())
         }
         "list_system_apps" => {
             let mut apps = Vec::new();
-            let dirs = vec![
-                "/usr/share/applications",
-                "/usr/local/share/applications",
-            ];
-            
+            let dirs = vec!["/usr/share/applications", "/usr/local/share/applications"];
+
             let home = std::env::var("HOME").unwrap_or_default();
             let user_apps_dir = format!("{}/.local/share/applications", home);
             let mut all_dirs = dirs;
             if !home.is_empty() {
                 all_dirs.push(&user_apps_dir);
             }
-            
+
             for dir_path in all_dirs {
                 let path = std::path::Path::new(&dir_path);
                 if !path.exists() {
@@ -721,7 +719,7 @@ async fn execute_local_tool(
                             let mut exec = None;
                             let mut icon = None;
                             let mut categories = None;
-                            
+
                             for line in content.lines() {
                                 if line.starts_with("Name=") && name.is_none() {
                                     name = Some(line.strip_prefix("Name=").unwrap().to_string());
@@ -730,10 +728,11 @@ async fn execute_local_tool(
                                 } else if line.starts_with("Icon=") && icon.is_none() {
                                     icon = Some(line.strip_prefix("Icon=").unwrap().to_string());
                                 } else if line.starts_with("Categories=") && categories.is_none() {
-                                    categories = Some(line.strip_prefix("Categories=").unwrap().to_string());
+                                    categories =
+                                        Some(line.strip_prefix("Categories=").unwrap().to_string());
                                 }
                             }
-                            
+
                             if let (Some(n), Some(e)) = (name, exec) {
                                 apps.push(json!({
                                     "name": n,
@@ -761,14 +760,14 @@ async fn execute_local_tool(
             let options_val = args["options"]
                 .as_array()
                 .ok_or("options argument missing or not an array")?;
-            
+
             let mut options = Vec::new();
             for opt in options_val {
                 if let Some(opt_str) = opt.as_str() {
                     options.push(opt_str.to_string());
                 }
             }
-            
+
             let tx_opt = QUESTION_TX.lock().unwrap().clone();
             if let Some(tx) = tx_opt {
                 let (resp_tx, mut resp_rx) = mpsc::channel(1);
@@ -778,7 +777,7 @@ async fn execute_local_tool(
                     response_tx: resp_tx,
                 };
                 tx.send(pending).await?;
-                
+
                 if let Some(answer) = resp_rx.recv().await {
                     Ok(answer)
                 } else {

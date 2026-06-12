@@ -45,12 +45,7 @@ impl<Message> shader::Program<Message> for CenterDomeProgram {
         Some(shader::Action::request_redraw())
     }
 
-    fn draw(
-        &self,
-        _state: &(),
-        _cursor: mouse::Cursor,
-        _bounds: Rectangle,
-    ) -> Self::Primitive {
+    fn draw(&self, _state: &(), _cursor: mouse::Cursor, _bounds: Rectangle) -> Self::Primitive {
         CenterDomePrimitive {
             uniforms: CenterDomeUniformsRaw {
                 radius: self.radius.max(0.001),

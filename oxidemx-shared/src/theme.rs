@@ -18,8 +18,9 @@ use std::path::PathBuf;
 /// Identifier for the active theme. Stored as a plain string in
 /// `config.json` (e.g. `"theme": "dracula"`); custom themes shipped
 /// via the user's data dir use the `Custom` variant.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub enum ThemeName {
+    #[default]
     Oxidemx,
     CatppuccinMocha,
     Nord,
@@ -88,13 +89,6 @@ impl<'de> Deserialize<'de> for ThemeName {
     fn deserialize<D: serde::Deserializer<'de>>(de: D) -> Result<Self, D::Error> {
         let s = <String as Deserialize>::deserialize(de)?;
         Ok(ThemeName::from(s.as_str()))
-    }
-}
-
-impl Default for ThemeName {
-    fn default() -> Self {
-        // Matches DEFAULT_THEME in overlay/themes.py.
-        ThemeName::Oxidemx
     }
 }
 
@@ -391,7 +385,9 @@ pub fn list_user_theme_slugs() -> Vec<String> {
             if p.extension().and_then(|s| s.to_str()) != Some("json") {
                 return None;
             }
-            p.file_stem().and_then(|s| s.to_str()).map(|s| s.to_string())
+            p.file_stem()
+                .and_then(|s| s.to_str())
+                .map(|s| s.to_string())
         })
         .collect();
     out.sort();
@@ -467,7 +463,10 @@ mod tests {
             "solarized-light",
         ] {
             let t = Theme::load_bundled(n).unwrap();
-            assert!(t.radial_image.is_none(), "{n} unexpectedly has radial_image");
+            assert!(
+                t.radial_image.is_none(),
+                "{n} unexpectedly has radial_image"
+            );
         }
     }
 

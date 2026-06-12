@@ -94,9 +94,7 @@ pub fn try_acquire_or_focus_existing() -> Acquisition {
         })
         .expect("spawn singleton thread");
 
-    status_rx
-        .recv()
-        .unwrap_or(Acquisition::BusUnavailable)
+    status_rx.recv().unwrap_or(Acquisition::BusUnavailable)
 }
 
 async fn handshake(

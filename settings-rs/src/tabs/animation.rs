@@ -9,14 +9,14 @@
 //! For the Submenu element a `chain` row exposes the per-item
 //! stagger slider (0–250 ms).
 
-use oxidemx_widgets::widgets::{labeled_int_slider, labeled_slider, section_header};
 use crate::{AnimDirection, AnimElement, Message, State};
 use iced::widget::{button, column, container, pick_list, row, rule, text, Space};
 use iced::{Alignment, Element, Length};
 use oxidemx_shared::{
-    Easing, ElementAnimation, PageTransitionConfig, PageTransitionShaderStyle,
-    PageTransitionStyle, TransitionConfig, TransitionKind,
+    Easing, ElementAnimation, PageTransitionConfig, PageTransitionShaderStyle, PageTransitionStyle,
+    TransitionConfig, TransitionKind,
 };
+use oxidemx_widgets::widgets::{labeled_int_slider, labeled_slider, section_header};
 
 // ============================================================================
 // Top-level: stack the three element sections.
@@ -60,9 +60,12 @@ pub fn view(state: &State) -> Element<'_, Message> {
 // ============================================================================
 
 fn page_transition_section(cfg: &PageTransitionConfig) -> Element<'_, Message> {
-    let is_custom = cfg.animation.enter.is_custom()
-        || cfg.animation.exit.is_custom();
-    let customize_label = if is_custom { "Edit custom…" } else { "Customize…" };
+    let is_custom = cfg.animation.enter.is_custom() || cfg.animation.exit.is_custom();
+    let customize_label = if is_custom {
+        "Edit custom…"
+    } else {
+        "Customize…"
+    };
     let header = row![
         text("Page transition").size(17),
         Space::new().width(Length::Fill),
@@ -194,9 +197,7 @@ fn page_transition_section(cfg: &PageTransitionConfig) -> Element<'_, Message> {
 // Page-transition shader sub-card.
 // ============================================================================
 
-fn page_transition_shader_subsection(
-    cfg: &PageTransitionConfig,
-) -> Element<'static, Message> {
+fn page_transition_shader_subsection(cfg: &PageTransitionConfig) -> Element<'static, Message> {
     let header = text("Shader overlay").size(15);
     let description = text(
         "GPU fragment-shader pass that runs on top of the canvas animation \
@@ -340,26 +341,24 @@ fn page_transition_shader_subsection(
 // One element's full block (header + enter | exit + chain).
 // ============================================================================
 
-fn element_section<'a>(
-    element: AnimElement,
-    anim: &'a ElementAnimation,
-) -> Element<'a, Message> {
+fn element_section<'a>(element: AnimElement, anim: &'a ElementAnimation) -> Element<'a, Message> {
     let editor_element = match element {
         AnimElement::Menu => crate::animation_editor::AnimEditorElement::Menu,
         AnimElement::Submenu => crate::animation_editor::AnimEditorElement::Submenu,
-        AnimElement::SliceHighlight => {
-            crate::animation_editor::AnimEditorElement::SliceHighlight
-        }
+        AnimElement::SliceHighlight => crate::animation_editor::AnimEditorElement::SliceHighlight,
         AnimElement::AiMorph => crate::animation_editor::AnimEditorElement::AiMorph,
     };
-    let is_custom =
-        anim.enter.is_custom() || anim.exit.is_custom();
+    let is_custom = anim.enter.is_custom() || anim.exit.is_custom();
 
     let header = row![
         text(element.label()).size(17),
         Space::new().width(Length::Fill),
-        button(if is_custom { "Edit custom…" } else { "Customize…" })
-            .on_press(Message::OpenAnimationEditor(editor_element)),
+        button(if is_custom {
+            "Edit custom…"
+        } else {
+            "Customize…"
+        })
+        .on_press(Message::OpenAnimationEditor(editor_element)),
         button("Reset").on_press(Message::ResetElementAnimation(element)),
     ]
     .align_y(Alignment::Center)
@@ -475,8 +474,7 @@ fn direction_panel<'a>(
 
     // --- Conditional kind-specific knobs
     let needs_scale = matches!(cfg.kind, TransitionKind::Grow | TransitionKind::GrowAndFade);
-    let needs_opacity =
-        matches!(cfg.kind, TransitionKind::Fade | TransitionKind::GrowAndFade);
+    let needs_opacity = matches!(cfg.kind, TransitionKind::Fade | TransitionKind::GrowAndFade);
 
     let mut col = column![
         text(format!("{} transition", dir.label())).size(14),

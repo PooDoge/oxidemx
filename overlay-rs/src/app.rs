@@ -14,15 +14,15 @@
 //! coordinates the way the gtk4-layer-shell prototype tried to.
 
 use iced::widget::canvas::Canvas;
-use iced::widget::{column, row, container, scrollable, text, text_input, button, Space};
-use iced::{Color, Element, Length, Size, Subscription, Task, Alignment};
+use iced::widget::{button, column, container, row, scrollable, text, text_input, Space};
+use iced::{Alignment, Color, Element, Length, Size, Subscription, Task};
 use tracing::{debug, error, info, warn};
 
 use oxidemx_shared::AppConfig;
 
 use crate::dbus::OverlayEvent;
 use crate::geometry::WINDOW_SIZE;
-use crate::radial::{RadialState, Painter, ChatMessage};
+use crate::radial::{ChatMessage, Painter, RadialState};
 
 const APP_ID: &str = "org.oxidemx.overlay";
 
@@ -38,7 +38,10 @@ pub enum Message {
     Positioned(bool),
     /// Toggle-mode cursor moved over the canvas. Coords are widget-
     /// local pixels (origin at canvas top-left).
-    ToggleCursor { x: f64, y: f64 },
+    ToggleCursor {
+        x: f64,
+        y: f64,
+    },
     /// Toggle-mode left-click — dispatch the highlighted slice and
     /// close the menu.
     ToggleClickSelect,
@@ -61,7 +64,7 @@ pub enum Message {
     WindowOpened(iced::window::Id),
     /// Result of querying the monitor size for centering fallback.
     CenterOverlay(Option<Size>),
-    
+
     // AI Assistant Messages
     AiEditorAction(iced::widget::text_editor::Action),
     AiSubmitPrompt,
@@ -194,7 +197,10 @@ fn update(state: &mut RadialState, message: Message) -> Task<Message> {
 
             let window_tasks = if let Some(id) = state.window_id {
                 Task::batch(vec![
-                    iced::window::move_to(id, iced::Point::new((x - half) as f32, (y - half) as f32)),
+                    iced::window::move_to(
+                        id,
+                        iced::Point::new((x - half) as f32, (y - half) as f32),
+                    ),
                     iced::window::minimize(id, false),
                     iced::window::gain_focus(id),
                 ])
@@ -265,9 +271,7 @@ fn update(state: &mut RadialState, message: Message) -> Task<Message> {
             // open/close ripple fires whenever the submenu state
             // transitions. Both compounding events still get one
             // ripple — looks more deliberate than two stacked.
-            if (before != after && after.is_some())
-                || (before_sub != after_sub)
-            {
+            if (before != after && after.is_some()) || (before_sub != after_sub) {
                 state.trigger_ripple();
             }
             Task::batch([
@@ -316,9 +320,7 @@ fn update(state: &mut RadialState, message: Message) -> Task<Message> {
             state.on_toggle_cursor(x, y);
             let after = state.target_slice();
             let after_sub = submenu_parent_of(state);
-            if (before != after && after.is_some())
-                || (before_sub != after_sub)
-            {
+            if (before != after && after.is_some()) || (before_sub != after_sub) {
                 state.trigger_ripple();
             }
             Task::batch([
@@ -488,7 +490,8 @@ fn update(state: &mut RadialState, message: Message) -> Task<Message> {
                     chat.history.push(ChatMessage::assistant(reply));
                 }
                 Err(err) => {
-                    chat.history.push(ChatMessage::assistant(format!("Error: {}", err)));
+                    chat.history
+                        .push(ChatMessage::assistant(format!("Error: {}", err)));
                 }
             }
             chat.updated_at = crate::radial::now_secs();
@@ -496,21 +499,19 @@ fn update(state: &mut RadialState, message: Message) -> Task<Message> {
             state.trigger_ripple();
             scroll_chat_to_end()
         }
-        Message::AiStream((thread_idx, event)) => {
-            match event {
-                crate::ai_client::StreamEvent::Activity(label) => {
-                    state.ai_activity = Some(label);
-                    Task::none()
-                }
-                crate::ai_client::StreamEvent::Delta(text) => {
-                    match &mut state.ai_stream {
-                        Some((idx, buf)) if *idx == thread_idx => buf.push_str(&text),
-                        _ => state.ai_stream = Some((thread_idx, text)),
-                    }
-                    scroll_chat_to_end()
-                }
+        Message::AiStream((thread_idx, event)) => match event {
+            crate::ai_client::StreamEvent::Activity(label) => {
+                state.ai_activity = Some(label);
+                Task::none()
             }
-        }
+            crate::ai_client::StreamEvent::Delta(text) => {
+                match &mut state.ai_stream {
+                    Some((idx, buf)) if *idx == thread_idx => buf.push_str(&text),
+                    _ => state.ai_stream = Some((thread_idx, text)),
+                }
+                scroll_chat_to_end()
+            }
+        },
         Message::AiStopRequest => {
             if let Some(handle) = state.ai_abort.take() {
                 handle.abort();
@@ -520,9 +521,8 @@ fn update(state: &mut RadialState, message: Message) -> Task<Message> {
             if let Some((idx, partial)) = state.ai_stream.take() {
                 if !partial.trim().is_empty() {
                     if let Some(chat) = state.ai_threads.get_mut(idx) {
-                        chat.history.push(ChatMessage::assistant(format!(
-                            "{partial}\n\n*(stopped)*"
-                        )));
+                        chat.history
+                            .push(ChatMessage::assistant(format!("{partial}\n\n*(stopped)*")));
                         chat.updated_at = crate::radial::now_secs();
                     }
                     crate::radial::save_chat_threads(&state.ai_threads);
@@ -591,7 +591,11 @@ fn update(state: &mut RadialState, message: Message) -> Task<Message> {
             let chat = state.chat();
             let mut out = String::new();
             for msg in &chat.history {
-                out.push_str(if msg.is_user { "**You:**\n" } else { "**AI:**\n" });
+                out.push_str(if msg.is_user {
+                    "**You:**\n"
+                } else {
+                    "**AI:**\n"
+                });
                 out.push_str(&msg.text);
                 out.push_str("\n\n");
             }
@@ -622,7 +626,10 @@ fn update(state: &mut RadialState, message: Message) -> Task<Message> {
         Message::AiChooseOption(choice) => {
             if let Some(pending) = state.ai_pending_question.take() {
                 let tx = pending.response_tx;
-                state.chat_mut().history.push(ChatMessage::user(choice.clone()));
+                state
+                    .chat_mut()
+                    .history
+                    .push(ChatMessage::user(choice.clone()));
                 state.ai_loading = true;
                 Task::perform(
                     async move {
@@ -700,11 +707,7 @@ fn dispatch_origin_for(state: &RadialState) -> Option<usize> {
 }
 
 fn classify(slice: &oxidemx_shared::Slice) -> DispatchOutcome {
-    let visible = slice
-        .visible_if
-        .as_ref()
-        .map(|c| c.eval())
-        .unwrap_or(true);
+    let visible = slice.visible_if.as_ref().map(|c| c.eval()).unwrap_or(true);
     if !visible {
         return DispatchOutcome::Unactionable;
     }
@@ -797,8 +800,7 @@ fn view(state: &RadialState) -> Element<'_, Message> {
     // multiplying here, none of the 12 shader programs need to know
     // a split is happening; they just see the menu going to alpha 0.
     let morph = state.ai_morph_progress();
-    let menu_alpha =
-        state.menu.current.clamp(0.0, 1.0) * crate::chat_shell::disc_alpha(morph);
+    let menu_alpha = state.menu.current.clamp(0.0, 1.0) * crate::chat_shell::disc_alpha(morph);
     let palette = &state.theme.theme.colors;
     let accent_rgba = oxidemx_shared::theme::parse_hex_rgba(&palette.accent)
         .map(|(r, g, b, a)| [r as f32, g as f32, b as f32, a as f32])
@@ -823,26 +825,23 @@ fn view(state: &RadialState) -> Element<'_, Message> {
     // anyway; the shadow is purely for the area outside).
     let drop_shadow_intensity = state.visuals.drop_shadow_intensity.clamp(0.0, 1.0);
     if drop_shadow_intensity > 0.001 && menu_alpha > 0.001 {
-        let outer_norm =
-            (crate::geometry::MENU_RADIUS as f32) / half_extent * menu_alpha;
-        let shadow = iced::widget::Shader::new(
-            crate::render::drop_shadow::DropShadowProgram {
-                outer_r: outer_norm,
-                intensity: drop_shadow_intensity * menu_alpha,
-                // Spread the shadow ~25% past the disc edge.
-                spread: 0.25,
-                // Sharpish inner edge so the disc reads as
-                // sitting clearly above its shadow.
-                falloff: 0.55,
-                // Read from the shared light direction (above).
-                light_angle,
-                // Offset the shadow centre 6% of half-extent
-                // toward the lower-right so it reads as a cast
-                // shadow, not a glow.
-                offset_dist: 0.06,
-                shadow_color: [0.0, 0.0, 0.0, 0.65],
-            },
-        )
+        let outer_norm = (crate::geometry::MENU_RADIUS as f32) / half_extent * menu_alpha;
+        let shadow = iced::widget::Shader::new(crate::render::drop_shadow::DropShadowProgram {
+            outer_r: outer_norm,
+            intensity: drop_shadow_intensity * menu_alpha,
+            // Spread the shadow ~25% past the disc edge.
+            spread: 0.25,
+            // Sharpish inner edge so the disc reads as
+            // sitting clearly above its shadow.
+            falloff: 0.55,
+            // Read from the shared light direction (above).
+            light_angle,
+            // Offset the shadow centre 6% of half-extent
+            // toward the lower-right so it reads as a cast
+            // shadow, not a glow.
+            offset_dist: 0.06,
+            shadow_color: [0.0, 0.0, 0.0, 0.65],
+        })
         .width(Length::Fixed(WINDOW_SIZE as f32))
         .height(Length::Fixed(WINDOW_SIZE as f32));
         layers.push(shadow.into());
@@ -910,56 +909,48 @@ fn view(state: &RadialState) -> Element<'_, Message> {
         let icon_bg_norm = 26.0_f32 / half_extent;
         let scale = menu_alpha;
         let palette = &state.theme.theme.colors;
-        let (sr, sg, sb, _) =
-            oxidemx_shared::theme::parse_hex_rgba(&palette.surface0)
-                .unwrap_or((0.18, 0.18, 0.20, 1.0));
+        let (sr, sg, sb, _) = oxidemx_shared::theme::parse_hex_rgba(&palette.surface0)
+            .unwrap_or((0.18, 0.18, 0.20, 1.0));
         let surface0 = [sr as f32, sg as f32, sb as f32, 1.0];
         let colors = [surface0; 8];
-        let (s1r, s1g, s1b, _) =
-            oxidemx_shared::theme::parse_hex_rgba(&palette.surface1)
-                .unwrap_or((0.25, 0.25, 0.28, 1.0));
+        let (s1r, s1g, s1b, _) = oxidemx_shared::theme::parse_hex_rgba(&palette.surface1)
+            .unwrap_or((0.25, 0.25, 0.28, 1.0));
         let surface1_color = [s1r as f32, s1g as f32, s1b as f32, 1.0];
-        let (s2r, s2g, s2b, _) =
-            oxidemx_shared::theme::parse_hex_rgba(&palette.surface2)
-                .unwrap_or((0.4, 0.4, 0.45, 1.0));
+        let (s2r, s2g, s2b, _) = oxidemx_shared::theme::parse_hex_rgba(&palette.surface2)
+            .unwrap_or((0.4, 0.4, 0.45, 1.0));
         let surface2_color = [s2r as f32, s2g as f32, s2b as f32, 1.0];
         // Canvas's stroke uses surface2 as its base colour, then
         // lerps to accent on hover. Same here.
         let stroke_color = surface2_color;
         let (ar, ag, ab, _) =
-            oxidemx_shared::theme::parse_hex_rgba(&palette.accent)
-                .unwrap_or((0.5, 0.5, 1.0, 1.0));
+            oxidemx_shared::theme::parse_hex_rgba(&palette.accent).unwrap_or((0.5, 0.5, 1.0, 1.0));
         let accent_color = [ar as f32, ag as f32, ab as f32, 1.0];
         let highlights = state.highlights.map(|t| t.current);
         // Canvas wedges meet at exactly the slice-boundary angle —
         // no transparent gap, just the stroke band painting a thin
         // separator line. Match that here.
         let gap_rad: f32 = 0.0;
-        let bg_op =
-            state.visuals.menu_background_opacity.clamp(0.0, 1.0);
-        let highlight_op =
-            state.visuals.slice_highlight_opacity.clamp(0.0, 1.0);
-        let sdf = iced::widget::Shader::new(
-            crate::render::sdf_ring::SdfRingProgram {
-                inner_r: inner_norm * scale,
-                outer_r: outer_norm * scale,
-                gap_rad,
-                intensity: sdf_intensity * menu_alpha,
-                slot_count: state.active_slot_count() as u32,
-                base_alpha: bg_op,
-                stroke_half_px: 1.2,
-                hover_wash_peak: 0.275 * highlight_op,
-                icon_r: icon_r_norm * scale,
-                icon_bg_radius: icon_bg_norm * scale,
-                colors,
-                highlights,
-                stroke_color,
-                accent_color,
-                surface1_color,
-                surface2_color,
-                menu_xform: menu_xform_raw,
-            },
-        )
+        let bg_op = state.visuals.menu_background_opacity.clamp(0.0, 1.0);
+        let highlight_op = state.visuals.slice_highlight_opacity.clamp(0.0, 1.0);
+        let sdf = iced::widget::Shader::new(crate::render::sdf_ring::SdfRingProgram {
+            inner_r: inner_norm * scale,
+            outer_r: outer_norm * scale,
+            gap_rad,
+            intensity: sdf_intensity * menu_alpha,
+            slot_count: state.active_slot_count() as u32,
+            base_alpha: bg_op,
+            stroke_half_px: 1.2,
+            hover_wash_peak: 0.275 * highlight_op,
+            icon_r: icon_r_norm * scale,
+            icon_bg_radius: icon_bg_norm * scale,
+            colors,
+            highlights,
+            stroke_color,
+            accent_color,
+            surface1_color,
+            surface2_color,
+            menu_xform: menu_xform_raw,
+        })
         .width(Length::Fixed(WINDOW_SIZE as f32))
         .height(Length::Fixed(WINDOW_SIZE as f32));
         layers.push(sdf.into());
@@ -980,23 +971,19 @@ fn view(state: &RadialState) -> Element<'_, Message> {
         // Multiply by menu_alpha so the bevel grows along with
         // the menu's open animation — same pattern the SDF ring
         // shader uses to stay in lockstep with the canvas.
-        let inner_norm =
-            (crate::geometry::CENTER_ZONE_RADIUS as f32) / half_extent * menu_alpha;
-        let outer_norm =
-            (crate::geometry::MENU_RADIUS as f32) / half_extent * menu_alpha;
-        let bevel = iced::widget::Shader::new(
-            crate::render::disc_bevel::DiscBevelProgram {
-                inner_r: inner_norm,
-                outer_r: outer_norm,
-                intensity: disc_bevel_intensity * menu_alpha,
-                rim_width: 0.045,
-                inset_width: 0.035,
-                light_angle,
-                shadow_strength: 0.7,
-                rim_color: [1.0, 1.0, 1.0, 0.85],
-                shadow_color: [0.0, 0.0, 0.0, 0.65],
-            },
-        )
+        let inner_norm = (crate::geometry::CENTER_ZONE_RADIUS as f32) / half_extent * menu_alpha;
+        let outer_norm = (crate::geometry::MENU_RADIUS as f32) / half_extent * menu_alpha;
+        let bevel = iced::widget::Shader::new(crate::render::disc_bevel::DiscBevelProgram {
+            inner_r: inner_norm,
+            outer_r: outer_norm,
+            intensity: disc_bevel_intensity * menu_alpha,
+            rim_width: 0.045,
+            inset_width: 0.035,
+            light_angle,
+            shadow_strength: 0.7,
+            rim_color: [1.0, 1.0, 1.0, 0.85],
+            shadow_color: [0.0, 0.0, 0.0, 0.65],
+        })
         .width(Length::Fixed(WINDOW_SIZE as f32))
         .height(Length::Fixed(WINDOW_SIZE as f32));
         layers.push(bevel.into());
@@ -1009,12 +996,10 @@ fn view(state: &RadialState) -> Element<'_, Message> {
     // side gated so the sweep fades on the shadow hemisphere.
     let sweep_intensity = state.visuals.specular_sweep_intensity.clamp(0.0, 1.0);
     if sweep_intensity > 0.001 && menu_alpha > 0.001 {
-        let inner_norm =
-            (crate::geometry::CENTER_ZONE_RADIUS as f32) / half_extent * menu_alpha;
-        let outer_norm =
-            (crate::geometry::MENU_RADIUS as f32) / half_extent * menu_alpha;
-        let sweep = iced::widget::Shader::new(
-            crate::render::specular_sweep::SpecularSweepProgram {
+        let inner_norm = (crate::geometry::CENTER_ZONE_RADIUS as f32) / half_extent * menu_alpha;
+        let outer_norm = (crate::geometry::MENU_RADIUS as f32) / half_extent * menu_alpha;
+        let sweep =
+            iced::widget::Shader::new(crate::render::specular_sweep::SpecularSweepProgram {
                 start: state.show_time.unwrap_or_else(std::time::Instant::now),
                 inner_r: inner_norm,
                 outer_r: outer_norm,
@@ -1025,10 +1010,9 @@ fn view(state: &RadialState) -> Element<'_, Message> {
                 half_width_rad: std::f32::consts::PI / 7.0,
                 light_angle,
                 sweep_color: [1.0, 1.0, 1.0, 0.85],
-            },
-        )
-        .width(Length::Fixed(WINDOW_SIZE as f32))
-        .height(Length::Fixed(WINDOW_SIZE as f32));
+            })
+            .width(Length::Fixed(WINDOW_SIZE as f32))
+            .height(Length::Fixed(WINDOW_SIZE as f32));
         layers.push(sweep.into());
     }
 
@@ -1040,25 +1024,21 @@ fn view(state: &RadialState) -> Element<'_, Message> {
     let slice_bevel_intensity = state.visuals.slice_bevel_intensity.clamp(0.0, 1.0);
     if slice_bevel_intensity > 0.001 && menu_alpha > 0.001 {
         let half_extent = (crate::geometry::WINDOW_SIZE as f32) / 2.0;
-        let inner_norm =
-            (crate::geometry::CENTER_ZONE_RADIUS as f32) / half_extent * menu_alpha;
-        let outer_norm =
-            (crate::geometry::MENU_RADIUS as f32) / half_extent * menu_alpha;
+        let inner_norm = (crate::geometry::CENTER_ZONE_RADIUS as f32) / half_extent * menu_alpha;
+        let outer_norm = (crate::geometry::MENU_RADIUS as f32) / half_extent * menu_alpha;
         let slot_count = state.active_slot_count().max(1) as u32;
-        let bevel = iced::widget::Shader::new(
-            crate::render::slice_bevel::SliceBevelProgram {
-                inner_r: inner_norm,
-                outer_r: outer_norm,
-                intensity: slice_bevel_intensity * menu_alpha,
-                slot_count,
-                // Width relative to half-extent. ~1.5% reads as
-                // a subtle bevel at typical menu sizes.
-                groove_width: 0.018,
-                light_angle,
-                rim_brightness: 0.9,
-                shadow_amount: 0.7,
-            },
-        )
+        let bevel = iced::widget::Shader::new(crate::render::slice_bevel::SliceBevelProgram {
+            inner_r: inner_norm,
+            outer_r: outer_norm,
+            intensity: slice_bevel_intensity * menu_alpha,
+            slot_count,
+            // Width relative to half-extent. ~1.5% reads as
+            // a subtle bevel at typical menu sizes.
+            groove_width: 0.018,
+            light_angle,
+            rim_brightness: 0.9,
+            shadow_amount: 0.7,
+        })
         .width(Length::Fixed(WINDOW_SIZE as f32))
         .height(Length::Fixed(WINDOW_SIZE as f32));
         layers.push(bevel.into());
@@ -1071,19 +1051,16 @@ fn view(state: &RadialState) -> Element<'_, Message> {
     let center_dome_intensity = state.visuals.center_dome_intensity.clamp(0.0, 1.0);
     if center_dome_intensity > 0.001 && menu_alpha > 0.001 {
         let half_extent = (crate::geometry::WINDOW_SIZE as f32) / 2.0;
-        let radius_norm =
-            (crate::geometry::CENTER_ZONE_RADIUS as f32) / half_extent * menu_alpha;
-        let dome = iced::widget::Shader::new(
-            crate::render::center_dome::CenterDomeProgram {
-                radius: radius_norm,
-                intensity: center_dome_intensity * menu_alpha,
-                light_angle,
-                shininess: 32.0,
-                rim_brightness: 0.6,
-                shadow_amount: 0.5,
-                specular_color: [1.0, 1.0, 1.0, 0.95],
-            },
-        )
+        let radius_norm = (crate::geometry::CENTER_ZONE_RADIUS as f32) / half_extent * menu_alpha;
+        let dome = iced::widget::Shader::new(crate::render::center_dome::CenterDomeProgram {
+            radius: radius_norm,
+            intensity: center_dome_intensity * menu_alpha,
+            light_angle,
+            shininess: 32.0,
+            rim_brightness: 0.6,
+            shadow_amount: 0.5,
+            specular_color: [1.0, 1.0, 1.0, 0.95],
+        })
         .width(Length::Fixed(WINDOW_SIZE as f32))
         .height(Length::Fixed(WINDOW_SIZE as f32));
         layers.push(dome.into());
@@ -1116,23 +1093,25 @@ fn view(state: &RadialState) -> Element<'_, Message> {
                 let color_key = slice
                     .and_then(|s| {
                         let c = s.color.trim();
-                        if c.is_empty() { None } else { Some(c) }
+                        if c.is_empty() {
+                            None
+                        } else {
+                            Some(c)
+                        }
                     })
                     .unwrap_or("accent");
                 let palette = &state.theme.theme.colors;
                 let (cr, cg, cb, _) = palette.slice_color_rgba(color_key);
                 let color = [cr as f32, cg as f32, cb as f32, 1.0];
-                let glow = iced::widget::Shader::new(
-                    crate::render::hover_glow::HoverGlowProgram {
-                        bisector_rad: bisector,
-                        half_sweep,
-                        inner_r: inner_norm,
-                        outer_r: outer_norm,
-                        progress,
-                        intensity: hover_glow_intensity * menu_alpha,
-                        color,
-                    },
-                )
+                let glow = iced::widget::Shader::new(crate::render::hover_glow::HoverGlowProgram {
+                    bisector_rad: bisector,
+                    half_sweep,
+                    inner_r: inner_norm,
+                    outer_r: outer_norm,
+                    progress,
+                    intensity: hover_glow_intensity * menu_alpha,
+                    color,
+                })
                 .width(Length::Fixed(WINDOW_SIZE as f32))
                 .height(Length::Fixed(WINDOW_SIZE as f32));
                 layers.push(glow.into());
@@ -1155,10 +1134,8 @@ fn view(state: &RadialState) -> Element<'_, Message> {
                 let bisector = (idx as f32) * slice_degrees - std::f32::consts::FRAC_PI_2;
                 let half_sweep = slice_degrees / 2.0;
                 let half_extent = (crate::geometry::WINDOW_SIZE as f32) / 2.0;
-                let inner_norm =
-                    (crate::geometry::CENTER_ZONE_RADIUS as f32 + 6.0) / half_extent;
-                let outer_norm =
-                    (crate::geometry::MENU_RADIUS as f32 - 6.0) / half_extent;
+                let inner_norm = (crate::geometry::CENTER_ZONE_RADIUS as f32 + 6.0) / half_extent;
+                let outer_norm = (crate::geometry::MENU_RADIUS as f32 - 6.0) / half_extent;
                 // Cursor in clip-UV [-1, 1]. RadialState stores
                 // it in canvas pixels relative to centre, so just
                 // divide by half_extent. Clamp generously so an
@@ -1178,28 +1155,30 @@ fn view(state: &RadialState) -> Element<'_, Message> {
                 let color_key = slice
                     .and_then(|s| {
                         let c = s.color.trim();
-                        if c.is_empty() { None } else { Some(c) }
+                        if c.is_empty() {
+                            None
+                        } else {
+                            Some(c)
+                        }
                     })
                     .unwrap_or("accent");
                 let palette = &state.theme.theme.colors;
                 let (ar, ag, ab, _) = palette.slice_color_rgba(color_key);
                 let highlight_color = [1.0, 1.0, 1.0, 0.85];
                 let accent_color = [ar as f32, ag as f32, ab as f32, 1.0];
-                let tilt = iced::widget::Shader::new(
-                    crate::render::hover_tilt::HoverTiltProgram {
-                        bisector_rad: bisector,
-                        half_sweep,
-                        inner_r: inner_norm,
-                        outer_r: outer_norm,
-                        progress,
-                        intensity: hover_tilt_intensity * menu_alpha,
-                        shadow_amount: state.visuals.hover_tilt_shadow.clamp(0.0, 1.0),
-                        sharpness: state.visuals.hover_tilt_sharpness.clamp(0.0, 1.0),
-                        cursor_uv,
-                        highlight_color,
-                        accent_color,
-                    },
-                )
+                let tilt = iced::widget::Shader::new(crate::render::hover_tilt::HoverTiltProgram {
+                    bisector_rad: bisector,
+                    half_sweep,
+                    inner_r: inner_norm,
+                    outer_r: outer_norm,
+                    progress,
+                    intensity: hover_tilt_intensity * menu_alpha,
+                    shadow_amount: state.visuals.hover_tilt_shadow.clamp(0.0, 1.0),
+                    sharpness: state.visuals.hover_tilt_sharpness.clamp(0.0, 1.0),
+                    cursor_uv,
+                    highlight_color,
+                    accent_color,
+                })
                 .width(Length::Fixed(WINDOW_SIZE as f32))
                 .height(Length::Fixed(WINDOW_SIZE as f32));
                 layers.push(tilt.into());
@@ -1218,15 +1197,12 @@ fn view(state: &RadialState) -> Element<'_, Message> {
             && menu_alpha > 0.001
             && elapsed_ms < crate::radial::RIPPLE_DURATION_MS
         {
-            let progress =
-                elapsed_ms as f32 / crate::radial::RIPPLE_DURATION_MS as f32;
-            let ripple = iced::widget::Shader::new(
-                crate::render::ripple::RippleProgram::new(
-                    progress,
-                    ripple_intensity * menu_alpha,
-                    accent_rgba,
-                ),
-            )
+            let progress = elapsed_ms as f32 / crate::radial::RIPPLE_DURATION_MS as f32;
+            let ripple = iced::widget::Shader::new(crate::render::ripple::RippleProgram::new(
+                progress,
+                ripple_intensity * menu_alpha,
+                accent_rgba,
+            ))
             .width(Length::Fixed(WINDOW_SIZE as f32))
             .height(Length::Fixed(WINDOW_SIZE as f32));
             layers.push(ripple.into());
@@ -1264,19 +1240,17 @@ fn view(state: &RadialState) -> Element<'_, Message> {
                 _ => crate::render::page_fx::PageFxStyle::Plasma,
             };
             let s = &pt_cfg.shader;
-            let layer = iced::widget::Shader::new(
-                crate::render::page_fx::PageFxProgram {
-                    progress,
-                    style,
-                    intensity: menu_alpha * s.intensity.clamp(0.0, 1.0),
-                    dissolve_noise_scale: s.dissolve_noise_scale,
-                    dissolve_band_softness: s.dissolve_band_softness,
-                    plasma_wave_scale: s.plasma_wave_scale,
-                    plasma_wave_speed: s.plasma_wave_speed,
-                    color_a,
-                    color_b,
-                },
-            )
+            let layer = iced::widget::Shader::new(crate::render::page_fx::PageFxProgram {
+                progress,
+                style,
+                intensity: menu_alpha * s.intensity.clamp(0.0, 1.0),
+                dissolve_noise_scale: s.dissolve_noise_scale,
+                dissolve_band_softness: s.dissolve_band_softness,
+                plasma_wave_scale: s.plasma_wave_scale,
+                plasma_wave_speed: s.plasma_wave_speed,
+                color_a,
+                color_b,
+            })
             .width(Length::Fixed(WINDOW_SIZE as f32))
             .height(Length::Fixed(WINDOW_SIZE as f32));
             layers.push(layer.into());
@@ -1289,25 +1263,22 @@ fn view(state: &RadialState) -> Element<'_, Message> {
     // closed): the user's last visible feedback should be the
     // celebratory flourish, not the ring sliding away.
     let burst_intensity = state.visuals.dispatch_burst_intensity.clamp(0.0, 1.0);
-    if let (Some(started), Some(origin_idx)) =
-        (state.dispatch_started, state.dispatch_origin)
-    {
+    if let (Some(started), Some(origin_idx)) = (state.dispatch_started, state.dispatch_origin) {
         let elapsed_ms = started.elapsed().as_millis() as u64;
-        if burst_intensity > 0.001
-            && elapsed_ms < crate::radial::BURST_DURATION_MS
-        {
-            let progress =
-                elapsed_ms as f32 / crate::radial::BURST_DURATION_MS as f32;
+        if burst_intensity > 0.001 && elapsed_ms < crate::radial::BURST_DURATION_MS {
+            let progress = elapsed_ms as f32 / crate::radial::BURST_DURATION_MS as f32;
             let slot_count = state.active_slot_count();
-            let origin = crate::render::dispatch_burst::slice_origin(
-                origin_idx, slot_count,
-            );
+            let origin = crate::render::dispatch_burst::slice_origin(origin_idx, slot_count);
             let palette = &state.theme.theme.colors;
             let slice = state.slices.get(origin_idx);
             let color_key = slice
                 .and_then(|s| {
                     let c = s.color.trim();
-                    if c.is_empty() { None } else { Some(c) }
+                    if c.is_empty() {
+                        None
+                    } else {
+                        Some(c)
+                    }
                 })
                 .unwrap_or("accent");
             let (cr, cg, cb, _) = palette.slice_color_rgba(color_key);
@@ -1470,7 +1441,10 @@ fn build_ai_panel(state: &RadialState, alpha: f32) -> Element<'_, Message> {
     let text_color = to_iced_color(&palette.text, Color::WHITE);
     let accent_color = to_iced_color(&palette.accent, Color::from_rgb(0.5, 0.5, 1.0));
 
-    let card_bg = fade(Color::from_rgba(base_color.r, base_color.g, base_color.b, 0.92), 1.0);
+    let card_bg = fade(
+        Color::from_rgba(base_color.r, base_color.g, base_color.b, 0.92),
+        1.0,
+    );
     let card_border = fade(accent_color, 0.25);
     let body_text = fade(text_color, 1.0);
     let dim_text = fade(text_color, 0.55);
@@ -1502,11 +1476,19 @@ fn build_ai_panel(state: &RadialState, alpha: f32) -> Element<'_, Message> {
             .on_press(msg)
     };
 
-    let saved_count = state.ai_threads.iter().filter(|t| !t.history.is_empty()).count();
+    let saved_count = state
+        .ai_threads
+        .iter()
+        .filter(|t| !t.history.is_empty())
+        .count();
     let mut toolbar = row![
         tool_btn("＋ New", Message::AiNewChat, false),
         tool_btn(
-            if state.ai_show_threads { "‹ Back" } else { "Chats" },
+            if state.ai_show_threads {
+                "‹ Back"
+            } else {
+                "Chats"
+            },
             Message::AiToggleThreads,
             state.ai_show_threads,
         ),
@@ -1636,11 +1618,7 @@ fn build_ai_panel(state: &RadialState, alpha: f32) -> Element<'_, Message> {
     let card_body: Element<'_, Message> = if state.ai_show_threads {
         let mut list = column![].spacing(6);
         if saved_count == 0 {
-            list = list.push(
-                text("No previous chats yet.")
-                    .size(12)
-                    .color(dim_text),
-            );
+            list = list.push(text("No previous chats yet.").size(12).color(dim_text));
         }
         // Newest first; skip never-used empty threads.
         for (idx, thread) in state.ai_threads.iter().enumerate().rev() {
@@ -1742,10 +1720,14 @@ fn build_ai_panel(state: &RadialState, alpha: f32) -> Element<'_, Message> {
         let mut question_col = column![
             text(&pending.question)
                 .size(12)
-                .font(iced::Font { weight: iced::font::Weight::Bold, ..Default::default() })
+                .font(iced::Font {
+                    weight: iced::font::Weight::Bold,
+                    ..Default::default()
+                })
                 .color(fade(accent_color, 1.0)),
             Space::new().height(Length::Fixed(4.0)),
-        ].spacing(4);
+        ]
+        .spacing(4);
 
         for opt in &pending.options {
             let opt_clone = opt.clone();
@@ -1754,7 +1736,7 @@ fn build_ai_panel(state: &RadialState, alpha: f32) -> Element<'_, Message> {
                     text(opt)
                         .size(11)
                         .color(body_text)
-                        .align_x(iced::alignment::Horizontal::Center)
+                        .align_x(iced::alignment::Horizontal::Center),
                 )
                 .width(Length::Fill)
                 .padding(6)
@@ -1766,23 +1748,24 @@ fn build_ai_panel(state: &RadialState, alpha: f32) -> Element<'_, Message> {
                     s.border.radius = 6.0.into();
                     s
                 })
-                .on_press(Message::AiChooseOption(opt_clone))
+                .on_press(Message::AiChooseOption(opt_clone)),
             );
         }
 
-        card_col = card_col.push(
-            container(question_col)
-                .padding(8)
-                .style(move |_| container::Style {
-                    background: Some(iced::Background::Color(fade(surface_color, 0.5))),
-                    border: iced::border::Border {
-                        color: fade(accent_color, 1.0),
-                        width: 1.0,
-                        radius: 8.0.into(),
-                    },
-                    ..Default::default()
-                })
-        );
+        card_col =
+            card_col.push(
+                container(question_col)
+                    .padding(8)
+                    .style(move |_| container::Style {
+                        background: Some(iced::Background::Color(fade(surface_color, 0.5))),
+                        border: iced::border::Border {
+                            color: fade(accent_color, 1.0),
+                            width: 1.0,
+                            radius: 8.0.into(),
+                        },
+                        ..Default::default()
+                    }),
+            );
     }
 
     let card = container(card_col)
@@ -1834,7 +1817,10 @@ fn build_ai_panel(state: &RadialState, alpha: f32) -> Element<'_, Message> {
         button(
             text("Stop")
                 .size(11)
-                .font(iced::Font { weight: iced::font::Weight::Bold, ..Default::default() })
+                .font(iced::Font {
+                    weight: iced::font::Weight::Bold,
+                    ..Default::default()
+                })
                 .color(body_text),
         )
         .padding(6)
@@ -1852,7 +1838,10 @@ fn build_ai_panel(state: &RadialState, alpha: f32) -> Element<'_, Message> {
         button(
             text("Send")
                 .size(11)
-                .font(iced::Font { weight: iced::font::Weight::Bold, ..Default::default() })
+                .font(iced::Font {
+                    weight: iced::font::Weight::Bold,
+                    ..Default::default()
+                })
                 .color(body_text),
         )
         .padding(6)
@@ -1870,15 +1859,14 @@ fn build_ai_panel(state: &RadialState, alpha: f32) -> Element<'_, Message> {
         input_col = input_col.push(
             text(state.ai_activity.unwrap_or("Working…"))
                 .size(11)
-                .font(iced::Font { style: iced::font::Style::Italic, ..Default::default() })
+                .font(iced::Font {
+                    style: iced::font::Style::Italic,
+                    ..Default::default()
+                })
                 .color(fade(accent_color, 1.0)),
         );
     }
-    input_col = input_col.push(
-        row![editor, action_btn]
-            .spacing(6)
-            .align_y(Alignment::End),
-    );
+    input_col = input_col.push(row![editor, action_btn].spacing(6).align_y(Alignment::End));
     let input_area: Element<'_, Message> = input_col.into();
 
     let content_col = column![toolbar, card, input_area].spacing(10);

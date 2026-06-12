@@ -10,9 +10,9 @@
 //!   and color thresholds (green > 30 %, yellow 15-30 %, red ≤ 15 %).
 //!   Strokes flip to white on dark themes / black on light themes.
 
-use oxidemx_widgets::palette::Palette;
 use iced::widget::canvas::{self, path::Builder, Frame, Geometry, Path, Stroke};
 use iced::{mouse, Color, Length, Point, Rectangle, Renderer, Theme};
+use oxidemx_widgets::palette::Palette;
 
 // ============================================================================
 // Data: UPower probe
@@ -78,7 +78,10 @@ pub async fn poll() -> Option<BatteryStatus> {
         let charging = matches!(state, 1 | 4 | 5);
 
         let pct = percent.clamp(0.0, 100.0).round() as u8;
-        let candidate = BatteryStatus { percent: pct, charging };
+        let candidate = BatteryStatus {
+            percent: pct,
+            charging,
+        };
         match best {
             Some(prev) if prev.percent >= pct => {}
             _ => best = Some(candidate),
@@ -207,11 +210,8 @@ impl<Message> canvas::Program<Message> for BatteryPainter {
             // light, so it punches through whatever fill colour
             // sits underneath.
             if s.charging {
-                let bolt = lightning_bolt(
-                    body_x + body_w / 2.0,
-                    body_y + body_h / 2.0,
-                    body_h * 0.55,
-                );
+                let bolt =
+                    lightning_bolt(body_x + body_w / 2.0, body_y + body_h / 2.0, body_h * 0.55);
                 // Black outline first so the bolt reads against
                 // any fill.
                 frame.stroke(
@@ -270,7 +270,6 @@ impl<Message> canvas::Program<Message> for BatteryPainter {
                 size: label_size.into(),
                 ..canvas::Text::default()
             });
-
         } else {
             // No data — single dim diagonal across the body.
             let mut b = Builder::new();
@@ -278,16 +277,13 @@ impl<Message> canvas::Program<Message> for BatteryPainter {
             b.line_to(Point::new(body_x + body_w - 2.0, body_y + body_h - 2.0));
             frame.stroke(
                 &b.build(),
-                Stroke::default()
-                    .with_color(self.text_dim)
-                    .with_width(1.0),
+                Stroke::default().with_color(self.text_dim).with_width(1.0),
             );
         }
 
         vec![frame.into_geometry()]
     }
 }
-
 
 // ============================================================================
 // Path helpers
@@ -303,11 +299,11 @@ fn lightning_bolt(cx: f32, cy: f32, height: f32) -> Path {
     // Six-point zig-zag: top → upper-right notch → middle-left
     // → middle-right notch → bottom → lower-left notch → close.
     let pts: [(f32, f32); 6] = [
-        ( 0.10, -0.50), // top tip (slightly off-centre)
-        (-0.40,  0.05), // upper-left valley
-        (-0.05,  0.05), // mid-shelf
-        (-0.18,  0.50), // bottom tip
-        ( 0.30, -0.05), // lower-right plateau
+        (0.10, -0.50),  // top tip (slightly off-centre)
+        (-0.40, 0.05),  // upper-left valley
+        (-0.05, 0.05),  // mid-shelf
+        (-0.18, 0.50),  // bottom tip
+        (0.30, -0.05),  // lower-right plateau
         (-0.05, -0.05), // mid-shelf back
     ];
     let mut b = Builder::new();
@@ -335,4 +331,3 @@ fn rounded_rect(x: f32, y: f32, w: f32, h: f32, r: f32) -> Path {
     b.close();
     b.build()
 }
-

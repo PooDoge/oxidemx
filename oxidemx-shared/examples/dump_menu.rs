@@ -39,8 +39,7 @@ fn main() {
         Some(t) => t,
         None => {
             eprintln!("Theme '{}' did not load — using default", theme_name);
-            Theme::load(&Default::default())
-                .expect("default theme must load")
+            Theme::load(&Default::default()).expect("default theme must load")
         }
     };
     println!("Theme:     {} ({})", theme.name, theme_name);
@@ -80,11 +79,7 @@ fn main() {
     );
 
     for (i, slice) in slices.iter().enumerate().take(8) {
-        let visible = slice
-            .visible_if
-            .as_ref()
-            .map(|c| c.eval())
-            .unwrap_or(true);
+        let visible = slice.visible_if.as_ref().map(|c| c.eval()).unwrap_or(true);
         let marker = if visible { " " } else { "✗" };
         let cmd = if slice.command.is_empty() {
             "(none)".into()
@@ -119,8 +114,7 @@ fn main() {
     println!();
     println!("Slice colour samples (theme palette):");
     for key in [
-        "green", "yellow", "red", "blue", "mauve", "pink", "peach", "teal",
-        "sapphire", "lavender",
+        "green", "yellow", "red", "blue", "mauve", "pink", "peach", "teal", "sapphire", "lavender",
     ] {
         let (r, g, b, _) = theme.colors.slice_color_rgba(key);
         println!(

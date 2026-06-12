@@ -20,13 +20,11 @@
 //! See memory entry `project_track_animation_system` for the data
 //! model and what's wired in the renderer.
 
-use oxidemx_widgets::widgets::{labeled_int_slider, labeled_slider};
 use crate::{style, Message, State};
 use iced::widget::{button, column, container, pick_list, row, rule, text, Space};
 use iced::{Alignment, Element, Length};
-use oxidemx_shared::{
-    AnimationTrack, Axis, Easing, ElementAnimation, TrackKind,
-};
+use oxidemx_shared::{AnimationTrack, Axis, Easing, ElementAnimation, TrackKind};
+use oxidemx_widgets::widgets::{labeled_int_slider, labeled_slider};
 
 /// Which top-level element the editor is currently editing. Drives
 /// the dispatch in main.rs that picks
@@ -80,10 +78,7 @@ impl AnimationEditorState {
 
 /// Resolve the active `ElementAnimation` from config. Used by the
 /// view + the main.rs handlers to read/write the right slot.
-pub fn element_animation<'a>(
-    state: &'a State,
-    el: AnimEditorElement,
-) -> &'a ElementAnimation {
+pub fn element_animation<'a>(state: &'a State, el: AnimEditorElement) -> &'a ElementAnimation {
     let cfg = &state.config.radial_menu.animation;
     match el {
         AnimEditorElement::Menu => &cfg.menu,
@@ -108,10 +103,7 @@ pub fn element_animation_mut<'a>(
     }
 }
 
-pub fn view<'a>(
-    state: &'a State,
-    editor: &'a AnimationEditorState,
-) -> Element<'a, Message> {
+pub fn view<'a>(state: &'a State, editor: &'a AnimationEditorState) -> Element<'a, Message> {
     let pal = &state.palette;
     let anim = element_animation(state, editor.element);
 
@@ -215,8 +207,12 @@ fn direction_column<'a>(
         let delete_btn = button(text("X").size(11))
             .style(style::btn_secondary(pal))
             .on_press(Message::AnimationEditorDeleteTrack(direction, i));
-        let row = row![label_btn, Space::new().width(Length::Fixed(4.0)), delete_btn]
-            .align_y(Alignment::Center);
+        let row = row![
+            label_btn,
+            Space::new().width(Length::Fixed(4.0)),
+            delete_btn
+        ]
+        .align_y(Alignment::Center);
         col = col.push(row);
     }
 
@@ -327,13 +323,7 @@ fn parameter_panel<'a>(
                 0.0..=1.0,
                 0.01,
                 |x| format!("{:.0} %", x * 100.0),
-                move |v| {
-                    Message::AnimationEditorSetParam(
-                        direction,
-                        idx,
-                        TrackParam::FadeAlpha(v),
-                    )
-                },
+                move |v| Message::AnimationEditorSetParam(direction, idx, TrackParam::FadeAlpha(v)),
             ));
         }
         TrackKind::Translate { axis, offset_px } => {
@@ -348,11 +338,7 @@ fn parameter_panel<'a>(
                 1.0,
                 |x| format!("{:+.0} px", x),
                 move |v| {
-                    Message::AnimationEditorSetParam(
-                        direction,
-                        idx,
-                        TrackParam::TranslatePx(v),
-                    )
+                    Message::AnimationEditorSetParam(direction, idx, TrackParam::TranslatePx(v))
                 },
             ));
         }
@@ -366,13 +352,7 @@ fn parameter_panel<'a>(
                 -360.0..=360.0,
                 1.0,
                 |x| format!("{:+.0}°", x),
-                move |v| {
-                    Message::AnimationEditorSetParam(
-                        direction,
-                        idx,
-                        TrackParam::RotateDeg(v),
-                    )
-                },
+                move |v| Message::AnimationEditorSetParam(direction, idx, TrackParam::RotateDeg(v)),
             ));
         }
         TrackKind::Scale { offset_pct } => {
@@ -385,13 +365,7 @@ fn parameter_panel<'a>(
                 0.0..=200.0,
                 1.0,
                 |x| format!("{:.0} %", x),
-                move |v| {
-                    Message::AnimationEditorSetParam(
-                        direction,
-                        idx,
-                        TrackParam::ScalePct(v),
-                    )
-                },
+                move |v| Message::AnimationEditorSetParam(direction, idx, TrackParam::ScalePct(v)),
             ));
         }
         TrackKind::Flip { axis, offset_deg } => {
@@ -405,13 +379,7 @@ fn parameter_panel<'a>(
                 -360.0..=360.0,
                 1.0,
                 |x| format!("{:+.0}°", x),
-                move |v| {
-                    Message::AnimationEditorSetParam(
-                        direction,
-                        idx,
-                        TrackParam::FlipDeg(v),
-                    )
-                },
+                move |v| Message::AnimationEditorSetParam(direction, idx, TrackParam::FlipDeg(v)),
             ));
         }
     }
@@ -422,26 +390,14 @@ fn parameter_panel<'a>(
         track.delay_ms,
         0..=2000,
         |ms| format!("{ms} ms"),
-        move |ms| {
-            Message::AnimationEditorSetParam(
-                direction,
-                idx,
-                TrackParam::DelayMs(ms),
-            )
-        },
+        move |ms| Message::AnimationEditorSetParam(direction, idx, TrackParam::DelayMs(ms)),
     ));
     params = params.push(labeled_int_slider(
         "Duration",
         track.duration_ms,
         16..=4000,
         |ms| format!("{ms} ms"),
-        move |ms| {
-            Message::AnimationEditorSetParam(
-                direction,
-                idx,
-                TrackParam::DurationMs(ms),
-            )
-        },
+        move |ms| Message::AnimationEditorSetParam(direction, idx, TrackParam::DurationMs(ms)),
     ));
     // Easing: type pick_list, plus stiffness/damping when Spring.
     let allow_spring = !matches!(track.kind, TrackKind::Fade { .. });
@@ -462,11 +418,10 @@ fn parameter_panel<'a>(
             EasingPickOption::EaseInOut,
         ]
     };
-    let easing_picker =
-        pick_list(easing_opts, Some(easing_opt), move |opt| {
-            Message::AnimationEditorSetEasingKind(direction, idx, opt)
-        })
-        .text_size(12);
+    let easing_picker = pick_list(easing_opts, Some(easing_opt), move |opt| {
+        Message::AnimationEditorSetEasingKind(direction, idx, opt)
+    })
+    .text_size(12);
     let easing_row = row![
         text("Easing").size(13).width(Length::Fixed(120.0)),
         Space::new().width(Length::Fill),
@@ -484,11 +439,7 @@ fn parameter_panel<'a>(
             1.0,
             |v| format!("{v:.0}"),
             move |v| {
-                Message::AnimationEditorSetParam(
-                    direction,
-                    idx,
-                    TrackParam::SpringStiffness(v),
-                )
+                Message::AnimationEditorSetParam(direction, idx, TrackParam::SpringStiffness(v))
             },
         ));
         params = params.push(labeled_slider(
@@ -497,24 +448,17 @@ fn parameter_panel<'a>(
             1.0..=40.0,
             0.5,
             |v| format!("{v:.1}"),
-            move |v| {
-                Message::AnimationEditorSetParam(
-                    direction,
-                    idx,
-                    TrackParam::SpringDamping(v),
-                )
-            },
+            move |v| Message::AnimationEditorSetParam(direction, idx, TrackParam::SpringDamping(v)),
         ));
     }
 
-    container(params).padding(12).style(style::card_quiet(pal)).into()
+    container(params)
+        .padding(12)
+        .style(style::card_quiet(pal))
+        .into()
 }
 
-fn axis_picker(
-    cur: Axis,
-    direction: AnimEditorDirection,
-    idx: usize,
-) -> Element<'static, Message> {
+fn axis_picker(cur: Axis, direction: AnimEditorDirection, idx: usize) -> Element<'static, Message> {
     let cur_opt = AxisOption(cur);
     let opts = vec![AxisOption(Axis::X), AxisOption(Axis::Y)];
     let picker = pick_list(opts, Some(cur_opt), move |opt| {
@@ -544,8 +488,7 @@ impl std::fmt::Display for TrackKindOption {
     }
 }
 
-const TRACK_KIND_OPTIONS: &[&str] =
-    &["Fade", "Translate", "Rotate", "Scale", "Flip"];
+const TRACK_KIND_OPTIONS: &[&str] = &["Fade", "Translate", "Rotate", "Scale", "Flip"];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct AxisOption(Axis);

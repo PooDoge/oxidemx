@@ -63,12 +63,7 @@ impl<Message> shader::Program<Message> for HoverTiltProgram {
         Some(shader::Action::request_redraw())
     }
 
-    fn draw(
-        &self,
-        _state: &(),
-        _cursor: mouse::Cursor,
-        _bounds: Rectangle,
-    ) -> Self::Primitive {
+    fn draw(&self, _state: &(), _cursor: mouse::Cursor, _bounds: Rectangle) -> Self::Primitive {
         HoverTiltPrimitive {
             uniforms: HoverTiltUniformsRaw {
                 bisector_rad: self.bisector_rad,

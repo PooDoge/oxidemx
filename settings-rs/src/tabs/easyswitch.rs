@@ -7,11 +7,11 @@
 //! the daemon, which fires the HID++ command to bond the device
 //! to that host.
 
-use oxidemx_widgets::widgets::section_header;
 use crate::{Message, State};
-use oxidemx_widgets::style;
 use iced::widget::{button, column, container, row, rule, text, Space};
 use iced::{Alignment, Element, Length};
+use oxidemx_widgets::style;
+use oxidemx_widgets::widgets::section_header;
 
 pub fn view(state: &State) -> Element<'_, Message> {
     let pal = &state.palette;
@@ -65,12 +65,7 @@ fn slot_grid<'a>(state: &'a State, es: &'a crate::daemon::EasySwitch) -> Element
     grid.into()
 }
 
-fn slot_card<'a>(
-    state: &'a State,
-    idx: u8,
-    name: &str,
-    is_current: bool,
-) -> Element<'a, Message> {
+fn slot_card<'a>(state: &'a State, idx: u8, name: &str, is_current: bool) -> Element<'a, Message> {
     let pal = &state.palette;
     let label = if name.is_empty() {
         format!("Host {} (unbonded)", idx + 1)
@@ -83,7 +78,9 @@ fn slot_card<'a>(
     action_btn = if is_current {
         action_btn.style(style::btn_secondary(pal))
     } else {
-        action_btn.style(style::btn_secondary(pal)).on_press(Message::SwitchHost(idx))
+        action_btn
+            .style(style::btn_secondary(pal))
+            .on_press(Message::SwitchHost(idx))
     };
 
     let dot_color = if is_current { pal.green } else { pal.subtext0 };

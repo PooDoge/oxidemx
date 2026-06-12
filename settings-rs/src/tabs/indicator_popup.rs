@@ -5,8 +5,7 @@
 //! via inotify.
 
 use oxidemx_shared::{
-    HostLabelStyle, PopupMode, QuickEntry,
-    QUICK_SLIDER_CATALOG, QUICK_TOGGLE_CATALOG,
+    HostLabelStyle, PopupMode, QuickEntry, QUICK_SLIDER_CATALOG, QUICK_TOGGLE_CATALOG,
 };
 use oxidemx_widgets::style;
 use oxidemx_widgets::widgets::section_header;
@@ -132,8 +131,12 @@ fn mode_card(state: &State) -> Element<'_, Message> {
             .size(11)
             .style(style::text_dim(pal)),
             rule::horizontal(1).style(style::rule_style(pal)),
-            row![simple_btn, Space::new().width(Length::Fixed(8.0)), power_btn]
-                .align_y(Alignment::Start),
+            row![
+                simple_btn,
+                Space::new().width(Length::Fixed(8.0)),
+                power_btn
+            ]
+            .align_y(Alignment::Start),
         ]
         .spacing(10),
     )
@@ -189,8 +192,7 @@ fn easy_switch_card(state: &State) -> Element<'_, Message> {
     // Host button preview — mock 3 hosts since daemon per-device
     // host info isn't piped into settings-rs yet.
     // TODO: thread real host info from state.daemon when available.
-    let mock_hosts: [Option<&str>; 3] =
-        [Some("jim-thinkpad"), Some("jim-macbook"), None];
+    let mock_hosts: [Option<&str>; 3] = [Some("jim-thinkpad"), Some("jim-macbook"), None];
 
     let preview_buttons: Vec<Element<Message>> = mock_hosts
         .iter()
@@ -202,12 +204,10 @@ fn easy_switch_card(state: &State) -> Element<'_, Message> {
                     .unwrap_or_else(|| format!("Channel {}", i + 1)),
                 HostLabelStyle::Channel => format!("Channel {}", i + 1),
             };
-            container(
-                text(label).size(11),
-            )
-            .padding([4, 10])
-            .style(style::chip(pal))
-            .into()
+            container(text(label).size(11))
+                .padding([4, 10])
+                .style(style::chip(pal))
+                .into()
         })
         .collect();
 
@@ -496,9 +496,7 @@ fn reorder_row<'a>(
 
     let label_col = column![
         text(entry.label).size(13),
-        text(entry.desc)
-            .size(10)
-            .style(style::text_dim(pal)),
+        text(entry.desc).size(10).style(style::text_dim(pal)),
     ]
     .spacing(2);
 
@@ -541,9 +539,7 @@ fn add_row<'a>(
 
     let label_col = column![
         text(entry.label).size(13),
-        text(entry.desc)
-            .size(10)
-            .style(style::text_dim(pal)),
+        text(entry.desc).size(10).style(style::text_dim(pal)),
     ]
     .spacing(2);
 
@@ -579,9 +575,7 @@ fn switch_row<'a>(
         ]
         .spacing(2),
         Space::new().width(Length::Fill),
-        toggler(on)
-            .on_toggle(msg)
-            .style(style::toggler_style(pal)),
+        toggler(on).on_toggle(msg).style(style::toggler_style(pal)),
     ]
     .align_y(Alignment::Center)
     .spacing(12)

@@ -71,9 +71,7 @@ pub fn parse_desktop_string(raw: &str) -> Option<DesktopEntry> {
     if kv.get("NoDisplay").map(String::as_str) == Some("true") {
         return None;
     }
-    if kv.get("Type").map(String::as_str) != Some("Application")
-        && kv.get("Type").is_some()
-    {
+    if kv.get("Type").map(String::as_str) != Some("Application") && kv.contains_key("Type") {
         // Spec says we should also accept entries with no Type key
         // (treat as Application by default), but if the entry
         // *does* declare a Type, only "Application" qualifies.
@@ -119,8 +117,8 @@ pub fn clean_exec_line(exec: &str) -> String {
     while let Some(c) = chars.next() {
         if c == '%' {
             match chars.next() {
-                Some('f') | Some('F') | Some('u') | Some('U') | Some('i')
-                | Some('c') | Some('k') | Some('v') | Some('m') => continue,
+                Some('f') | Some('F') | Some('u') | Some('U') | Some('i') | Some('c')
+                | Some('k') | Some('v') | Some('m') => continue,
                 Some('%') => intermediate.push('%'),
                 Some(other) => {
                     intermediate.push('%');
@@ -174,7 +172,7 @@ pub fn enumerate_applications() -> Vec<DesktopEntry> {
         }
     }
     let mut out: Vec<_> = by_id.into_values().collect();
-    out.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    out.sort_by_key(|a| a.name.to_lowercase());
     out
 }
 
@@ -209,9 +207,7 @@ pub fn standard_application_dirs() -> Vec<PathBuf> {
     // Flatpak system — usually also in $XDG_DATA_DIRS via
     // /var/lib/flatpak/exports/share, but include defensively for
     // older distros that don't export it through the env var.
-    dirs.push(PathBuf::from(
-        "/var/lib/flatpak/exports/share/applications",
-    ));
+    dirs.push(PathBuf::from("/var/lib/flatpak/exports/share/applications"));
 
     // Walk $XDG_DATA_DIRS dynamically so we pick up whatever the
     // distro configures (often includes Flatpak roots, sometimes
@@ -224,10 +220,7 @@ pub fn standard_application_dirs() -> Vec<PathBuf> {
 
     // Flatpak per-user.
     if let Some(home) = std::env::var_os("HOME") {
-        dirs.push(
-            PathBuf::from(&home)
-                .join(".local/share/flatpak/exports/share/applications"),
-        );
+        dirs.push(PathBuf::from(&home).join(".local/share/flatpak/exports/share/applications"));
     }
 
     // Per-user XDG dir (highest precedence so user overrides win).
@@ -240,8 +233,7 @@ pub fn standard_application_dirs() -> Vec<PathBuf> {
     // Dedupe while preserving order — first occurrence kept, so the
     // priority order above is honoured for the BTreeMap last-write-
     // wins logic in `enumerate_applications`.
-    let mut seen: std::collections::HashSet<PathBuf> =
-        std::collections::HashSet::new();
+    let mut seen: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
     dirs.retain(|p| seen.insert(p.clone()));
     dirs
 }

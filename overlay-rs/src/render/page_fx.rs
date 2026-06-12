@@ -94,12 +94,7 @@ impl<Message> shader::Program<Message> for PageFxProgram {
         Some(shader::Action::request_redraw())
     }
 
-    fn draw(
-        &self,
-        _state: &(),
-        _cursor: mouse::Cursor,
-        _bounds: Rectangle,
-    ) -> Self::Primitive {
+    fn draw(&self, _state: &(), _cursor: mouse::Cursor, _bounds: Rectangle) -> Self::Primitive {
         PageFxPrimitive {
             uniforms: PageFxUniformsRaw {
                 progress: self.progress.clamp(0.0, 1.0),
@@ -138,11 +133,7 @@ impl Primitive for PageFxPrimitive {
         queue.write_buffer(&pipeline.uniforms, 0, bytemuck::bytes_of(&self.uniforms));
     }
 
-    fn draw(
-        &self,
-        pipeline: &Self::Pipeline,
-        render_pass: &mut wgpu::RenderPass<'_>,
-    ) -> bool {
+    fn draw(&self, pipeline: &Self::Pipeline, render_pass: &mut wgpu::RenderPass<'_>) -> bool {
         render_pass.set_pipeline(&pipeline.pipeline);
         render_pass.set_bind_group(0, &pipeline.bind_group, &[]);
         render_pass.draw(0..3, 0..1);
@@ -159,11 +150,7 @@ pub struct PageFxPipeline {
 }
 
 impl iced::widget::shader::Pipeline for PageFxPipeline {
-    fn new(
-        device: &wgpu::Device,
-        _queue: &wgpu::Queue,
-        format: wgpu::TextureFormat,
-    ) -> Self {
+    fn new(device: &wgpu::Device, _queue: &wgpu::Queue, format: wgpu::TextureFormat) -> Self {
         let uniforms = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("page_fx.uniforms"),
             size: std::mem::size_of::<PageFxUniformsRaw>() as u64,

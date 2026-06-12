@@ -94,7 +94,10 @@ async fn run_listener(tx: async_channel::Sender<OverlayEvent>) -> zbus::Result<(
             if let Ok(args) = sig.args() {
                 debug!(x = args.x, y = args.y, "MenuRequested");
                 if tx_show
-                    .send(OverlayEvent::Show { x: args.x, y: args.y })
+                    .send(OverlayEvent::Show {
+                        x: args.x,
+                        y: args.y,
+                    })
                     .await
                     .is_err()
                 {

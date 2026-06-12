@@ -9,12 +9,8 @@
 //! converts HSV → hex on each emitted message and the existing
 //! `SetThemeColor` path handles the rest.
 
-use iced::widget::canvas::{
-    self,
-    gradient::Linear,
-    Action, Frame, Geometry, Path, Stroke,
-};
 use iced::gradient::ColorStop;
+use iced::widget::canvas::{self, gradient::Linear, Action, Frame, Geometry, Path, Stroke};
 use iced::{mouse, Color, Event, Point, Rectangle, Renderer, Theme};
 
 /// Standard HSV → RGB conversion. `h`, `s`, `v` all in `[0, 1]`.
@@ -162,9 +158,7 @@ where
         );
         frame.stroke(
             &outer,
-            Stroke::default()
-                .with_color(Color::WHITE)
-                .with_width(1.0),
+            Stroke::default().with_color(Color::WHITE).with_width(1.0),
         );
 
         vec![frame.into_geometry()]
@@ -302,9 +296,7 @@ where
         );
         frame.stroke(
             &line,
-            Stroke::default()
-                .with_color(Color::WHITE)
-                .with_width(1.5),
+            Stroke::default().with_color(Color::WHITE).with_width(1.5),
         );
 
         vec![frame.into_geometry()]
@@ -343,4 +335,3 @@ where
         }
     }
 }
-

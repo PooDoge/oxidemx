@@ -88,17 +88,13 @@ pub fn draw_ring_transformed(
         // are all baked into `ring_transform.scale`-multiplied
         // radii via `mscale` upstream; this call applies the
         // remaining channels). Identity transform = no-op.
-        crate::render::animation::apply_composed_transform(
-            f,
-            center,
-            ring_transform,
-        );
+        crate::render::animation::apply_composed_transform(f, center, ring_transform);
         let ring_alpha = ring_transform.alpha.clamp(0.0, 1.0);
         for i in 0..n {
             let highlight = highlights.get(i).copied().unwrap_or(0.0);
-            let slice_for_render = slices.get(i).filter(|s| {
-                s.visible_if.as_ref().map(|c| c.eval()).unwrap_or(true)
-            });
+            let slice_for_render = slices
+                .get(i)
+                .filter(|s| s.visible_if.as_ref().map(|c| c.eval()).unwrap_or(true));
             // Per-slot transform: wrap slice draw in with_save so
             // the per-slot transform doesn't leak across to the
             // next slot's draw_slice call. Skipped when
@@ -110,8 +106,7 @@ pub fn draw_ring_transformed(
             // slot transform can pivot around it.
             let n_f = n as f32;
             let slice_degrees = 360.0 / n_f;
-            let icon_angle =
-                ((i as f32) * slice_degrees - 90.0).to_radians();
+            let icon_angle = ((i as f32) * slice_degrees - 90.0).to_radians();
             let icon_pos = polar(center, icon_r, icon_angle);
 
             let draw = |fr: &mut Frame| {
@@ -138,9 +133,7 @@ pub fn draw_ring_transformed(
             if needs_slot_save {
                 f.with_save(|fr| {
                     if let Some(t) = slot_t {
-                        crate::render::animation::apply_composed_transform(
-                            fr, icon_pos, t,
-                        );
+                        crate::render::animation::apply_composed_transform(fr, icon_pos, t);
                     }
                     draw(fr);
                 });
@@ -205,8 +198,7 @@ pub fn draw_slice(
     // shader frame. This is what users notice as "lag during
     // menu open" when the SDF is at full intensity.
     if wfm > 0.02 {
-        let start_deg =
-            (index as f32) * slice_degrees - slice_degrees / 2.0 - 90.0;
+        let start_deg = (index as f32) * slice_degrees - slice_degrees / 2.0 - 90.0;
         let end_deg = start_deg + slice_degrees;
         let start_rad = start_deg.to_radians();
         let end_rad = end_deg.to_radians();
@@ -225,13 +217,15 @@ pub fn draw_slice(
 
         // Stroke — interpolate surface2 → accent, alpha 60..150,
         // line width 1.0..1.5.
-        let stroke_color =
-            lerp(rgba(&palette.surface2, 1.0), accent_color, hl);
+        let stroke_color = lerp(rgba(&palette.surface2, 1.0), accent_color, hl);
         let alpha = ((60.0 + 90.0 * hl) / 255.0) * mo * wfm;
         frame.stroke(
             &wedge,
             Stroke::default()
-                .with_color(Color { a: alpha, ..stroke_color })
+                .with_color(Color {
+                    a: alpha,
+                    ..stroke_color
+                })
                 .with_width(1.0 + 0.5 * hl),
         );
 
@@ -307,7 +301,6 @@ pub fn draw_slice(
     }
 }
 
-
 /// Draw the page-name flash inside the centre puck — handles the
 /// slide-in / cross-slide-out / fade-out sequence in one place.
 /// Caller passes the current and (optional) previous page name,
@@ -381,19 +374,16 @@ pub fn draw_page_name_transition(
         None
     };
 
-    let (tr, tg, tb, _) =
-        parse_hex_rgba(&palette.text).unwrap_or((1.0, 1.0, 1.0, 1.0));
+    let (tr, tg, tb, _) = parse_hex_rgba(&palette.text).unwrap_or((1.0, 1.0, 1.0, 1.0));
 
     // Approximate visible-character width — same constant the
     // hover label uses (`label_size * 0.55`).
     let approx_w = |s: &str| s.chars().count() as f32 * label_size * 0.55;
     // Aggressive truncate so long page names fit the puck.
     let truncate = |s: &str| -> String {
-        let max_chars =
-            ((radius * 2.0 / (label_size * 0.55)).max(4.0)) as usize;
+        let max_chars = ((radius * 2.0 / (label_size * 0.55)).max(4.0)) as usize;
         if s.chars().count() > max_chars {
-            let mut out: String =
-                s.chars().take(max_chars.saturating_sub(1)).collect();
+            let mut out: String = s.chars().take(max_chars.saturating_sub(1)).collect();
             out.push('…');
             out
         } else {
@@ -448,10 +438,7 @@ pub fn draw_page_name_transition(
                     f.rotate(Radians(tangent));
                     f.fill_text(iced::widget::canvas::Text {
                         content: s,
-                        position: iced::Point::new(
-                            -cell_w / 2.0,
-                            -label_size / 2.0,
-                        ),
+                        position: iced::Point::new(-cell_w / 2.0, -label_size / 2.0),
                         color: txt_color(alpha),
                         size: label_size.into(),
                         font: label_font,
@@ -464,10 +451,7 @@ pub fn draw_page_name_transition(
             let w = approx_w(&display);
             frame.fill_text(iced::widget::canvas::Text {
                 content: display,
-                position: iced::Point::new(
-                    center.x - w / 2.0 + x_off,
-                    center.y - label_size / 2.0,
-                ),
+                position: iced::Point::new(center.x - w / 2.0 + x_off, center.y - label_size / 2.0),
                 color: txt_color(alpha),
                 size: label_size.into(),
                 font: label_font,
@@ -531,11 +515,7 @@ pub fn draw_submenu(
     let stagger_ms = anim::chain_stagger_ms(submenu_anim.chain.as_ref());
 
     for (i, item) in items.iter().enumerate() {
-        let allowed = item
-            .visible_if
-            .as_ref()
-            .map(|c| c.eval())
-            .unwrap_or(true);
+        let allowed = item.visible_if.as_ref().map(|c| c.eval()).unwrap_or(true);
         if !allowed {
             continue;
         }
@@ -578,9 +558,7 @@ pub fn draw_submenu(
             frame.stroke(
                 &Path::circle(item_pos, scaled_radius + 3.0),
                 Stroke::default()
-                    .with_color(Color::from_rgba(
-                        1.0, 1.0, 1.0, 60.0 / 255.0 * item_opacity,
-                    ))
+                    .with_color(Color::from_rgba(1.0, 1.0, 1.0, 60.0 / 255.0 * item_opacity))
                     .with_width(3.0),
             );
         }
@@ -601,9 +579,7 @@ pub fn draw_submenu(
         };
         frame.stroke(
             &Path::circle(item_pos, scaled_radius),
-            Stroke::default()
-                .with_color(border_color)
-                .with_width(1.5),
+            Stroke::default().with_color(border_color).with_width(1.5),
         );
 
         let color_key = if !item.color.is_empty() {
@@ -623,7 +599,14 @@ pub fn draw_submenu(
             icons.resolve(item.icon.as_str(), glyph_size_px, icon_color)
         };
         if let Some(handle) = resolved {
-            draw_icon(frame, item_pos.x, item_pos.y, glyph_size, &handle, item_opacity);
+            draw_icon(
+                frame,
+                item_pos.x,
+                item_pos.y,
+                glyph_size,
+                &handle,
+                item_opacity,
+            );
         } else {
             frame.fill(
                 &Path::circle(item_pos, scaled_radius * 0.35),
@@ -699,8 +682,7 @@ pub fn draw_center(
     // visible "ripple" rather than a silent radius bump.
     if flash > 0.0 {
         let halo = Path::circle(center, radius + 6.0);
-        let (ar, ag, ab, _) =
-            parse_hex_rgba(&palette.accent).unwrap_or((1.0, 1.0, 1.0, 1.0));
+        let (ar, ag, ab, _) = parse_hex_rgba(&palette.accent).unwrap_or((1.0, 1.0, 1.0, 1.0));
         frame.stroke(
             &halo,
             Stroke::default()
@@ -714,9 +696,7 @@ pub fn draw_center(
         );
     }
 
-    let has_description = description
-        .map(|d| !d.trim().is_empty())
-        .unwrap_or(false);
+    let has_description = description.map(|d| !d.trim().is_empty()).unwrap_or(false);
     let description_size = (label_size * 0.62).max(8.0);
 
     if let Some(text) = label {
@@ -765,31 +745,23 @@ pub fn draw_center(
             // Description sits a half-line below the label; truncate
             // a bit more aggressively because the smaller font fits
             // more glyphs across the puck.
-            let max_chars =
-                ((radius * 2.0 / (description_size * 0.55)).max(6.0)) as usize;
+            let max_chars = ((radius * 2.0 / (description_size * 0.55)).max(6.0)) as usize;
             let display: String = if trimmed.chars().count() > max_chars {
-                let mut out: String = trimmed
-                    .chars()
-                    .take(max_chars.saturating_sub(1))
-                    .collect();
+                let mut out: String = trimmed.chars().take(max_chars.saturating_sub(1)).collect();
                 out.push('…');
                 out
             } else {
                 trimmed.to_string()
             };
             let approx_w = display.chars().count() as f32 * description_size * 0.55;
-            let (tr, tg, tb, _) =
-                parse_hex_rgba(&palette.subtext0).unwrap_or((0.7, 0.7, 0.7, 1.0));
+            let (tr, tg, tb, _) = parse_hex_rgba(&palette.subtext0).unwrap_or((0.7, 0.7, 0.7, 1.0));
             // Anchor description below the label baseline. The label
             // (when present) was nudged up by ~0.65× description
             // size; place description ~0.85× description size below
             // centre so the gap reads as a natural line break.
             frame.fill_text(iced::widget::canvas::Text {
                 content: display,
-                position: iced::Point::new(
-                    center.x - approx_w / 2.0,
-                    center.y + label_size * 0.05,
-                ),
+                position: iced::Point::new(center.x - approx_w / 2.0, center.y + label_size * 0.05),
                 color: iced::Color::from_rgba(
                     tr as f32,
                     tg as f32,
@@ -876,9 +848,7 @@ pub fn draw_arc_tooltip(
     // otherwise push past the wedge + half a wedge each side.
     let max_arc_rad = (slice_degrees * 2.0).to_radians();
     let mut visible: Vec<char> = chars.clone();
-    while (visible.len() as f32 * cell_w) / radius > max_arc_rad
-        && visible.len() > 1
-    {
+    while (visible.len() as f32 * cell_w) / radius > max_arc_rad && visible.len() > 1 {
         visible.pop();
         if visible.last() != Some(&'…') {
             *visible.last_mut().unwrap() = '…';
@@ -1045,10 +1015,10 @@ pub fn draw_page_indicator(
     // strip; clamp to a minimum so two-page menus don't crowd.
     let target_chord: f32 = 8.0;
     let mut step_rad = (target_chord / arc_radius.max(1.0)).max(0.22); // ≈ 12.6° min
-    // Cap the total arc so the strip never sweeps past ~±45° from
-    // straight-down — beyond that the dots start overlapping the
-    // hover label and the page-cycle reads as a curve rather than
-    // an indicator.
+                                                                       // Cap the total arc so the strip never sweeps past ~±45° from
+                                                                       // straight-down — beyond that the dots start overlapping the
+                                                                       // hover label and the page-cycle reads as a curve rather than
+                                                                       // an indicator.
     let max_total_rad: f32 = std::f32::consts::FRAC_PI_2; // 90° total
     if (page_count as f32 - 1.0) * step_rad > max_total_rad {
         step_rad = max_total_rad / (page_count as f32 - 1.0).max(1.0);
@@ -1059,10 +1029,8 @@ pub fn draw_page_indicator(
     // sin(angle) for Y with the canvas Y-down convention.
     let base_angle = std::f32::consts::FRAC_PI_2;
 
-    let (ar, ag, ab, _) =
-        parse_hex_rgba(&palette.accent).unwrap_or((1.0, 1.0, 1.0, 1.0));
-    let (tr, tg, tb, _) =
-        parse_hex_rgba(&palette.text).unwrap_or((1.0, 1.0, 1.0, 1.0));
+    let (ar, ag, ab, _) = parse_hex_rgba(&palette.accent).unwrap_or((1.0, 1.0, 1.0, 1.0));
+    let (tr, tg, tb, _) = parse_hex_rgba(&palette.text).unwrap_or((1.0, 1.0, 1.0, 1.0));
 
     for i in 0..page_count {
         // Negate the offset so dot 0 lands on the LEFT and dot
@@ -1110,13 +1078,7 @@ pub fn draw_page_indicator(
 /// under ~0.5 px. `from > to` is fine — we always step from
 /// `from` toward `to` regardless of direction. Module-private
 /// helper shared by `build_wedge` and `build_tooltip_ribbon`.
-fn arc_line_to(
-    p: &mut canvas::path::Builder,
-    center: Point,
-    radius: f32,
-    from: f32,
-    to: f32,
-) {
+fn arc_line_to(p: &mut canvas::path::Builder, center: Point, radius: f32, from: f32, to: f32) {
     let sweep = (to - from).abs();
     if sweep < 1e-4 || radius < 0.5 {
         return;
@@ -1130,13 +1092,7 @@ fn arc_line_to(
     }
 }
 
-fn build_wedge(
-    center: Point,
-    inner_r: f32,
-    outer_r: f32,
-    start_rad: f32,
-    end_rad: f32,
-) -> Path {
+fn build_wedge(center: Point, inner_r: f32, outer_r: f32, start_rad: f32, end_rad: f32) -> Path {
     Path::new(|p| {
         let inner_start = polar(center, inner_r, start_rad);
         let outer_start = polar(center, outer_r, start_rad);

@@ -19,13 +19,19 @@ fn main() {
         let kind = if e.is_flatpak { "FLATPAK" } else { "native " };
         println!(
             "  [{}] {:30} icon={:30} cmd={}",
-            kind, e.name, e.icon, e.slice_command()
+            kind,
+            e.name,
+            e.icon,
+            e.slice_command()
         );
     }
     if let Some(query) = std::env::args().nth(1) {
         println!();
         println!("Search '{}':", query);
-        for e in oxidemx_shared::search_applications(&apps, &query).iter().take(8) {
+        for e in oxidemx_shared::search_applications(&apps, &query)
+            .iter()
+            .take(8)
+        {
             let kind = if e.is_flatpak { "FLATPAK" } else { "native " };
             println!("  [{}] {:30} {}", kind, e.name, e.path.display());
         }

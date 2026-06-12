@@ -48,12 +48,7 @@ impl<Message> shader::Program<Message> for SpecularSweepProgram {
         Some(shader::Action::request_redraw())
     }
 
-    fn draw(
-        &self,
-        _state: &(),
-        _cursor: mouse::Cursor,
-        _bounds: Rectangle,
-    ) -> Self::Primitive {
+    fn draw(&self, _state: &(), _cursor: mouse::Cursor, _bounds: Rectangle) -> Self::Primitive {
         SpecularSweepPrimitive {
             uniforms: SpecularSweepUniformsRaw {
                 inner_r: self.inner_r,

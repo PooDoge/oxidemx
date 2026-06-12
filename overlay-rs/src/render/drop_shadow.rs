@@ -44,12 +44,7 @@ impl<Message> shader::Program<Message> for DropShadowProgram {
         Some(shader::Action::request_redraw())
     }
 
-    fn draw(
-        &self,
-        _state: &(),
-        _cursor: mouse::Cursor,
-        _bounds: Rectangle,
-    ) -> Self::Primitive {
+    fn draw(&self, _state: &(), _cursor: mouse::Cursor, _bounds: Rectangle) -> Self::Primitive {
         DropShadowPrimitive {
             uniforms: DropShadowUniformsRaw {
                 outer_r: self.outer_r.max(0.001),
