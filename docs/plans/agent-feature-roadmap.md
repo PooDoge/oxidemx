@@ -115,3 +115,25 @@ memory tools, two modes, approval cards, vision hook, threads).
 - AGENTS.md is now the cross-vendor rules filename (Warp default,
   OpenHands, Open Interpreter Rust rewrite) — name our per-recipe
   instruction files accordingly for familiarity.
+
+## Addendum 2 (personal-assistant deep dive — OpenClaw details)
+
+Refinements to Tier 1 items from OpenClaw's verified docs:
+
+- **First-run ritual** (BOOTSTRAP.md → IDENTITY.md): on first chat
+  the agent interviews the user and WRITES its own identity/user
+  files, then the bootstrap file is deleted. Charming onboarding
+  for our soul.md/user.md — the assistant names itself and fills
+  the files in conversation rather than shipping blank templates.
+- **Per-file injection budgets** (20k chars/file, 60k total) — cap
+  soul.md/user.md/heartbeat.md the same way so a runaway file can't
+  eat the context window.
+- **Heartbeat cost knobs** worth copying: active-hours window,
+  skip-when-busy (defer while a chat turn is in flight), and a
+  light-context variant for cheap ticks.
+- **Recipe requirements gating** (skills `requires: bins/env/os`):
+  a recipe declaring `requires: { bins: ["wl-paste"] }` greys out
+  in the picker when the binary is missing — cheap robustness.
+- Anti-marketplace stance reinforced: ClawHub's "ClawHavoc"
+  campaign planted 824 malicious skills; registry trust is a
+  full-time job we should not take on.
