@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="48" height="48">
+  <!-- Drive body -->
+  <rect x="8" y="10" width="32" height="28" rx="4" fill="none" stroke="#E0AF68" stroke-width="2.5"/>
+  <!-- Platter -->
+  <circle cx="22" cy="22" r="7" fill="none" stroke="#E0AF68" stroke-width="2.5"/>
+  <circle cx="22" cy="22" r="1.8" fill="#E0AF68"/>
+  <!-- Activity light -->
+  <circle cx="34" cy="33" r="2" fill="#E0AF68"/>
+</svg>

@@ -1,5 +1,5 @@
-# Weather widget — canonical PDK example.
-# NOT a workspace member (excluded via root Cargo.toml `examples/widgets/*`).
+# Weather widget — canonical PDK example, shipped as a bundled built-in.
+# NOT a workspace member (excluded via root Cargo.toml `widgets/builtin/*`).
 # Build with: cargo build --release --target wasm32-wasip1
 # Install with: oxidemx-widget install ./weather-1.4.0.omxw
 

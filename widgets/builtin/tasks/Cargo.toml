@@ -1,0 +1,21 @@
+# Tasks-due widget — bundled built-in fed by the host's system-stats push.
+# NOT a workspace member (excluded via root Cargo.toml `widgets/builtin/*`).
+# Build with: cargo build --release --target wasm32-wasip1
+
+# Standalone — never part of the parent workspace.
+[workspace]
+
+[package]
+name = "tasks"
+version = "1.0.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+oxidemx-widget-api = { path = "../../../oxidemx-widget-api" }
+
+[profile.release]
+panic = "abort"
+opt-level = "s"

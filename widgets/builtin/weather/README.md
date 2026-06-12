@@ -8,20 +8,20 @@ a 3-day forecast; tap the slice to open open-meteo.com.
 
 ```
 cargo build --release --target wasm32-wasip1 \
-    --manifest-path examples/widgets/weather/Cargo.toml
+    --manifest-path widgets/builtin/weather/Cargo.toml
 ```
 
 The compiled module lands at:
 
 ```
-examples/widgets/weather/target/wasm32-wasip1/release/weather.wasm
+widgets/builtin/weather/target/wasm32-wasip1/release/weather.wasm
 ```
 
 ## Pack and install (requires the CLI — Task 7)
 
 ```
 # Pack the widget directory into a .omxw bundle:
-oxidemx-widget pack examples/widgets/weather/
+oxidemx-widget pack widgets/builtin/weather/
 
 # Install the bundle:
 oxidemx-widget install ./weather-1.4.0.omxw
@@ -31,9 +31,9 @@ oxidemx-widget install ./weather-1.4.0.omxw
 
 ```
 mkdir -p ~/.config/oxidemx/widgets/weather
-cp examples/widgets/weather/widget.json ~/.config/oxidemx/widgets/weather/
-cp examples/widgets/weather/icon.svg    ~/.config/oxidemx/widgets/weather/
-cp examples/widgets/weather/target/wasm32-wasip1/release/weather.wasm \
+cp widgets/builtin/weather/widget.json ~/.config/oxidemx/widgets/weather/
+cp widgets/builtin/weather/icon.svg    ~/.config/oxidemx/widgets/weather/
+cp widgets/builtin/weather/target/wasm32-wasip1/release/weather.wasm \
        ~/.config/oxidemx/widgets/weather/widget.wasm
 ```
 

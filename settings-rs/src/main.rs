@@ -5948,7 +5948,7 @@ mod widget_flow_tests {
     use serde_json::json;
 
     /// Minimal but valid weather manifest (mirrors
-    /// `examples/widgets/weather/widget.json` where it matters:
+    /// `widgets/builtin/weather/widget.json` where it matters:
     /// id, options incl. location/enum/select with defaults).
     const WEATHER_MANIFEST: &str = r#"{
       "id": "weather",

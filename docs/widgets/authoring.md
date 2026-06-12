@@ -12,7 +12,7 @@ replays every frame without calling guest code.
 Copy the canonical example and adapt it:
 
 ```bash
-cp -r examples/widgets/weather my-widget
+cp -r widgets/builtin/weather my-widget
 cd my-widget
 # edit src/lib.rs, widget.json
 cargo build --release --target wasm32-wasip1
@@ -21,7 +21,7 @@ oxidemx-widget install ./my-widget-0.1.0.omxw
 # the overlay hot-registers it; place it from Settings › Menu
 ```
 
-The weather example lives at `examples/widgets/weather/` and is the
+The weather example lives at `widgets/builtin/weather/` and is the
 authoritative reference for every feature described in this guide.
 
 ---
@@ -249,7 +249,7 @@ A `SettingsChanged` event triggers an instance reload (settings diff
 just dev-widget        # or the equivalent cargo + cp sequence
 
 # Run widget unit tests natively (Ctx is mockable; no wasm target needed).
-cargo test --manifest-path examples/widgets/weather/Cargo.toml
+cargo test --manifest-path widgets/builtin/weather/Cargo.toml
 ```
 
 The weather example has full native unit tests for JSON parsing,

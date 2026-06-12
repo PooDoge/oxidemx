@@ -1,0 +1,12 @@
+{
+  "id": "memory",
+  "name": "Memory",
+  "version": "1.0.0",
+  "author": "OxideMX",
+  "homepage": "https://github.com/oxidemx/widgets",
+  "api_version": 1,
+  "entry": "widget.wasm",
+  "icon": "icon.svg",
+  "permissions": ["system-stats"],
+  "slice": { "fallback_icon": "media-flash-symbolic" }
+}

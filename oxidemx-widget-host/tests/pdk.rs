@@ -2,7 +2,7 @@
 //! correctly in the wasmi host:
 //!
 //! - `pdk_widget_round_trips`: fixture/pdk-widget init+event+render.
-//! - `weather_widget_loads`: examples/widgets/weather init issues HttpGet
+//! - `weather_widget_loads`: widgets/builtin/weather init issues HttpGet
 //!   with the configured latitude in the URL.
 
 mod common;
@@ -81,7 +81,7 @@ fn weather_widget_loads() {
         .parent()
         .expect("manifest dir has parent")
         .to_path_buf();
-    let weather_dir = workspace_root.join("examples").join("widgets").join("weather");
+    let weather_dir = workspace_root.join("widgets").join("builtin").join("weather");
     let Some(wasm) = common::build_wasm_at("weather", weather_dir, "weather") else { return };
 
     // Settings with a location (Oslo: lat=59.91, lon=10.75).

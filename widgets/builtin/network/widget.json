@@ -1,0 +1,16 @@
+{
+  "id": "network",
+  "name": "Network rate",
+  "version": "1.0.0",
+  "author": "OxideMX",
+  "homepage": "https://github.com/oxidemx/widgets",
+  "api_version": 1,
+  "entry": "widget.wasm",
+  "icon": "icon.svg",
+  "permissions": ["system-stats"],
+  "slice": { "fallback_icon": "network-transmit-receive-symbolic" },
+  "options": [
+    { "key": "show_sparkline", "type": "boolean", "label": "Show sparkline",
+      "default": true }
+  ]
+}

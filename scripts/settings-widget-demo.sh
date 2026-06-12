@@ -14,7 +14,7 @@ cd "$(dirname "$0")/.."
 
 echo "==> building weather example (wasm32-wasip1)"
 cargo build --release --target wasm32-wasip1 \
-    --manifest-path examples/widgets/weather/Cargo.toml
+    --manifest-path widgets/builtin/weather/Cargo.toml
 
 echo "==> building widget CLI + settings app (debug)"
 cargo build -p oxidemx-widget-cli -p oxidemx-settings
@@ -31,9 +31,9 @@ echo "==> packing + installing the weather widget via the CLI"
 BUNDLE="$TMP/weather-1.4.0.omxw"
 STAGE="$TMP/weather"
 mkdir -p "$STAGE"
-cp examples/widgets/weather/widget.json "$STAGE/"
-cp examples/widgets/weather/icon.svg "$STAGE/"
-cp examples/widgets/weather/target/wasm32-wasip1/release/weather.wasm \
+cp widgets/builtin/weather/widget.json "$STAGE/"
+cp widgets/builtin/weather/icon.svg "$STAGE/"
+cp widgets/builtin/weather/target/wasm32-wasip1/release/weather.wasm \
     "$STAGE/widget.wasm"
 ./target/debug/oxidemx-widget pack --output "$BUNDLE" "$STAGE"
 # Dev-key signed → unknown key → needs --force (the GUI surfaces the

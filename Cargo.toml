@@ -29,7 +29,7 @@ members = [
     "spike-iced", "iced_gtk_themer",
     "tools/oxidemx-widget-cli",
 ]
-exclude = ["pop_os_iced", "libcosmic", "oxidemx-widget-host/fixtures/*", "examples/widgets/*"]
+exclude = ["pop_os_iced", "libcosmic", "oxidemx-widget-host/fixtures/*", "widgets/builtin/*"]
 
 [profile.release]
 # Match daemon/Cargo.toml's existing release profile so a `cargo build

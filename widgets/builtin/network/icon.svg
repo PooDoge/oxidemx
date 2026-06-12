@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="48" height="48">
+  <!-- Down arrow -->
+  <g stroke="#7DCFFF" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" fill="none">
+    <line x1="17" y1="8" x2="17" y2="36"/>
+    <polyline points="10,29 17,36 24,29"/>
+  </g>
+  <!-- Up arrow -->
+  <g stroke="#BB9AF7" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" fill="none">
+    <line x1="31" y1="40" x2="31" y2="12"/>
+    <polyline points="24,19 31,12 38,19"/>
+  </g>
+</svg>

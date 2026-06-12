@@ -11,7 +11,7 @@ cd "$(dirname "$0")/.."
 
 echo "==> building weather example (wasm32-wasip1)"
 cargo build --release --target wasm32-wasip1 \
-    --manifest-path examples/widgets/weather/Cargo.toml
+    --manifest-path widgets/builtin/weather/Cargo.toml
 
 echo "==> building overlay (debug — carries the --widget-smoke flag)"
 cargo build -p oxidemx-overlay
@@ -22,9 +22,9 @@ export XDG_CONFIG_HOME="$TMP/config"
 
 WIDGET_DIR="$XDG_CONFIG_HOME/oxidemx/widgets/weather"
 mkdir -p "$WIDGET_DIR"
-cp examples/widgets/weather/widget.json "$WIDGET_DIR/"
-cp examples/widgets/weather/icon.svg "$WIDGET_DIR/"
-cp examples/widgets/weather/target/wasm32-wasip1/release/weather.wasm \
+cp widgets/builtin/weather/widget.json "$WIDGET_DIR/"
+cp widgets/builtin/weather/icon.svg "$WIDGET_DIR/"
+cp widgets/builtin/weather/target/wasm32-wasip1/release/weather.wasm \
     "$WIDGET_DIR/widget.wasm"
 
 # One page, weather placed on slot 4 (instance key apps.slot4), the
