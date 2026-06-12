@@ -427,7 +427,18 @@ pub fn install(
             .map_err(|e| CliError::Manifest(format!("widget.json does not parse: {e}")))?
     };
 
+    // The id becomes a path component under widgets_dir — validate it
+    // BEFORE computing dest, or a crafted manifest ("../../…") escapes
+    // the install root entirely (arbitrary file write).
+    manifest
+        .validate()
+        .map_err(|e| CliError::Manifest(format!("bundle manifest invalid: {e}")))?;
     let id = manifest.id.clone();
+    // validate() enforces [a-z0-9.-]+ which already rejects `/`, but dot
+    // runs like ".." remain expressible — reject anything path-like.
+    if id.is_empty() || id.chars().all(|c| c == '.') || id.contains("..") {
+        return Err(CliError::Manifest(format!("unsafe widget id {id:?}")));
+    }
 
     // Resolve installation root.
     let root = match install_root {

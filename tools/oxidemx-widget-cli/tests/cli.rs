@@ -328,3 +328,36 @@ fn zip_slip_entry_is_rejected_and_writes_nothing() {
         "names are validated before anything is extracted"
     );
 }
+
+/// A crafted manifest id like "../../tmp/evil" must never become a path
+/// component under widgets_dir — install() validates the id before
+/// computing the destination (review finding, Plan 3 final).
+#[test]
+fn traversal_manifest_id_is_rejected() {
+    let tmp = tempfile::tempdir().unwrap();
+    let install_root = tmp.path().join("widgets");
+    std::fs::create_dir_all(&install_root).unwrap();
+
+    for bad_id in ["../../escape", "..", "...", ""] {
+        let manifest = WEATHER_MANIFEST.replace("\"weather\"", &format!("{bad_id:?}"));
+        let bundle = tmp.path().join("evil-id.omxw");
+        write_raw_bundle(
+            &bundle,
+            &[
+                ("widget.json", manifest.as_bytes()),
+                ("icon.svg", b"<svg/>"),
+                ("widget.wasm", b"\0asm"),
+            ],
+        );
+        let err = install(&bundle, true, Some(&install_root))
+            .expect_err("traversal id must be refused");
+        assert!(
+            matches!(err, CliError::Manifest(_)),
+            "id {bad_id:?}: expected Manifest error, got {err:?}"
+        );
+        assert!(
+            !tmp.path().join("escape").exists() && !tmp.path().join("tmp").exists(),
+            "id {bad_id:?} escaped the install root"
+        );
+    }
+}
