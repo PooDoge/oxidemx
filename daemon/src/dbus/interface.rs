@@ -685,11 +685,17 @@ impl OxideMXService {
         Ok(())
     }
 
-    /// Get battery status from the device
+    /// Get battery status from the device. While the mouse naps
+    /// (`available == false`) the last-known percentage is served —
+    /// charge doesn't change while asleep, and 0% would make the
+    /// indicator flash empty on every idle timeout. `(0, false)` is
+    /// only returned before the first successful reading.
     async fn get_battery_status(&self) -> fdo::Result<(u8, bool)> {
         let state = self.battery_state.read().await;
         if state.available {
             Ok((state.percentage, state.charging))
+        } else if state.has_reading {
+            Ok((state.percentage, false))
         } else {
             Ok((0, false))
         }

@@ -653,7 +653,25 @@ fn weather_location(state: &State) -> Element<'_, Message> {
     .spacing(8)
     .align_y(Alignment::Center);
 
-    let mut col = column![current, search].spacing(8);
+    // Temperature unit — Fahrenheit default, Celsius opt-in.
+    let celsius = state.config.overlay.weather_celsius;
+    let unit_btn = |label: &'static str, is_celsius: bool| {
+        let b = button(text(label).size(11)).on_press(Message::SetWeatherCelsius(is_celsius));
+        if celsius == is_celsius {
+            b.style(style::btn_primary(pal))
+        } else {
+            b.style(style::btn_secondary(pal))
+        }
+    };
+    let units = row![
+        text("Units:").size(12),
+        unit_btn("°F", false),
+        unit_btn("°C", true),
+    ]
+    .spacing(8)
+    .align_y(Alignment::Center);
+
+    let mut col = column![current, units, search].spacing(8);
     for (i, place) in state.weather_results.iter().enumerate() {
         col = col.push(
             button(text(place.label.clone()).size(12))

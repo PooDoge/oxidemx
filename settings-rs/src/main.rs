@@ -223,6 +223,8 @@ pub enum Message {
     /// Pick result `idx` → persist overlay.weather_location/_place.
     WeatherPick(usize),
     WeatherClearLocation,
+    /// Temperature unit toggle — `true` = Celsius (°F is default).
+    SetWeatherCelsius(bool),
     /// Live-widget data source for slice `idx` (Buttons tab editor).
     SetSliceWidgetSource(usize, oxidemx_shared::WidgetSource),
     /// Dial target for slice `idx`.
@@ -2703,6 +2705,12 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             state.config.overlay.weather_location = None;
             state.config.overlay.weather_place = None;
             state.status = "Weather location cleared".to_string();
+            state.touch();
+            Task::none()
+        }
+        Message::SetWeatherCelsius(celsius) => {
+            state.config.overlay.weather_celsius = celsius;
+            state.status = format!("Weather units set to °{}", if celsius { "C" } else { "F" });
             state.touch();
             Task::none()
         }

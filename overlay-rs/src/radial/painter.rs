@@ -641,6 +641,47 @@ impl<'a> canvas::Program<crate::app::Message> for Painter<'a> {
                     );
                 }
             }
+
+            // Weather popup — hovering the Weather wedge shows the
+            // full conditions card (place, current, 7-day forecast)
+            // after the same dwell delay as the arc tooltip. Drawn
+            // last so it sits above every ring element.
+            if let (Some(idx), Some(since)) =
+                (self.state.target_slice, self.state.target_slice_since)
+            {
+                let is_weather = self
+                    .state
+                    .slices
+                    .get(idx)
+                    .filter(|s| matches!(s.kind, oxidemx_shared::ActionKind::Widget))
+                    .and_then(|s| s.widget.as_ref())
+                    .map(|w| matches!(w.source, oxidemx_shared::WidgetSource::Weather))
+                    .unwrap_or(false);
+                if is_weather {
+                    if let Some(weather) = &self.state.widgets.snap.weather {
+                        let elapsed_ms = since.elapsed().as_millis() as u32;
+                        let delay = self.state.visuals.tooltip_delay_ms;
+                        if elapsed_ms >= delay {
+                            const FADE_MS: f32 = 150.0;
+                            let alpha = ((elapsed_ms - delay) as f32 / FADE_MS).clamp(0.0, 1.0);
+                            let outer_r = ((MENU_RADIUS as f32) - RING_OUTER_INSET) * mscale;
+                            crate::render::slices::draw_weather_popup(
+                                &mut frame,
+                                bounds.size(),
+                                center,
+                                outer_r,
+                                idx,
+                                self.state.active_slot_count(),
+                                weather,
+                                palette,
+                                &self.state.icons,
+                                mopacity,
+                                alpha,
+                            );
+                        }
+                    }
+                }
+            }
         }
 
         vec![frame.into_geometry()]

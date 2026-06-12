@@ -37,12 +37,41 @@ pub struct WidgetSnapshot {
     pub night_light_on: Option<bool>,
     pub brightness_percent: Option<u8>,
     pub volume_percent: Option<u8>,
-    /// `(temperature °C, condition label)` from Open-Meteo. The
-    /// label includes the configured place name when one is set
-    /// ("Clear · Oslo").
-    pub weather: Option<(f32, String)>,
+    /// Current conditions + 7-day forecast from Open-Meteo. The
+    /// wedge renders the condition icon; the hover popup renders
+    /// the rest.
+    pub weather: Option<WeatherInfo>,
     /// Scheduled OxideMX tasks due within 24 h.
     pub tasks_due: Option<u32>,
+}
+
+/// Current weather + daily forecast, already in the configured
+/// temperature unit.
+#[derive(Debug, Clone)]
+pub struct WeatherInfo {
+    /// Current temperature in the configured unit.
+    pub temp: f32,
+    /// Current WMO 4677 weather code.
+    pub code: u64,
+    /// Short condition label for the current code ("Partly cloudy").
+    pub label: String,
+    /// Configured place name ("Oslo, NO"), when one is set.
+    pub place: Option<String>,
+    /// `true` = temps are °F, `false` = °C.
+    pub fahrenheit: bool,
+    /// Up to 7 days starting today.
+    pub daily: Vec<DayForecast>,
+}
+
+/// One day of the Open-Meteo daily forecast.
+#[derive(Debug, Clone)]
+pub struct DayForecast {
+    /// Short weekday name ("Mon"), "Today" for the first entry.
+    pub day: String,
+    /// WMO weather code for the day.
+    pub code: u64,
+    pub t_min: f32,
+    pub t_max: f32,
 }
 
 /// Stream of snapshots, one per second. Same channel-bridge shape
@@ -54,6 +83,7 @@ pub fn stream() -> impl futures_util::stream::Stream<Item = WidgetSnapshot> {
         let overlay_cfg = crate::config::load().map(|c| c.overlay).unwrap_or_default();
         let weather_loc = overlay_cfg.weather_location;
         let weather_place = overlay_cfg.weather_place;
+        let weather_fahrenheit = !overlay_cfg.weather_celsius;
 
         let mut prev_cpu: Option<(u64, u64)> = None; // (busy, total)
         let mut prev_net: Option<(u64, u64)> = None; // (rx, tx bytes)
@@ -113,12 +143,9 @@ pub fn stream() -> impl futures_util::stream::Stream<Item = WidgetSnapshot> {
             // ---- every 15 min: weather ----
             if tick.is_multiple_of(900) {
                 if let Some((lat, lon)) = weather_loc {
-                    if let Some((temp, cond)) = fetch_weather(lat, lon).await {
-                        let label = match &weather_place {
-                            Some(place) => format!("{cond} · {place}"),
-                            None => cond,
-                        };
-                        snap.weather = Some((temp, label));
+                    if let Some(mut info) = fetch_weather(lat, lon, weather_fahrenheit).await {
+                        info.place = weather_place.clone();
+                        snap.weather = Some(info);
                     }
                 }
             }
@@ -266,12 +293,17 @@ async fn read_volume() -> Option<u8> {
     Some((v * 100.0).round().clamp(0.0, 200.0) as u8)
 }
 
-/// One Open-Meteo current-conditions fetch. Keyless API; ~1 req /
-/// 15 min is far inside its fair-use budget.
-async fn fetch_weather(lat: f64, lon: f64) -> Option<(f32, String)> {
+/// One Open-Meteo current-conditions + 7-day-forecast fetch.
+/// Keyless API; ~1 req / 15 min is far inside its fair-use budget.
+/// Open-Meteo does the unit conversion server-side via
+/// `temperature_unit`.
+async fn fetch_weather(lat: f64, lon: f64, fahrenheit: bool) -> Option<WeatherInfo> {
+    let unit = if fahrenheit { "fahrenheit" } else { "celsius" };
     let url = format!(
         "https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}\
-         &current=temperature_2m,weather_code"
+         &current=temperature_2m,weather_code\
+         &daily=weather_code,temperature_2m_max,temperature_2m_min\
+         &forecast_days=7&timezone=auto&temperature_unit={unit}"
     );
     let resp = reqwest::Client::builder()
         .timeout(Duration::from_secs(10))
@@ -285,7 +317,77 @@ async fn fetch_weather(lat: f64, lon: f64) -> Option<(f32, String)> {
     let cur = &v["current"];
     let temp = cur["temperature_2m"].as_f64()? as f32;
     let code = cur["weather_code"].as_u64().unwrap_or(0);
-    Some((temp, weather_label(code).to_string()))
+
+    let daily = &v["daily"];
+    let dates = daily["time"].as_array();
+    let codes = daily["weather_code"].as_array();
+    let maxs = daily["temperature_2m_max"].as_array();
+    let mins = daily["temperature_2m_min"].as_array();
+    let mut days = Vec::new();
+    if let (Some(dates), Some(codes), Some(maxs), Some(mins)) = (dates, codes, maxs, mins) {
+        for (i, date) in dates.iter().take(7).enumerate() {
+            let day = if i == 0 {
+                "Today".to_string()
+            } else {
+                date.as_str()
+                    .and_then(weekday_short)
+                    .unwrap_or("—")
+                    .to_string()
+            };
+            days.push(DayForecast {
+                day,
+                code: codes.get(i).and_then(|c| c.as_u64()).unwrap_or(0),
+                t_min: mins.get(i).and_then(|t| t.as_f64()).unwrap_or(0.0) as f32,
+                t_max: maxs.get(i).and_then(|t| t.as_f64()).unwrap_or(0.0) as f32,
+            });
+        }
+    }
+
+    Some(WeatherInfo {
+        temp,
+        code,
+        label: weather_label(code).to_string(),
+        place: None, // filled in by the sampling loop from config
+        fahrenheit,
+        daily: days,
+    })
+}
+
+/// Weekday abbreviation for an ISO `YYYY-MM-DD` date. Civil-days
+/// algorithm (Howard Hinnant's `days_from_civil`) — avoids pulling
+/// chrono in for one weekday lookup.
+fn weekday_short(iso: &str) -> Option<&'static str> {
+    let mut parts = iso.splitn(3, '-');
+    let y: i64 = parts.next()?.parse().ok()?;
+    let m: i64 = parts.next()?.parse().ok()?;
+    let d: i64 = parts.next()?.parse().ok()?;
+    if !(1..=12).contains(&m) || !(1..=31).contains(&d) {
+        return None;
+    }
+    let y = if m <= 2 { y - 1 } else { y };
+    let era = if y >= 0 { y } else { y - 399 } / 400;
+    let yoe = y - era * 400;
+    let doy = (153 * (if m > 2 { m - 3 } else { m + 9 }) + 2) / 5 + d - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    let days = era * 146_097 + doe - 719_468; // days since 1970-01-01
+    let dow = (days + 4).rem_euclid(7); // 1970-01-01 was a Thursday
+    Some(["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][dow as usize])
+}
+
+/// WMO weather-code → XDG symbolic icon name (Adwaita ships the
+/// full `weather-*-symbolic` set).
+pub fn weather_icon_name(code: u64) -> &'static str {
+    match code {
+        0 => "weather-clear-symbolic",
+        1 | 2 => "weather-few-clouds-symbolic",
+        3 => "weather-overcast-symbolic",
+        45 | 48 => "weather-fog-symbolic",
+        51..=57 => "weather-showers-scattered-symbolic",
+        61..=67 | 80..=82 => "weather-showers-symbolic",
+        71..=77 | 85 | 86 => "weather-snow-symbolic",
+        95..=99 => "weather-storm-symbolic",
+        _ => "weather-overcast-symbolic",
+    }
 }
 
 /// WMO weather-code → short label (Open-Meteo uses WMO 4677 codes).
@@ -329,5 +431,26 @@ mod tests {
         assert_eq!(weather_label(63), "Rain");
         assert_eq!(weather_label(96), "Thunderstorm");
         assert_eq!(weather_label(123), "Cloudy");
+    }
+
+    #[test]
+    fn weather_icons_cover_wmo_ranges() {
+        assert_eq!(weather_icon_name(0), "weather-clear-symbolic");
+        assert_eq!(weather_icon_name(2), "weather-few-clouds-symbolic");
+        assert_eq!(weather_icon_name(3), "weather-overcast-symbolic");
+        assert_eq!(weather_icon_name(53), "weather-showers-scattered-symbolic");
+        assert_eq!(weather_icon_name(63), "weather-showers-symbolic");
+        assert_eq!(weather_icon_name(75), "weather-snow-symbolic");
+        assert_eq!(weather_icon_name(96), "weather-storm-symbolic");
+        assert_eq!(weather_icon_name(123), "weather-overcast-symbolic");
+    }
+
+    #[test]
+    fn weekday_short_known_dates() {
+        assert_eq!(weekday_short("1970-01-01"), Some("Thu"));
+        assert_eq!(weekday_short("2026-06-12"), Some("Fri"));
+        assert_eq!(weekday_short("2000-02-29"), Some("Tue"));
+        assert_eq!(weekday_short("not-a-date"), None);
+        assert_eq!(weekday_short("2026-13-01"), None);
     }
 }

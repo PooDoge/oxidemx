@@ -290,6 +290,7 @@ pub fn draw_slice(
                 mo,
                 hl,
                 Color::from_rgba(sr as f32, sg as f32, sb as f32, 1.0),
+                icons,
             );
             return;
         }

@@ -787,9 +787,14 @@ pub struct OverlayConfig {
 
     /// Display name for the weather location ("Oslo, NO") — set by
     /// the settings geocoder alongside `weather_location`; shown in
-    /// the wedge's sublabel ("Clear · Oslo").
+    /// the wedge's hover popup header.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub weather_place: Option<String>,
+
+    /// Temperature unit for the Weather widget. Fahrenheit is the
+    /// default; `true` switches to Celsius (settings app toggle).
+    #[serde(default)]
+    pub weather_celsius: bool,
 
     /// AI agent knobs.
     #[serde(default)]

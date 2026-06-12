@@ -31,6 +31,10 @@ pub struct BatteryState {
     pub charging: bool,
     /// Whether battery info is available
     pub available: bool,
+    /// Whether at least one successful reading has ever been taken
+    /// this daemon run. Lets readers serve the last-known percentage
+    /// while the mouse naps (`available == false`) instead of 0%.
+    pub has_reading: bool,
     /// Last error message if any
     pub error: Option<String>,
 }
@@ -413,6 +417,7 @@ impl BatteryHandler {
                 state.percentage = percentage;
                 state.charging = charging;
                 state.available = true;
+                state.has_reading = true;
                 state.error = None;
                 tracing::debug!(percentage, charging, "Battery state updated");
             }
@@ -641,6 +646,7 @@ pub async fn start_battery_updater_shared_with_dbus(
                     s.percentage = percentage;
                     s.charging = charging;
                     s.available = true;
+                    s.has_reading = true;
                     s.error = None;
                 }
                 tracing::debug!(percentage, charging, "Battery state updated (shared)");
@@ -652,10 +658,13 @@ pub async fn start_battery_updater_shared_with_dbus(
             Err(e) => {
                 consecutive_errors += 1;
 
-                // Emit "off" signal when battery transitions from available to unavailable.
-                let was_available = {
+                // The mouse sleeping (or briefly dropping the link)
+                // doesn't change its charge — keep advertising the
+                // last-known percentage on the transition signal so
+                // the indicator doesn't flash 0% during every nap.
+                let (was_available, last_pct) = {
                     let s = state.read().await;
-                    s.available
+                    (s.available, if s.has_reading { s.percentage } else { 0 })
                 };
 
                 {
@@ -665,7 +674,7 @@ pub async fn start_battery_updater_shared_with_dbus(
                 }
 
                 if was_available {
-                    maybe_emit_device_state_changed(&dbus_conn, 0, false).await;
+                    maybe_emit_device_state_changed(&dbus_conn, last_pct, false).await;
                 }
 
                 // Only log warning for first few errors, then go quiet
