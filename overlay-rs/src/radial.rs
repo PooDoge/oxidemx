@@ -122,6 +122,14 @@ pub struct ChatMessage {
     /// re-parses.
     #[serde(skip)]
     pub md: Vec<iced::widget::markdown::Item>,
+
+    /// Structured agent-feature card attached to this message
+    /// (command executed / task scheduled / memory saved). `None`
+    /// for plain text bubbles — and for every message written
+    /// before this field existed, so old `ai-chats.json` files
+    /// load unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub card: Option<crate::ai_client::AgentCardData>,
 }
 
 impl ChatMessage {
@@ -130,6 +138,7 @@ impl ChatMessage {
             is_user: true,
             text,
             md: Vec::new(),
+            card: None,
         }
     }
 
@@ -139,6 +148,32 @@ impl ChatMessage {
             is_user: false,
             text,
             md,
+            card: None,
+        }
+    }
+
+    /// An agent-feature card message. `text` carries a plain-text
+    /// rendering for "Copy chat" and for clients without card
+    /// rendering; the view draws from `card`.
+    pub fn agent_card(card: crate::ai_client::AgentCardData) -> Self {
+        let text = match &card {
+            crate::ai_client::AgentCardData::Command {
+                command, exit_code, ..
+            } => {
+                format!("[command executed: {command} (exit {exit_code})]")
+            }
+            crate::ai_client::AgentCardData::Task { name, schedule, .. } => {
+                format!("[task scheduled: {name} — {schedule}]")
+            }
+            crate::ai_client::AgentCardData::Memory { text, .. } => {
+                format!("[memory saved: {text}]")
+            }
+        };
+        ChatMessage {
+            is_user: false,
+            text,
+            md: Vec::new(),
+            card: Some(card),
         }
     }
 }
@@ -288,7 +323,7 @@ pub struct RadialState {
     /// one request can be in flight (`ai_loading` gates submit).
     pub ai_stream: Option<(usize, String)>,
     /// What the agent is doing right now, for the loading row.
-    pub ai_activity: Option<&'static str>,
+    pub ai_activity: Option<String>,
     /// Abort handle for the in-flight request (Stop button).
     pub ai_abort: Option<iced::task::Handle>,
     /// Index (within the active thread's history) of the bubble the

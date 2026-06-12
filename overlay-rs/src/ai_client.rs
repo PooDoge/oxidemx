@@ -30,8 +30,49 @@ pub static CONFIG_CHANGED_TX: Lazy<Mutex<Option<mpsc::Sender<String>>>> =
 pub enum StreamEvent {
     /// A chunk of the model's text reply, in order.
     Delta(String),
-    /// What the agent is doing right now ("Searching the web…").
-    Activity(&'static str),
+    /// What the agent is doing right now ("Searching the web…",
+    /// "Scheduling task — writing systemd unit…"). Dynamic so tool
+    /// executors can interpolate the target into the label.
+    Activity(String),
+    /// A structured agent-feature card to append to the
+    /// conversation (command executed / task scheduled / memory
+    /// saved). Rendered by `chat_ui::cards` and persisted on the
+    /// owning `ChatMessage`.
+    #[allow(dead_code)] // constructed by the T4 tool executors
+    Card(AgentCardData),
+}
+
+/// Payload for the three agent-feature card types. Serialized into
+/// `ai-chats.json` as part of `ChatMessage`, so every field is
+/// plain data (chips/buttons are derived in the view).
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum AgentCardData {
+    /// `execute_command` ran. `stdout` is trimmed to the card cap.
+    Command {
+        command: String,
+        stdout: String,
+        exit_code: i32,
+    },
+    /// `schedule_task` created/changed a systemd user timer.
+    Task {
+        name: String,
+        /// Unit base name ("oxidemx-task-<slug>").
+        unit: String,
+        /// OnCalendar expression as written to the timer.
+        schedule: String,
+        /// Human "next run" from `systemctl --user list-timers`,
+        /// `None` when the timer is disabled.
+        next_run: Option<String>,
+        enabled: bool,
+    },
+    /// `memory` saved an entry.
+    Memory {
+        id: String,
+        text: String,
+        /// "until changed" (pinned) or "auto · 90d" (unpinned).
+        retention: String,
+    },
 }
 
 /// Channel to push (thread_idx, StreamEvent) into the UI loop.
@@ -504,7 +545,7 @@ pub async fn ask_ai(
     let mut full_text = String::new();
 
     if let Some(s) = &sink {
-        s.send(StreamEvent::Activity("Thinking…")).await;
+        s.send(StreamEvent::Activity("Thinking…".to_string())).await;
     }
 
     for round in 0..MAX_TOOL_ROUNDS {
@@ -556,7 +597,7 @@ pub async fn ask_ai(
                 };
                 info!("Executing local tool '{}' (call_id={})", name, call_id);
                 if let Some(s) = &sink {
-                    s.send(StreamEvent::Activity(activity_for_tool(&name)))
+                    s.send(StreamEvent::Activity(activity_for_tool(&name).to_string()))
                         .await;
                 }
                 let result_text = match execute_local_tool(&name, args).await {
@@ -567,7 +608,7 @@ pub async fn ask_ai(
                     Err(e) => format!("Tool error: {e}"),
                 };
                 if let Some(s) = &sink {
-                    s.send(StreamEvent::Activity("Thinking…")).await;
+                    s.send(StreamEvent::Activity("Thinking…".to_string())).await;
                 }
                 input = json!({
                     "type": "function_result",

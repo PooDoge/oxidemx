@@ -495,7 +495,7 @@ fn update(state: &mut RadialState, message: Message) -> Task<Message> {
             chat.history.push(ChatMessage::user(prompt.clone()));
             chat.updated_at = now;
             state.ai_loading = true;
-            state.ai_activity = Some("Thinking…");
+            state.ai_activity = Some("Thinking…".to_string());
             // Server-side conversation state: the Interactions API
             // replays context from previous_interaction_id, so only
             // the new prompt travels (the local history is
@@ -549,6 +549,18 @@ fn update(state: &mut RadialState, message: Message) -> Task<Message> {
             crate::ai_client::StreamEvent::Activity(label) => {
                 state.ai_activity = Some(label);
                 Task::none()
+            }
+            crate::ai_client::StreamEvent::Card(card) => {
+                // Cards land in the requesting thread immediately —
+                // they describe something that already happened
+                // (command ran, unit written), so they must survive
+                // even if the turn is later stopped/errored.
+                if let Some(chat) = state.ai_threads.get_mut(thread_idx) {
+                    chat.history.push(ChatMessage::agent_card(card));
+                    chat.updated_at = crate::radial::now_secs();
+                }
+                crate::radial::save_chat_threads(&state.ai_threads);
+                scroll_chat_to_end()
             }
             crate::ai_client::StreamEvent::Delta(text) => {
                 match &mut state.ai_stream {
@@ -1904,7 +1916,7 @@ fn build_ai_panel(state: &RadialState, alpha: f32) -> Element<'_, Message> {
     let mut input_col = column![].spacing(4);
     if state.ai_loading {
         input_col = input_col.push(
-            text(state.ai_activity.unwrap_or("Working…"))
+            text(state.ai_activity.as_deref().unwrap_or("Working…"))
                 .size(11)
                 .font(iced::Font {
                     style: iced::font::Style::Italic,
