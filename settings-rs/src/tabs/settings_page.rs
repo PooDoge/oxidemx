@@ -73,6 +73,8 @@ pub fn view(state: &State) -> Element<'_, Message> {
         Space::new().height(Length::Fixed(8.0)),
         section_block(state, "Theme", theme_picker(state)),
         Space::new().height(Length::Fixed(16.0)),
+        section_block(state, "Weather widget", weather_location(state)),
+        Space::new().height(Length::Fixed(16.0)),
         section_block(state, "Visuals", tabs::visuals::view(state)),
         Space::new().height(Length::Fixed(16.0)),
         section_block(state, "Animation", tabs::animation::view(state)),
@@ -594,4 +596,75 @@ impl std::fmt::Display for ThemeChoice {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(&self.display)
     }
+}
+
+/// Weather-widget location: shows the configured place, a city
+/// search box backed by Open-Meteo's keyless geocoder, and the
+/// result list. Picking a result persists
+/// `overlay.weather_location` + `overlay.weather_place`; the
+/// overlay's sampler reads both on its next launch of the menu.
+fn weather_location(state: &State) -> Element<'_, Message> {
+    let pal = &state.palette;
+
+    let current: Element<Message> = match (
+        &state.config.overlay.weather_place,
+        state.config.overlay.weather_location,
+    ) {
+        (Some(place), _) => row![
+            text(format!("Location: {place}")).size(12),
+            button(text("Clear").size(11))
+                .style(style::btn_secondary(pal))
+                .on_press(Message::WeatherClearLocation),
+        ]
+        .spacing(8)
+        .align_y(Alignment::Center)
+        .into(),
+        (None, Some((lat, lon))) => row![
+            text(format!("Location: {lat:.3}, {lon:.3}")).size(12),
+            button(text("Clear").size(11))
+                .style(style::btn_secondary(pal))
+                .on_press(Message::WeatherClearLocation),
+        ]
+        .spacing(8)
+        .align_y(Alignment::Center)
+        .into(),
+        _ => text("No location set — the Weather wedge shows a placeholder.")
+            .size(12)
+            .style(style::text_dim(pal))
+            .into(),
+    };
+
+    let search_btn = if state.weather_searching {
+        button(text("Searching…").size(11)).style(style::btn_secondary(pal))
+    } else {
+        button(text("Search").size(11))
+            .style(style::btn_secondary(pal))
+            .on_press(Message::WeatherSearch)
+    };
+    let search = row![
+        text_input("City name (e.g. Oslo)…", &state.weather_query)
+            .size(12)
+            .padding(6)
+            .on_input(Message::SetWeatherQuery)
+            .on_submit(Message::WeatherSearch)
+            .width(Length::Fixed(260.0)),
+        search_btn,
+    ]
+    .spacing(8)
+    .align_y(Alignment::Center);
+
+    let mut col = column![current, search].spacing(8);
+    for (i, place) in state.weather_results.iter().enumerate() {
+        col = col.push(
+            button(text(place.label.clone()).size(12))
+                .style(style::btn_secondary(pal))
+                .on_press(Message::WeatherPick(i)),
+        );
+    }
+    col = col.push(
+        text("Forecast data by Open-Meteo (no API key). Refreshes every 15 minutes while the menu is open.")
+            .size(10)
+            .style(style::text_dim(pal)),
+    );
+    col.into()
 }

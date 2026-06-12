@@ -235,6 +235,39 @@ fn parse_list_timers(json: &str, now_secs: u64) -> Vec<(String, String)> {
     out
 }
 
+/// Count `oxidemx-task-*` timers whose next run falls within
+/// `window_secs` of `now_secs`. Pure half of `due_within_24h_count`.
+fn due_in_window(json: &str, now_secs: u64, window_secs: u64) -> u32 {
+    let Ok(rows) = serde_json::from_str::<serde_json::Value>(json) else {
+        return 0;
+    };
+    let mut count = 0;
+    for row in rows.as_array().into_iter().flatten() {
+        let Some(unit) = row["unit"].as_str() else {
+            continue;
+        };
+        if !unit.starts_with("oxidemx-task-") {
+            continue;
+        }
+        if let Some(next_usec) = row["next"].as_u64() {
+            let next_secs = next_usec / 1_000_000;
+            if next_secs >= now_secs && next_secs <= now_secs + window_secs {
+                count += 1;
+            }
+        }
+    }
+    count
+}
+
+/// Number of scheduled OxideMX tasks due within the next 24 hours —
+/// feeds the Splice Widgets "Tasks" wedge.
+pub fn due_within_24h_count() -> u32 {
+    match systemctl(&["list-timers", "--all", "--output=json"]) {
+        Ok(json) => due_in_window(&json, unix_now(), 86_400),
+        Err(_) => 0,
+    }
+}
+
 // =============================================================================
 // SYSTEMCTL-BACKED PUBLIC API
 // =============================================================================
@@ -353,6 +386,23 @@ pub fn list() -> Vec<TaskInfo> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn due_in_window_counts_only_oxidemx_timers_in_range() {
+        let now = 1_000_000u64; // secs
+        let json = format!(
+            r#"[
+              {{"unit":"oxidemx-task-a.timer","next":{}}},
+              {{"unit":"oxidemx-task-b.timer","next":{}}},
+              {{"unit":"oxidemx-task-c.timer","next":null}},
+              {{"unit":"systemd-tmpfiles-clean.timer","next":{}}}
+            ]"#,
+            (now + 3_600) * 1_000_000,  // in 1h → counts
+            (now + 90_000) * 1_000_000, // in 25h → outside window
+            (now + 60) * 1_000_000,     // foreign unit → ignored
+        );
+        assert_eq!(super::due_in_window(&json, now, 86_400), 1);
+    }
+
     use super::*;
 
     fn temp_dir(tag: &str) -> PathBuf {

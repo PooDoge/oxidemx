@@ -67,9 +67,10 @@ into yours.
    live ↓ rate.
 2. Cycle to **Widgets**: CPU (with sparkline + cores/temp), Memory
    (used / total GB), Network ↓↑ with sparkline, Disk GB free, mouse
-   Battery % from the daemon. Weather shows "— / set location" until
-   `overlay.weather_location: [lat, lon]` is set in config.json; Tasks
-   shows its honest "no task source" stub.
+   Battery % from the daemon. Weather shows "— / set location" until a
+   location is set: Settings → Settings tab → "Weather widget" → search
+   a city (Open-Meteo geocoder) and pick a result. Tasks counts
+   scheduled oxidemx timers due within 24 h.
 3. Per-page wedge labels render under every icon on all pages.
 
 ## Vision-loop captures (no daemon needed)

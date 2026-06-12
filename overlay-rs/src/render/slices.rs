@@ -506,8 +506,10 @@ fn draw_widget_wedge(
                 "GB free".into(),
                 None,
             ),
-            // No task backend exists yet — honest stub per plan.
-            Some(WidgetSource::TasksDue) => ("—".into(), "no task source".into(), None),
+            Some(WidgetSource::TasksDue) => match snap.tasks_due {
+                Some(n) => (n.to_string(), "due in 24h".into(), None),
+                None => ("—".into(), "scheduled tasks".into(), None),
+            },
             Some(WidgetSource::MouseBattery) => match snap.mouse_battery {
                 Some((pct, charging)) => (
                     format!("{pct}%"),

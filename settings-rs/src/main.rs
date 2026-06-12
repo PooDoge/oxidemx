@@ -216,6 +216,17 @@ impl Tab {
 #[derive(Debug, Clone)]
 pub enum Message {
     SwitchTab(Tab),
+    /// Weather-location geocoder (Settings tab).
+    SetWeatherQuery(String),
+    WeatherSearch,
+    WeatherResults(Result<Vec<GeoPlace>, String>),
+    /// Pick result `idx` → persist overlay.weather_location/_place.
+    WeatherPick(usize),
+    WeatherClearLocation,
+    /// Live-widget data source for slice `idx` (Buttons tab editor).
+    SetSliceWidgetSource(usize, oxidemx_shared::WidgetSource),
+    /// Dial target for slice `idx`.
+    SetSliceDial(usize, oxidemx_shared::DialKind),
     SetVisual(VisualField, f32),
     /// Font family override for rendered text (Visuals tab).
     /// Empty string = system default.
@@ -1007,6 +1018,74 @@ impl AnimDirection {
 // State
 // ============================================================================
 
+/// One geocoding hit from Open-Meteo's keyless geocoder.
+#[derive(Debug, Clone, PartialEq)]
+pub struct GeoPlace {
+    /// "Oslo, NO" — also persisted as `overlay.weather_place`.
+    pub label: String,
+    pub lat: f64,
+    pub lon: f64,
+}
+
+/// Resolve a city name via Open-Meteo's geocoding API. Runs `curl`
+/// in a blocking task — settings has no HTTP client dependency and
+/// this is a rare, user-initiated call.
+async fn geocode_city(query: String) -> Result<Vec<GeoPlace>, String> {
+    tokio::task::spawn_blocking(move || {
+        let encoded: String = query
+            .trim()
+            .chars()
+            .map(|c| {
+                if c.is_ascii_alphanumeric() || "-_.~".contains(c) {
+                    c.to_string()
+                } else {
+                    c.to_string()
+                        .bytes()
+                        .map(|b| format!("%{b:02X}"))
+                        .collect()
+                }
+            })
+            .collect();
+        let url = format!(
+            "https://geocoding-api.open-meteo.com/v1/search?name={encoded}&count=5&language=en&format=json"
+        );
+        let out = std::process::Command::new("curl")
+            .args(["-sm", "8", &url])
+            .output()
+            .map_err(|e| format!("curl failed to start: {e}"))?;
+        if !out.status.success() {
+            return Err("geocoding request failed (offline?)".to_string());
+        }
+        let v: serde_json::Value = serde_json::from_slice(&out.stdout)
+            .map_err(|e| format!("geocoding response unreadable: {e}"))?;
+        let mut places = Vec::new();
+        for r in v["results"].as_array().into_iter().flatten() {
+            let (Some(name), Some(lat), Some(lon)) = (
+                r["name"].as_str(),
+                r["latitude"].as_f64(),
+                r["longitude"].as_f64(),
+            ) else {
+                continue;
+            };
+            let region = r["admin1"].as_str().unwrap_or("");
+            let country = r["country_code"].as_str().unwrap_or("");
+            let label = match (region.is_empty(), country.is_empty()) {
+                (false, false) => format!("{name}, {region}, {country}"),
+                (true, false) => format!("{name}, {country}"),
+                _ => name.to_string(),
+            };
+            places.push(GeoPlace { label, lat, lon });
+        }
+        if places.is_empty() {
+            Err("no places matched".to_string())
+        } else {
+            Ok(places)
+        }
+    })
+    .await
+    .map_err(|e| format!("geocoding task failed: {e}"))?
+}
+
 pub struct State {
     pub config: AppConfig,
     /// Resolved colour palette derived from `config.theme`. Rebuilt
@@ -1034,6 +1113,12 @@ pub struct State {
     /// reset; click after the window times out arms again instead
     /// of acting. `None` = no reset pending.
     pub reset_armed_at: Option<std::time::Instant>,
+
+    /// Weather-location geocoder (Settings tab): live query text,
+    /// the last search's results, and an in-flight flag.
+    pub weather_query: String,
+    pub weather_results: Vec<GeoPlace>,
+    pub weather_searching: bool,
     /// Currently-selected slot in the radial preview, if any.
     /// Drives the per-slice editor in the Buttons-tab right column.
     pub selected_slice: Option<usize>,
@@ -1192,6 +1277,9 @@ impl Default for State {
             status_seen: String::new(),
             status_set_at: None,
             reset_armed_at: None,
+            weather_query: String::new(),
+            weather_results: Vec::new(),
+            weather_searching: false,
             selected_slice: None,
             icons: std::rc::Rc::new(oxidemx_icons::IconCache::new()),
             iced_handles: std::rc::Rc::new(std::cell::RefCell::new(
@@ -2557,6 +2645,65 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                 slice.kind = k;
                 state.touch();
             }
+            Task::none()
+        }
+        Message::SetSliceWidgetSource(i, source) => {
+            if let Some(slice) = state.active_slices_mut().get_mut(i) {
+                slice.widget = Some(oxidemx_shared::WidgetConfig {
+                    source,
+                    format: None,
+                });
+                state.touch();
+            }
+            Task::none()
+        }
+        Message::SetSliceDial(i, kind) => {
+            if let Some(slice) = state.active_slices_mut().get_mut(i) {
+                slice.dial = Some(kind);
+                state.touch();
+            }
+            Task::none()
+        }
+        Message::SetWeatherQuery(q) => {
+            state.weather_query = q;
+            Task::none()
+        }
+        Message::WeatherSearch => {
+            let q = state.weather_query.trim().to_string();
+            if q.is_empty() || state.weather_searching {
+                return Task::none();
+            }
+            state.weather_searching = true;
+            state.weather_results.clear();
+            Task::perform(geocode_city(q), Message::WeatherResults)
+        }
+        Message::WeatherResults(res) => {
+            state.weather_searching = false;
+            match res {
+                Ok(places) => {
+                    state.status = format!("{} places found", places.len());
+                    state.weather_results = places;
+                }
+                Err(e) => state.status = format!("Weather lookup failed: {e}"),
+            }
+            Task::none()
+        }
+        Message::WeatherPick(idx) => {
+            if let Some(place) = state.weather_results.get(idx).cloned() {
+                state.config.overlay.weather_location = Some((place.lat, place.lon));
+                state.config.overlay.weather_place = Some(place.label.clone());
+                state.weather_results.clear();
+                state.weather_query.clear();
+                state.status = format!("Weather location set: {}", place.label);
+                state.touch();
+            }
+            Task::none()
+        }
+        Message::WeatherClearLocation => {
+            state.config.overlay.weather_location = None;
+            state.config.overlay.weather_place = None;
+            state.status = "Weather location cleared".to_string();
+            state.touch();
             Task::none()
         }
         Message::SetSliceColor(i, s) => {

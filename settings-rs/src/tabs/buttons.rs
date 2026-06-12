@@ -1191,11 +1191,27 @@ fn action_value_editor<'a>(state: &'a State, idx: usize, slice: &'a Slice) -> El
             .size(11)
             .style(style::text_dim(pal))
             .into(),
-        ActionKind::Widget | ActionKind::Dial => {
-            text("(live wedge — data source set in config.json's widget/dial fields)")
-                .size(11)
-                .style(style::text_dim(pal))
-                .into()
+        ActionKind::Widget => {
+            let selected = slice.widget.as_ref().map(|w| WidgetSourceOption(w.source));
+            pick_list(
+                WIDGET_SOURCE_OPTIONS.to_vec(),
+                selected,
+                move |o: WidgetSourceOption| Message::SetSliceWidgetSource(idx, o.0),
+            )
+            .style(style::pick_list_style(pal))
+            .text_size(12)
+            .placeholder("Pick data source…")
+            .into()
+        }
+        ActionKind::Dial => {
+            let selected = slice.dial.map(DialKindOption);
+            pick_list(DIAL_OPTIONS.to_vec(), selected, move |o: DialKindOption| {
+                Message::SetSliceDial(idx, o.0)
+            })
+            .style(style::pick_list_style(pal))
+            .text_size(12)
+            .placeholder("Pick dial target…")
+            .into()
         }
         ActionKind::None => text("(no action)")
             .size(11)
@@ -1464,6 +1480,53 @@ impl std::fmt::Display for PowerOption {
         f.write_str(self.1)
     }
 }
+
+/// Pick-list wrapper for a widget wedge's data source.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WidgetSourceOption(pub oxidemx_shared::WidgetSource);
+
+impl std::fmt::Display for WidgetSourceOption {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use oxidemx_shared::WidgetSource as W;
+        f.write_str(match self.0 {
+            W::Weather => "Weather",
+            W::Cpu => "CPU usage",
+            W::Memory => "Memory",
+            W::Network => "Network rate",
+            W::Disk => "Disk free",
+            W::TasksDue => "Tasks due",
+            W::MouseBattery => "Mouse battery",
+        })
+    }
+}
+
+const WIDGET_SOURCE_OPTIONS: [WidgetSourceOption; 7] = [
+    WidgetSourceOption(oxidemx_shared::WidgetSource::Weather),
+    WidgetSourceOption(oxidemx_shared::WidgetSource::Cpu),
+    WidgetSourceOption(oxidemx_shared::WidgetSource::Memory),
+    WidgetSourceOption(oxidemx_shared::WidgetSource::Network),
+    WidgetSourceOption(oxidemx_shared::WidgetSource::Disk),
+    WidgetSourceOption(oxidemx_shared::WidgetSource::TasksDue),
+    WidgetSourceOption(oxidemx_shared::WidgetSource::MouseBattery),
+];
+
+/// Pick-list wrapper for a dial wedge's target.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DialKindOption(pub oxidemx_shared::DialKind);
+
+impl std::fmt::Display for DialKindOption {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self.0 {
+            oxidemx_shared::DialKind::Brightness => "Brightness",
+            oxidemx_shared::DialKind::Volume => "Volume",
+        })
+    }
+}
+
+const DIAL_OPTIONS: [DialKindOption; 2] = [
+    DialKindOption(oxidemx_shared::DialKind::Brightness),
+    DialKindOption(oxidemx_shared::DialKind::Volume),
+];
 
 const POWER_OPTIONS: [PowerOption; 5] = [
     PowerOption("lock", "Lock"),

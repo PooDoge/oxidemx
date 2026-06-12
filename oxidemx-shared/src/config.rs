@@ -785,6 +785,12 @@ pub struct OverlayConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub weather_location: Option<(f64, f64)>,
 
+    /// Display name for the weather location ("Oslo, NO") — set by
+    /// the settings geocoder alongside `weather_location`; shown in
+    /// the wedge's sublabel ("Clear · Oslo").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub weather_place: Option<String>,
+
     /// AI agent knobs.
     #[serde(default)]
     pub ai: AiConfig,

@@ -37,8 +37,12 @@ pub struct WidgetSnapshot {
     pub night_light_on: Option<bool>,
     pub brightness_percent: Option<u8>,
     pub volume_percent: Option<u8>,
-    /// `(temperature °C, condition label)` from Open-Meteo.
+    /// `(temperature °C, condition label)` from Open-Meteo. The
+    /// label includes the configured place name when one is set
+    /// ("Clear · Oslo").
     pub weather: Option<(f32, String)>,
+    /// Scheduled OxideMX tasks due within 24 h.
+    pub tasks_due: Option<u32>,
 }
 
 /// Stream of snapshots, one per second. Same channel-bridge shape
@@ -47,9 +51,9 @@ pub fn stream() -> impl futures_util::stream::Stream<Item = WidgetSnapshot> {
     let (tx, rx) = async_channel::bounded::<WidgetSnapshot>(4);
 
     tokio::spawn(async move {
-        let weather_loc = crate::config::load()
-            .ok()
-            .and_then(|c| c.overlay.weather_location);
+        let overlay_cfg = crate::config::load().map(|c| c.overlay).unwrap_or_default();
+        let weather_loc = overlay_cfg.weather_location;
+        let weather_place = overlay_cfg.weather_place;
 
         let mut prev_cpu: Option<(u64, u64)> = None; // (busy, total)
         let mut prev_net: Option<(u64, u64)> = None; // (rx, tx bytes)
@@ -98,11 +102,23 @@ pub fn stream() -> impl futures_util::stream::Stream<Item = WidgetSnapshot> {
                 snap.mouse_battery = crate::haptic_client::battery_status().await;
             }
 
+            // ---- every minute: scheduled-task due count ----
+            if tick.is_multiple_of(60) {
+                snap.tasks_due =
+                    tokio::task::spawn_blocking(crate::agent::tasks::due_within_24h_count)
+                        .await
+                        .ok();
+            }
+
             // ---- every 15 min: weather ----
             if tick.is_multiple_of(900) {
                 if let Some((lat, lon)) = weather_loc {
-                    if let Some(w) = fetch_weather(lat, lon).await {
-                        snap.weather = Some(w);
+                    if let Some((temp, cond)) = fetch_weather(lat, lon).await {
+                        let label = match &weather_place {
+                            Some(place) => format!("{cond} · {place}"),
+                            None => cond,
+                        };
+                        snap.weather = Some((temp, label));
                     }
                 }
             }
