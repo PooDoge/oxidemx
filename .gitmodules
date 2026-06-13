@@ -1,0 +1,10 @@
+[submodule "pop_os_iced"]
+	path = pop_os_iced
+	url = https://github.com/pop-os/iced.git
+	branch = master
+[submodule "docs/iced-guide"]
+	path = docs/iced-guide
+	url = https://github.com/JL710/iced-guide.git
+[submodule "libcosmic"]
+	path = libcosmic
+	url = https://github.com/pop-os/libcosmic.git
