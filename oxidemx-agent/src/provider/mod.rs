@@ -15,6 +15,7 @@
 //! sends `store: false` and no session id — for short-lived flow
 //! workers that need reproducible context.
 
+pub mod embed;
 pub mod sse;
 pub mod wire;
 
@@ -330,10 +331,8 @@ impl CompletionProvider for GeminiInteractionsProvider {
 
 #[async_trait]
 impl EmbeddingProvider for GeminiInteractionsProvider {
-    async fn embed(&self, _input: Vec<String>) -> Result<Vec<Vec<f32>>, LLMError> {
-        Err(LLMError::ProviderError(
-            "embeddings land with the Tier-3 memory work (P2)".into(),
-        ))
+    async fn embed(&self, input: Vec<String>) -> Result<Vec<Vec<f32>>, LLMError> {
+        embed::embed_texts(&self.client, &self.api_key, &input, &self.cancel).await
     }
 }
 
