@@ -49,7 +49,15 @@ struct OverlayTool {
 impl ToolRuntime for OverlayTool {
     async fn execute(&self, args: Value) -> Result<Value, ToolCallError> {
         match crate::ai_client::tools::execute_local_tool(&self.name, args, &self.sink).await {
-            Ok(text) => Ok(Value::String(text)),
+            // The Gemini backend builds the function response from this
+            // Value by parsing it as JSON — a bare `Value::String` of
+            // PLAIN TEXT (execute_command output, google_search prose,
+            // run_flow summary) parses to nothing and the model sees
+            // `{"content": null}`. So: if the tool already returned JSON
+            // text, deliver the parsed object; otherwise wrap the plain
+            // text as `{"output": …}` so the model actually receives it.
+            Ok(text) => Ok(serde_json::from_str::<Value>(&text)
+                .unwrap_or_else(|_| serde_json::json!({ "output": text }))),
             Err(e) => Err(ToolCallError::RuntimeError(e)),
         }
     }
