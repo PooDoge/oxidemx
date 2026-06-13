@@ -23,7 +23,9 @@ pub(super) fn update(state: &mut RadialState, message: Message) -> Task<Message>
                 | Message::AiModelToggled
                 | Message::AiRenameStart(_)
                 | Message::AiDeleteThread(_)
-                | Message::AiModeSelected(_)
+                | Message::AiOpenCommandCenter
+                | Message::AiOpenAgentsConfig
+                | Message::AiOpenMcpConfig
                 | Message::AiNewChat
                 | Message::AiToggleThreads
                 | Message::AiSelectThread(_)
@@ -805,14 +807,15 @@ pub(super) fn update(state: &mut RadialState, message: Message) -> Task<Message>
             crate::radial::save_chat_threads(&state.ai_threads);
             Task::none()
         }
-        Message::AiModeSelected(mode) => {
-            let chat = state.chat_mut();
-            if chat.mode != mode {
-                chat.mode = mode;
-                // New tool configuration → new server-side thread.
-                chat.session_id = None;
-                crate::radial::save_chat_threads(&state.ai_threads);
-            }
+        Message::AiOpenCommandCenter => {
+            let _ = std::process::Command::new("oxidemx-mission-control").spawn();
+            Task::none()
+        }
+        Message::AiOpenAgentsConfig | Message::AiOpenMcpConfig => {
+            // Open Settings on the Agents tab (roster / tools / MCP).
+            let _ = std::process::Command::new("oxidemx-settings")
+                .env("OXIDEMX_SETTINGS_TAB", "agents")
+                .spawn();
             Task::none()
         }
         Message::AiNewChat => {

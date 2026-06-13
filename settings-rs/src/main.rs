@@ -1429,9 +1429,12 @@ impl Default for State {
         // Restore the last-visited tab from disk if the user has
         // one saved. Falls back to Buttons (the home tab) when
         // there's no record or it points at an unknown tag.
-        let initial_tab = ui_state::load_last_tab()
-            .as_deref()
-            .and_then(Tab::from_tag)
+        // `OXIDEMX_SETTINGS_TAB` (set by the overlay's chat action icons)
+        // forces a starting tab; otherwise restore the last-used one.
+        let initial_tab = std::env::var("OXIDEMX_SETTINGS_TAB")
+            .ok()
+            .and_then(|t| Tab::from_tag(&t))
+            .or_else(|| ui_state::load_last_tab().as_deref().and_then(Tab::from_tag))
             .unwrap_or(Tab::MouseButtons);
         let (widget_registry, widget_manifests) = tabs::buttons::picker::scan_registry_full();
         State {

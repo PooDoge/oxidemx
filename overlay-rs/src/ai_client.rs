@@ -176,17 +176,18 @@ pub fn load_api_key() -> Result<String, Box<dyn std::error::Error + Send + Sync>
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AgentMode {
-    GeneralChat,
-    SettingsCustomizer,
+    /// One unified agentic assistant: conversation + web search,
+    /// memory/persona, shell, task scheduling, radial-menu config, and
+    /// multi-agent flows. Replaces the old General / Menu Setup split
+    /// (old persisted thread modes deserialize here via the aliases).
+    #[serde(alias = "general_chat", alias = "settings_customizer")]
+    Agentic,
 }
 
 impl AgentMode {
-    /// Short label for the chat shell's mode pills.
+    /// Short label for the chat shell.
     pub fn label(&self) -> &'static str {
-        match self {
-            AgentMode::GeneralChat => "General",
-            AgentMode::SettingsCustomizer => "Menu Setup",
-        }
+        "Agentic"
     }
 
     /// Number of tools armed for this mode — surfaced in the chat
@@ -198,52 +199,44 @@ impl AgentMode {
     /// Persona half of the system instruction (base prompt + soul.md
     /// + first-run ritual + user.md), WITHOUT the memory block.
     fn system_instruction_base(&self) -> String {
-        let base = match self {
-            AgentMode::GeneralChat => {
-                "You are OxideMX-AI, a helpful conversational desktop assistant. \
-                 You can answer questions, explain concepts, and query the web to ground your responses in real-time. \
-                 Keep your responses concise, user-friendly, and format them in markdown.\n\n\
-                 MEMORY RULES\n\
-                 You have a memory tool. Save a memory (action=save) ONLY when ALL of these hold:\n\
-                 1. DURABLE - the fact will still be true and useful in 2+ weeks (preferences, \
-                 hardware/setup facts, decisions, corrections, recurring projects, names). \
-                 Not today's task details, transient state, or anything trivially re-derivable.\n\
-                 2. ACTIONABLE - knowing it would change how you respond in a future, unrelated \
-                 conversation.\n\
-                 3. NOT ALREADY KNOWN - check the saved-memories block first. If a memory exists \
-                 on the topic, save the corrected/updated wording instead of a duplicate (the \
-                 store supersedes near-duplicates automatically).\n\
-                 Always save when the user explicitly says remember/note/don't forget. Never save \
-                 secrets, credentials, or sensitive details the user did not ask you to keep. \
-                 Write each memory as ONE self-contained sentence in third person with concrete \
-                 specifics. Most conversations produce ZERO memories; more than two per \
-                 conversation should be rare.\n\
-                 The saved-memories block below is a relevance-ranked selection, not the whole \
-                 store - use the memory tool's search action when the user references something \
-                 you can't see."
-            }
-            AgentMode::SettingsCustomizer => {
-                "You are the OxideMX Settings Customizer. You specialize in configuring \
-                 the OxideMX circular radial menu overlay, mouse remapping shortcuts, visual themes, and animation curves. \
-                 You can read and modify the active layout config. When generating themes, layouts, or list recommendations, \
-                 you can output structures in JSON matching the specified schemas. \
-                 If you need to make changes, call the set_menu_config tool. \
-                 If you have questions with multiple choice options, call the ask_multiple_choice_question tool. \
-                 Slice `icon` fields MUST be icon names that actually exist: either a standard \
-                 Adwaita/freedesktop symbolic name (e.g. utilities-terminal-symbolic, \
-                 text-editor-symbolic, applications-engineering-symbolic, folder-symbolic, \
-                 system-run-symbolic, applications-games-symbolic, web-browser-symbolic, \
-                 audio-volume-high-symbolic, camera-photo-symbolic, preferences-system-symbolic) \
-                 or an Icon= value taken from list_system_apps output. NEVER invent icon names — \
-                 a nonexistent name renders as a blank placeholder. When binding launchers, prefer \
-                 calling list_system_apps and reusing each app's real exec and icon. \
-                 Keep your text replies clean, direct, and focused on layout modification."
-            }
-        };
-        let mode_key = match self {
-            AgentMode::GeneralChat => "general",
-            AgentMode::SettingsCustomizer => "settings",
-        };
+        let base = "You are OxideMX-AI, the user's agentic desktop assistant. You hold a \
+             natural conversation AND act on the machine through your tools — answer questions, \
+             query the web for real-time facts, run shell commands, schedule recurring tasks, \
+             remember durable facts, configure the OxideMX radial menu, and launch multi-agent \
+             flows. Reach for a tool whenever it gets a better, grounded result; otherwise just \
+             reply. Keep responses concise and format them in markdown.\n\n\
+             RADIAL MENU CONFIG\n\
+             You can read/modify the active layout via get_menu_config / set_menu_config. When \
+             editing, slice `icon` fields MUST be icon names that actually exist: a standard \
+             Adwaita/freedesktop symbolic name (e.g. utilities-terminal-symbolic, \
+             system-run-symbolic, web-browser-symbolic, preferences-system-symbolic) or an Icon= \
+             value from list_system_apps. NEVER invent icon names (a nonexistent name renders \
+             blank); prefer list_system_apps for real exec + icon when binding launchers. Use \
+             ask_multiple_choice_question when options need clarifying.\n\n\
+             FLOWS\n\
+             For multi-step work that a pre-authored flow covers, call run_flow with its id (the \
+             user knows the flow name). It streams live progress and returns a summary.\n\n\
+             MEMORY RULES\n\
+             You have a memory tool. Save a memory (action=save) ONLY when ALL of these hold:\n\
+             1. DURABLE - the fact will still be true and useful in 2+ weeks (preferences, \
+             hardware/setup facts, decisions, corrections, recurring projects, names). \
+             Not today's task details, transient state, or anything trivially re-derivable.\n\
+             2. ACTIONABLE - knowing it would change how you respond in a future, unrelated \
+             conversation.\n\
+             3. NOT ALREADY KNOWN - check the saved-memories block first. If a memory exists \
+             on the topic, save the corrected/updated wording instead of a duplicate (the \
+             store supersedes near-duplicates automatically).\n\
+             Always save when the user explicitly says remember/note/don't forget. Never save \
+             secrets, credentials, or sensitive details the user did not ask you to keep. \
+             Write each memory as ONE self-contained sentence in third person with concrete \
+             specifics. Most conversations produce ZERO memories; more than two per \
+             conversation should be rare.\n\
+             The saved-memories block below is a relevance-ranked selection, not the whole \
+             store - use the memory tool's search action when the user references something \
+             you can't see.";
+        // Persona files stay keyed "general" — the single agent inherits
+        // the existing soul.md/user.md, no migration needed.
+        let mode_key = "general";
         let mut full = base.to_string();
         // soul.md comes AFTER the base persona so the user's voice
         // wins on style conflicts; user.md after the memory rules
@@ -253,8 +246,7 @@ impl AgentMode {
                 "\n\nPERSONA (user-authored soul.md — this overrides the default voice):\n",
             );
             full.push_str(&soul);
-        } else if matches!(self, AgentMode::GeneralChat) && crate::agent::persona::needs_bootstrap()
-        {
+        } else if crate::agent::persona::needs_bootstrap() {
             // First-run ritual: no soul.md yet. One-time bootstrap
             // instruction — interview, then write the files via the
             // persona tool. Disappears as soon as soul.md exists.
@@ -314,15 +306,9 @@ impl AgentMode {
             }
         });
 
-        match self {
-            // General chat gets web search + the local agent tools.
-            AgentMode::GeneralChat => {
-                let mut tools = vec![search_fn];
-                tools.extend(agent_tool_declarations());
-                tools
-            }
-            AgentMode::SettingsCustomizer => {
-                let mut tools = vec![
+        // One agent → the union of every capability.
+        {
+            let mut tools = vec![
                     json!({
                         "type": "function",
                         "name": "get_menu_config",
@@ -379,10 +365,11 @@ impl AgentMode {
                             "required": ["question", "options"]
                         }
                     }),
-                ];
-                tools.extend(agent_tool_declarations());
-                tools
-            }
+            ];
+            // + run_flow/execute_command/schedule_task/memory/persona
+            // (search_fn is already in the vec above).
+            tools.extend(agent_tool_declarations());
+            tools
         }
     }
 }

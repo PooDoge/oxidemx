@@ -120,7 +120,7 @@ impl Default for ChatThread {
     fn default() -> Self {
         ChatThread {
             title: String::new(),
-            mode: crate::ai_client::AgentMode::SettingsCustomizer,
+            mode: crate::ai_client::AgentMode::Agentic,
             history: Vec::new(),
             session_id: None,
             model: default_chat_model(),

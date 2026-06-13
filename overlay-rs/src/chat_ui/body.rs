@@ -26,19 +26,21 @@ pub fn hairline<'a>(kit: Kit, color: Color) -> Element<'a, Message> {
         .into()
 }
 
+/// Bubble max width as a share of the chat window width, so bubbles
+/// grow when the window is widened — clamped to a readable band
+/// (narrow windows keep the old 360 px; very wide windows cap at
+/// 760 px so prose lines don't get uncomfortably long).
+fn bubble_max_width(state: &RadialState) -> f32 {
+    (state.win_size.0 * 0.72).clamp(360.0, 760.0)
+}
+
 pub fn conversation<'a>(state: &'a RadialState, kit: &Kit) -> Element<'a, Message> {
     let kit = *kit;
     let mut list = column![].spacing(10);
 
     if state.chat().history.is_empty() {
-        let suggestions = match state.chat().mode {
-            crate::ai_client::AgentMode::SettingsCustomizer => {
-                "Try asking:\n• 'Change slice colors to green'\n• 'Set animation speed to fast'\n• 'Switch to Dracula theme'\n• 'Show installed apps'"
-            }
-            crate::ai_client::AgentMode::GeneralChat => {
-                "Ask, or describe an automation:\n• 'Dim the screen to 40% tonight at 22:00'\n• 'Remember I prefer warm light after sunset'\n• 'What's new in GNOME 50?'"
-            }
-        };
+        let suggestions =
+            "Ask, automate, or configure:\n• 'Dim the screen to 40% tonight at 22:00'\n• 'Change slice colors to green'\n• 'Run the research-digest flow on this URL'\n• 'Remember I prefer warm light after sunset'";
         list = list.push(
             text(suggestions)
                 .size(13)
@@ -69,7 +71,7 @@ pub fn conversation<'a>(state: &'a RadialState, kit: &Kit) -> Element<'a, Messag
                         bottom: 9.0,
                         left: 13.0,
                     })
-                    .max_width(360.0)
+                    .max_width(bubble_max_width(state))
                     .style(bubble_style(kit, false)),
                     Space::new().width(Length::Fill),
                 ]);
@@ -204,7 +206,7 @@ fn bubble_row<'a>(
             bottom: 9.0,
             left: 13.0,
         })
-        .max_width(360.0)
+        .max_width(bubble_max_width(state))
         .style(bubble_style(kit, msg.is_user));
 
     // Hovering a bubble reveals its copy button; a fixed-width

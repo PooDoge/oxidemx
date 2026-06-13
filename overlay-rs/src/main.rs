@@ -100,7 +100,7 @@ fn main() -> iced::Result {
         let code = rt.block_on(async {
             // Provider + key resolve inside the runtime from config.
             match ai_client::ask_ai(
-                ai_client::AgentMode::GeneralChat,
+                ai_client::AgentMode::Agentic,
                 ai_client::DEFAULT_MODEL,
                 &prompt,
                 None,

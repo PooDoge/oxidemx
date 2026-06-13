@@ -98,11 +98,12 @@ pub enum Message {
     AiResponseReceived(usize, Result<(String, Option<String>), String>),
     AiChooseOption(String),
     AiQuestionReceived(crate::ai_client::PendingQuestion),
-    /// Agent-mode pill clicked (Menu Setup ↔ General). Switching
-    /// resets the server-side session thread — the two modes'
-    /// tool configurations can't share one Interactions thread —
-    /// but keeps the visible history.
-    AiModeSelected(crate::ai_client::AgentMode),
+    /// Chat strip action icons (replace the old mode toggle): open
+    /// the Command Center (Mission Control), the Agents & skills
+    /// config (settings Agents tab), and MCP servers.
+    AiOpenCommandCenter,
+    AiOpenAgentsConfig,
+    AiOpenMcpConfig,
     /// "+ New" — start a fresh conversation thread.
     AiNewChat,
     /// Toggle the previous-conversations list.

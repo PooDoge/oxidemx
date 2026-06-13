@@ -100,21 +100,12 @@ pub fn strip<'a>(state: &'a RadialState, kit: &Kit) -> Element<'a, Message> {
 
     bar = bar.push(Space::new().width(Length::Fill));
 
-    // Agent-mode pill (tap cycles Menu Setup ↔ General). The
-    // redesign's strip only shows the flash indicator, but the two
-    // tool configurations are a real functional switch — keep it
-    // reachable as a compact pill.
-    let mode = state.chat().mode;
-    let next_mode = match mode {
-        crate::ai_client::AgentMode::SettingsCustomizer => crate::ai_client::AgentMode::GeneralChat,
-        crate::ai_client::AgentMode::GeneralChat => crate::ai_client::AgentMode::SettingsCustomizer,
-    };
-    bar = bar.push(chip(
-        mode.label().to_string(),
-        false,
-        true,
-        Message::AiModeSelected(next_mode),
-    ));
+    // Action icons (the agent is one unified "Agentic" mode now, so the
+    // old General/Menu-Setup toggle is gone): open the Command Center
+    // (Mission Control), the Agents & skills config, and MCP servers.
+    bar = bar.push(chip("▦".into(), false, true, Message::AiOpenCommandCenter));
+    bar = bar.push(chip("⚙".into(), false, true, Message::AiOpenAgentsConfig));
+    bar = bar.push(chip("🔌".into(), false, true, Message::AiOpenMcpConfig));
 
     // Flash/Pro indicator, right-aligned with the sparkle.
     let is_pro = state.chat().model == crate::ai_client::PRO_MODEL;
