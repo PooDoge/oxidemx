@@ -937,6 +937,106 @@ pub struct OverlayConfig {
     pub ai: AiConfig,
 }
 
+/// Which LLM provider the agent runtime uses. All ride AutoAgents'
+/// built-in backends (standard chat APIs, history shipped via memory)
+/// except `ClaudeCode`, which shells out to the `claude` CLI.
+///
+/// Migration: the legacy `interactions` / `generate_content` values
+/// (the retired bespoke Gemini transport) deserialize to `Gemini`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AiProvider {
+    /// Gemini via the normal `generateContent` API (default).
+    #[default]
+    #[serde(alias = "interactions", alias = "generate_content")]
+    Gemini,
+    #[serde(rename = "openai")]
+    OpenAi,
+    Anthropic,
+    /// Local models via Ollama (no API key).
+    Ollama,
+    /// The `claude` CLI / Claude subscription (no API key; chat-only).
+    ClaudeCode,
+}
+
+impl AiProvider {
+    /// Human-readable label for pickers.
+    pub fn label(&self) -> &'static str {
+        match self {
+            AiProvider::Gemini => "Gemini (Google)",
+            AiProvider::OpenAi => "OpenAI",
+            AiProvider::Anthropic => "Anthropic (Claude API)",
+            AiProvider::Ollama => "Ollama (local)",
+            AiProvider::ClaudeCode => "Claude Code (CLI)",
+        }
+    }
+
+    /// Default model id for this provider — used when the user
+    /// switches providers so the `model` field stays valid.
+    pub fn default_model(&self) -> &'static str {
+        match self {
+            AiProvider::Gemini => "gemini-2.5-flash",
+            AiProvider::OpenAi => "gpt-4o",
+            AiProvider::Anthropic => "claude-sonnet-4-6",
+            AiProvider::Ollama => "llama3.2",
+            AiProvider::ClaudeCode => "", // CLI uses the subscription default
+        }
+    }
+
+    /// Whether this provider needs an API key (Ollama + Claude Code
+    /// don't).
+    pub fn needs_key(&self) -> bool {
+        matches!(self, AiProvider::Gemini | AiProvider::OpenAi | AiProvider::Anthropic)
+    }
+
+    /// Environment variable that supplies this provider's key, if any.
+    pub fn key_env(&self) -> Option<&'static str> {
+        match self {
+            AiProvider::Gemini => Some("GEMINI_API_KEY"),
+            AiProvider::OpenAi => Some("OPENAI_API_KEY"),
+            AiProvider::Anthropic => Some("ANTHROPIC_API_KEY"),
+            AiProvider::Ollama | AiProvider::ClaudeCode => None,
+        }
+    }
+
+    /// File stem under `~/.config/oxidemx/` for this provider's key
+    /// (`<stem>.key`), if it uses one. The shared contract between the
+    /// settings writer and the agent reader.
+    pub fn key_file_stem(&self) -> Option<&'static str> {
+        match self {
+            AiProvider::Gemini => Some("gemini"),
+            AiProvider::OpenAi => Some("openai"),
+            AiProvider::Anthropic => Some("anthropic"),
+            AiProvider::Ollama | AiProvider::ClaudeCode => None,
+        }
+    }
+
+    /// Suggested model ids for pickers (free-text still allowed).
+    pub fn model_suggestions(&self) -> &'static [&'static str] {
+        match self {
+            AiProvider::Gemini => &["gemini-2.5-flash", "gemini-2.5-pro"],
+            AiProvider::OpenAi => &["gpt-4o", "gpt-4o-mini", "gpt-4.1"],
+            AiProvider::Anthropic => &["claude-sonnet-4-6", "claude-opus-4-8", "claude-haiku-4-5-20251001"],
+            AiProvider::Ollama => &["llama3.2", "qwen2.5", "mistral"],
+            AiProvider::ClaudeCode => &["", "sonnet", "opus", "haiku"],
+        }
+    }
+
+    pub const ALL: [AiProvider; 5] = [
+        AiProvider::Gemini,
+        AiProvider::OpenAi,
+        AiProvider::Anthropic,
+        AiProvider::Ollama,
+        AiProvider::ClaudeCode,
+    ];
+}
+
+impl std::fmt::Display for AiProvider {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.label())
+    }
+}
+
 /// AI agent configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AiConfig {
@@ -947,14 +1047,29 @@ pub struct AiConfig {
     /// confirmation chip in the chat.
     #[serde(default = "default_command_allowlist")]
     pub command_allowlist: Vec<String>,
+
+    /// LLM provider the agent runtime uses.
+    #[serde(default, alias = "backend")]
+    pub provider: AiProvider,
+
+    /// Model id for the selected provider. The settings AI tab resets
+    /// this to the provider's default when the provider changes.
+    #[serde(default = "default_ai_model")]
+    pub model: String,
 }
 
 impl Default for AiConfig {
     fn default() -> Self {
         AiConfig {
             command_allowlist: default_command_allowlist(),
+            provider: AiProvider::default(),
+            model: default_ai_model(),
         }
     }
+}
+
+fn default_ai_model() -> String {
+    "gemini-2.5-flash".to_string()
 }
 
 fn default_command_allowlist() -> Vec<String> {

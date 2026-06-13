@@ -21,6 +21,7 @@
 
 mod actions;
 mod agent;
+mod agent_runtime;
 mod ai_client;
 mod anim;
 mod app;
@@ -84,6 +85,55 @@ fn main() -> iced::Result {
             }
         });
         std::process::exit(code);
+    }
+
+    // Headless agent self-test: drives the real `agent_runtime` path
+    // (OverlayAgent + tools + provider + session) against the live API
+    // with no window or bus claim. Used to verify the AutoAgents
+    // replacement end-to-end without the radial UI. Usage:
+    //   oxidemx-overlay --agent-selftest "your prompt here"
+    if let Some(pos) = std::env::args().position(|a| a == "--agent-selftest") {
+        let prompt = std::env::args()
+            .nth(pos + 1)
+            .unwrap_or_else(|| "Say hello in one short sentence.".to_string());
+        let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
+        let code = rt.block_on(async {
+            // Provider + key resolve inside the runtime from config.
+            match ai_client::ask_ai(
+                ai_client::AgentMode::GeneralChat,
+                ai_client::DEFAULT_MODEL,
+                &prompt,
+                None,
+                &[],
+            )
+            .await
+            {
+                Ok((reply, _)) => {
+                    println!("--- reply ---\n{reply}");
+                    0
+                }
+                Err(e) => {
+                    eprintln!("selftest failed: {e}");
+                    1
+                }
+            }
+        });
+        std::process::exit(code);
+    }
+
+    // Headless memory-recall probe: prints the hybrid lexical+semantic
+    // injection block for a query, for verifying semantic recall.
+    //   oxidemx-overlay --memory-recall "what theme should I use?"
+    if let Some(pos) = std::env::args().position(|a| a == "--memory-recall") {
+        let query = std::env::args().nth(pos + 1).unwrap_or_default();
+        let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
+        rt.block_on(async {
+            match agent::memory::injection_block_for_async(&query).await {
+                Some(block) => println!("{block}"),
+                None => println!("(no memories)"),
+            }
+        });
+        std::process::exit(0);
     }
 
     // Default filter: info-level for our crates, error-only for usvg

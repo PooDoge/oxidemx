@@ -12,6 +12,14 @@ path = "src/main.rs"
 
 [dependencies]
 oxidemx-shared = { path = "../oxidemx-shared" }
+# AutoAgents-based agent runtime: Gemini Interactions provider +
+# GenerateContent fallback + the allowlist matcher. The overlay's
+# chat loop runs on this (see src/agent_runtime.rs).
+oxidemx-agent = { path = "../oxidemx-agent" }
+autoagents = { version = "=0.3.7", default-features = false, features = ["google"] }
+autoagents-derive = "=0.3.7"
+async-trait = "0.1"
+tokio-util = "0.7"
 oxidemx-icons = { path = "../oxidemx-icons" }
 oxidemx-window = { path = "../oxidemx-window" }
 # Widget plugin runtime: the wasmi host worker + the wire types the

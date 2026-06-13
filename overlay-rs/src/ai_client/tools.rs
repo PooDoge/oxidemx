@@ -9,23 +9,6 @@ use super::{
     PendingQuestion, StreamEvent, StreamSink, CONFIG_CHANGED_TX, DEFAULT_MODEL, QUESTION_TX,
 };
 
-/// Human label for a tool the agent is about to run. Generic
-/// fallback per tool — the executors emit more specific labels once
-/// they've parsed their arguments (e.g. "Running brightnessctl…").
-pub(super) fn activity_for_tool(name: &str) -> &'static str {
-    match name {
-        "google_search" => "Searching the web…",
-        "get_menu_config" => "Reading menu config…",
-        "set_menu_config" => "Writing config…",
-        "list_system_apps" => "Listing installed apps…",
-        "ask_multiple_choice_question" => "Waiting for your choice…",
-        "execute_command" => "Running command…",
-        "schedule_task" => "Managing scheduled tasks…",
-        "memory" => "Updating memories…",
-        _ => "Running tool…",
-    }
-}
-
 /// Declarations for the local agent tools (`execute_command`,
 /// `schedule_task`, `memory`), shared by both modes so general chat
 /// and the settings customizer expose identical machine-side
@@ -194,7 +177,7 @@ async fn ask_user_choice(
 /// structured `Card` events into the owning chat thread; the
 /// returned string is what goes back to the model as the
 /// `function_result`.
-pub(super) async fn execute_local_tool(
+pub(crate) async fn execute_local_tool(
     name: &str,
     args: serde_json::Value,
     sink: &Option<StreamSink>,
