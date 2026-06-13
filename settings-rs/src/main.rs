@@ -9,6 +9,7 @@
 //! existing inotify watcher previews changes within ~150 ms.
 
 mod tabs {
+    pub mod ai;
     pub mod animation;
     pub mod buttons;
     pub mod devices;
@@ -82,6 +83,8 @@ pub enum Tab {
     Flow,
     Macros,
     Gaming,
+    /// Agent runtime config — backend, model, API key, allowlist.
+    Ai,
     Settings,
 }
 
@@ -98,6 +101,7 @@ impl Tab {
             Tab::Flow => "Flow",
             Tab::Macros => "Macros",
             Tab::Gaming => "Gaming",
+            Tab::Ai => "AI",
             Tab::Settings => "Settings",
         }
     }
@@ -126,6 +130,7 @@ impl Tab {
             Tab::Flow => "F",
             Tab::Macros => "P",
             Tab::Gaming => "G",
+            Tab::Ai => "A",
             Tab::Settings => "*",
         }
     }
@@ -147,6 +152,7 @@ impl Tab {
             Tab::Flow => "view-grid-symbolic",
             Tab::Macros => "media-playback-start-symbolic",
             Tab::Gaming => "applications-games-symbolic",
+            Tab::Ai => "applications-science-symbolic",
             Tab::Settings => "preferences-system-symbolic",
         }
     }
@@ -166,6 +172,7 @@ impl Tab {
             Tab::Flow => "flow",
             Tab::Macros => "macros",
             Tab::Gaming => "gaming",
+            Tab::Ai => "ai",
             Tab::Settings => "settings",
         }
     }
@@ -192,12 +199,13 @@ impl Tab {
             "flow" => Tab::Flow,
             "macros" => Tab::Macros,
             "gaming" => Tab::Gaming,
+            "ai" => Tab::Ai,
             "settings" => Tab::Settings,
             _ => return None,
         })
     }
 
-    pub const ALL: [Tab; 11] = [
+    pub const ALL: [Tab; 12] = [
         Tab::MouseButtons,
         Tab::Menu,
         Tab::PointScroll,
@@ -208,6 +216,7 @@ impl Tab {
         Tab::Flow,
         Tab::Macros,
         Tab::Gaming,
+        Tab::Ai,
         Tab::Settings,
     ];
 }
@@ -321,6 +330,16 @@ pub enum Message {
     /// (Settings tab — the field is write-only; the stored key is
     /// never loaded back into the UI).
     AiKeyDraftChanged(String),
+    /// AI tab: Gemini transport backend changed.
+    AiBackendChanged(oxidemx_shared::config::AiBackend),
+    /// AI tab: agent model id edited/picked.
+    AiModelChanged(String),
+    /// AI tab: allowlist add-form draft edited.
+    AiAllowlistDraftChanged(String),
+    /// AI tab: commit the allowlist draft as a new entry.
+    AiAllowlistAdd,
+    /// AI tab: remove the allowlist entry at this index.
+    AiAllowlistRemove(usize),
     /// AI Assistant: persist the drafted key to
     /// `~/.config/oxidemx/gemini.key` (created 0600). The overlay
     /// re-reads the file on every prompt, so no restart is needed.
@@ -1298,6 +1317,8 @@ pub struct State {
     /// Write-only: the stored key is never loaded back into the
     /// field, only a "configured" indicator is shown.
     pub ai_key_draft: String,
+    /// AI tab allowlist add-form draft (not persisted).
+    pub ai_allowlist_draft: String,
     /// Whether `~/.config/oxidemx/gemini.key` exists. Checked at
     /// boot and updated on save/remove.
     pub ai_key_present: bool,
@@ -1426,6 +1447,7 @@ impl Default for State {
             ),
             haptic_diagnosis: None,
             ai_key_draft: String::new(),
+            ai_allowlist_draft: String::new(),
             ai_key_present: ai_key_path().exists(),
             widget_registry,
             picker_open: None,
@@ -2518,6 +2540,45 @@ fn update_inner(state: &mut State, message: Message) -> Task<Message> {
                 }
                 state.capturing_shortcut = None;
                 state.status = format!("Captured: {chord}");
+            }
+            Task::none()
+        }
+        Message::AiBackendChanged(b) => {
+            state.config.overlay.ai.backend = b;
+            state.touch();
+            Task::none()
+        }
+        Message::AiModelChanged(m) => {
+            state.config.overlay.ai.model = m;
+            state.touch();
+            Task::none()
+        }
+        Message::AiAllowlistDraftChanged(v) => {
+            state.ai_allowlist_draft = v;
+            Task::none()
+        }
+        Message::AiAllowlistAdd => {
+            let entry = state.ai_allowlist_draft.trim().to_string();
+            if entry.is_empty() || entry == "*" {
+                state.status = "Allowlist entries must name a command (bare * is refused)".into();
+                return Task::none();
+            }
+            let list = &mut state.config.overlay.ai.command_allowlist;
+            if list.iter().any(|e| e == &entry) {
+                state.status = format!("\"{entry}\" is already allowlisted");
+                return Task::none();
+            }
+            list.push(entry);
+            state.ai_allowlist_draft.clear();
+            state.touch();
+            Task::none()
+        }
+        Message::AiAllowlistRemove(i) => {
+            let list = &mut state.config.overlay.ai.command_allowlist;
+            if i < list.len() {
+                let removed = list.remove(i);
+                state.status = format!("Removed \"{removed}\" from the allowlist");
+                state.touch();
             }
             Task::none()
         }
@@ -5497,6 +5558,7 @@ fn view(state: &State) -> Element<'_, Message> {
         match state.tab {
             Tab::MouseButtons => tabs::mouse_buttons::view(state),
             Tab::Menu => tabs::buttons::view(state),
+            Tab::Ai => tabs::ai::view(state),
             Tab::Settings => tabs::settings_page::view(state),
             Tab::PointScroll => tabs::scroll::view(state),
             Tab::IndicatorPopup => tabs::indicator_popup::view(state),

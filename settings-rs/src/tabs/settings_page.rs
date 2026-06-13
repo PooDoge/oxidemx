@@ -81,69 +81,10 @@ pub fn view(state: &State) -> Element<'_, Message> {
         Space::new().height(Length::Fixed(16.0)),
         section_block(state, "Application bindings", app_bindings(state)),
         Space::new().height(Length::Fixed(16.0)),
-        section_block(state, "AI Assistant", ai_key_panel(state)),
-        Space::new().height(Length::Fixed(16.0)),
         section_block(state, "About + shortcuts", about_panel(state)),
     ]
     .spacing(10)
     .into()
-}
-
-// ============================================================================
-// AI Assistant — Gemini API key management
-// ============================================================================
-
-/// Write-only key field: the stored key is never loaded back into
-/// the UI (only a "configured" indicator), so a screen-share or a
-/// glance at the settings window can't leak it. Saving writes
-/// `~/.config/oxidemx/gemini.key` with 0600 perms; the overlay
-/// re-reads the file on every prompt, so there's nothing to restart.
-fn ai_key_panel(state: &State) -> Element<'_, Message> {
-    let pal = &state.palette;
-
-    let intro = text(
-        "Google Gemini API key for the radial menu's AI Assistant page \
-         (chat + settings agent). Stored outside config.json at \
-         ~/.config/oxidemx/gemini.key — config exports and imports \
-         never include it. Get a free key at aistudio.google.com.",
-    )
-    .size(11)
-    .style(style::text_dim(pal));
-
-    let status_line: Element<Message> = if state.ai_key_present {
-        text("Key configured ✓ — paste a new one below to replace it.")
-            .size(11)
-            .style(style::text_accent(pal))
-            .into()
-    } else {
-        text("No key configured — the AI page will answer with an error until one is set.")
-            .size(11)
-            .style(style::text_faint(pal))
-            .into()
-    };
-
-    let input = text_input("Paste API key…", &state.ai_key_draft)
-        .secure(true)
-        .on_input(Message::AiKeyDraftChanged)
-        .on_submit(Message::AiKeySave)
-        .padding(6)
-        .size(12)
-        .width(Length::Fill);
-
-    let save_btn = button(text("Save").size(11))
-        .style(style::btn_primary(pal))
-        .on_press(Message::AiKeySave);
-
-    let mut form = row![input, save_btn].align_y(Alignment::Center).spacing(8);
-    if state.ai_key_present {
-        form = form.push(
-            button(text("Remove").size(11))
-                .style(style::btn_danger(pal))
-                .on_press(Message::AiKeyRemove),
-        );
-    }
-
-    column![intro, status_line, form].spacing(8).into()
 }
 
 // ============================================================================
