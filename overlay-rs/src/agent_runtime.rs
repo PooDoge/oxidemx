@@ -206,7 +206,12 @@ pub async fn run(
             .await;
     }
 
-    let mut handle = AgentBuilder::<_, DirectAgent>::new(ReActAgent::new(agent))
+    // 10 (the ReAct default) is too few for a chat agent that may chain
+    // several tools in one turn (read a file, run a command, search,
+    // run a flow…). At 10, a multi-tool request runs out of turns and
+    // the model fabricates "no result" for tools it never reached. 30
+    // gives ample headroom while still bounding runaway loops.
+    let mut handle = AgentBuilder::<_, DirectAgent>::new(ReActAgent::with_max_turns(agent, 30))
         .llm(llm)
         .memory(Box::new(memory))
         .build()
