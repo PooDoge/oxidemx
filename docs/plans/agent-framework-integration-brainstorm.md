@@ -600,6 +600,17 @@ chat sub-agent card (§4.1) renders the run-layer events filtered to one run.
   settings **AI tab** (backend/model pickers, API-key panel moved from the
   Settings page, command-allowlist GUI editor). Plan + learnings:
   `docs/superpowers/plans/2026-06-12-agent-framework-p1a.md`.
+- **P1b — DONE 2026-06-13**: the overlay chat now runs on the AutoAgents
+  runtime (`overlay-rs/src/agent_runtime.rs`), not the hand-rolled
+  `ask_ai` loop — straight replacement, no feature flag. One `OverlayTool`
+  delegates to the untouched `execute_local_tool` (all tools/cards/approval
+  preserved); `description()` carries persona + memory injection; the
+  provider streams SSE deltas while the executor stays non-streaming;
+  session threaded via seed/read. Allowlist unified (overlay re-exports
+  `oxidemx_agent::allowlist`). Headless `--agent-selftest` verified 4/4
+  tool paths live (reply+session, google_search, execute_command, memory).
+  Interactive UI walk-through human-gated (not installed over Jim's live
+  binary). Plan: `docs/superpowers/plans/2026-06-13-agent-framework-p1b-overlay-replacement.md`.
 - **P1 (overlay-embedded MVP)** — tool bridge + `on_tool_call` ApprovalGate;
   main chat on the framework behind `agent-framework` flag. *Exit: feature
   parity with today's chat.*
