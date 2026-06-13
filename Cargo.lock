@@ -5016,6 +5016,7 @@ dependencies = [
  "autoagents-derive",
  "futures",
  "futures-util",
+ "oxidemx-shared",
  "reqwest 0.12.28",
  "schemars",
  "serde",

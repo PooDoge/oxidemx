@@ -12,7 +12,8 @@ edition = "2021"
 description = "AutoAgents-based agent runtime for OxideMX (P0 spike: Gemini Interactions provider + execute_command tool + ReAct CLI harness)"
 
 [dependencies]
-autoagents = { version = "=0.3.7", default-features = false }
+oxidemx-shared = { path = "../oxidemx-shared" }
+autoagents = { version = "=0.3.7", default-features = false, features = ["google"] }
 autoagents-derive = "=0.3.7"
 async-trait = "0.1"
 reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"] }

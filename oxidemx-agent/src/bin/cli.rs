@@ -8,7 +8,6 @@
 //! API key lookup mirrors the overlay (`ai_client.rs:124-149`):
 //! `GEMINI_API_KEY` env, else `~/.config/oxidemx/gemini.key`.
 
-use std::sync::Arc;
 
 use autoagents::core::agent::memory::SlidingWindowMemory;
 use autoagents::core::agent::prebuilt::executor::ReActAgent;
@@ -16,8 +15,9 @@ use autoagents::core::agent::task::Task;
 use autoagents::core::agent::{AgentBuilder, DirectAgent};
 use autoagents_derive::{agent, AgentHooks};
 
-use oxidemx_agent::provider::{GeminiInteractionsProvider, DEFAULT_MODEL};
+use oxidemx_agent::factory::provider_from_config;
 use oxidemx_agent::tools::{set_allowlist, ExecuteCommand};
+use oxidemx_shared::config::AiBackend;
 
 #[agent(
     name = "shell_agent",
@@ -51,29 +51,44 @@ fn key_path() -> Option<std::path::PathBuf> {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    // Defaults come from the live config.json (backend, model,
+    // allowlist) so the CLI behaves like the rest of the app; flags
+    // override per-invocation.
+    let cfg = oxidemx_shared::config::default_config_path()
+        .and_then(|p| oxidemx_shared::AppConfig::load_from(&p).ok())
+        .map(|c| c.overlay.ai)
+        .unwrap_or_default();
+
     let mut args = std::env::args().skip(1);
     let mut prompt = None;
-    let mut model = DEFAULT_MODEL.to_string();
-    // Overlay defaults (oxidemx-shared AiConfig::default).
-    let mut allow: Vec<String> = ["brightnessctl", "wpctl", "systemctl --user"]
-        .map(String::from)
-        .to_vec();
+    let mut model = cfg.model.clone();
+    let mut backend = cfg.backend;
+    let mut allow = cfg.command_allowlist.clone();
     while let Some(a) = args.next() {
         match a.as_str() {
             "--model" => model = args.next().ok_or("--model needs a value")?,
             "--allow" => allow.push(args.next().ok_or("--allow needs a value")?),
+            "--backend" => {
+                backend = match args.next().as_deref() {
+                    Some("interactions") => AiBackend::Interactions,
+                    Some("generate_content") => AiBackend::GenerateContent,
+                    other => return Err(format!("--backend must be interactions|generate_content, got {other:?}").into()),
+                }
+            }
             _ if prompt.is_none() => prompt = Some(a),
             other => return Err(format!("unexpected argument: {other}").into()),
         }
     }
-    let prompt =
-        prompt.ok_or("usage: oxidemx-agent-cli \"<prompt>\" [--model <id>] [--allow <entry>]...")?;
+    let prompt = prompt.ok_or(
+        "usage: oxidemx-agent-cli \"<prompt>\" [--model <id>] [--backend interactions|generate_content] [--allow <entry>]...",
+    )?;
 
     set_allowlist(allow);
-    let provider = GeminiInteractionsProvider::new(api_key()?, model);
+    eprintln!("[backend: {backend:?}, model: {model}]");
+    let provider = provider_from_config(backend, &model, &api_key()?)?;
 
     let handle = AgentBuilder::<_, DirectAgent>::new(ReActAgent::new(ShellAgent {}))
-        .llm(provider as Arc<dyn autoagents::llm::LLMProvider>)
+        .llm(provider)
         .memory(Box::new(SlidingWindowMemory::new(10)))
         .build()
         .await?;

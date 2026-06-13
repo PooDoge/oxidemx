@@ -937,6 +937,39 @@ pub struct OverlayConfig {
     pub ai: AiConfig,
 }
 
+/// Which Gemini transport the agent runtime talks to.
+///
+/// `Interactions` (v1beta/interactions) is the agentic default:
+/// server-side sessions, function calling, the API the overlay chat
+/// already uses. `GenerateContent` is Gemini's classic stateless
+/// API, kept as a fallback if Interactions misbehaves or is
+/// deprecated — it rides AutoAgents' built-in `google` backend.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AiBackend {
+    #[default]
+    Interactions,
+    GenerateContent,
+}
+
+impl AiBackend {
+    /// Human-readable label for pickers.
+    pub fn label(&self) -> &'static str {
+        match self {
+            AiBackend::Interactions => "Interactions (agentic, default)",
+            AiBackend::GenerateContent => "GenerateContent (classic, fallback)",
+        }
+    }
+
+    pub const ALL: [AiBackend; 2] = [AiBackend::Interactions, AiBackend::GenerateContent];
+}
+
+impl std::fmt::Display for AiBackend {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.label())
+    }
+}
+
 /// AI agent configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AiConfig {
@@ -947,14 +980,29 @@ pub struct AiConfig {
     /// confirmation chip in the chat.
     #[serde(default = "default_command_allowlist")]
     pub command_allowlist: Vec<String>,
+
+    /// Gemini transport used by the agent runtime.
+    #[serde(default)]
+    pub backend: AiBackend,
+
+    /// Model id for the agent runtime. The overlay chat keeps its
+    /// own per-thread flash/pro toggle until P1b unifies on this.
+    #[serde(default = "default_ai_model")]
+    pub model: String,
 }
 
 impl Default for AiConfig {
     fn default() -> Self {
         AiConfig {
             command_allowlist: default_command_allowlist(),
+            backend: AiBackend::default(),
+            model: default_ai_model(),
         }
     }
+}
+
+fn default_ai_model() -> String {
+    "gemini-2.5-flash".to_string()
 }
 
 fn default_command_allowlist() -> Vec<String> {
