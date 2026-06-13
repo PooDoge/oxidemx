@@ -1,0 +1,9 @@
+[Unit]
+Description=OxideMX flow trigger engine — run flows whose schedule is due
+After=graphical-session.target
+
+[Service]
+Type=oneshot
+# Runs every flow whose [triggers] schedule is due now (cheap no-op
+# when nothing is due). Uses the configured provider + key.
+ExecStart=/usr/local/bin/oxidemx-conductor tick

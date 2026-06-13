@@ -22,6 +22,7 @@ pub mod loader;
 pub mod mock;
 pub mod plan;
 pub mod roster;
+pub mod schedule;
 pub mod step_agent;
 pub mod supervisor;
 pub mod template;

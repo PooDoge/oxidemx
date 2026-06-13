@@ -1,0 +1,12 @@
+[Unit]
+Description=OxideMX flow trigger engine — periodic schedule check
+
+[Timer]
+# Check a few times an hour; the conductor itself decides which flows
+# are actually due (so a missed tick catches up on the next one).
+OnBootSec=2min
+OnUnitActiveSec=15min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

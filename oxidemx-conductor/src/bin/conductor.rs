@@ -33,6 +33,7 @@ use oxidemx_conductor::step_agent::{build_and_run, StepAgent};
 use oxidemx_conductor::supervisor::{
     resolve_inputs, run_flow, ConfigFactory, FixedFactory, ProviderFactory, RunOptions,
 };
+use oxidemx_conductor::schedule::Schedule;
 use oxidemx_conductor::{validate, KNOWN_TOOLS};
 use oxidemx_shared::config::AiProvider;
 use tokio_util::sync::CancellationToken;
@@ -45,6 +46,7 @@ async fn main() -> ExitCode {
         "list" => cmd_list(),
         "validate" => cmd_validate(&args[1..]),
         "run" => cmd_run(&args[1..]).await,
+        "tick" => cmd_tick(&args[1..]).await,
         "oneshot" => cmd_oneshot(&args[1..]).await,
         "status" => cmd_status(&args[1..]),
         "help" | "-h" | "--help" => {
@@ -67,6 +69,7 @@ fn print_help() {
          oxidemx-conductor validate <flow-id>\n  \
          oxidemx-conductor run <flow-id> [--input k=v]... [--mock] [--provider P] [--model M] [--workdir DIR]\n  \
          oxidemx-conductor oneshot [--provider P] [--model M] [--system S] <prompt>\n  \
+         oxidemx-conductor tick    (run flows whose schedule trigger is due — for a timer)\n  \
          oxidemx-conductor status [<run-id>]\n\n\
          `oneshot` runs a single context-free prompt (default provider: claude_code,\n\
          the keyless Claude Code CLI) — handy for prompt optimization and one-shot\n\
@@ -308,6 +311,144 @@ async fn cmd_oneshot(args: &[String]) -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+/// The trigger engine's heartbeat: run every flow whose
+/// `[triggers] schedule` is due now (driven by a systemd user timer).
+/// Flows with required-but-unsupplied inputs are skipped (a scheduled
+/// run can't prompt). Uses the configured real provider.
+async fn cmd_tick(args: &[String]) -> ExitCode {
+    let opts = parse_opts(args);
+    let flows_root = opts.flows_dir.clone().unwrap_or_else(default_flows_root);
+    let agents_root = opts.agents_dir.clone().unwrap_or_else(default_agents_root);
+    let now = unix_secs();
+    let offset = local_offset_secs();
+
+    let provider = opts.provider.unwrap_or(AiProvider::Gemini);
+    let key = if opts.mock || !provider.needs_key() {
+        String::new()
+    } else {
+        match oxidemx_agent::keys::provider_key(provider) {
+            Some(k) => k,
+            None => {
+                eprintln!("tick: no API key for {}; nothing run.", provider.label());
+                return ExitCode::SUCCESS;
+            }
+        }
+    };
+    let allowlist = load_allowlist();
+    let mut ran = 0usize;
+
+    for id in list_flows(&flows_root) {
+        let Ok((doc, roster)) = load_flow(&flows_root, &agents_root, &id) else {
+            continue;
+        };
+        let schedules: Vec<Schedule> = doc
+            .manifest
+            .triggers
+            .schedule
+            .iter()
+            .filter_map(|s| Schedule::parse(s))
+            .collect();
+        if schedules.is_empty() {
+            continue;
+        }
+        let last = last_run_secs(&id);
+        if !schedules.iter().any(|s| s.is_due(now, last, offset)) {
+            continue;
+        }
+        let plan = match validate(&doc, &roster, KNOWN_TOOLS) {
+            Ok(p) => p,
+            Err(_) => {
+                eprintln!("tick: skipping `{id}` (invalid)");
+                continue;
+            }
+        };
+        let inputs = match resolve_inputs(&plan, &BTreeMap::new()) {
+            Ok(i) => i,
+            Err(missing) => {
+                eprintln!("tick: skipping `{id}` (needs inputs: {})", missing.join(", "));
+                continue;
+            }
+        };
+        let run_id = format!("{id}-{}", unix_millis());
+        let workdir = runs_root().join(&run_id);
+        if std::fs::create_dir_all(&workdir).is_err() {
+            continue;
+        }
+        eprintln!("tick: running `{id}` (run {run_id})");
+        let factory: Arc<dyn ProviderFactory> = if opts.mock {
+            Arc::new(FixedFactory(MockProvider::echoing()))
+        } else {
+            Arc::new(ConfigFactory {
+                provider,
+                api_key: key.clone(),
+            })
+        };
+        let run_opts = RunOptions {
+            run_id: run_id.clone(),
+            inputs,
+            workdir: workdir.clone(),
+            roster,
+            factory,
+            cancel: CancellationToken::new(),
+            approval: ApprovalPolicy::parse(&plan.doc.manifest.defaults.approval),
+            allowlist: allowlist.clone(),
+        };
+        let outcome = run_flow(&plan, run_opts, Arc::new(JsonLinesSink)).await;
+        let record = serde_json::json!({
+            "run_id": outcome.run_id, "flow_id": id,
+            "success": outcome.success, "artifacts": outcome.artifacts,
+            "error": outcome.error, "trigger": "schedule",
+        });
+        let _ = std::fs::write(
+            workdir.join("run.json"),
+            serde_json::to_string_pretty(&record).unwrap_or_default(),
+        );
+        ran += 1;
+    }
+    eprintln!("tick: {ran} due flow(s) ran.");
+    ExitCode::SUCCESS
+}
+
+/// Latest run time (unix seconds) for a flow, parsed from its newest
+/// `<flow>-<unix_millis>` run dir; `None` if it never ran.
+fn last_run_secs(flow_id: &str) -> Option<i64> {
+    let root = runs_root();
+    let prefix = format!("{flow_id}-");
+    let mut newest: Option<u128> = None;
+    for e in std::fs::read_dir(&root).ok()?.flatten() {
+        let name = e.file_name().to_string_lossy().to_string();
+        if let Some(ms) = name.strip_prefix(&prefix).and_then(|s| s.parse::<u128>().ok()) {
+            newest = Some(newest.map_or(ms, |n| n.max(ms)));
+        }
+    }
+    newest.map(|ms| (ms / 1000) as i64)
+}
+
+/// Local UTC offset in seconds, via `date +%z` (avoids a tz crate).
+fn local_offset_secs() -> i64 {
+    let out = std::process::Command::new("date").arg("+%z").output();
+    let z = out
+        .ok()
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .unwrap_or_default();
+    // Format: ±HHMM
+    if z.len() == 5 {
+        let sign = if z.starts_with('-') { -1 } else { 1 };
+        let h: i64 = z[1..3].parse().unwrap_or(0);
+        let m: i64 = z[3..5].parse().unwrap_or(0);
+        sign * (h * 3600 + m * 60)
+    } else {
+        0
+    }
+}
+
+fn unix_secs() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
 }
 
 fn cmd_status(args: &[String]) -> ExitCode {
