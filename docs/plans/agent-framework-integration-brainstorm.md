@@ -583,10 +583,16 @@ chat sub-agent card (§4.1) renders the run-layer events filtered to one run.
 
 ## 12. Revised phasing (supersedes §5)
 
-- **P0 spike (1–2 d)** — unchanged: vendor AutoAgents @0.3.7,
-  `GeminiInteractionsProvider` (+ CancellationToken plumbing §7.3), ReAct
-  agent + wrapped `execute_command` in CLI harness. *Exit: hybrid session
-  model proven, stream chunks mapped.*
+- **P0 spike — DONE 2026-06-12** (branch `agent-framework`, commits
+  8e9a8a8→d7aa85f; plan + learnings in `docs/superpowers/plans/
+  2026-06-12-agent-framework-p0.md`): autoagents 0.3.7 pinned from
+  crates.io, `GeminiInteractionsProvider` with CancellationToken on both
+  paths, allowlist-bridged `execute_command`, ReAct CLI harness. Live
+  smoke tests passed (happy + denial paths, session threading). Key
+  discovery: blocking responses omit `status` on pending function_call
+  steps — overlay's `== "waiting"` filter is a latent bug to fix.
+  Deferred to P1: StreamChunk mapping (text-delta sink shipped instead),
+  multi-call input-array live verification.
 - **P1 (overlay-embedded MVP)** — tool bridge + `on_tool_call` ApprovalGate;
   main chat on the framework behind `agent-framework` flag. *Exit: feature
   parity with today's chat.*
