@@ -1,0 +1,18 @@
+# Example MCP server config — copy to ~/.config/oxidemx/mcp.toml (or
+# point $OXIDEMX_MCP_CONFIG at it). Each server's tools are exposed to
+# agents namespaced as `<server>::<tool>`, loaded by
+# oxidemx_agent::toolkit::mcp::load_default().
+
+[[mcp.servers]]
+name = "filesystem"
+protocol = "stdio"
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-filesystem", "/home/jim/notes"]
+timeout = 30
+
+[[mcp.servers]]
+name = "git"
+protocol = "stdio"
+command = "uvx"
+args = ["mcp-server-git", "--repository", "/home/jim/code/project"]
+timeout = 30

@@ -41,3 +41,13 @@ exclude = ["pop_os_iced", "libcosmic", "oxidemx-widget-host/fixtures/*", "widget
 opt-level = 3
 lto = true
 codegen-units = 1
+
+# Vendor AutoAgents from git (the spec's "vendor & pin", §6) so we can
+# use `autoagents-toolkit` + MCP, which are NOT published to crates.io
+# — only the core `autoagents`/`autoagents-derive` crates are. Patching
+# crates-io redirects every existing `=0.3.7` dep across the workspace
+# to the v0.3.7 git tag WITHOUT editing each dep line, keeping a single
+# `autoagents` source so `ToolT` (and friends) unify with the toolkit.
+[patch.crates-io]
+autoagents = { git = "https://github.com/liquidos-ai/AutoAgents", tag = "v0.3.7" }
+autoagents-derive = { git = "https://github.com/liquidos-ai/AutoAgents", tag = "v0.3.7" }

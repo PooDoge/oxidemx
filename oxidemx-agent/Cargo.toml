@@ -15,6 +15,10 @@ description = "AutoAgents-based agent runtime for OxideMX (P0 spike: Gemini Inte
 oxidemx-shared = { path = "../oxidemx-shared" }
 autoagents = { version = "=0.3.7", default-features = false, features = ["google", "openai", "anthropic", "ollama"] }
 autoagents-derive = "=0.3.7"
+# The toolkit (filesystem/search/document-parsing/MCP tools) is git-only
+# — see the workspace [patch.crates-io] note. Same v0.3.7 tag so its
+# `autoagents` resolves to the patched single source.
+autoagents-toolkit = { git = "https://github.com/liquidos-ai/AutoAgents", tag = "v0.3.7", default-features = false, features = ["filesystem", "search", "document-parsing", "mcp"] }
 async-trait = "0.1"
 reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "process", "time", "sync"] }

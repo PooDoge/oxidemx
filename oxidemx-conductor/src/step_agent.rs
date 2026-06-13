@@ -25,8 +25,6 @@ use autoagents::llm::{LLMProvider, ToolCall};
 use serde_json::Value;
 use tokio_util::sync::CancellationToken;
 
-use oxidemx_agent::tools::ExecuteCommand;
-
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
 /// One step's agent definition.
@@ -62,15 +60,14 @@ impl AgentDeriveT for StepAgent {
         None
     }
     fn tools(&self) -> Vec<Box<dyn ToolT>> {
-        self.tools
-            .iter()
-            .filter_map(|t| match t.as_str() {
-                // The one bridged tool today; self-gates via the
-                // process allowlist the supervisor installs.
-                "execute_command" => Some(Box::new(ExecuteCommand {}) as Box<dyn ToolT>),
-                _ => None,
-            })
-            .collect()
+        // The full registry: our allowlist-gated `execute_command` plus
+        // the AutoAgents Toolkit (filesystem / document-parsing /
+        // search). The step's roster grants are the gate; unknown or
+        // unavailable names (e.g. `brave_search` with no key) drop out.
+        // (MCP server tools load async via `oxidemx_agent::toolkit::mcp`
+        // and reach agents through agentd — not wired per-step here, as
+        // `Box<dyn ToolT>` isn't `Clone`; that's the follow-up.)
+        oxidemx_agent::toolkit::build_tools(&self.tools)
     }
 }
 

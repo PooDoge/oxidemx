@@ -9,6 +9,7 @@ pub mod claude_code;
 pub mod embed;
 pub mod factory;
 pub mod keys;
+pub mod toolkit;
 pub mod tools;
 
 /// Embed texts with Gemini `gemini-embedding-001` (the embedding seam

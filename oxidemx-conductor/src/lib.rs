@@ -33,7 +33,8 @@ pub use plan::{validate, FlowPlan, ValidationError};
 pub use roster::{AgentDef, Roster};
 pub use supervisor::{run_flow, RunHandle, RunOptions, RunOutcome};
 
-/// Tools the conductor knows how to bridge today. Roster `tools`
-/// grants are validated against this set. (P0 shipped only
-/// `execute_command`; more bridge in as `oxidemx-agent` grows them.)
-pub const KNOWN_TOOLS: &[&str] = &["execute_command"];
+/// Tools the conductor knows how to bridge. Roster `tools` grants are
+/// validated against this set — the full `oxidemx-agent` registry:
+/// our `execute_command` plus the AutoAgents Toolkit (filesystem,
+/// document parsing, web search).
+pub use oxidemx_agent::toolkit::BUILTIN_TOOLS as KNOWN_TOOLS;
