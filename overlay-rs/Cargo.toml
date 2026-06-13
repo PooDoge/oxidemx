@@ -19,6 +19,7 @@ oxidemx-agent = { path = "../oxidemx-agent" }
 autoagents = { version = "=0.3.7", default-features = false, features = ["google"] }
 autoagents-derive = "=0.3.7"
 async-trait = "0.1"
+tokio-util = "0.7"
 oxidemx-icons = { path = "../oxidemx-icons" }
 oxidemx-window = { path = "../oxidemx-window" }
 # Widget plugin runtime: the wasmi host worker + the wire types the

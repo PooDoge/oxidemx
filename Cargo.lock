@@ -5087,6 +5087,7 @@ dependencies = [
  "serde_json",
  "tiny-skia",
  "tokio",
+ "tokio-util",
  "tracing",
  "tracing-subscriber",
  "url",

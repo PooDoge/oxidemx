@@ -205,14 +205,45 @@ fn sweep_expired_at(path: &Path, now: u64) -> usize {
 /// Recall score (Generative-Agents shape): relevance to the query,
 /// recency with a 30-day half-life, and a capped usage boost.
 fn score(entry: &MemoryEntry, query_tokens: &std::collections::HashSet<String>, now: u64) -> f32 {
+    score_blended(entry, query_tokens, now, None)
+}
+
+/// Recall score: `0.6 relevance + 0.25 recency + 0.15 usage`.
+///
+/// `relevance` is the stronger of the lexical (token-overlap) and the
+/// semantic (cosine) signals — so a meaning-match surfaces at zero
+/// word overlap, while keeping relevance the dominant term and
+/// recency/usage as tiebreakers (weights unchanged from the original
+/// lexical-only scorer; `sem = None` ⇒ identical behaviour).
+///
+/// The cosine is rescaled before use: `gemini-embedding-001` cosines
+/// sit in a high, compressed band (~0.45 for unrelated text, ~0.70+
+/// for related), so the raw value barely moves the score. Mapping
+/// `[0.40, 0.85] → [0, 1]` (empirical for this model at 768-dim)
+/// restores a usable dynamic range. Lexical relevance is unbounded-ish
+/// (`inter / sqrt(len)`); `max` over the two is fine since both land
+/// in roughly the same 0–1 range for real queries.
+fn score_blended(
+    entry: &MemoryEntry,
+    query_tokens: &std::collections::HashSet<String>,
+    now: u64,
+    sem: Option<f32>,
+) -> f32 {
     let etoks = tokens(&entry.text);
-    let relevance = if query_tokens.is_empty() || etoks.is_empty() {
+    let lexical = if query_tokens.is_empty() || etoks.is_empty() {
         0.0
     } else {
         let inter = etoks.intersection(query_tokens).count() as f32;
         // Normalise by entry length so short atomic facts aren't
         // drowned out by long rambly ones.
         inter / (etoks.len() as f32).sqrt()
+    };
+    let relevance = match sem {
+        Some(cos) => {
+            let rescaled = ((cos - 0.40) / 0.45).clamp(0.0, 1.0);
+            lexical.max(rescaled)
+        }
+        None => lexical,
     };
     let age_days = now.saturating_sub(entry.last_used_at.max(entry.created_at)) as f32 / 86_400.0;
     let recency = 0.5_f32.powf(age_days / 30.0);
@@ -247,7 +278,12 @@ fn unix_to_date(secs: u64) -> String {
 /// carries its date so the model can reason about staleness. Marks
 /// included entries as used and bumps `times_injected`. `None` when
 /// the store is empty.
-fn injection_block_at(path: &Path, query: &str, now: u64) -> Option<String> {
+fn injection_block_at(
+    path: &Path,
+    query: &str,
+    now: u64,
+    sem: Option<&std::collections::HashMap<String, f32>>,
+) -> Option<String> {
     let mut entries = load_from(path);
     if entries.is_empty() {
         return None;
@@ -258,7 +294,10 @@ fn injection_block_at(path: &Path, query: &str, now: u64) -> Option<String> {
     let mut unpinned: Vec<(&MemoryEntry, f32)> = entries
         .iter()
         .filter(|e| !e.pinned)
-        .map(|e| (e, score(e, &qtoks, now)))
+        .map(|e| {
+            let s = sem.and_then(|m| m.get(&e.id).copied());
+            (e, score_blended(e, &qtoks, now, s))
+        })
         .collect();
     unpinned.sort_by(|(_, a), (_, b)| b.partial_cmp(a).unwrap_or(std::cmp::Ordering::Equal));
 
@@ -525,7 +564,41 @@ pub fn sweep_expired(now: u64) -> usize {
 /// stats on the injected entries.
 pub fn injection_block_for(query: &str) -> Option<String> {
     sweep_once();
-    injection_block_at(&store_path(), query, unix_now())
+    injection_block_at(&store_path(), query, unix_now(), None)
+}
+
+/// Hybrid lexical + semantic recall: embeds the query and the saved
+/// memories (cached) and blends cosine similarity into the ranking,
+/// so a fact with zero word-overlap but matching meaning ("prefers
+/// dark mode" for "what theme should I use?") can surface. Best-
+/// effort with a hard time budget: any embedding failure, missing
+/// key, or a slow round falls back to the lexical [`injection_block_for`]
+/// — the chat turn is never blocked waiting on embeddings.
+pub async fn injection_block_for_async(query: &str) -> Option<String> {
+    sweep_once();
+    let path = store_path();
+    let now = unix_now();
+
+    // Candidate (id, text) for every entry — semantic recall ranks
+    // the whole store, not a lexical pre-filter (which would exclude
+    // exactly the low-word-overlap matches we want).
+    let candidates: Vec<(String, String)> = load_from(&path)
+        .into_iter()
+        .map(|e| (e.id, e.text))
+        .collect();
+    if candidates.is_empty() {
+        return None;
+    }
+
+    let sem = tokio::time::timeout(
+        std::time::Duration::from_secs(3),
+        crate::agent::memory_semantic::semantic_scores(query, &candidates),
+    )
+    .await
+    .ok()
+    .flatten();
+
+    injection_block_at(&path, query, now, sem.as_ref())
 }
 
 /// Top-5 entries for a free-text query (the memory tool's `search`
@@ -652,7 +725,7 @@ mod tests {
         let pinned = save_entry_at(&path, "pinned one", "c", 5);
         assert!(set_pinned_at(&path, &pinned.id, true));
 
-        let block = injection_block_at(&path, "", 1000).unwrap();
+        let block = injection_block_at(&path, "", 1000, None).unwrap();
         let lines: Vec<&str> = block.lines().collect();
         assert!(lines[0].starts_with("The user's saved memories"));
         // Pinned first; unpinned by score (recency dominates an
@@ -677,7 +750,7 @@ mod tests {
             // write-time dedupe.
             save_entry_at(&path, &format!("entry topic{i} detail{i}"), "s", i);
         }
-        let block = injection_block_at(&path, "", 100).unwrap();
+        let block = injection_block_at(&path, "", 100, None).unwrap();
         // Header + 10 bullets; the two oldest (0, 1) fall off.
         assert_eq!(block.lines().count(), 11);
         assert!(!block.contains("topic0 "));
@@ -687,7 +760,7 @@ mod tests {
     #[test]
     fn injection_block_empty_store_is_none() {
         let path = temp_store("empty");
-        assert_eq!(injection_block_at(&path, "", 1), None);
+        assert_eq!(injection_block_at(&path, "", 1, None), None);
     }
 }
 
@@ -749,7 +822,7 @@ mod recall_tests {
         );
         save_entry_at(&path, "Jim plays guitar on weekends", "hobby", 9_000_000);
         let block =
-            injection_block_at(&path, "change the weather widget location", 10_000_000).unwrap();
+            injection_block_at(&path, "change the weather widget location", 10_000_000, None).unwrap();
         let weather_pos = block.find("weather widget").unwrap();
         let guitar_pos = block.find("guitar").unwrap();
         assert!(

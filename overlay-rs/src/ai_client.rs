@@ -173,11 +173,9 @@ impl AgentMode {
         self.tools().len()
     }
 
-    /// Full system instruction for this mode: the static persona
-    /// text plus the user's saved-memories block — pinned entries
-    /// plus the entries most relevant to `query` — so both modes can
-    /// recall facts the user asked us to keep.
-    pub fn system_instruction(&self, query: &str) -> String {
+    /// Persona half of the system instruction (base prompt + soul.md
+    /// + first-run ritual + user.md), WITHOUT the memory block.
+    fn system_instruction_base(&self) -> String {
         let base = match self {
             AgentMode::GeneralChat => {
                 "You are OxideMX-AI, a helpful conversational desktop assistant. \
@@ -254,9 +252,18 @@ impl AgentMode {
             full.push_str("\n\nABOUT THE USER (user-authored user.md):\n");
             full.push_str(&user);
         }
-        match crate::agent::memory::injection_block_for(query) {
-            Some(block) => format!("{full}\n\n{block}"),
-            None => full,
+        full
+    }
+
+    /// System instruction with **hybrid lexical + semantic** memory
+    /// recall — the interactive chat path. Falls back to lexical
+    /// internally if embeddings are unavailable (see
+    /// `memory::injection_block_for_async`).
+    pub async fn system_instruction_async(&self, query: &str) -> String {
+        let base = self.system_instruction_base();
+        match crate::agent::memory::injection_block_for_async(query).await {
+            Some(block) => format!("{base}\n\n{block}"),
+            None => base,
         }
     }
 

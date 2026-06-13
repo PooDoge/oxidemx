@@ -154,7 +154,9 @@ pub async fn run(
     sink: Option<StreamSink>,
     history: &[(bool, String)],
 ) -> Result<(String, Option<String>), BoxError> {
-    let system = mode.system_instruction(prompt);
+    // Hybrid lexical+semantic memory recall (falls back to lexical
+    // internally if embeddings are unavailable).
+    let system = mode.system_instruction_async(prompt).await;
     let tools = build_tools(mode, &sink);
     let agent = OverlayAgent {
         system,

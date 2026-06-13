@@ -11,5 +11,6 @@
 pub mod commands;
 pub mod heartbeat;
 pub mod memory;
+pub mod memory_semantic;
 pub mod persona;
 pub mod tasks;

@@ -130,6 +130,21 @@ fn main() -> iced::Result {
         std::process::exit(code);
     }
 
+    // Headless memory-recall probe: prints the hybrid lexical+semantic
+    // injection block for a query, for verifying semantic recall.
+    //   oxidemx-overlay --memory-recall "what theme should I use?"
+    if let Some(pos) = std::env::args().position(|a| a == "--memory-recall") {
+        let query = std::env::args().nth(pos + 1).unwrap_or_default();
+        let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
+        rt.block_on(async {
+            match agent::memory::injection_block_for_async(&query).await {
+                Some(block) => println!("{block}"),
+                None => println!("(no memories)"),
+            }
+        });
+        std::process::exit(0);
+    }
+
     // Default filter: info-level for our crates, error-only for usvg
     // (which spams "Failed to parse marker-start value: 'none'." for
     // every freedesktop icon — the parser warns on perfectly valid
