@@ -620,6 +620,18 @@ chat sub-agent card (§4.1) renders the run-layer events filtered to one run.
   zero-word-overlap recall (dark-mode preference ranks #1 for "what visual
   appearance…"). INSTALLED to /usr/local/bin for live testing. Plan:
   `docs/superpowers/plans/2026-06-13-agent-framework-p2-semantic-memory.md`.
+- **P3 — DONE 2026-06-13** (multi-provider + reduce complexity, per user):
+  **retired the bespoke Gemini Interactions transport** (deleted
+  provider/{mod,sse,wire}.rs); normal Gemini `generateContent` is the new
+  default. AiConfig `backend`→`provider` (serde-migrated): Gemini / OpenAI /
+  Anthropic / Ollama / **Claude Code (CLI)**. One factory seam over
+  AutoAgents built-ins + a custom subprocess `ClaudeCodeProvider`
+  (`claude -p … --output-format json`, chat-only). Per-provider keys
+  (`~/.config/oxidemx/<p>.key` + env). agent_runtime collapsed to one path
+  (history via memory, **non-streaming**). Settings AI tab: provider picker +
+  per-provider key fields. Live-verified Gemini (tools) + Claude Code (chat);
+  OpenAI/Anthropic/Ollama wired+unit-tested (need keys/service). INSTALLED.
+  Plan: `docs/superpowers/plans/2026-06-13-agent-framework-p3-multiprovider.md`.
 - **P1 (overlay-embedded MVP)** — tool bridge + `on_tool_call` ApprovalGate;
   main chat on the framework behind `agent-framework` flag. *Exit: feature
   parity with today's chat.*
