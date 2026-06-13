@@ -27,10 +27,8 @@ use autoagents::core::agent::{AgentBuilder, AgentDeriveT, AgentHooks, Context, D
 use autoagents::core::tool::{ToolCallError, ToolRuntime, ToolT};
 use autoagents::llm::chat::{ChatMessage, ChatRole, MessageType};
 use autoagents::llm::LLMProvider;
-use oxidemx_agent::provider::GeminiInteractionsProvider;
-use oxidemx_shared::config::AiBackend;
+use oxidemx_shared::config::AiProvider;
 use serde_json::Value;
-use tokio::sync::mpsc;
 
 use crate::ai_client::{AgentMode, StreamEvent, StreamSink};
 
@@ -132,28 +130,50 @@ fn build_tools(mode: AgentMode, sink: &Option<StreamSink>) -> Vec<OverlayTool> {
         .collect()
 }
 
-/// Which backend the agent runtime should use this turn.
-fn configured_backend() -> AiBackend {
-    oxidemx_shared::config::default_config_path()
+/// The provider + model + key for this turn, from config.json.
+/// `model_hint` is the thread's model (the Gemini flash/pro toggle);
+/// honoured only for Gemini, where it's meaningful — other providers
+/// use their configured model.
+fn resolve_provider(model_hint: &str) -> Result<(AiProvider, String, String), BoxError> {
+    let ai = oxidemx_shared::config::default_config_path()
         .and_then(|p| oxidemx_shared::AppConfig::load_from(&p).ok())
-        .map(|c| c.overlay.ai.backend)
-        .unwrap_or_default()
+        .map(|c| c.overlay.ai)
+        .unwrap_or_default();
+    let provider = ai.provider;
+    let model = if provider == AiProvider::Gemini {
+        model_hint.to_string()
+    } else {
+        ai.model.clone()
+    };
+    let key = if provider.needs_key() {
+        oxidemx_agent::keys::provider_key(provider).ok_or_else(|| {
+            format!(
+                "No API key for {}. Add one in Settings → AI.",
+                provider.label()
+            )
+        })?
+    } else {
+        String::new()
+    };
+    Ok((provider, model, key))
 }
 
-/// One agent turn. Returns `(reply_text, next_session_id)`.
+/// One agent turn. Returns `(reply_text, None)` — sessions are gone;
+/// every provider ships history via memory. The tuple shape is kept
+/// for call-site stability.
 ///
-/// `history` is the thread's prior turns as `(is_user, text)`, used
-/// only by the stateless `GenerateContent` fallback to reconstruct
-/// context; the Interactions backend relies on `session_id` instead.
+/// `history` is the thread's prior turns as `(is_user, text)`, seeded
+/// into the executor's memory so the model has conversational context
+/// across turns (all providers are stateless now).
 pub async fn run(
-    api_key: &str,
     mode: AgentMode,
-    model: &str,
+    model_hint: &str,
     prompt: &str,
-    session_id: Option<String>,
     sink: Option<StreamSink>,
     history: &[(bool, String)],
 ) -> Result<(String, Option<String>), BoxError> {
+    let (provider, model, key) = resolve_provider(model_hint)?;
+
     // Hybrid lexical+semantic memory recall (falls back to lexical
     // internally if embeddings are unavailable).
     let system = mode.system_instruction_async(prompt).await;
@@ -164,71 +184,12 @@ pub async fn run(
         sink: sink.clone(),
     };
 
-    match configured_backend() {
-        AiBackend::Interactions => run_interactions(agent, api_key, model, prompt, session_id, sink).await,
-        AiBackend::GenerateContent => {
-            run_generate_content(agent, api_key, model, prompt, history).await
-        }
-    }
-}
+    let llm: Arc<dyn LLMProvider> = oxidemx_agent::factory::provider_from_config(
+        provider, &model, &key,
+    )
+    .map_err(|e| Box::new(e) as BoxError)?;
 
-/// Interactions backend: server-side session + live SSE deltas.
-async fn run_interactions(
-    agent: OverlayAgent,
-    api_key: &str,
-    model: &str,
-    prompt: &str,
-    session_id: Option<String>,
-    sink: Option<StreamSink>,
-) -> Result<(String, Option<String>), BoxError> {
-    // Provider streams text deltas through this channel; a forwarder
-    // relays them into the chat thread as they arrive.
-    let (dtx, mut drx) = mpsc::channel::<String>(64);
-    let provider = GeminiInteractionsProvider::new(api_key, model).with_delta_sink(dtx);
-    provider.seed_session(session_id).await;
-
-    let fwd_sink = sink.clone();
-    let forwarder = tokio::spawn(async move {
-        while let Some(text) = drx.recv().await {
-            if let Some(s) = &fwd_sink {
-                s.send(StreamEvent::Delta(text)).await;
-            }
-        }
-    });
-
-    let llm: Arc<dyn LLMProvider> = provider.clone();
-    let mut handle = AgentBuilder::<_, DirectAgent>::new(ReActAgent::new(agent))
-        .llm(llm)
-        .memory(Box::new(SlidingWindowMemory::new(20)))
-        .build()
-        .await?;
-    drain_events(handle.subscribe_events());
-
-    let reply: String = handle.agent.run(Task::new(prompt)).await?;
-    let next_session = provider.session().await;
-
-    // Close the delta channel (drop the provider's sender) and let
-    // the forwarder finish draining anything already queued.
-    drop(handle);
-    drop(provider);
-    let _ = forwarder.await;
-
-    Ok((reply, next_session))
-}
-
-/// GenerateContent fallback: stateless, ships history via memory.
-/// No live deltas (the upstream backend doesn't use our sink) — the
-/// reply arrives at once. Documented degraded mode.
-async fn run_generate_content(
-    agent: OverlayAgent,
-    api_key: &str,
-    model: &str,
-    prompt: &str,
-    history: &[(bool, String)],
-) -> Result<(String, Option<String>), BoxError> {
-    let llm = oxidemx_agent::factory::provider_from_config(AiBackend::GenerateContent, model, api_key)
-        .map_err(|e| Box::new(e) as BoxError)?;
-
+    // Ship the thread transcript so the model has multi-turn context.
     let mut memory = SlidingWindowMemory::new(40);
     for (is_user, text) in history {
         let role = if *is_user {
@@ -262,7 +223,15 @@ async fn run_generate_content(
 fn drain_events<S>(mut rx: S)
 where
     S: futures_util::Stream + Send + Unpin + 'static,
+    S::Item: std::fmt::Debug,
 {
     use futures_util::StreamExt;
-    tokio::spawn(async move { while rx.next().await.is_some() {} });
+    let debug = std::env::var_os("OXIDEMX_AGENT_DEBUG").is_some();
+    tokio::spawn(async move {
+        while let Some(ev) = rx.next().await {
+            if debug {
+                eprintln!("[event] {ev:?}");
+            }
+        }
+    });
 }

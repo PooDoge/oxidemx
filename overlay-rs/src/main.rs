@@ -98,27 +98,18 @@ fn main() -> iced::Result {
             .unwrap_or_else(|| "Say hello in one short sentence.".to_string());
         let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
         let code = rt.block_on(async {
-            let key = match ai_client::load_api_key() {
-                Ok(k) => k,
-                Err(e) => {
-                    eprintln!("selftest: no API key: {e}");
-                    return 1;
-                }
-            };
+            // Provider + key resolve inside the runtime from config.
             match ai_client::ask_ai(
-                &key,
                 ai_client::AgentMode::GeneralChat,
                 ai_client::DEFAULT_MODEL,
                 &prompt,
-                None,
                 None,
                 &[],
             )
             .await
             {
-                Ok((reply, session)) => {
+                Ok((reply, _)) => {
                     println!("--- reply ---\n{reply}");
-                    eprintln!("--- session: {session:?} ---");
                     0
                 }
                 Err(e) => {

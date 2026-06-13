@@ -28,7 +28,11 @@ pub static CONFIG_CHANGED_TX: Lazy<Mutex<Option<mpsc::Sender<String>>>> =
 /// into the right conversation.
 #[derive(Debug, Clone)]
 pub enum StreamEvent {
-    /// A chunk of the model's text reply, in order.
+    /// A chunk of the model's text reply, in order. Not produced in
+    /// the current non-streaming runtime (the reply arrives complete
+    /// via `AiResponseReceived`); the variant + its UI scaffolding are
+    /// kept so token streaming can be re-added without rewiring.
+    #[allow(dead_code)]
     Delta(String),
     /// What the agent is doing right now ("Searching the web…",
     /// "Scheduling task — writing systemd unit…"). Dynamic so tool
@@ -524,23 +528,20 @@ pub async fn run_heartbeat() -> Result<Option<String>, Box<dyn std::error::Error
     Ok(Some(text))
 }
 
-/// One agent turn, now driven by the AutoAgents runtime
-/// (`crate::agent_runtime`). The ReAct loop, tool dispatch, SSE
-/// streaming, and session threading all live there; this thin
-/// wrapper keeps the call signature the rest of the overlay expects.
-///
-/// `history` is the thread's prior turns as `(is_user, text)` — used
-/// by the stateless `GenerateContent` fallback to reconstruct
-/// context. The Interactions backend ignores it (server-side session
-/// via `session_id`). Returns `(reply_text, next_session_id)`.
+/// One agent turn, driven by the AutoAgents runtime
+/// (`crate::agent_runtime`). The provider (Gemini / OpenAI / Anthropic
+/// / Ollama / Claude Code) is chosen from config; keys resolve per
+/// provider inside the runtime. `model` is the thread's flash/pro hint
+/// (honoured only for Gemini). `history` (the thread's prior turns) is
+/// shipped to the model as conversational context. Returns
+/// `(reply_text, None)` — sessions are gone; the tuple shape is kept
+/// for call-site stability.
 pub async fn ask_ai(
-    api_key: &str,
     mode: AgentMode,
     model: &str,
     prompt: &str,
-    session_id: Option<String>,
     sink: Option<StreamSink>,
     history: &[(bool, String)],
 ) -> Result<(String, Option<String>), Box<dyn std::error::Error + Send + Sync>> {
-    crate::agent_runtime::run(api_key, mode, model, prompt, session_id, sink, history).await
+    crate::agent_runtime::run(mode, model, prompt, sink, history).await
 }

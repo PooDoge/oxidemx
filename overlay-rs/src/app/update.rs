@@ -655,19 +655,13 @@ pub(super) fn update(state: &mut RadialState, message: Message) -> Task<Message>
             chat.updated_at = now;
             state.ai_loading = true;
             state.ai_activity = Some("Thinking…".to_string());
-            // Server-side conversation state: the Interactions API
-            // replays context from previous_interaction_id, so only
-            // the new prompt travels (the local history is
-            // display-only).
-            let session_id = state.chat().session_id.clone();
             let mode = state.chat().mode;
             let model = state.chat().model.clone();
             let thread_idx = state.ai_active;
             let sink = crate::ai_client::StreamSink::for_thread(thread_idx);
             // Prior turns (everything before the prompt just pushed) —
-            // used by the stateless GenerateContent fallback to rebuild
-            // context. The Interactions backend ignores it (server-side
-            // session via session_id).
+            // shipped to the model as conversational context (all
+            // providers are stateless; history lives client-side).
             let history: Vec<(bool, String)> = {
                 let h = &state.chat().history;
                 h.iter()
@@ -677,14 +671,9 @@ pub(super) fn update(state: &mut RadialState, message: Message) -> Task<Message>
             };
             let (task, handle) = Task::perform(
                 async move {
-                    match crate::ai_client::load_api_key() {
-                        Ok(key) => crate::ai_client::ask_ai(
-                            &key, mode, &model, &prompt, session_id, sink, &history,
-                        )
+                    crate::ai_client::ask_ai(mode, &model, &prompt, sink, &history)
                         .await
-                        .map_err(|e| e.to_string()),
-                        Err(e) => Err(e.to_string()),
-                    }
+                        .map_err(|e| e.to_string())
                 },
                 move |res| Message::AiResponseReceived(thread_idx, res),
             )
