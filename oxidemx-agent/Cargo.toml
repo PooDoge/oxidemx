@@ -1,0 +1,34 @@
+# OxideMX agent runtime (P0 spike).
+#
+# Pins AutoAgents at exactly 0.3.7 — the version whose trait surface
+# the integration spec (docs/plans/agent-framework-integration-
+# brainstorm.md) was written against. default-features = false pulls
+# zero provider backends: the Gemini Interactions transport lives in
+# this crate (src/provider/), not upstream.
+[package]
+name = "oxidemx-agent"
+version = "0.1.0"
+edition = "2021"
+description = "AutoAgents-based agent runtime for OxideMX (P0 spike: Gemini Interactions provider + execute_command tool + ReAct CLI harness)"
+
+[dependencies]
+autoagents = { version = "=0.3.7", default-features = false }
+autoagents-derive = "=0.3.7"
+async-trait = "0.1"
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "process", "time", "sync"] }
+tokio-util = "0.7"
+futures-util = "0.3"
+futures = "0.3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+schemars = "0.8"
+thiserror = "1"
+tracing = "0.1"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["full"] }
+
+[[bin]]
+name = "oxidemx-agent-cli"
+path = "src/bin/cli.rs"
