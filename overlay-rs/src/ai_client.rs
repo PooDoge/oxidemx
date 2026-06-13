@@ -2,7 +2,7 @@ use once_cell::sync::Lazy;
 use serde_json::json;
 use std::sync::Mutex;
 use tokio::sync::mpsc;
-use tracing::{error, info};
+use tracing::error;
 
 // =============================================================================
 // GLOBAL CHANNELS FOR ASYNC TOOL-TO-UI COMMUNICATION
@@ -105,11 +105,9 @@ impl StreamSink {
     }
 }
 
-mod sse;
 pub mod tools;
 
-use sse::stream_round;
-use tools::{activity_for_tool, agent_tool_declarations, execute_local_tool};
+use tools::agent_tool_declarations;
 
 // =============================================================================
 // API KEY & CONFIG PATH RESOLVERS
@@ -361,12 +359,11 @@ impl AgentMode {
 }
 
 // =============================================================================
-// MAIN ASYNC API CLIENT FUNCTION (AGENT LOOP)
+// NESTED-CALL HELPERS (heartbeat / consolidation / grounded search)
 // =============================================================================
-
-/// Hard cap on model⇄tool round-trips within one `ask_ai` call so a
-/// confused model can't loop the agent forever.
-const MAX_TOOL_ROUNDS: usize = 8;
+// The agent loop itself now lives in `crate::agent_runtime`; these
+// raw one-shot helpers remain for tool-less nested interactions
+// (heartbeat tick, memory consolidation, grounded web search).
 
 const INTERACTIONS_URL: &str = "https://generativelanguage.googleapis.com/v1beta/interactions";
 /// Default + fallback model; the chat toolbar can switch threads to
@@ -421,9 +418,11 @@ fn collect_output_text(body: &serde_json::Value) -> String {
     out
 }
 
-/// Everything one request/response round yields, whether it came in
-/// over SSE or as a single JSON body.
+/// Everything one nested-call round yields. `id`/`status`/`calls`
+/// are parsed for completeness but the surviving callers (heartbeat,
+/// consolidation, grounded search) only read `text`.
 #[derive(Debug, Default)]
+#[allow(dead_code)]
 struct RoundOutcome {
     id: Option<String>,
     status: String,
@@ -458,23 +457,6 @@ async fn blocking_round(
     Ok(out)
 }
 
-/// One agent turn against the Gemini **Interactions API**
-/// (`v1beta/interactions`). Server-side conversation state: pass
-/// the `session_id` returned by the previous turn as
-/// `previous_interaction_id` and the API replays the full context —
-/// no client-side history shipping.
-///
-/// With a `sink`, responses stream over SSE — text deltas and
-/// tool-activity labels are forwarded live; if SSE parsing ever
-/// fails mid-round, the round transparently retries as a blocking
-/// call (the UI just sees the text arrive at once). Function calls
-/// surface as `requires_action`; each is executed locally and fed
-/// back as a `function_result` input until the model answers with
-/// plain text.
-///
-/// History note: the original Antigravity-era client targeted this
-/// API at `v1beta2` (404) and was temporarily ported to stateless
-/// `generateContent`; this is the proper `v1beta` transport.
 /// One headless heartbeat turn (see agent/heartbeat.rs for the
 /// contract). Tool-less single round: persona + memories +
 /// checklist in, plain text out. Returns `None` when the agent
@@ -535,103 +517,23 @@ pub async fn run_heartbeat() -> Result<Option<String>, Box<dyn std::error::Error
     Ok(Some(text))
 }
 
+/// One agent turn, now driven by the AutoAgents runtime
+/// (`crate::agent_runtime`). The ReAct loop, tool dispatch, SSE
+/// streaming, and session threading all live there; this thin
+/// wrapper keeps the call signature the rest of the overlay expects.
+///
+/// `history` is the thread's prior turns as `(is_user, text)` — used
+/// by the stateless `GenerateContent` fallback to reconstruct
+/// context. The Interactions backend ignores it (server-side session
+/// via `session_id`). Returns `(reply_text, next_session_id)`.
 pub async fn ask_ai(
     api_key: &str,
     mode: AgentMode,
     model: &str,
     prompt: &str,
-    mut session_id: Option<String>,
+    session_id: Option<String>,
     sink: Option<StreamSink>,
+    history: &[(bool, String)],
 ) -> Result<(String, Option<String>), Box<dyn std::error::Error + Send + Sync>> {
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(120))
-        .build()?;
-
-    let tools = mode.tools();
-    let mut input: serde_json::Value = json!(prompt);
-    let mut full_text = String::new();
-
-    if let Some(s) = &sink {
-        s.send(StreamEvent::Activity("Thinking…".to_string())).await;
-    }
-
-    for round in 0..MAX_TOOL_ROUNDS {
-        let mut req_body = json!({
-            "model": model,
-            "input": input,
-            "tools": tools,
-            "system_instruction": mode.system_instruction(prompt),
-        });
-        if let Some(prev) = &session_id {
-            req_body["previous_interaction_id"] = json!(prev);
-        }
-
-        info!(round, model, prev = ?session_id, "Sending Interactions API request");
-        let outcome = if sink.is_some() {
-            match stream_round(&client, api_key, &req_body, &sink).await {
-                Ok(o) => o,
-                Err(e) if e.to_string().starts_with("API error") => return Err(e),
-                Err(e) => {
-                    // SSE hiccup — retry the round as a plain JSON
-                    // exchange so the turn still completes.
-                    tracing::warn!(error = %e, "SSE round failed; falling back to blocking call");
-                    blocking_round(&client, api_key, &req_body).await?
-                }
-            }
-        } else {
-            blocking_round(&client, api_key, &req_body).await?
-        };
-
-        info!(status = %outcome.status, id = ?outcome.id, "Interaction response");
-        session_id = outcome.id.or(session_id);
-        if !outcome.text.is_empty() {
-            if !full_text.is_empty() {
-                full_text.push('\n');
-            }
-            full_text.push_str(&outcome.text);
-        }
-
-        match outcome.status.as_str() {
-            "completed" => {
-                if full_text.is_empty() {
-                    return Err("Model returned an empty reply".into());
-                }
-                return Ok((full_text, session_id));
-            }
-            "requires_action" => {
-                let Some((call_id, name, args)) = outcome.calls.into_iter().next() else {
-                    return Err("requires_action with no pending function call".into());
-                };
-                info!("Executing local tool '{}' (call_id={})", name, call_id);
-                if let Some(s) = &sink {
-                    s.send(StreamEvent::Activity(activity_for_tool(&name).to_string()))
-                        .await;
-                }
-                let result_text = match execute_local_tool(&name, args, &sink).await {
-                    Ok(t) => t,
-                    // Feed tool failures back to the model instead
-                    // of aborting the turn — it can usually recover
-                    // or explain.
-                    Err(e) => format!("Tool error: {e}"),
-                };
-                if let Some(s) = &sink {
-                    s.send(StreamEvent::Activity("Thinking…".to_string())).await;
-                }
-                input = json!({
-                    "type": "function_result",
-                    "call_id": call_id,
-                    "name": name,
-                    "result": [{ "type": "text", "text": result_text }],
-                });
-            }
-            "failed" | "cancelled" | "incomplete" | "budget_exceeded" => {
-                return Err(format!("Interaction ended with status '{}'", outcome.status).into());
-            }
-            other => {
-                return Err(format!("Unrecognized interaction status: {other}").into());
-            }
-        }
-    }
-
-    Err(format!("Agent exceeded {MAX_TOOL_ROUNDS} tool rounds without a final answer").into())
+    crate::agent_runtime::run(api_key, mode, model, prompt, session_id, sink, history).await
 }

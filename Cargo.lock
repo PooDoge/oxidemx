@@ -5062,6 +5062,9 @@ name = "oxidemx-overlay"
 version = "0.0.1"
 dependencies = [
  "async-channel",
+ "async-trait",
+ "autoagents",
+ "autoagents-derive",
  "bytemuck",
  "futures-util",
  "iced 0.14.0 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -5069,6 +5072,7 @@ dependencies = [
  "naga 27.0.3",
  "notify",
  "once_cell",
+ "oxidemx-agent",
  "oxidemx-icons",
  "oxidemx-scene-render",
  "oxidemx-shared",

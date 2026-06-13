@@ -664,14 +664,25 @@ pub(super) fn update(state: &mut RadialState, message: Message) -> Task<Message>
             let model = state.chat().model.clone();
             let thread_idx = state.ai_active;
             let sink = crate::ai_client::StreamSink::for_thread(thread_idx);
+            // Prior turns (everything before the prompt just pushed) —
+            // used by the stateless GenerateContent fallback to rebuild
+            // context. The Interactions backend ignores it (server-side
+            // session via session_id).
+            let history: Vec<(bool, String)> = {
+                let h = &state.chat().history;
+                h.iter()
+                    .take(h.len().saturating_sub(1))
+                    .map(|m| (m.is_user, m.text.clone()))
+                    .collect()
+            };
             let (task, handle) = Task::perform(
                 async move {
                     match crate::ai_client::load_api_key() {
-                        Ok(key) => {
-                            crate::ai_client::ask_ai(&key, mode, &model, &prompt, session_id, sink)
-                                .await
-                                .map_err(|e| e.to_string())
-                        }
+                        Ok(key) => crate::ai_client::ask_ai(
+                            &key, mode, &model, &prompt, session_id, sink, &history,
+                        )
+                        .await
+                        .map_err(|e| e.to_string()),
                         Err(e) => Err(e.to_string()),
                     }
                 },
