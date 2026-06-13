@@ -83,7 +83,7 @@ pub type StreamEventTx = mpsc::Sender<(usize, StreamEvent)>;
 pub static STREAM_TX: Lazy<Mutex<Option<StreamEventTx>>> = Lazy::new(|| Mutex::new(None));
 
 /// Per-request handle for forwarding stream events. Cheap to clone.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct StreamSink {
     pub thread: usize,
     pub tx: mpsc::Sender<(usize, StreamEvent)>,
@@ -100,7 +100,7 @@ impl StreamSink {
             .map(|tx| StreamSink { thread, tx })
     }
 
-    async fn send(&self, event: StreamEvent) {
+    pub(crate) async fn send(&self, event: StreamEvent) {
         let _ = self.tx.send((self.thread, event)).await;
     }
 }

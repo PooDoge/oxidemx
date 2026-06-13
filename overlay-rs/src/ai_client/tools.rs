@@ -194,7 +194,7 @@ async fn ask_user_choice(
 /// structured `Card` events into the owning chat thread; the
 /// returned string is what goes back to the model as the
 /// `function_result`.
-pub(super) async fn execute_local_tool(
+pub(crate) async fn execute_local_tool(
     name: &str,
     args: serde_json::Value,
     sink: &Option<StreamSink>,

@@ -21,6 +21,7 @@
 
 mod actions;
 mod agent;
+mod agent_runtime;
 mod ai_client;
 mod anim;
 mod app;
