@@ -18,7 +18,7 @@ use oxidemx_widgets::widgets::section_header;
 
 use crate::{Message, State};
 
-/// One flow row: identity + validation result.
+/// One flow row: identity + validation result + last-run outcome.
 #[derive(Debug, Clone)]
 pub struct FlowRow {
     pub id: String,
@@ -26,6 +26,8 @@ pub struct FlowRow {
     pub step_order: Vec<String>,
     pub valid: bool,
     pub errors: Vec<String>,
+    /// Most recent run's `(success, artifact_count)`, if any ran.
+    pub last_run: Option<(bool, usize)>,
 }
 
 /// One roster agent row.
@@ -53,9 +55,11 @@ impl AgentsData {
     pub fn load() -> Self {
         let flows_root = default_flows_root();
         let agents_root = default_agents_root();
+        let last_runs = scan_last_runs();
 
         let mut flows = Vec::new();
         for id in list_flows(&flows_root) {
+            let last_run = last_runs.get(&id).copied();
             match load_flow(&flows_root, &agents_root, &id) {
                 Ok((doc, roster)) => {
                     let name = doc.name().to_string();
@@ -66,6 +70,7 @@ impl AgentsData {
                             step_order: plan.topo.clone(),
                             valid: true,
                             errors: Vec::new(),
+                            last_run,
                         }),
                         Err(errs) => flows.push(FlowRow {
                             id,
@@ -73,6 +78,7 @@ impl AgentsData {
                             step_order: doc.manifest.steps.iter().map(|s| s.id.clone()).collect(),
                             valid: false,
                             errors: errs.iter().map(|e| e.to_string()).collect(),
+                            last_run,
                         }),
                     }
                 }
@@ -82,6 +88,7 @@ impl AgentsData {
                     step_order: Vec::new(),
                     valid: false,
                     errors: vec![e.to_string()],
+                    last_run,
                 }),
             }
         }
@@ -115,6 +122,50 @@ impl AgentsData {
             mcp_server_count,
         }
     }
+}
+
+/// Scan the conductor's runs dir for each flow's most recent run.json,
+/// returning `flow_id -> (success, artifact_count)`. Run ids are
+/// `<flow>-<unix_millis>`, so a lexicographic max over the run dir
+/// names per flow finds the latest.
+fn scan_last_runs() -> std::collections::HashMap<String, (bool, usize)> {
+    let mut latest: std::collections::HashMap<String, (String, bool, usize)> =
+        std::collections::HashMap::new();
+    let runs_root = std::env::var_os("OXIDEMX_RUNS_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            let base = std::env::var_os("XDG_DATA_HOME")
+                .map(PathBuf::from)
+                .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/share")))
+                .unwrap_or_else(|| PathBuf::from("."));
+            base.join("oxidemx").join("runs")
+        });
+    let Ok(entries) = std::fs::read_dir(&runs_root) else {
+        return std::collections::HashMap::new();
+    };
+    for e in entries.flatten() {
+        let dir_name = e.file_name().to_string_lossy().to_string();
+        let Ok(s) = std::fs::read_to_string(e.path().join("run.json")) else {
+            continue;
+        };
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(&s) else {
+            continue;
+        };
+        let Some(flow_id) = v["flow_id"].as_str() else { continue };
+        let success = v["success"].as_bool().unwrap_or(false);
+        let arts = v["artifacts"].as_array().map(|a| a.len()).unwrap_or(0);
+        let keep = latest
+            .get(flow_id)
+            .map(|(rid, _, _)| dir_name > *rid)
+            .unwrap_or(true);
+        if keep {
+            latest.insert(flow_id.to_string(), (dir_name, success, arts));
+        }
+    }
+    latest
+        .into_iter()
+        .map(|(k, (_, ok, n))| (k, (ok, n)))
+        .collect()
 }
 
 /// Spawn Mission Control, pre-selecting `flow_id` (read via
@@ -436,6 +487,14 @@ fn flows_card(state: &State) -> Element<'_, Message> {
             format!("{} steps:  {}", f.step_order.len(), f.step_order.join(" → "))
         };
         let mut block = column![head, text(order).size(11).style(style::text_dim(pal))].spacing(4);
+        if let Some((ok, n)) = f.last_run {
+            let (label, color) = if ok {
+                (format!("last run ✓ · {n} artifact(s)"), pal.success)
+            } else {
+                ("last run ✗ failed".to_string(), pal.danger)
+            };
+            block = block.push(text(label).size(10).style(text_color(color)));
+        }
         for e in &f.errors {
             block = block.push(text(format!("• {e}")).size(10).style(text_color(pal.danger)));
         }
