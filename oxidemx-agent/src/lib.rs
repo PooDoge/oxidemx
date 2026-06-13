@@ -7,4 +7,4 @@
 // Modules land per plan task; uncommented as each is implemented.
 pub mod allowlist;
 pub mod provider;
-// pub mod tools;
+pub mod tools;

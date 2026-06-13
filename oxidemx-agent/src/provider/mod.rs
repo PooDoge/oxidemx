@@ -142,6 +142,9 @@ impl GeminiInteractionsProvider {
                 message: e.to_string(),
                 raw_response: String::new(),
             })?;
+        if std::env::var_os("OXIDEMX_AGENT_DEBUG").is_some() {
+            eprintln!("[provider] raw steps: {}", body["steps"]);
+        }
         Ok(parse_interaction_body(&body))
     }
 
@@ -200,7 +203,15 @@ fn parse_interaction_body(body: &Value) -> RoundOutcome {
         calls: Vec::new(),
     };
     for step in body["steps"].as_array().into_iter().flatten() {
-        if step["type"] == "function_call" && step["status"] == "waiting" {
+        // Live wire (2026-06-12): pending function_call steps carry NO
+        // status field in blocking responses; only filter out steps
+        // explicitly marked done. (The overlay's `== "waiting"` filter
+        // is a latent bug masked by its SSE-first path.)
+        let resolved = matches!(
+            step["status"].as_str(),
+            Some("completed") | Some("failed") | Some("cancelled")
+        );
+        if step["type"] == "function_call" && !resolved {
             out.calls.push((
                 step["id"].as_str().unwrap_or_default().to_string(),
                 step["name"].as_str().unwrap_or_default().to_string(),
@@ -265,6 +276,15 @@ impl ChatProvider for GeminiInteractionsProvider {
         let mut session = self.session.lock().await;
         let body = self.request_body(input, &tool_decls, system.as_deref(), session.as_deref());
         let outcome = self.round(&body).await?;
+        if std::env::var_os("OXIDEMX_AGENT_DEBUG").is_some() {
+            eprintln!(
+                "[provider] status={} text_len={} calls={} id={:?}",
+                outcome.status,
+                outcome.text.len(),
+                outcome.calls.len(),
+                outcome.id
+            );
+        }
 
         // Thread the session id; terminal failure statuses surface
         // as provider errors so the executor stops cleanly.
@@ -318,9 +338,13 @@ mod tests {
             "id": "intx_123",
             "status": "requires_action",
             "steps": [
+                {"type": "thought", "signature": "opaque"},
                 {"type": "model_output", "content": [{"type": "text", "text": "Let me check."}]},
-                {"type": "function_call", "status": "waiting", "id": "call_1",
+                // Live wire: pending calls have NO status field.
+                {"type": "function_call", "id": "call_1",
                  "name": "execute_command", "arguments": {"command": "systemctl --user status oxidemx"}},
+                {"type": "function_call", "status": "waiting", "id": "call_2",
+                 "name": "second_tool", "arguments": {}},
                 {"type": "function_call", "status": "completed", "id": "call_0",
                  "name": "older_tool", "arguments": {}}
             ]
@@ -329,9 +353,11 @@ mod tests {
         assert_eq!(out.id.as_deref(), Some("intx_123"));
         assert_eq!(out.status, "requires_action");
         assert_eq!(out.text, "Let me check.");
-        // Only the WAITING call is pending; completed ones are history.
-        assert_eq!(out.calls.len(), 1);
+        // Status-less and "waiting" calls are pending; completed ones
+        // are history; thought steps are ignored.
+        assert_eq!(out.calls.len(), 2);
         assert_eq!(out.calls[0].1, "execute_command");
+        assert_eq!(out.calls[1].1, "second_tool");
     }
 
     #[test]
