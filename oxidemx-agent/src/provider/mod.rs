@@ -83,6 +83,19 @@ impl GeminiInteractionsProvider {
         self
     }
 
+    /// Seed the server-side session before a run so the Interactions
+    /// API replays the prior conversation. Pass the id returned by
+    /// the previous turn (or `None` to start fresh).
+    pub async fn seed_session(&self, id: Option<String>) {
+        *self.session.lock().await = id;
+    }
+
+    /// The current session id — read back after a run to persist for
+    /// the next turn. `None` until the API returns one.
+    pub async fn session(&self) -> Option<String> {
+        self.session.lock().await.clone()
+    }
+
     /// Request body for one round. `prev` is the session id, if any.
     fn request_body(
         &self,
@@ -380,6 +393,16 @@ mod tests {
         assert_eq!(calls[0].function.name, "execute_command");
         let args: Value = serde_json::from_str(&calls[0].function.arguments).unwrap();
         assert_eq!(args["command"], "wpctl status");
+    }
+
+    #[tokio::test]
+    async fn session_seed_and_read_round_trips() {
+        let p = GeminiInteractionsProvider::new("k", DEFAULT_MODEL);
+        assert_eq!(p.session().await, None);
+        p.seed_session(Some("intx_42".into())).await;
+        assert_eq!(p.session().await, Some("intx_42".into()));
+        p.seed_session(None).await;
+        assert_eq!(p.session().await, None);
     }
 
     #[tokio::test]
