@@ -738,6 +738,23 @@ fn summarize(output: &str) -> String {
 }
 
 /// Emit the terminal event and build the outcome.
+/// Write the canonical `run.json` outcome record to the run workdir,
+/// so EVERY launcher (CLI, tick, Mission Control, agentd) records runs
+/// uniformly (the Agents tab "last run" + `flow status` read these).
+fn write_run_json(opts: &RunOptions, flow_id: &str, success: bool, artifacts: &[String], error: &Option<String>) {
+    let record = serde_json::json!({
+        "run_id": opts.run_id,
+        "flow_id": flow_id,
+        "success": success,
+        "artifacts": artifacts,
+        "error": error,
+    });
+    let _ = std::fs::write(
+        opts.workdir.join("run.json"),
+        serde_json::to_string_pretty(&record).unwrap_or_default(),
+    );
+}
+
 async fn finalize(
     plan: &FlowPlan,
     opts: &RunOptions,
@@ -746,18 +763,21 @@ async fn finalize(
     artifacts: Vec<String>,
     failed: Option<(String, String)>,
 ) -> RunOutcome {
+    let flow_id = &plan.doc.manifest.flow.id;
     if opts.cancel.is_cancelled() && failed.is_none() {
         sink.emit(RunEvent::RunCancelled {
             run_id: opts.run_id.clone(),
         })
         .await;
+        let error = Some("cancelled".to_string());
+        write_run_json(opts, flow_id, false, &artifacts, &error);
         return RunOutcome {
             run_id: opts.run_id.clone(),
             success: false,
             artifacts,
             outputs: done,
             handoff_markdown: String::new(),
-            error: Some("cancelled".into()),
+            error,
         };
     }
 
@@ -768,13 +788,15 @@ async fn finalize(
             step: (!step.is_empty()).then_some(step.clone()),
         })
         .await;
+        let error = Some(reason);
+        write_run_json(opts, flow_id, false, &artifacts, &error);
         return RunOutcome {
             run_id: opts.run_id.clone(),
             success: false,
             artifacts,
             outputs: done,
             handoff_markdown: String::new(),
-            error: Some(reason),
+            error,
         };
     }
 
@@ -807,6 +829,7 @@ async fn finalize(
     })
     .await;
 
+    write_run_json(opts, flow_id, true, &artifacts, &None);
     RunOutcome {
         run_id: opts.run_id.clone(),
         success: true,
