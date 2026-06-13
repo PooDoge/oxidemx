@@ -8,19 +8,9 @@ use std::path::PathBuf;
 
 use oxidemx_shared::config::AiProvider;
 
-/// `(env var, key-file stem)` for the key-bearing providers.
-fn key_spec(provider: AiProvider) -> Option<(&'static str, &'static str)> {
-    match provider {
-        AiProvider::Gemini => Some(("GEMINI_API_KEY", "gemini")),
-        AiProvider::OpenAi => Some(("OPENAI_API_KEY", "openai")),
-        AiProvider::Anthropic => Some(("ANTHROPIC_API_KEY", "anthropic")),
-        AiProvider::Ollama | AiProvider::ClaudeCode => None,
-    }
-}
-
 /// Path to a provider's key file, e.g. `~/.config/oxidemx/openai.key`.
 pub fn key_path(provider: AiProvider) -> Option<PathBuf> {
-    let (_, stem) = key_spec(provider)?;
+    let stem = provider.key_file_stem()?;
     let home = std::env::var_os("HOME")?;
     Some(PathBuf::from(home).join(format!(".config/oxidemx/{stem}.key")))
 }
@@ -28,11 +18,12 @@ pub fn key_path(provider: AiProvider) -> Option<PathBuf> {
 /// The configured key for `provider`: env var, else the key file.
 /// `None` for keyless providers or when nothing is configured.
 pub fn provider_key(provider: AiProvider) -> Option<String> {
-    let (env, _) = key_spec(provider)?;
-    if let Ok(k) = std::env::var(env) {
-        let k = k.trim().to_string();
-        if !k.is_empty() {
-            return Some(k);
+    if let Some(env) = provider.key_env() {
+        if let Ok(k) = std::env::var(env) {
+            let k = k.trim().to_string();
+            if !k.is_empty() {
+                return Some(k);
+            }
         }
     }
     let path = key_path(provider)?;

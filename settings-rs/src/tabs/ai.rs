@@ -9,13 +9,9 @@
 use crate::{Message, State};
 use iced::widget::{button, column, container, pick_list, row, rule, text, text_input};
 use iced::{Alignment, Element, Length};
-use oxidemx_shared::config::AiBackend;
+use oxidemx_shared::config::AiProvider;
 use oxidemx_widgets::style;
 use oxidemx_widgets::widgets::section_header;
-
-/// Model ids offered in the quick picker; the text field takes any
-/// id for previews/experiments.
-const KNOWN_MODELS: [&str; 2] = ["gemini-2.5-flash", "gemini-2.5-pro"];
 
 pub fn view(state: &State) -> Element<'_, Message> {
     let pal = &state.palette;
@@ -24,7 +20,7 @@ pub fn view(state: &State) -> Element<'_, Message> {
         section_header("AI"),
         text(
             "The agent runtime behind the radial menu's AI page: which \
-             Gemini API it talks to, which model, the API key, and which \
+             provider it talks to, which model, the API key, and which \
              shell commands the agent may run without asking. Edits \
              autosave; the overlay picks them up via inotify within \
              ~150 ms.",
@@ -32,7 +28,7 @@ pub fn view(state: &State) -> Element<'_, Message> {
         .size(12)
         .style(style::text_dim(pal)),
         rule::horizontal(1).style(style::rule_style(pal)),
-        section_block(state, "Backend", backend_picker(state)),
+        section_block(state, "Provider", provider_picker(state)),
         section_block(state, "Model", model_picker(state)),
         section_block(state, "API key", key_panel(state)),
         section_block(state, "Command allowlist", allowlist_editor(state)),
@@ -42,23 +38,25 @@ pub fn view(state: &State) -> Element<'_, Message> {
 }
 
 // ============================================================================
-// Backend
+// Provider
 // ============================================================================
 
-fn backend_picker(state: &State) -> Element<'_, Message> {
+fn provider_picker(state: &State) -> Element<'_, Message> {
     let pal = &state.palette;
-    let current = state.config.overlay.ai.backend;
+    let current = state.config.overlay.ai.provider;
 
     let intro = text(
-        "Interactions is Gemini's agentic API (server-side sessions, the \
-         default). GenerateContent is the classic stateless API, kept as \
-         a fallback if Interactions misbehaves — same key, fewer \
-         features (no session reuse, no mid-reply cancel).",
+        "Which LLM serves the chat. Gemini, OpenAI and Anthropic use \
+         their API keys (below). Ollama runs local models (no key). \
+         Claude Code uses your `claude` CLI / subscription (no key) but \
+         is chat-only — the agent tools (run command, memory, …) don't \
+         apply on that path. Switching providers resets the model to \
+         that provider's default.",
     )
     .size(11)
     .style(style::text_dim(pal));
 
-    let picker = pick_list(AiBackend::ALL, Some(current), Message::AiBackendChanged)
+    let picker = pick_list(AiProvider::ALL, Some(current), Message::AiProviderChanged)
         .text_size(12)
         .padding(6)
         .style(style::pick_list_style(pal));
@@ -72,16 +70,23 @@ fn backend_picker(state: &State) -> Element<'_, Message> {
 
 fn model_picker(state: &State) -> Element<'_, Message> {
     let pal = &state.palette;
+    let provider = state.config.overlay.ai.provider;
     let current = state.config.overlay.ai.model.clone();
 
     let intro = text(
-        "Flash is fast and cheap; Pro reasons harder. Any model id works \
-         in the text field — previews included.",
+        "Pick a model for the selected provider, or type any id in the \
+         field. Claude Code leaves this blank to use your subscription \
+         default.",
     )
     .size(11)
     .style(style::text_dim(pal));
 
-    let known: Vec<String> = KNOWN_MODELS.iter().map(|s| s.to_string()).collect();
+    let known: Vec<String> = provider
+        .model_suggestions()
+        .iter()
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+        .collect();
     let selected = known.iter().find(|m| **m == current).cloned();
     let quick = pick_list(known, selected, Message::AiModelChanged)
         .placeholder("custom…")
@@ -101,18 +106,31 @@ fn model_picker(state: &State) -> Element<'_, Message> {
 }
 
 // ============================================================================
-// API key (moved from settings_page.rs — same write-only contract)
+// API key — per selected provider (write-only contract)
 // ============================================================================
 
 fn key_panel(state: &State) -> Element<'_, Message> {
     let pal = &state.palette;
+    let provider = state.config.overlay.ai.provider;
 
-    let intro = text(
-        "Google Gemini API key, used by both backends. Stored outside \
-         config.json at ~/.config/oxidemx/gemini.key — config exports \
-         and imports never include it. Get a free key at \
-         aistudio.google.com.",
-    )
+    // Keyless providers (Ollama, Claude Code) just show a note.
+    let Some(stem) = provider.key_file_stem() else {
+        return text(format!(
+            "{} needs no API key.",
+            provider.label()
+        ))
+        .size(11)
+        .style(style::text_dim(pal))
+        .into();
+    };
+
+    let env = provider.key_env().unwrap_or("");
+    let intro = text(format!(
+        "API key for {}. Stored outside config.json at \
+         ~/.config/oxidemx/{stem}.key (0600) — never included in config \
+         exports. The {env} environment variable overrides it.",
+        provider.label()
+    ))
     .size(11)
     .style(style::text_dim(pal));
 

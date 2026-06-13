@@ -989,6 +989,39 @@ impl AiProvider {
         matches!(self, AiProvider::Gemini | AiProvider::OpenAi | AiProvider::Anthropic)
     }
 
+    /// Environment variable that supplies this provider's key, if any.
+    pub fn key_env(&self) -> Option<&'static str> {
+        match self {
+            AiProvider::Gemini => Some("GEMINI_API_KEY"),
+            AiProvider::OpenAi => Some("OPENAI_API_KEY"),
+            AiProvider::Anthropic => Some("ANTHROPIC_API_KEY"),
+            AiProvider::Ollama | AiProvider::ClaudeCode => None,
+        }
+    }
+
+    /// File stem under `~/.config/oxidemx/` for this provider's key
+    /// (`<stem>.key`), if it uses one. The shared contract between the
+    /// settings writer and the agent reader.
+    pub fn key_file_stem(&self) -> Option<&'static str> {
+        match self {
+            AiProvider::Gemini => Some("gemini"),
+            AiProvider::OpenAi => Some("openai"),
+            AiProvider::Anthropic => Some("anthropic"),
+            AiProvider::Ollama | AiProvider::ClaudeCode => None,
+        }
+    }
+
+    /// Suggested model ids for pickers (free-text still allowed).
+    pub fn model_suggestions(&self) -> &'static [&'static str] {
+        match self {
+            AiProvider::Gemini => &["gemini-2.5-flash", "gemini-2.5-pro"],
+            AiProvider::OpenAi => &["gpt-4o", "gpt-4o-mini", "gpt-4.1"],
+            AiProvider::Anthropic => &["claude-sonnet-4-6", "claude-opus-4-8", "claude-haiku-4-5-20251001"],
+            AiProvider::Ollama => &["llama3.2", "qwen2.5", "mistral"],
+            AiProvider::ClaudeCode => &["", "sonnet", "opus", "haiku"],
+        }
+    }
+
     pub const ALL: [AiProvider; 5] = [
         AiProvider::Gemini,
         AiProvider::OpenAi,

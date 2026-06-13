@@ -331,7 +331,7 @@ pub enum Message {
     /// never loaded back into the UI).
     AiKeyDraftChanged(String),
     /// AI tab: Gemini transport backend changed.
-    AiBackendChanged(oxidemx_shared::config::AiBackend),
+    AiProviderChanged(oxidemx_shared::config::AiProvider),
     /// AI tab: agent model id edited/picked.
     AiModelChanged(String),
     /// AI tab: allowlist add-form draft edited.
@@ -1372,9 +1372,20 @@ pub struct State {
 /// lookup in `overlay-rs/src/ai_client.rs::load_api_key` (which
 /// also honours `GEMINI_API_KEY` and the legacy juhradial path —
 /// this app only manages the canonical file).
-pub fn ai_key_path() -> std::path::PathBuf {
+/// Key file for a provider (`~/.config/oxidemx/<stem>.key`), or
+/// `None` for keyless providers (Ollama, Claude Code).
+pub fn ai_key_path_for(provider: oxidemx_shared::config::AiProvider) -> Option<std::path::PathBuf> {
+    let stem = provider.key_file_stem()?;
     let home = std::env::var("HOME").unwrap_or_default();
-    std::path::Path::new(&home).join(".config/oxidemx/gemini.key")
+    Some(std::path::Path::new(&home).join(format!(".config/oxidemx/{stem}.key")))
+}
+
+/// Whether the given provider has a key on disk (or no key needed).
+pub fn ai_key_present_for(provider: oxidemx_shared::config::AiProvider) -> bool {
+    match ai_key_path_for(provider) {
+        Some(p) => p.exists(),
+        None => true, // keyless providers are always "ready"
+    }
 }
 
 impl Default for State {
@@ -1388,6 +1399,7 @@ impl Default for State {
         // so make sure the multi-page invariant holds (>=1 page)
         // before any slice-editor message can mutate state.
         config.radial_menu.normalize_pages();
+        let ai_key_present = ai_key_present_for(config.overlay.ai.provider);
         let pal = palette::Palette::resolve(&config.theme);
         // Restore the last-visited tab from disk if the user has
         // one saved. Falls back to Buttons (the home tab) when
@@ -1448,7 +1460,7 @@ impl Default for State {
             haptic_diagnosis: None,
             ai_key_draft: String::new(),
             ai_allowlist_draft: String::new(),
-            ai_key_present: ai_key_path().exists(),
+            ai_key_present,
             widget_registry,
             picker_open: None,
             picker_search: String::new(),
@@ -2543,8 +2555,14 @@ fn update_inner(state: &mut State, message: Message) -> Task<Message> {
             }
             Task::none()
         }
-        Message::AiBackendChanged(b) => {
-            state.config.overlay.ai.backend = b;
+        Message::AiProviderChanged(p) => {
+            state.config.overlay.ai.provider = p;
+            // Reset the model to the new provider's default so the
+            // stored model never points at the wrong provider.
+            state.config.overlay.ai.model = p.default_model().to_string();
+            // Refresh the key indicator for the now-selected provider.
+            state.ai_key_present = ai_key_present_for(p);
+            state.ai_key_draft.clear();
             state.touch();
             Task::none()
         }
@@ -2592,7 +2610,10 @@ fn update_inner(state: &mut State, message: Message) -> Task<Message> {
                 state.status = "AI key field is empty — nothing saved".into();
                 return Task::none();
             }
-            let path = ai_key_path();
+            let Some(path) = ai_key_path_for(state.config.overlay.ai.provider) else {
+                state.status = "This provider needs no API key".into();
+                return Task::none();
+            };
             let result = (|| -> std::io::Result<()> {
                 if let Some(dir) = path.parent() {
                     std::fs::create_dir_all(dir)?;
@@ -2617,7 +2638,10 @@ fn update_inner(state: &mut State, message: Message) -> Task<Message> {
             Task::none()
         }
         Message::AiKeyRemove => {
-            match std::fs::remove_file(ai_key_path()) {
+            let Some(path) = ai_key_path_for(state.config.overlay.ai.provider) else {
+                return Task::none();
+            };
+            match std::fs::remove_file(path) {
                 Ok(()) => {
                     state.ai_key_present = false;
                     state.status = "AI API key removed".into();
