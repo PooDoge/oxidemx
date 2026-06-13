@@ -344,6 +344,10 @@ pub enum Message {
     AgentsRefresh,
     /// Agents tab: open Mission Control, pre-selecting this flow id.
     AgentsRunFlow(String),
+    /// Agents tab: edit the "new flow" name field.
+    AgentsNewFlowDraft(String),
+    /// Agents tab: scaffold a starter flow from the draft name.
+    AgentsCreateFlow,
     /// AI tab: Gemini transport backend changed.
     AiProviderChanged(oxidemx_shared::config::AiProvider),
     /// AI tab: agent model id edited/picked.
@@ -1384,6 +1388,9 @@ pub struct State {
     /// MCP servers. Loaded at boot + on refresh (not in Default, which
     /// must stay IO-free).
     pub agents: tabs::agents::AgentsData,
+    /// Agents tab: the "new flow" name field + last create result.
+    pub agents_new_flow_draft: String,
+    pub agents_new_flow_status: String,
 }
 
 /// Where the AI Assistant's Gemini API key lives. Mirrors the
@@ -1492,6 +1499,8 @@ impl Default for State {
             widget_preview: None,
             window_width: INITIAL_WINDOW_SIZE.width,
             agents: tabs::agents::AgentsData::default(),
+            agents_new_flow_draft: String::new(),
+            agents_new_flow_status: String::new(),
         }
     }
 }
@@ -2271,6 +2280,21 @@ fn update_inner(state: &mut State, message: Message) -> Task<Message> {
         }
         Message::AgentsRunFlow(id) => {
             tabs::agents::launch_mission_control(&id);
+            Task::none()
+        }
+        Message::AgentsNewFlowDraft(s) => {
+            state.agents_new_flow_draft = s;
+            Task::none()
+        }
+        Message::AgentsCreateFlow => {
+            match tabs::agents::scaffold_flow(&state.agents_new_flow_draft) {
+                Ok(id) => {
+                    state.agents_new_flow_draft.clear();
+                    state.agents_new_flow_status = format!("created `{id}` — edit its flow.md to refine");
+                    state.agents = tabs::agents::AgentsData::load();
+                }
+                Err(e) => state.agents_new_flow_status = format!("✗ {e}"),
+            }
             Task::none()
         }
         Message::SetAiFxEffect(idx, slug) => {

@@ -9,7 +9,7 @@
 
 use std::path::PathBuf;
 
-use iced::widget::{button, column, container, row, rule, text, Space};
+use iced::widget::{button, column, container, row, rule, text, text_input, Space};
 use iced::{Alignment, Element, Length};
 use oxidemx_conductor::loader::{default_agents_root, default_flows_root, list_flows, load_flow, load_roster};
 use oxidemx_conductor::{validate, KNOWN_TOOLS};
@@ -126,6 +126,86 @@ pub fn launch_mission_control(flow_id: &str) {
         .spawn();
 }
 
+/// Sanitize a user-typed flow id to a safe directory slug
+/// (lowercase, alnum + dashes).
+fn slugify(raw: &str) -> String {
+    let mut out = String::new();
+    let mut last_dash = false;
+    for ch in raw.trim().chars() {
+        if ch.is_ascii_alphanumeric() {
+            out.push(ch.to_ascii_lowercase());
+            last_dash = false;
+        } else if !last_dash && !out.is_empty() {
+            out.push('-');
+            last_dash = true;
+        }
+    }
+    out.trim_matches('-').to_string()
+}
+
+/// Scaffold a runnable starter flow at `<flows_root>/<id>/flow.md`. The
+/// template uses the shipped roster agents (so it validates + runs
+/// immediately) and is meant to be hand-refined afterward. Errors on a
+/// bad id or an existing flow (won't clobber).
+pub fn scaffold_flow(raw_id: &str) -> Result<String, String> {
+    let id = slugify(raw_id);
+    if id.is_empty() {
+        return Err("enter a flow name (letters, numbers, dashes)".into());
+    }
+    let dir = default_flows_root().join(&id);
+    let flow_md = dir.join("flow.md");
+    if flow_md.exists() {
+        return Err(format!("flow `{id}` already exists"));
+    }
+    std::fs::create_dir_all(&dir).map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
+    let template = format!(
+        r#"---
+[flow]
+id = "{id}"
+name = "{id}"
+description = "Describe what this flow does."
+version = 1
+
+[inputs]
+topic = {{ type = "string", default = "the AutoAgents changelog" }}
+
+[defaults]
+model = "gemini-2.5-flash"
+executor = "react"
+approval = "allowlist"
+max_turns = 8
+
+[[step]]
+id = "research"
+agent = "web-researcher"
+task = "Gather what you can about {{{{input.topic}}}}."
+output = "debug/research.md"
+
+[[step]]
+id = "answer"
+agent = "writer"
+needs = ["research"]
+task = "Write a clear, grounded summary about {{{{input.topic}}}}."
+context = ["@artifact@"]
+output = "ANSWER.md"
+
+[delivery]
+root = "ANSWER.md"
+title = "{id}"
+---
+
+# {id}
+
+A starter flow. Edit this file to shape the pipeline: add `[[step]]`
+tables, wire them with `needs`, grant tools via the roster agents, and
+use `kind = "reflect"` / `kind = "route"` for review loops and
+branches. Validate + run it from the Agents tab.
+"#
+    );
+    std::fs::write(&flow_md, template).map_err(|e| format!("cannot write flow.md: {e}"))?;
+    Ok(id)
+}
+
 pub fn view(state: &State) -> Element<'_, Message> {
     let pal = &state.palette;
     let a = &state.agents;
@@ -164,6 +244,7 @@ pub fn view(state: &State) -> Element<'_, Message> {
     column![
         header,
         intro,
+        new_flow_bar(state),
         rule::horizontal(1).style(style::rule_style(pal)),
         flows_card(state),
         roster_card(state),
@@ -173,6 +254,29 @@ pub fn view(state: &State) -> Element<'_, Message> {
     ]
     .spacing(16)
     .into()
+}
+
+fn new_flow_bar(state: &State) -> Element<'_, Message> {
+    let pal = &state.palette;
+    let input = text_input("new-flow-name", &state.agents_new_flow_draft)
+        .on_input(Message::AgentsNewFlowDraft)
+        .on_submit(Message::AgentsCreateFlow)
+        .padding(6)
+        .size(12)
+        .width(Length::Fixed(220.0));
+    let create = button(text("New flow").size(12))
+        .padding([6, 12])
+        .on_press(Message::AgentsCreateFlow)
+        .style(style::btn_secondary(pal));
+    let mut bar = row![input, create].spacing(8).align_y(Alignment::Center);
+    if !state.agents_new_flow_status.is_empty() {
+        bar = bar.push(
+            text(state.agents_new_flow_status.clone())
+                .size(11)
+                .style(style::text_dim(pal)),
+        );
+    }
+    bar.into()
 }
 
 fn card<'a>(state: &'a State, title: &str, body: Element<'a, Message>) -> Element<'a, Message> {
@@ -329,4 +433,19 @@ fn mcp_card(state: &State) -> Element<'_, Message> {
 
 fn text_color(c: iced::Color) -> impl Fn(&iced::Theme) -> iced::widget::text::Style {
     move |_| iced::widget::text::Style { color: Some(c) }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::slugify;
+
+    #[test]
+    fn slugify_makes_safe_dir_names() {
+        assert_eq!(slugify("Research Digest"), "research-digest");
+        assert_eq!(slugify("  My  Cool Flow!! "), "my-cool-flow");
+        assert_eq!(slugify("already-ok"), "already-ok");
+        assert_eq!(slugify("a/b\\c"), "a-b-c");
+        assert_eq!(slugify("   "), "");
+        assert_eq!(slugify("---"), "");
+    }
 }
