@@ -5,7 +5,7 @@ use serde_json::json;
 use tokio::sync::mpsc;
 
 use super::{
-    collect_output_text, get_config_path, load_api_key, post_interaction, AgentCardData,
+    collect_output_text, get_config_path, load_api_key, post_interaction, AgentCardData, FlowStep,
     PendingQuestion, StreamEvent, StreamSink, CONFIG_CHANGED_TX, DEFAULT_MODEL, QUESTION_TX,
 };
 
@@ -15,6 +15,29 @@ use super::{
 /// capabilities.
 pub(super) fn agent_tool_declarations() -> Vec<serde_json::Value> {
     vec![
+        json!({
+            "type": "function",
+            "name": "run_flow",
+            "description": "Run a multi-agent OxideMX flow (a named, pre-authored pipeline of agent steps) via the conductor. Use when the user asks to run a flow by name, or for a multi-step task a flow exists for (e.g. 'research-digest' to fetch+digest+answer a URL). List available flows is out of scope — the user knows the flow id. Streams live per-step progress and returns a summary; a card with a 'Watch' button to Mission Control appears in chat.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "flow_id": {
+                        "type": "string",
+                        "description": "The flow id to run (a directory under ~/.config/oxidemx/flows/)"
+                    },
+                    "inputs_json": {
+                        "type": "string",
+                        "description": "Optional JSON object of input values keyed by name, e.g. {\"url\": \"https://…\"}. Declared flow defaults apply for anything omitted."
+                    },
+                    "mock": {
+                        "type": "boolean",
+                        "description": "Run with the deterministic mock provider (no LLM calls) for a dry run. Default false (real run)."
+                    }
+                },
+                "required": ["flow_id"]
+            }
+        }),
         json!({
             "type": "function",
             "name": "execute_command",
@@ -183,6 +206,7 @@ pub(crate) async fn execute_local_tool(
     sink: &Option<StreamSink>,
 ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
     match name {
+        "run_flow" => run_flow_tool(&args, sink).await,
         "execute_command" => execute_command_tool(&args, sink).await,
         "schedule_task" => schedule_task_tool(&args, sink).await,
         "memory" => memory_tool(&args, sink).await,
@@ -316,6 +340,158 @@ async fn send_activity(sink: &Option<StreamSink>, label: String) {
 async fn send_card(sink: &Option<StreamSink>, card: AgentCardData) {
     if let Some(s) = sink {
         s.send(StreamEvent::Card(card)).await;
+    }
+}
+
+/// Record/overwrite a step's status in the running flow-card model.
+fn set_flow_status(steps: &mut Vec<FlowStep>, step: &str, status: &str) {
+    if let Some(s) = steps.iter_mut().find(|s| s.step == step) {
+        s.status = status.to_string();
+    } else {
+        steps.push(FlowStep {
+            step: step.to_string(),
+            status: status.to_string(),
+        });
+    }
+}
+
+/// `run_flow`: launch a conductor flow as a subprocess and stream its
+/// run-layer events (JSON lines) into the chat — live `Activity` per
+/// step, a final `Flow` card, and a text summary back to the model.
+///
+/// Shelling the installed `oxidemx-conductor` keeps the heavy
+/// conductor/toolkit out of the overlay binary and isolates the run
+/// (its own LLM calls, fs writes) in a child process.
+async fn run_flow_tool(
+    args: &serde_json::Value,
+    sink: &Option<StreamSink>,
+) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+    use tokio::io::AsyncBufReadExt;
+
+    let flow_id = args["flow_id"]
+        .as_str()
+        .ok_or("run_flow: `flow_id` argument missing or not a string")?
+        .to_string();
+    let mock = args.get("mock").and_then(serde_json::Value::as_bool).unwrap_or(false);
+
+    let mut cmd_args = vec!["run".to_string(), flow_id.clone()];
+    if mock {
+        cmd_args.push("--mock".to_string());
+    }
+    // Inputs arrive as a JSON-object string (Gemini's function schema
+    // can't express an open-keyed object directly).
+    if let Some(obj) = args
+        .get("inputs_json")
+        .and_then(serde_json::Value::as_str)
+        .filter(|s| !s.trim().is_empty())
+        .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
+        .as_ref()
+        .and_then(serde_json::Value::as_object)
+    {
+        for (k, v) in obj {
+            let val = v
+                .as_str()
+                .map(str::to_string)
+                .unwrap_or_else(|| v.to_string());
+            cmd_args.push("--input".to_string());
+            cmd_args.push(format!("{k}={val}"));
+        }
+    }
+
+    send_activity(sink, format!("Running flow “{flow_id}”…")).await;
+
+    let mut child = tokio::process::Command::new("oxidemx-conductor")
+        .args(&cmd_args)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|e| {
+            format!("could not launch the conductor (is `oxidemx-conductor` on PATH?): {e}")
+        })?;
+
+    let stdout = child.stdout.take().ok_or("run_flow: no stdout from conductor")?;
+    let mut lines = tokio::io::BufReader::new(stdout).lines();
+
+    let mut steps: Vec<FlowStep> = Vec::new();
+    let mut artifacts: Vec<String> = Vec::new();
+    let mut run_id = String::new();
+    let mut success = false;
+    let mut fail_reason: Option<String> = None;
+
+    while let Some(line) = lines.next_line().await? {
+        let Ok(ev) = serde_json::from_str::<serde_json::Value>(&line) else {
+            continue;
+        };
+        let kind = ev["kind"].as_str().unwrap_or("");
+        let step = ev["step"].as_str().unwrap_or("");
+        match kind {
+            "run_started" => {
+                run_id = ev["run_id"].as_str().unwrap_or("").to_string();
+                if let Some(arr) = ev["steps"].as_array() {
+                    for s in arr.iter().filter_map(serde_json::Value::as_str) {
+                        set_flow_status(&mut steps, s, "pending");
+                    }
+                }
+            }
+            "task_started" => {
+                set_flow_status(&mut steps, step, "running");
+                send_activity(sink, format!("Flow “{flow_id}” · {step}…")).await;
+            }
+            "task_finished" => {
+                set_flow_status(&mut steps, step, "done");
+                if let Some(a) = ev["artifact"].as_str() {
+                    artifacts.push(a.to_string());
+                }
+            }
+            "task_error" => set_flow_status(&mut steps, step, "failed"),
+            "step_skipped" => set_flow_status(&mut steps, step, "skipped"),
+            "step_retrying" => {
+                send_activity(sink, format!("Flow “{flow_id}” · retrying {step}…")).await
+            }
+            "run_finished" => {
+                success = true;
+                if let Some(arr) = ev["artifacts"].as_array() {
+                    artifacts = arr
+                        .iter()
+                        .filter_map(|v| v.as_str().map(String::from))
+                        .collect();
+                }
+            }
+            "run_failed" => {
+                success = false;
+                fail_reason = ev["reason"].as_str().map(String::from);
+            }
+            _ => {}
+        }
+    }
+    let _ = child.wait().await;
+
+    send_card(
+        sink,
+        AgentCardData::Flow {
+            flow_id: flow_id.clone(),
+            run_id: run_id.clone(),
+            success,
+            steps: steps.clone(),
+            artifacts: artifacts.clone(),
+        },
+    )
+    .await;
+
+    let done = steps.iter().filter(|s| s.status == "done").count();
+    if success {
+        Ok(format!(
+            "Flow '{flow_id}' completed: {done}/{} steps done, {} artifact(s) [{}] (run {run_id}).",
+            steps.len(),
+            artifacts.len(),
+            artifacts.join(", "),
+        ))
+    } else {
+        Ok(format!(
+            "Flow '{flow_id}' failed{}. {done}/{} steps finished first.",
+            fail_reason.map(|r| format!(": {r}")).unwrap_or_default(),
+            steps.len(),
+        ))
     }
 }
 

@@ -35,6 +35,7 @@ pub(super) fn update(state: &mut RadialState, message: Message) -> Task<Message>
                 | Message::AiMemorySearch(_)
                 | Message::AiMemoryDelete(_)
                 | Message::AiMemoryPin(_, _)
+                | Message::AiWatchFlow(_)
                 | Message::AiToggleTasks
                 | Message::AiTaskToggle(_, _)
                 | Message::AiTaskRun(_)
@@ -873,6 +874,14 @@ pub(super) fn update(state: &mut RadialState, message: Message) -> Task<Message>
         Message::AiMemoryPin(id, pinned) => {
             crate::agent::memory::set_pinned(&id, pinned);
             state.ai_memories = crate::agent::memory::load_all();
+            Task::none()
+        }
+        Message::AiWatchFlow(flow_id) => {
+            // Open Mission Control on this flow (fire-and-forget; a
+            // missing binary is harmless — the card still stands).
+            let _ = std::process::Command::new("oxidemx-mission-control")
+                .env("OXIDEMX_MC_FLOW", &flow_id)
+                .spawn();
             Task::none()
         }
         Message::AiToggleTasks => {

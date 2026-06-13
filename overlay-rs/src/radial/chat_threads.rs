@@ -57,6 +57,16 @@ impl ChatMessage {
             crate::ai_client::AgentCardData::Memory { text, .. } => {
                 format!("[memory saved: {text}]")
             }
+            crate::ai_client::AgentCardData::Flow {
+                flow_id,
+                success,
+                steps,
+                ..
+            } => {
+                let done = steps.iter().filter(|s| s.status == "done").count();
+                let verb = if *success { "completed" } else { "run failed" };
+                format!("[flow {verb}: {flow_id} — {done}/{} steps]", steps.len())
+            }
         };
         ChatMessage {
             is_user: false,

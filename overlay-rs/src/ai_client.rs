@@ -76,6 +76,24 @@ pub enum AgentCardData {
         /// "until changed" (pinned) or "auto · 90d" (unpinned).
         retention: String,
     },
+    /// `run_flow` ran a conductor flow. Live per-step progress streams
+    /// as `Activity` while it runs; this card is the final summary,
+    /// with a "Watch" chip that opens Mission Control on the flow.
+    Flow {
+        flow_id: String,
+        run_id: String,
+        success: bool,
+        steps: Vec<FlowStep>,
+        artifacts: Vec<String>,
+    },
+}
+
+/// One step's terminal status inside a `Flow` card.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct FlowStep {
+    pub step: String,
+    /// `pending` | `running` | `done` | `failed` | `skipped`.
+    pub status: String,
 }
 
 /// Channel to push (thread_idx, StreamEvent) into the UI loop.

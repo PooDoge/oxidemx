@@ -159,6 +159,8 @@ pub enum Message {
     AiMemorySearch(String),
     /// Delete a memory by id (row 🗑 / card "Forget" chip).
     AiMemoryDelete(String),
+    /// Open Mission Control on a flow (Flow card "Watch" chip).
+    AiWatchFlow(String),
     /// Pin/unpin a memory by id.
     AiMemoryPin(String, bool),
     /// Toggle the scheduled-tasks view (header clock button).

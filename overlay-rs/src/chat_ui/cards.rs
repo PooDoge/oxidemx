@@ -36,6 +36,20 @@ pub fn view<'a>(card: &'a AgentCardData, kit: &Kit) -> Element<'a, Message> {
             "Memory saved",
             format!("retention: {retention}"),
         ),
+        AgentCardData::Flow {
+            flow_id,
+            success,
+            steps,
+            ..
+        } => {
+            let done = steps.iter().filter(|s| s.status == "done").count();
+            (
+                if *success { kit.accent } else { kit.red },
+                "⛓",
+                if *success { "Flow completed" } else { "Flow run" },
+                format!("{flow_id} · {done}/{} steps", steps.len()),
+            )
+        }
     };
 
     let header = row![
@@ -127,6 +141,45 @@ pub fn view<'a>(card: &'a AgentCardData, kit: &Kit) -> Element<'a, Message> {
                 chip("Forget".into(), Message::AiMemoryDelete(id.clone())).into(),
             ];
             (body, chips)
+        }
+        AgentCardData::Flow {
+            flow_id,
+            steps,
+            artifacts,
+            ..
+        } => {
+            let mut col = column![].spacing(2);
+            for s in steps {
+                let (g, c) = match s.status.as_str() {
+                    "done" => ("●", kit.green),
+                    "running" => ("◐", kit.accent),
+                    "failed" => ("✗", kit.red),
+                    "skipped" => ("⊘", kit.overlay0),
+                    _ => ("○", kit.overlay0),
+                };
+                col = col.push(
+                    row![
+                        text(g).size(11).color(kit.fade(c, 1.0)),
+                        text(s.step.clone()).size(11.5).color(kit.fade(kit.subtext1, 1.0)),
+                    ]
+                    .spacing(7)
+                    .align_y(Alignment::Center),
+                );
+            }
+            if !artifacts.is_empty() {
+                col = col.push(
+                    text(format!("artifacts: {}", artifacts.join(", ")))
+                        .size(10)
+                        .font(iced::Font::MONOSPACE)
+                        .color(kit.fade(kit.subtext0, 1.0)),
+                );
+            }
+            let chips = vec![chip(
+                "Watch in Mission Control".into(),
+                Message::AiWatchFlow(flow_id.clone()),
+            )
+            .into()];
+            (col.into(), chips)
         }
     };
 
