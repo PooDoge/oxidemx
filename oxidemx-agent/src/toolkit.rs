@@ -84,6 +84,31 @@ pub fn build_tools(names: &[String]) -> Vec<Box<dyn ToolT>> {
     names.iter().filter_map(|n| build_tool(n)).collect()
 }
 
+/// Execute a registry tool by name directly (for callers OUTSIDE the
+/// AutoAgents executor — e.g. the overlay's `execute_local_tool`
+/// dispatcher). Returns the tool's JSON result or an error string.
+pub async fn execute_tool(
+    name: &str,
+    args: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    use autoagents::core::tool::ToolRuntime;
+    let r = match name {
+        "execute_command" => ExecuteCommand {}.execute(args).await,
+        "read_file" => ReadFile::new().execute(args).await,
+        "write_file" => WriteFile::new().execute(args).await,
+        "list_dir" => ListDir::new().execute(args).await,
+        "search_file" => SearchFile::new(10_000).execute(args).await,
+        "create_dir" => CreateDir::new().execute(args).await,
+        "move_file" => MoveFile::new().execute(args).await,
+        "copy_file" => CopyFile::new().execute(args).await,
+        "delete_file" => DeleteFile::new().execute(args).await,
+        "parse_document" => DocumentParser::new().execute(args).await,
+        "brave_search" if brave_key_present() => BraveSearch::new().execute(args).await,
+        _ => return Err(format!("unknown or unavailable tool: {name}")),
+    };
+    r.map_err(|e| e.to_string())
+}
+
 /// MCP (Model Context Protocol) server tools, loaded from a config
 /// file and exposed as native `ToolT`s by the toolkit's rmcp client.
 pub mod mcp {

@@ -36,6 +36,55 @@ pub(super) fn agent_tool_declarations() -> Vec<serde_json::Value> {
         }),
         json!({
             "type": "function",
+            "name": "read_file",
+            "description": "Read a file from the local filesystem and return its contents. Use absolute paths (e.g. /home/jim/.local/share/oxidemx/runs/<run>/ANSWER.md).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_path": { "type": "string", "description": "Absolute path of the file to read" }
+                },
+                "required": ["file_path"]
+            }
+        }),
+        json!({
+            "type": "function",
+            "name": "list_dir",
+            "description": "List the entries in a directory on the local filesystem.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "directory_path": { "type": "string", "description": "Absolute path of the directory to list" }
+                },
+                "required": ["directory_path"]
+            }
+        }),
+        json!({
+            "type": "function",
+            "name": "search_file",
+            "description": "Find files by name pattern (wildcards * and ?) under a directory, recursively.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "directory": { "type": "string", "description": "Absolute directory to search in" },
+                    "pattern": { "type": "string", "description": "Filename pattern, e.g. *.md" }
+                },
+                "required": ["directory", "pattern"]
+            }
+        }),
+        json!({
+            "type": "function",
+            "name": "parse_document",
+            "description": "Extract clean text from a local document file (PDF, DOCX, XLSX, PPTX, HTML, CSV, Markdown, XML). Use for binary/rich formats that read_file can't show as text.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "source": { "type": "string", "description": "Absolute path of the document file" }
+                },
+                "required": ["source"]
+            }
+        }),
+        json!({
+            "type": "function",
             "name": "run_flow",
             "description": "Run a multi-agent OxideMX flow (a named, pre-authored pipeline of agent steps) via the conductor. Use when the user asks to run a flow by name, or for a multi-step task a flow exists for (e.g. 'research-digest' to fetch+digest+answer a URL). List available flows is out of scope — the user knows the flow id. Streams live per-step progress and returns a summary; a card with a 'Watch' button to Mission Control appears in chat.",
             "parameters": {
@@ -225,6 +274,11 @@ pub(crate) async fn execute_local_tool(
     sink: &Option<StreamSink>,
 ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
     match name {
+        // Read-only AutoAgents Toolkit tools, run directly via the
+        // toolkit bridge (the overlay links the toolkit transitively).
+        "read_file" | "list_dir" | "search_file" | "parse_document" => {
+            read_tool(name, args, sink).await
+        }
         "compose_flow" => compose_flow_tool(&args, sink).await,
         "run_flow" => run_flow_tool(&args, sink).await,
         "execute_command" => execute_command_tool(&args, sink).await,
@@ -360,6 +414,35 @@ async fn send_activity(sink: &Option<StreamSink>, label: String) {
 async fn send_card(sink: &Option<StreamSink>, card: AgentCardData) {
     if let Some(s) = sink {
         s.send(StreamEvent::Card(card)).await;
+    }
+}
+
+/// Run a read-only toolkit tool (read_file / list_dir / search_file /
+/// parse_document) via the `oxidemx-agent` bridge, surfacing a short
+/// activity label and returning the tool's JSON result to the model.
+async fn read_tool(
+    name: &str,
+    args: serde_json::Value,
+    sink: &Option<StreamSink>,
+) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+    let target = args
+        .get("file_path")
+        .or_else(|| args.get("directory_path"))
+        .or_else(|| args.get("source"))
+        .or_else(|| args.get("directory"))
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("");
+    let verb = match name {
+        "list_dir" => "Listing",
+        "search_file" => "Searching",
+        _ => "Reading",
+    };
+    send_activity(sink, format!("{verb} {target}…")).await;
+    match oxidemx_agent::toolkit::execute_tool(name, args).await {
+        Ok(v) => Ok(serde_json::to_string_pretty(&v).unwrap_or_else(|_| v.to_string())),
+        // A tool error (missing file, perms) goes back as a structured
+        // result so the model explains/recovers rather than aborting.
+        Err(e) => Ok(format!("{{\"error\": {}}}", serde_json::Value::String(e))),
     }
 }
 

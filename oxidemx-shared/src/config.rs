@@ -1073,9 +1073,21 @@ fn default_ai_model() -> String {
 }
 
 fn default_command_allowlist() -> Vec<String> {
-    ["brightnessctl", "wpctl", "systemctl --user"]
-        .map(String::from)
-        .to_vec()
+    // Safe read-only commands: brightness/audio control + read-only
+    // system diagnostics (so the `system-doctor` flow works out of the
+    // box). All inspect, none mutate.
+    [
+        "brightnessctl",
+        "wpctl",
+        "systemctl --user",
+        "uptime",
+        "df",
+        "free",
+        "journalctl",
+        "rpm-ostree status",
+    ]
+    .map(String::from)
+    .to_vec()
 }
 
 fn default_schema_version() -> u32 {

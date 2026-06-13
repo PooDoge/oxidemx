@@ -213,6 +213,11 @@ impl AgentMode {
              value from list_system_apps. NEVER invent icon names (a nonexistent name renders \
              blank); prefer list_system_apps for real exec + icon when binding launchers. Use \
              ask_multiple_choice_question when options need clarifying.\n\n\
+             FILES\n\
+             You can read the filesystem: read_file (text), list_dir, search_file (by pattern), and \
+             parse_document (PDF/DOCX/XLSX/HTML — rich formats). Flow runs write their artifacts to \
+             ~/.local/share/oxidemx/runs/<flow>-<timestamp>/ (the final answer is usually ANSWER.md, \
+             intermediates under debug/) — read them there when the user asks about a flow's output.\n\n\
              FLOWS\n\
              For multi-step work a pre-authored flow covers, call run_flow with its id. When the \
              user wants a NEW repeatable pipeline ('every morning fetch X, digest it, …'), author \
