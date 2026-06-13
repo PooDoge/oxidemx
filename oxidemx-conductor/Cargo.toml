@@ -1,0 +1,38 @@
+# OxideMX Conductor — the flow orchestration layer (P3 core).
+#
+# Compiles a FlowDoc (TOML-frontmatter + markdown, §8 of the
+# integration spec) into a validated DAG and drives it with a
+# supervisor that schedules ready steps, joins fan-ins, retries,
+# times out, and cancels — all on AutoAgents' agent primitive
+# (one ReAct DirectAgent per step). AutoAgents ships no orchestration;
+# this crate IS that layer (spec §7).
+#
+# Lives in its own crate so agentd (P4) can host it without dragging
+# in the overlay. Depends on oxidemx-agent only for the provider
+# factory, tool bridge, and allowlist — never the other way around.
+[package]
+name = "oxidemx-conductor"
+version = "0.1.0"
+edition = "2021"
+description = "Flow orchestration for OxideMX: FlowDoc → validated DAG → supervised AutoAgents run (joins, retry, timeout, cancel)"
+
+[dependencies]
+oxidemx-shared = { path = "../oxidemx-shared" }
+oxidemx-agent = { path = "../oxidemx-agent" }
+autoagents = { version = "=0.3.7", default-features = false, features = ["google", "openai", "anthropic", "ollama"] }
+async-trait = "0.1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync", "fs"] }
+tokio-util = "0.7"
+futures-util = "0.3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+thiserror = "1"
+tracing = "0.1"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["full"] }
+
+[[bin]]
+name = "oxidemx-conductor"
+path = "src/bin/conductor.rs"

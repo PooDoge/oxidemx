@@ -25,6 +25,7 @@ members = [
     "oxidemx-window",
     "overlay-rs",
     "oxidemx-agent",
+    "oxidemx-conductor",
     "popup-rs",
     "settings-rs",
     "spike-iced", "iced_gtk_themer",
