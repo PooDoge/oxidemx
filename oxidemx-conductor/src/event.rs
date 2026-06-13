@@ -51,6 +51,9 @@ pub enum RunEvent {
     TaskError { step: String, error: String },
     /// A failed step is being retried (1-based attempt number).
     StepRetrying { step: String, attempt: u32 },
+    /// A step was skipped — a route branch not taken, or a step made
+    /// unreachable by one (so the UI can render it greyed, not failed).
+    StepSkipped { step: String, reason: String },
     /// A tool call needs user approval (off-allowlist). `card` is the
     /// approval-card JSON the UI renders.
     ApprovalRequested { step: String, card: serde_json::Value },

@@ -1,0 +1,28 @@
+# OxideMX Mission Control — the live multi-agent flow monitor (P4).
+#
+# A standalone iced window that EMBEDS the conductor as a library:
+# pick a flow, run it (mock or a real provider), and watch the
+# run-layer event stream (§11) render live — per-step DAG status,
+# artifacts, and an event console. No agentd needed; the conductor's
+# EventSink trait + an async channel feed iced directly.
+[package]
+name = "oxidemx-mission-control"
+version = "0.1.0"
+edition = "2021"
+description = "Live multi-agent flow monitor for OxideMX — embeds the conductor and renders its RunEvent stream"
+
+[dependencies]
+oxidemx-shared = { path = "../oxidemx-shared" }
+oxidemx-conductor = { path = "../oxidemx-conductor" }
+oxidemx-agent = { path = "../oxidemx-agent" }
+oxidemx-widgets = { path = "../oxidemx-widgets" }
+iced = { version = "0.14", features = ["wayland", "x11", "tokio"] }
+async-channel = "2"
+async-trait = "0.1"
+futures-util = "0.3"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync", "fs"] }
+tokio-util = "0.7"
+
+[[bin]]
+name = "oxidemx-mission-control"
+path = "src/main.rs"

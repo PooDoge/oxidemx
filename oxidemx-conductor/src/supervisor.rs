@@ -425,9 +425,9 @@ async fn mark_skipped(
     sink: &Arc<dyn EventSink>,
 ) {
     if skipped.insert(step.to_string()) {
-        sink.emit(RunEvent::AgentMessage {
+        sink.emit(RunEvent::StepSkipped {
             step: step.to_string(),
-            message: "skipped: route branch not taken".into(),
+            reason: "route branch not taken".into(),
         })
         .await;
     }
@@ -456,9 +456,9 @@ async fn propagate_skips(
             break;
         }
         for id in newly {
-            sink.emit(RunEvent::AgentMessage {
+            sink.emit(RunEvent::StepSkipped {
                 step: id.clone(),
-                message: "skipped: upstream branch not taken".into(),
+                reason: "upstream branch not taken".into(),
             })
             .await;
             skipped.insert(id);

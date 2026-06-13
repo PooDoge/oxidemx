@@ -5076,6 +5076,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "oxidemx-mission-control"
+version = "0.1.0"
+dependencies = [
+ "async-channel",
+ "async-trait",
+ "futures-util",
+ "iced 0.14.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "oxidemx-agent",
+ "oxidemx-conductor",
+ "oxidemx-shared",
+ "oxidemx-widgets",
+ "tokio",
+ "tokio-util",
+]
+
+[[package]]
 name = "oxidemx-overlay"
 version = "0.0.1"
 dependencies = [
