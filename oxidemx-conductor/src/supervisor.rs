@@ -199,6 +199,9 @@ pub async fn run_flow(
     let mut done: BTreeMap<String, String> = BTreeMap::new();
     let mut artifacts: Vec<String> = Vec::new();
     let mut running: BTreeSet<String> = BTreeSet::new();
+    // Steps cut off by a route branch that wasn't taken (and their
+    // transitively-unreachable dependents).
+    let mut skipped: BTreeSet<String> = BTreeSet::new();
     let mut failed: Option<(String, String)> = None;
     let mut join: JoinSet<StepResult> = JoinSet::new();
 
@@ -207,109 +210,35 @@ pub async fn run_flow(
             break;
         }
 
-        // Schedule every newly-ready step (needs satisfied, not yet
-        // run / running). For v1, only `agent` steps execute; reflect
-        // / route are validated but pass through as no-ops recorded as
-        // finished (their execution is the next increment).
+        // Propagate route-branch skips: a pending step any of whose
+        // needs is skipped can never run (needs are all-of), so it is
+        // skipped too — to a fixpoint.
+        propagate_skips(plan, &done, &mut skipped, &sink).await;
+
+        // Done when every step has either finished or been skipped.
+        if done.len() + skipped.len() == all_steps.len() {
+            break;
+        }
+
+        // Ready = pending, not running/skipped, with all `needs` (and,
+        // for a reflect step, its `target`) finished.
         let ready: Vec<String> = plan
             .topo
             .iter()
             .filter(|id| {
-                !done.contains_key(*id)
-                    && !running.contains(*id)
-                    && plan
-                        .step(id)
-                        .map(|s| s.needs.iter().all(|n| done.contains_key(n)))
-                        .unwrap_or(false)
+                !done.contains_key(*id) && !running.contains(*id) && !skipped.contains(*id)
+            })
+            .filter(|id| {
+                let s = plan.step(id).expect("topo id exists");
+                s.needs.iter().all(|n| done.contains_key(n))
+                    && effective_target(s).map(|t| done.contains_key(t)).unwrap_or(true)
             })
             .cloned()
             .collect();
 
-        for id in ready {
-            let step = plan.step(&id).expect("topo id exists").clone();
-
-            // reflect / route: not yet executed — record as finished
-            // with an empty artifact so dependents unblock. (Honest
-            // no-op; full execution is the documented next increment.)
-            if step.kind != "agent" {
-                sink.emit(RunEvent::AgentMessage {
-                    step: id.clone(),
-                    message: format!("`{}` step kind not yet executed (v1 no-op)", step.kind),
-                })
-                .await;
-                done.insert(id.clone(), String::new());
-                sink.emit(RunEvent::TaskFinished {
-                    step: id.clone(),
-                    success: true,
-                    artifact: None,
-                    summary: format!("{} step skipped (v1)", step.kind),
-                })
-                .await;
-                continue;
-            }
-
-            let agent_name = step.agent.clone().unwrap_or_default();
-            sink.emit(RunEvent::TaskAssigned {
-                step: id.clone(),
-                agent: agent_name,
-            })
-            .await;
-
-            // Assemble the concrete prompt: expand inputs, then prepend
-            // context blocks from upstream outputs.
-            let task_tmpl = step.task.clone().unwrap_or_default();
-            let task = match template::expand_inputs(&task_tmpl, &opts.inputs) {
-                Ok(t) => t,
-                Err(e) => {
-                    failed = Some((id.clone(), e.to_string()));
-                    break 'schedule;
-                }
-            };
-            let predecessor = (step.needs.len() == 1).then(|| UpstreamResult {
-                step_id: step.needs[0].clone(),
-                output: done.get(&step.needs[0]).cloned().unwrap_or_default(),
-            });
-            let prompt = template::assemble_prompt(&task, &step.context, predecessor.as_ref(), &done);
-
-            let system = resolve_system(&step, &opts.roster);
-            let tools = resolve_tools(&step, &opts.roster);
-            let model = step.model(&plan.doc.manifest.defaults).to_string();
-            let provider = match opts.factory.provider(&model) {
-                Ok(p) => p,
-                Err(e) => {
-                    failed = Some((id.clone(), format!("provider: {e}")));
-                    break 'schedule;
-                }
-            };
-
-            let cancel = opts.cancel.clone();
-            let sink2 = sink.clone();
-            let id2 = id.clone();
-            let timeout = step.timeout_secs;
-            let retry = step.retry;
-            running.insert(id.clone());
-
-            join.spawn(async move {
-                sink2.emit(RunEvent::TaskStarted { step: id2.clone() }).await;
-                let agent = StepAgent::new(id2.clone(), system, tools, cancel.clone());
-                let result = run_step_with_retry(
-                    provider, agent, &prompt, max_turns, timeout, retry, &cancel, &sink2, &id2,
-                )
-                .await;
-                StepResult {
-                    step_id: id2,
-                    result,
-                }
-            });
-        }
-
-        if running.is_empty() {
-            // Nothing running and nothing schedulable.
-            if done.len() == all_steps.len() || failed.is_some() {
-                break;
-            }
-            // Should be impossible for a validated DAG, but guard
-            // against a stuck schedule rather than spinning.
+        if ready.is_empty() && running.is_empty() {
+            // No ready and nothing in flight: either done (handled
+            // above) or a genuinely stuck schedule.
             failed = Some((
                 String::new(),
                 "scheduler stalled: no ready or running steps".into(),
@@ -317,9 +246,104 @@ pub async fn run_flow(
             break;
         }
 
-        // Wait for the next step to finish.
+        for id in ready {
+            let step = plan.step(&id).expect("topo id exists").clone();
+            match step.kind.as_str() {
+                // reflect / route run inline (serialization points): a
+                // bounded critic↔reviser loop / a one-shot classifier.
+                "reflect" => {
+                    match run_reflect_inline(plan, &opts, &step, &done, max_turns, &sink).await {
+                        Ok(output) => {
+                            finish_step(&opts, &step, output, &mut done, &mut artifacts, &sink).await;
+                        }
+                        Err(e) => {
+                            emit_task_error(&sink, &id, &e).await;
+                            failed = Some((id, e));
+                            opts.cancel.cancel();
+                            break 'schedule;
+                        }
+                    }
+                }
+                "route" => {
+                    match run_route_inline(plan, &opts, &step, &done, max_turns, &sink).await {
+                        Ok((label, chosen_target)) => {
+                            // Skip the branches not taken.
+                            for tgt in step.choices.values() {
+                                if tgt != &chosen_target {
+                                    mark_skipped(plan, tgt, &mut skipped, &sink).await;
+                                }
+                            }
+                            finish_step(&opts, &step, label, &mut done, &mut artifacts, &sink).await;
+                        }
+                        Err(e) => {
+                            emit_task_error(&sink, &id, &e).await;
+                            failed = Some((id, e));
+                            opts.cancel.cancel();
+                            break 'schedule;
+                        }
+                    }
+                }
+                // agent steps run concurrently in the JoinSet.
+                _ => {
+                    sink.emit(RunEvent::TaskAssigned {
+                        step: id.clone(),
+                        agent: step.agent.clone().unwrap_or_default(),
+                    })
+                    .await;
+
+                    let task_tmpl = step.task.clone().unwrap_or_default();
+                    let task = match template::expand_inputs(&task_tmpl, &opts.inputs) {
+                        Ok(t) => t,
+                        Err(e) => {
+                            failed = Some((id.clone(), e.to_string()));
+                            break 'schedule;
+                        }
+                    };
+                    let predecessor = (step.needs.len() == 1).then(|| UpstreamResult {
+                        step_id: step.needs[0].clone(),
+                        output: done.get(&step.needs[0]).cloned().unwrap_or_default(),
+                    });
+                    let prompt =
+                        template::assemble_prompt(&task, &step.context, predecessor.as_ref(), &done);
+
+                    let system = resolve_system(&step, &opts.roster);
+                    let tools = resolve_tools(&step, &opts.roster);
+                    let model = step.model(&plan.doc.manifest.defaults).to_string();
+                    let provider = match opts.factory.provider(&model) {
+                        Ok(p) => p,
+                        Err(e) => {
+                            failed = Some((id.clone(), format!("provider: {e}")));
+                            break 'schedule;
+                        }
+                    };
+
+                    let cancel = opts.cancel.clone();
+                    let sink2 = sink.clone();
+                    let id2 = id.clone();
+                    let timeout = step.timeout_secs;
+                    let retry = step.retry;
+                    running.insert(id.clone());
+
+                    join.spawn(async move {
+                        sink2.emit(RunEvent::TaskStarted { step: id2.clone() }).await;
+                        let agent = StepAgent::new(id2.clone(), system, tools, cancel.clone());
+                        let result = run_step_with_retry(
+                            provider, agent, &prompt, max_turns, timeout, retry, &cancel, &sink2, &id2,
+                        )
+                        .await;
+                        StepResult { step_id: id2, result }
+                    });
+                }
+            }
+        }
+
+        // If only inline steps ran this round, recompute readiness;
+        // otherwise collect the next concurrent agent result.
+        if running.is_empty() {
+            continue;
+        }
         let Some(joined) = join.join_next().await else {
-            break;
+            continue;
         };
         let sr = match joined {
             Ok(sr) => sr,
@@ -332,26 +356,11 @@ pub async fn run_flow(
 
         match sr.result {
             Ok(output) => {
-                let step = plan.step(&sr.step_id).expect("step exists");
-                let artifact = write_artifact(&opts.workdir, step, &output).await;
-                if let Some(path) = &artifact {
-                    artifacts.push(path.clone());
-                }
-                sink.emit(RunEvent::TaskFinished {
-                    step: sr.step_id.clone(),
-                    success: true,
-                    artifact: artifact.clone(),
-                    summary: summarize(&output),
-                })
-                .await;
-                done.insert(sr.step_id, output);
+                let step = plan.step(&sr.step_id).expect("step exists").clone();
+                finish_step(&opts, &step, output, &mut done, &mut artifacts, &sink).await;
             }
             Err(e) => {
-                sink.emit(RunEvent::TaskError {
-                    step: sr.step_id.clone(),
-                    error: e.clone(),
-                })
-                .await;
+                emit_task_error(&sink, &sr.step_id, &e).await;
                 failed = Some((sr.step_id, e));
                 opts.cancel.cancel(); // stop scheduling further work
             }
@@ -364,6 +373,301 @@ pub async fn run_flow(
     while join.join_next().await.is_some() {}
 
     finalize(plan, &opts, sink, done, artifacts, failed).await
+}
+
+/// The extra scheduling dependency a reflect step has on its `target`
+/// (it can't critique an output that doesn't exist yet).
+fn effective_target(step: &Step) -> Option<&str> {
+    if step.kind == "reflect" {
+        step.target.as_deref()
+    } else {
+        None
+    }
+}
+
+/// Commit a finished step: write its artifact, emit `task_finished`,
+/// record its output for downstream context.
+async fn finish_step(
+    opts: &RunOptions,
+    step: &Step,
+    output: String,
+    done: &mut BTreeMap<String, String>,
+    artifacts: &mut Vec<String>,
+    sink: &Arc<dyn EventSink>,
+) {
+    let artifact = write_artifact(&opts.workdir, step, &output).await;
+    if let Some(path) = &artifact {
+        artifacts.push(path.clone());
+    }
+    sink.emit(RunEvent::TaskFinished {
+        step: step.id.clone(),
+        success: true,
+        artifact,
+        summary: summarize(&output),
+    })
+    .await;
+    done.insert(step.id.clone(), output);
+}
+
+async fn emit_task_error(sink: &Arc<dyn EventSink>, step: &str, error: &str) {
+    sink.emit(RunEvent::TaskError {
+        step: step.to_string(),
+        error: error.to_string(),
+    })
+    .await;
+}
+
+/// Skip a step (route branch not taken) and announce it.
+async fn mark_skipped(
+    _plan: &FlowPlan,
+    step: &str,
+    skipped: &mut BTreeSet<String>,
+    sink: &Arc<dyn EventSink>,
+) {
+    if skipped.insert(step.to_string()) {
+        sink.emit(RunEvent::AgentMessage {
+            step: step.to_string(),
+            message: "skipped: route branch not taken".into(),
+        })
+        .await;
+    }
+}
+
+/// Transitively skip any pending step that needs an already-skipped
+/// step (needs are all-of, so one skipped need makes the step
+/// unreachable). Runs to a fixpoint.
+async fn propagate_skips(
+    plan: &FlowPlan,
+    done: &BTreeMap<String, String>,
+    skipped: &mut BTreeSet<String>,
+    sink: &Arc<dyn EventSink>,
+) {
+    loop {
+        let newly: Vec<String> = plan
+            .doc
+            .manifest
+            .steps
+            .iter()
+            .filter(|s| !done.contains_key(&s.id) && !skipped.contains(&s.id))
+            .filter(|s| s.needs.iter().any(|n| skipped.contains(n)))
+            .map(|s| s.id.clone())
+            .collect();
+        if newly.is_empty() {
+            break;
+        }
+        for id in newly {
+            sink.emit(RunEvent::AgentMessage {
+                step: id.clone(),
+                message: "skipped: upstream branch not taken".into(),
+            })
+            .await;
+            skipped.insert(id);
+        }
+    }
+}
+
+/// A roster agent's persona, or a sensible fallback.
+fn persona_of(roster: &Roster, id: &str, fallback: &str) -> String {
+    roster
+        .get(id)
+        .map(|d| d.persona.trim().to_string())
+        .filter(|p| !p.is_empty())
+        .unwrap_or_else(|| fallback.to_string())
+}
+
+/// Run a route step: a one-shot classifier picks one of the declared
+/// labels; returns `(label, chosen_target_step_id)`.
+async fn run_route_inline(
+    plan: &FlowPlan,
+    opts: &RunOptions,
+    step: &Step,
+    done: &BTreeMap<String, String>,
+    max_turns: usize,
+    sink: &Arc<dyn EventSink>,
+) -> Result<(String, String), String> {
+    sink.emit(RunEvent::TaskAssigned {
+        step: step.id.clone(),
+        agent: "router".into(),
+    })
+    .await;
+    sink.emit(RunEvent::TaskStarted { step: step.id.clone() }).await;
+
+    let base = template::expand_inputs(step.prompt.as_deref().unwrap_or(""), &opts.inputs)
+        .map_err(|e| e.to_string())?;
+    let pred = (step.needs.len() == 1).then(|| UpstreamResult {
+        step_id: step.needs[0].clone(),
+        output: done.get(&step.needs[0]).cloned().unwrap_or_default(),
+    });
+    let labels: Vec<String> = step.choices.keys().cloned().collect();
+    let body = template::assemble_prompt(&base, &step.context, pred.as_ref(), done);
+    let task = format!(
+        "{body}\n\nChoose exactly ONE option and reply with ONLY its label (no other words). Options: {}",
+        labels.join(", ")
+    );
+    let system = "You are a router. Read the context and the question, then output exactly one of \
+                  the allowed labels and nothing else."
+        .to_string();
+    let model = step.model(&plan.doc.manifest.defaults).to_string();
+    let provider = opts.factory.provider(&model).map_err(|e| format!("provider: {e}"))?;
+    let agent = StepAgent::new(format!("{}:router", step.id), system, vec![], opts.cancel.clone());
+    let out = build_and_run(provider, agent, &task, max_turns.clamp(1, 2), &opts.cancel)
+        .await
+        .map_err(|e| e.to_string())?;
+    let (label, target) = parse_route_choice(&out, &step.choices);
+    sink.emit(RunEvent::AgentMessage {
+        step: step.id.clone(),
+        message: format!("routed → {label}"),
+    })
+    .await;
+    Ok((label, target))
+}
+
+/// Map a classifier's free-text answer to a declared choice: prefer an
+/// exact label token, then a substring; fall back to the first choice.
+fn parse_route_choice(output: &str, choices: &BTreeMap<String, String>) -> (String, String) {
+    let lower = output.to_lowercase();
+    let mut substring: Option<(&String, &String)> = None;
+    for (label, target) in choices {
+        let l = label.to_lowercase();
+        if lower
+            .split(|c: char| !c.is_alphanumeric())
+            .any(|tok| tok == l)
+        {
+            return (label.clone(), target.clone());
+        }
+        if substring.is_none() && lower.contains(&l) {
+            substring = Some((label, target));
+        }
+    }
+    if let Some((l, t)) = substring {
+        return (l.clone(), t.clone());
+    }
+    let (l, t) = choices.iter().next().expect("route step has choices");
+    (l.clone(), t.clone())
+}
+
+/// Run a reflect step: a bounded critic↔reviser loop over the target
+/// step's output (reflection.rs pattern, supervisor-counted). Returns
+/// the accepted/last revision — a SEPARATE artifact from the target's
+/// own output (downstream may consume either).
+async fn run_reflect_inline(
+    plan: &FlowPlan,
+    opts: &RunOptions,
+    step: &Step,
+    done: &BTreeMap<String, String>,
+    max_turns: usize,
+    sink: &Arc<dyn EventSink>,
+) -> Result<String, String> {
+    let target_id = step.target.as_deref().ok_or("reflect step missing target")?;
+    let target_step = plan
+        .step(target_id)
+        .ok_or_else(|| format!("reflect target `{target_id}` not found"))?
+        .clone();
+    let critic_ref = step.critic.clone().unwrap_or_default();
+
+    sink.emit(RunEvent::TaskAssigned {
+        step: step.id.clone(),
+        agent: critic_ref.clone(),
+    })
+    .await;
+    sink.emit(RunEvent::TaskStarted { step: step.id.clone() }).await;
+
+    let mut current = done.get(target_id).cloned().unwrap_or_default();
+    let critic_system = persona_of(
+        &opts.roster,
+        &critic_ref,
+        "You are a rigorous critic. Identify only genuinely blocking problems.",
+    );
+    let critic_model = opts
+        .roster
+        .get(&critic_ref)
+        .and_then(|d| d.decl.model.clone())
+        .unwrap_or_else(|| plan.doc.manifest.defaults.model.clone());
+    let critic_provider = opts
+        .factory
+        .provider(&critic_model)
+        .map_err(|e| format!("provider: {e}"))?;
+
+    let target_system = resolve_system(&target_step, &opts.roster);
+    let target_tools = resolve_tools(&target_step, &opts.roster);
+    let target_task = template::expand_inputs(target_step.task.as_deref().unwrap_or(""), &opts.inputs)
+        .map_err(|e| e.to_string())?;
+    let target_model = target_step.model(&plan.doc.manifest.defaults).to_string();
+    let target_provider = opts
+        .factory
+        .provider(&target_model)
+        .map_err(|e| format!("provider: {e}"))?;
+
+    let rounds = step.max_rounds.unwrap_or(1).max(1);
+    for round in 1..=rounds {
+        if opts.cancel.is_cancelled() {
+            return Err("run cancelled".into());
+        }
+        let critique_prompt = format!(
+            "Critically review the output below for BLOCKING problems (factual errors, unmet \
+             requirements, unsafe suggestions). List each as a bullet. If there are none, reply \
+             with exactly: NO BLOCKING FINDINGS.\n\n---\n{current}"
+        );
+        let critic_agent = StepAgent::new(
+            format!("{}:critic", step.id),
+            critic_system.clone(),
+            vec![],
+            opts.cancel.clone(),
+        );
+        let critique = build_and_run(
+            critic_provider.clone(),
+            critic_agent,
+            &critique_prompt,
+            max_turns,
+            &opts.cancel,
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+        sink.emit(RunEvent::AgentMessage {
+            step: step.id.clone(),
+            message: format!("round {round} critique: {}", summarize(&critique)),
+        })
+        .await;
+
+        if reflect_accepts(&critique) {
+            sink.emit(RunEvent::AgentMessage {
+                step: step.id.clone(),
+                message: format!("accepted after round {round}"),
+            })
+            .await;
+            return Ok(current);
+        }
+
+        // Revise via the target's own agent, addressing the critique.
+        let revise_prompt = format!(
+            "Original task:\n{target_task}\n\nYour previous output:\n{current}\n\nA reviewer raised \
+             these blocking findings:\n{critique}\n\nProduce a revised version that resolves them. \
+             Return only the revised output."
+        );
+        let reviser = StepAgent::new(
+            format!("{}:revise", step.id),
+            target_system.clone(),
+            target_tools.clone(),
+            opts.cancel.clone(),
+        );
+        current = build_and_run(
+            target_provider.clone(),
+            reviser,
+            &revise_prompt,
+            max_turns,
+            &opts.cancel,
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+    }
+    Ok(current)
+}
+
+/// v1 acceptance predicate: the critic declared no blocking findings.
+/// (`accept_when` other than `no_blocking_findings` falls back to this
+/// same marker for now.)
+fn reflect_accepts(critique: &str) -> bool {
+    critique.to_uppercase().contains("NO BLOCKING FINDINGS")
 }
 
 /// One step's execution including timeout + retry/backoff.
@@ -524,7 +828,7 @@ mod tests {
 
     fn roster() -> Roster {
         let mut r = Roster::new();
-        for id in ["web-researcher", "summarizer", "writer", "extractor"] {
+        for id in ["web-researcher", "summarizer", "writer", "extractor", "skeptic"] {
             r.insert(AgentDef::parse(&format!("---\nid = \"{id}\"\n---\nYou are {id}.")).unwrap());
         }
         r
@@ -698,5 +1002,134 @@ output = "MERGED.md"
         .await;
         assert!(!outcome.success);
         assert!(sink.snapshot().await.iter().any(|e| matches!(e, RunEvent::RunFailed { .. })));
+    }
+
+    // ── reflect ──────────────────────────────────────────────────────
+
+    const REFLECT_FLOW: &str = r#"---
+[flow]
+id = "reflecty"
+[[step]]
+id = "draft"
+agent = "writer"
+task = "Write a draft."
+output = "debug/draft.md"
+[[step]]
+id = "review"
+kind = "reflect"
+target = "draft"
+critic = "skeptic"
+max_rounds = 2
+accept_when = "no_blocking_findings"
+output = "REVIEW.md"
+---
+"#;
+
+    #[tokio::test]
+    async fn reflect_accepts_when_critic_finds_nothing() {
+        // Critic replies with the accept marker on round 1 ⇒ the
+        // review output is the unchanged draft.
+        let provider = MockProvider::scripted(
+            vec![
+                ("Critically review", "NO BLOCKING FINDINGS"),
+                ("Write a draft", "INITIAL-DRAFT"),
+            ],
+            "X",
+        );
+        let plan = validate(&FlowDoc::parse(REFLECT_FLOW).unwrap(), &roster(), &[]).unwrap();
+        let dir = std::env::temp_dir().join("conductor-test-reflect-accept");
+        let _ = std::fs::remove_dir_all(&dir);
+        let sink = Arc::new(CollectingSink::default());
+        let outcome = run_flow(
+            &plan,
+            opts(BTreeMap::new(), Arc::new(FixedFactory(provider)), dir.clone()),
+            sink.clone(),
+        )
+        .await;
+        assert!(outcome.success, "reflect run failed: {:?}", outcome.error);
+        assert_eq!(outcome.outputs["review"], "INITIAL-DRAFT");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn reflect_revises_when_critic_finds_problems() {
+        // Critic never accepts ⇒ the target's agent revises each round;
+        // the review output is the revised text, not the draft.
+        let provider = MockProvider::scripted(
+            vec![
+                ("Produce a revised version", "REVISED-OUTPUT"),
+                ("Critically review", "FINDING: please expand"),
+                ("Write a draft", "INITIAL-DRAFT"),
+            ],
+            "X",
+        );
+        let plan = validate(&FlowDoc::parse(REFLECT_FLOW).unwrap(), &roster(), &[]).unwrap();
+        let dir = std::env::temp_dir().join("conductor-test-reflect-revise");
+        let _ = std::fs::remove_dir_all(&dir);
+        let sink = Arc::new(CollectingSink::default());
+        let outcome = run_flow(
+            &plan,
+            opts(BTreeMap::new(), Arc::new(FixedFactory(provider)), dir.clone()),
+            sink.clone(),
+        )
+        .await;
+        assert!(outcome.success, "reflect run failed: {:?}", outcome.error);
+        assert_eq!(outcome.outputs["draft"], "INITIAL-DRAFT");
+        assert_eq!(outcome.outputs["review"], "REVISED-OUTPUT");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // ── route ────────────────────────────────────────────────────────
+
+    const ROUTE_FLOW: &str = r#"---
+[flow]
+id = "routey"
+[[step]]
+id = "classify"
+agent = "writer"
+task = "Produce a topic."
+[[step]]
+id = "decide"
+kind = "route"
+needs = ["classify"]
+prompt = "Pick the right branch."
+choices = { alpha = "path_a", beta = "path_b" }
+[[step]]
+id = "path_a"
+agent = "writer"
+needs = ["decide"]
+task = "Handle the A branch."
+output = "A.md"
+[[step]]
+id = "path_b"
+agent = "writer"
+needs = ["decide"]
+task = "Handle the B branch."
+output = "B.md"
+---
+"#;
+
+    #[tokio::test]
+    async fn route_runs_chosen_branch_and_skips_the_other() {
+        // The router sees the option list and picks "alpha" ⇒ path_a
+        // runs, path_b is skipped, and the run still completes.
+        let provider = MockProvider::scripted(vec![("Options:", "alpha")], "BRANCH-DONE");
+        let plan = validate(&FlowDoc::parse(ROUTE_FLOW).unwrap(), &roster(), &[]).unwrap();
+        let dir = std::env::temp_dir().join("conductor-test-route");
+        let _ = std::fs::remove_dir_all(&dir);
+        let sink = Arc::new(CollectingSink::default());
+        let outcome = run_flow(
+            &plan,
+            opts(BTreeMap::new(), Arc::new(FixedFactory(provider)), dir.clone()),
+            sink.clone(),
+        )
+        .await;
+        assert!(outcome.success, "route run failed: {:?}", outcome.error);
+        assert_eq!(outcome.outputs["decide"], "alpha");
+        assert!(outcome.outputs.contains_key("path_a"), "chosen branch did not run");
+        assert!(!outcome.outputs.contains_key("path_b"), "skipped branch ran anyway");
+        assert!(dir.join("A.md").exists());
+        assert!(!dir.join("B.md").exists());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

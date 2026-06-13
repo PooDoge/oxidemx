@@ -43,11 +43,20 @@ context = ["@artifact@"]
 output = "debug/claims.md"
 
 [[step]]
+id = "stress-test"
+kind = "reflect"
+target = "digest"
+critic = "skeptic"
+max_rounds = 2
+accept_when = "no_blocking_findings"
+output = "debug/digest-reviewed.md"
+
+[[step]]
 id = "answer"
 agent = "writer"
-needs = ["digest", "claims"]
-task = "Answer the user's question using the digest and the extracted claims. Be specific and cite which claim each statement rests on. Question: {{input.question}}"
-context = ["@step:digest@", "@step:claims@"]
+needs = ["stress-test", "claims"]
+task = "Answer the user's question using the stress-tested digest and the extracted claims. Be specific and cite which claim each statement rests on. Question: {{input.question}}"
+context = ["@step:stress-test@", "@step:claims@"]
 output = "ANSWER.md"
 
 [triggers]
