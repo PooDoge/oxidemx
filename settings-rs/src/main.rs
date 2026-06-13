@@ -9,6 +9,7 @@
 //! existing inotify watcher previews changes within ~150 ms.
 
 mod tabs {
+    pub mod agents;
     pub mod ai;
     pub mod animation;
     pub mod buttons;
@@ -85,6 +86,9 @@ pub enum Tab {
     Gaming,
     /// Agent runtime config — backend, model, API key, allowlist.
     Ai,
+    /// Multi-agent flows, roster, tool registry, MCP servers — the
+    /// conductor's management surface (browse/validate/launch).
+    Agents,
     Settings,
 }
 
@@ -102,6 +106,7 @@ impl Tab {
             Tab::Macros => "Macros",
             Tab::Gaming => "Gaming",
             Tab::Ai => "AI",
+            Tab::Agents => "Agents",
             Tab::Settings => "Settings",
         }
     }
@@ -131,6 +136,7 @@ impl Tab {
             Tab::Macros => "P",
             Tab::Gaming => "G",
             Tab::Ai => "A",
+            Tab::Agents => "@",
             Tab::Settings => "*",
         }
     }
@@ -153,6 +159,7 @@ impl Tab {
             Tab::Macros => "media-playback-start-symbolic",
             Tab::Gaming => "applications-games-symbolic",
             Tab::Ai => "applications-science-symbolic",
+            Tab::Agents => "system-run-symbolic",
             Tab::Settings => "preferences-system-symbolic",
         }
     }
@@ -173,6 +180,7 @@ impl Tab {
             Tab::Macros => "macros",
             Tab::Gaming => "gaming",
             Tab::Ai => "ai",
+            Tab::Agents => "agents",
             Tab::Settings => "settings",
         }
     }
@@ -200,12 +208,13 @@ impl Tab {
             "macros" => Tab::Macros,
             "gaming" => Tab::Gaming,
             "ai" => Tab::Ai,
+            "agents" => Tab::Agents,
             "settings" => Tab::Settings,
             _ => return None,
         })
     }
 
-    pub const ALL: [Tab; 12] = [
+    pub const ALL: [Tab; 13] = [
         Tab::MouseButtons,
         Tab::Menu,
         Tab::PointScroll,
@@ -217,6 +226,7 @@ impl Tab {
         Tab::Macros,
         Tab::Gaming,
         Tab::Ai,
+        Tab::Agents,
         Tab::Settings,
     ];
 }
@@ -330,6 +340,10 @@ pub enum Message {
     /// (Settings tab — the field is write-only; the stored key is
     /// never loaded back into the UI).
     AiKeyDraftChanged(String),
+    /// Agents tab: re-scan flows/roster/MCP from disk.
+    AgentsRefresh,
+    /// Agents tab: open Mission Control, pre-selecting this flow id.
+    AgentsRunFlow(String),
     /// AI tab: Gemini transport backend changed.
     AiProviderChanged(oxidemx_shared::config::AiProvider),
     /// AI tab: agent model id edited/picked.
@@ -1366,6 +1380,10 @@ pub struct State {
     /// the page scrollable (infinite height), so we track the
     /// window instead.
     pub window_width: f32,
+    /// Agents tab data — flows (with validation), roster agents, and
+    /// MCP servers. Loaded at boot + on refresh (not in Default, which
+    /// must stay IO-free).
+    pub agents: tabs::agents::AgentsData,
 }
 
 /// Where the AI Assistant's Gemini API key lives. Mirrors the
@@ -1473,6 +1491,7 @@ impl Default for State {
             widget_store: None,
             widget_preview: None,
             window_width: INITIAL_WINDOW_SIZE.width,
+            agents: tabs::agents::AgentsData::default(),
         }
     }
 }
@@ -2189,11 +2208,17 @@ impl State {
     }
 }
 
+// `State::default()` does config IO; it can't be a literal, so the
+// post-construction agents scan isn't a field-reassign smell.
+#[allow(clippy::field_reassign_with_default)]
 fn boot() -> (State, Task<Message>) {
     // Kick off both probes immediately so the indicators aren't
     // blank for the full poll interval after launch.
+    let mut state = State::default();
+    // Scan flows/roster/MCP once at startup (IO — kept out of Default).
+    state.agents = tabs::agents::AgentsData::load();
     (
-        State::default(),
+        state,
         Task::batch([
             Task::perform(battery::poll(), Message::BatteryUpdate),
             Task::perform(daemon::poll(), Message::DaemonSnapshotReceived),
@@ -2229,11 +2254,24 @@ fn update_inner(state: &mut State, message: Message) -> Task<Message> {
             if t == Tab::Macros {
                 state.macros = tabs::macros::list();
             }
+            // Re-scan flows/roster/MCP each time the Agents tab opens
+            // so externally-edited .md files show up without restart.
+            if t == Tab::Agents {
+                state.agents = tabs::agents::AgentsData::load();
+            }
             // Persist the new tab fire-and-forget so re-opening
             // the settings window lands on the same surface.
             Task::perform(ui_state::save_last_tab(t.tag().to_string()), |_| {
                 Message::LastTabPersisted
             })
+        }
+        Message::AgentsRefresh => {
+            state.agents = tabs::agents::AgentsData::load();
+            Task::none()
+        }
+        Message::AgentsRunFlow(id) => {
+            tabs::agents::launch_mission_control(&id);
+            Task::none()
         }
         Message::SetAiFxEffect(idx, slug) => {
             let fx = &mut state.config.radial_menu.visuals.ai_fx;
@@ -5583,6 +5621,7 @@ fn view(state: &State) -> Element<'_, Message> {
             Tab::MouseButtons => tabs::mouse_buttons::view(state),
             Tab::Menu => tabs::buttons::view(state),
             Tab::Ai => tabs::ai::view(state),
+            Tab::Agents => tabs::agents::view(state),
             Tab::Settings => tabs::settings_page::view(state),
             Tab::PointScroll => tabs::scroll::view(state),
             Tab::IndicatorPopup => tabs::indicator_popup::view(state),

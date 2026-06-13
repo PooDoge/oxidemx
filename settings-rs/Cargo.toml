@@ -28,6 +28,13 @@ oxidemx-widget-cli = { path = "../tools/oxidemx-widget-cli" }
 # Shared Scene replay (same prim walk the overlay's ring uses) —
 # drives the options card's live wedge preview.
 oxidemx-scene-render = { path = "../oxidemx-scene-render" }
+# The Agents tab reuses the conductor's flow loader + validator (single
+# source of truth — the same parse/validate the CLI + Mission Control
+# use) to list and check flows/roster agents.
+oxidemx-conductor = { path = "../oxidemx-conductor" }
+# Tool registry metadata (is_mutating, MCP config path) for the Agents
+# tab's tool + MCP cards.
+oxidemx-agent = { path = "../oxidemx-agent" }
 
 # iced 0.14 — same toolkit as the overlay so we share render
 # tech and don't drag in a separate UI dep tree. Standard widgets

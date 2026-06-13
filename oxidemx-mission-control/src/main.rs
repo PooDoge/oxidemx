@@ -146,6 +146,14 @@ fn boot() -> (App, Task<Message>) {
         console: Vec::new(),
         outcome: None,
     };
+    // Pre-select a flow when launched for one (e.g. the Agents settings
+    // tab's "Open in Mission Control" passes OXIDEMX_MC_FLOW).
+    let mut app = app;
+    if let Some(id) = std::env::var("OXIDEMX_MC_FLOW").ok().filter(|s| !s.is_empty()) {
+        if app.flows.iter().any(|f| f == &id) {
+            select_flow(&mut app, &id);
+        }
+    }
     (app, Task::none())
 }
 
