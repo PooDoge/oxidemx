@@ -611,6 +611,15 @@ chat sub-agent card (§4.1) renders the run-layer events filtered to one run.
   tool paths live (reply+session, google_search, execute_command, memory).
   Interactive UI walk-through human-gated (not installed over Jim's live
   binary). Plan: `docs/superpowers/plans/2026-06-13-agent-framework-p1b-overlay-replacement.md`.
+- **P2 — DONE 2026-06-13** (semantic memory): unstubbed the provider's
+  `embed()` with `gemini-embedding-001` (768-dim; classic text-embedding-004
+  404s on this key); overlay memory recall is now hybrid lexical+semantic —
+  `injection_block_for_async` embeds query + saved memories (cached,
+  text-keyed), blends cosine as `relevance = max(lexical, rescaled_cosine)`
+  at the dominant 0.6 weight, 3s timeout + lexical fallback. Live-verified
+  zero-word-overlap recall (dark-mode preference ranks #1 for "what visual
+  appearance…"). INSTALLED to /usr/local/bin for live testing. Plan:
+  `docs/superpowers/plans/2026-06-13-agent-framework-p2-semantic-memory.md`.
 - **P1 (overlay-embedded MVP)** — tool bridge + `on_tool_call` ApprovalGate;
   main chat on the framework behind `agent-framework` flag. *Exit: feature
   parity with today's chat.*
