@@ -9,10 +9,10 @@
 
 use std::path::PathBuf;
 
-use iced::widget::{button, column, container, row, rule, text, text_input, Space};
+use iced::widget::{button, column, container, row, rule, text, text_editor, text_input, Space};
 use iced::{Alignment, Element, Length};
 use oxidemx_conductor::loader::{default_agents_root, default_flows_root, list_flows, load_flow, load_roster};
-use oxidemx_conductor::{validate, KNOWN_TOOLS};
+use oxidemx_conductor::{validate, FlowDoc, KNOWN_TOOLS};
 use oxidemx_widgets::style;
 use oxidemx_widgets::widgets::section_header;
 
@@ -124,6 +124,61 @@ pub fn launch_mission_control(flow_id: &str) {
     let _ = std::process::Command::new("oxidemx-mission-control")
         .env("OXIDEMX_MC_FLOW", flow_id)
         .spawn();
+}
+
+/// In-GUI editor for a flow's `flow.md` source, with live validation.
+/// Holds the `text_editor` buffer (not `Clone`, so it lives directly in
+/// `State`, never cloned). Closes the create → edit → validate → run
+/// loop without leaving the GUI (the spec's "raw-TOML drawer", §9.2).
+pub struct FlowEditor {
+    pub id: String,
+    pub content: text_editor::Content,
+    pub valid: bool,
+    pub errors: Vec<String>,
+}
+
+impl FlowEditor {
+    /// Open `<flows_root>/<id>/flow.md` into the editor.
+    pub fn open(id: &str) -> Option<Self> {
+        let path = default_flows_root().join(id).join("flow.md");
+        let text = std::fs::read_to_string(&path).ok()?;
+        let mut ed = FlowEditor {
+            id: id.to_string(),
+            content: text_editor::Content::with_text(&text),
+            valid: false,
+            errors: Vec::new(),
+        };
+        ed.revalidate();
+        Some(ed)
+    }
+
+    /// Re-parse + validate the current buffer against the roster.
+    pub fn revalidate(&mut self) {
+        let src = self.content.text();
+        let roster = load_roster(&default_agents_root()).unwrap_or_default();
+        match FlowDoc::parse(&src) {
+            Ok(doc) => match validate(&doc, &roster, KNOWN_TOOLS) {
+                Ok(_) => {
+                    self.valid = true;
+                    self.errors.clear();
+                }
+                Err(errs) => {
+                    self.valid = false;
+                    self.errors = errs.iter().map(|e| e.to_string()).collect();
+                }
+            },
+            Err(e) => {
+                self.valid = false;
+                self.errors = vec![e.to_string()];
+            }
+        }
+    }
+
+    /// Write the buffer back to `flow.md`.
+    pub fn save(&self) -> Result<(), String> {
+        let path = default_flows_root().join(&self.id).join("flow.md");
+        std::fs::write(&path, self.content.text()).map_err(|e| e.to_string())
+    }
 }
 
 /// Sanitize a user-typed flow id to a safe directory slug
@@ -241,10 +296,16 @@ pub fn view(state: &State) -> Element<'_, Message> {
         Space::new().height(Length::Fixed(0.0)).into()
     };
 
+    let editor: Element<Message> = match &state.agents_flow_editor {
+        Some(ed) => editor_panel(state, ed),
+        None => Space::new().height(Length::Fixed(0.0)).into(),
+    };
+
     column![
         header,
         intro,
         new_flow_bar(state),
+        editor,
         rule::horizontal(1).style(style::rule_style(pal)),
         flows_card(state),
         roster_card(state),
@@ -277,6 +338,51 @@ fn new_flow_bar(state: &State) -> Element<'_, Message> {
         );
     }
     bar.into()
+}
+
+fn editor_panel<'a>(state: &'a State, ed: &'a FlowEditor) -> Element<'a, Message> {
+    let pal = &state.palette;
+    let status: Element<Message> = if ed.valid {
+        text("✓ valid").size(11).style(text_color(pal.success)).into()
+    } else {
+        let mut col = column![text(format!("✗ {} problem(s)", ed.errors.len()))
+            .size(11)
+            .style(text_color(pal.danger))]
+        .spacing(2);
+        for e in ed.errors.iter().take(6) {
+            col = col.push(text(format!("• {e}")).size(10).style(text_color(pal.danger)));
+        }
+        col.into()
+    };
+
+    let editor = text_editor(&ed.content)
+        .on_action(Message::AgentsEditorAction)
+        .padding(8)
+        .height(Length::Fixed(280.0));
+
+    let head = row![
+        text(format!("Editing  {}/flow.md", ed.id))
+            .size(13)
+            .style(style::text_accent(pal)),
+        Space::new().width(Length::Fill),
+        button(text("Save").size(12))
+            .padding([4, 12])
+            .on_press(Message::AgentsSaveFlow)
+            .style(style::btn_primary(pal)),
+        button(text("Close").size(12))
+            .padding([4, 12])
+            .on_press(Message::AgentsCloseEditor)
+            .style(style::btn_secondary(pal)),
+    ]
+    .spacing(8)
+    .align_y(Alignment::Center);
+
+    let body = column![head, editor, status].spacing(8);
+    container(body)
+        .padding(14)
+        .width(Length::Fill)
+        .style(style::card(pal))
+        .into()
 }
 
 fn card<'a>(state: &'a State, title: &str, body: Element<'a, Message>) -> Element<'a, Message> {
@@ -312,6 +418,10 @@ fn flows_card(state: &State) -> Element<'_, Message> {
             text(f.name.clone()).size(13).style(style::text_accent(pal)),
             Space::new().width(Length::Fill),
             badge,
+            button(text("Edit").size(11))
+                .padding([3, 9])
+                .on_press(Message::AgentsEditFlow(f.id.clone()))
+                .style(style::btn_secondary(pal)),
             button(text("Open in Mission Control").size(11))
                 .padding([3, 9])
                 .on_press(Message::AgentsRunFlow(f.id.clone()))

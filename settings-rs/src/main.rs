@@ -348,6 +348,14 @@ pub enum Message {
     AgentsNewFlowDraft(String),
     /// Agents tab: scaffold a starter flow from the draft name.
     AgentsCreateFlow,
+    /// Agents tab: open a flow's flow.md in the in-GUI editor.
+    AgentsEditFlow(String),
+    /// Agents tab: a text_editor action in the flow editor.
+    AgentsEditorAction(iced::widget::text_editor::Action),
+    /// Agents tab: save the editor buffer back to flow.md.
+    AgentsSaveFlow,
+    /// Agents tab: close the flow editor.
+    AgentsCloseEditor,
     /// AI tab: Gemini transport backend changed.
     AiProviderChanged(oxidemx_shared::config::AiProvider),
     /// AI tab: agent model id edited/picked.
@@ -1391,6 +1399,8 @@ pub struct State {
     /// Agents tab: the "new flow" name field + last create result.
     pub agents_new_flow_draft: String,
     pub agents_new_flow_status: String,
+    /// Agents tab: the open in-GUI flow.md editor, if any.
+    pub agents_flow_editor: Option<tabs::agents::FlowEditor>,
 }
 
 /// Where the AI Assistant's Gemini API key lives. Mirrors the
@@ -1504,6 +1514,7 @@ impl Default for State {
             agents: tabs::agents::AgentsData::default(),
             agents_new_flow_draft: String::new(),
             agents_new_flow_status: String::new(),
+            agents_flow_editor: None,
         }
     }
 }
@@ -2295,9 +2306,41 @@ fn update_inner(state: &mut State, message: Message) -> Task<Message> {
                     state.agents_new_flow_draft.clear();
                     state.agents_new_flow_status = format!("created `{id}` — edit its flow.md to refine");
                     state.agents = tabs::agents::AgentsData::load();
+                    // Open the fresh flow in the editor right away.
+                    state.agents_flow_editor = tabs::agents::FlowEditor::open(&id);
                 }
                 Err(e) => state.agents_new_flow_status = format!("✗ {e}"),
             }
+            Task::none()
+        }
+        Message::AgentsEditFlow(id) => {
+            state.agents_flow_editor = tabs::agents::FlowEditor::open(&id);
+            Task::none()
+        }
+        Message::AgentsEditorAction(action) => {
+            if let Some(ed) = &mut state.agents_flow_editor {
+                let revalidate = action.is_edit();
+                ed.content.perform(action);
+                if revalidate {
+                    ed.revalidate();
+                }
+            }
+            Task::none()
+        }
+        Message::AgentsSaveFlow => {
+            if let Some(ed) = &state.agents_flow_editor {
+                match ed.save() {
+                    Ok(()) => {
+                        state.agents_new_flow_status = format!("saved `{}/flow.md`", ed.id);
+                        state.agents = tabs::agents::AgentsData::load();
+                    }
+                    Err(e) => state.agents_new_flow_status = format!("✗ save failed: {e}"),
+                }
+            }
+            Task::none()
+        }
+        Message::AgentsCloseEditor => {
+            state.agents_flow_editor = None;
             Task::none()
         }
         Message::SetAiFxEffect(idx, slug) => {
