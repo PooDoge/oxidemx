@@ -144,15 +144,17 @@ pub struct Step {
     /// Roster id or `./agents/<file>.md`. Required for agent steps.
     #[serde(default)]
     pub agent: Option<String>,
-    /// DAG edges. `[]` (or omitted) ⇒ entry point.
-    #[serde(default)]
+    /// DAG edges. `[]` (or omitted) ⇒ entry point. Accepts a single
+    /// string or an array (`needs = "x"` or `needs = ["x", "y"]`).
+    #[serde(default, deserialize_with = "string_or_seq")]
     pub needs: Vec<String>,
     /// The concrete instruction, templated with `{{input.*}}`.
     #[serde(default)]
     pub task: Option<String>,
     /// Context tokens injected before the task (`@artifact@`,
-    /// `@step:<id>@`). Resolved by `template.rs`.
-    #[serde(default)]
+    /// `@step:<id>@`). Resolved by `template.rs`. Accepts a single
+    /// string or an array.
+    #[serde(default, deserialize_with = "string_or_seq")]
     pub context: Vec<String>,
     /// Artifact path under the run workdir to write this step's
     /// output to (e.g. `debug/raw.md`, `ANSWER.md`).
@@ -196,6 +198,25 @@ pub struct Step {
 
 fn default_step_kind() -> String {
     "agent".to_string()
+}
+
+/// Deserialize a `Vec<String>` from either a single string or an
+/// array — so `needs = "x"` and `needs = ["x"]` both parse. Forgiving
+/// ergonomics for hand-authored and LLM-composed flows alike.
+fn string_or_seq<'de, D>(d: D) -> Result<Vec<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum OneOrMany {
+        One(String),
+        Many(Vec<String>),
+    }
+    Ok(match OneOrMany::deserialize(d)? {
+        OneOrMany::One(s) => vec![s],
+        OneOrMany::Many(v) => v,
+    })
 }
 
 #[derive(Debug, Clone, Copy, Deserialize)]
@@ -432,6 +453,29 @@ interrogated.
     fn unclosed_frontmatter_is_an_error() {
         let err = FlowDoc::parse("---\n[flow]\nid=\"x\"\n").unwrap_err();
         assert!(matches!(err, FlowDocError::UnclosedFrontmatter));
+    }
+
+    #[test]
+    fn needs_and_context_accept_string_or_array() {
+        let src = r#"---
+[flow]
+id = "lenient"
+[[step]]
+id = "a"
+agent = "x"
+task = "t"
+[[step]]
+id = "b"
+agent = "x"
+task = "t"
+needs = "a"
+context = "@artifact@"
+---
+"#;
+        let doc = FlowDoc::parse(src).unwrap();
+        let b = doc.manifest.steps.iter().find(|s| s.id == "b").unwrap();
+        assert_eq!(b.needs, vec!["a".to_string()]);
+        assert_eq!(b.context, vec!["@artifact@".to_string()]);
     }
 
     #[test]

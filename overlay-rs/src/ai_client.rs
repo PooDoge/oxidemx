@@ -214,8 +214,10 @@ impl AgentMode {
              blank); prefer list_system_apps for real exec + icon when binding launchers. Use \
              ask_multiple_choice_question when options need clarifying.\n\n\
              FLOWS\n\
-             For multi-step work that a pre-authored flow covers, call run_flow with its id (the \
-             user knows the flow name). It streams live progress and returns a summary.\n\n\
+             For multi-step work a pre-authored flow covers, call run_flow with its id. When the \
+             user wants a NEW repeatable pipeline ('every morning fetch X, digest it, …'), author \
+             it with compose_flow (you write the flow.md; it validates and tells you any errors to \
+             fix). run_flow streams live progress and returns a summary.\n\n\
              MEMORY RULES\n\
              You have a memory tool. Save a memory (action=save) ONLY when ALL of these hold:\n\
              1. DURABLE - the fact will still be true and useful in 2+ weeks (preferences, \

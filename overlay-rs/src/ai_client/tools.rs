@@ -17,6 +17,25 @@ pub(super) fn agent_tool_declarations() -> Vec<serde_json::Value> {
     vec![
         json!({
             "type": "function",
+            "name": "compose_flow",
+            "description": "Author a new multi-agent flow from the user's description and save it (then it's runnable via run_flow / the Agents tab / Mission Control). You write the COMPLETE flow.md content. Format: TOML frontmatter between `---` fences, then a markdown body.\n[flow] id, name, description, version=1\n[inputs] <name> = { type=\"string\", required=true|false, default=\"...\" }  (use in tasks as {{input.<name>}})\n[defaults] model=\"gemini-2.5-flash\", approval=\"allowlist\", max_turns=8\n[[step]] id, agent (a roster id — one of: web-researcher, summarizer, extractor, writer, skeptic), needs=[ids], task=\"...\", context=[\"@artifact@\" (sole predecessor) or \"@step:<id>@\" (a named ancestor)], output=\"debug/x.md\". Optional review step: kind=\"reflect\", target=\"<step>\", critic=\"skeptic\", max_rounds=2. Optional branch: kind=\"route\", needs=[...], choices={ label=\"<step-id>\" }, prompt=\"...\".\n[delivery] root=\"ANSWER.md\", title=\"...\"\nThe tool validates after writing and returns any errors — if invalid, call it again with the corrected flow.md.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "flow_id": {
+                        "type": "string",
+                        "description": "A short id for the flow (becomes a dir slug, e.g. 'release-watch')"
+                    },
+                    "flow_md": {
+                        "type": "string",
+                        "description": "The complete flow.md content (TOML frontmatter + markdown body)"
+                    }
+                },
+                "required": ["flow_id", "flow_md"]
+            }
+        }),
+        json!({
+            "type": "function",
             "name": "run_flow",
             "description": "Run a multi-agent OxideMX flow (a named, pre-authored pipeline of agent steps) via the conductor. Use when the user asks to run a flow by name, or for a multi-step task a flow exists for (e.g. 'research-digest' to fetch+digest+answer a URL). List available flows is out of scope — the user knows the flow id. Streams live per-step progress and returns a summary; a card with a 'Watch' button to Mission Control appears in chat.",
             "parameters": {
@@ -206,6 +225,7 @@ pub(crate) async fn execute_local_tool(
     sink: &Option<StreamSink>,
 ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
     match name {
+        "compose_flow" => compose_flow_tool(&args, sink).await,
         "run_flow" => run_flow_tool(&args, sink).await,
         "execute_command" => execute_command_tool(&args, sink).await,
         "schedule_task" => schedule_task_tool(&args, sink).await,
@@ -340,6 +360,71 @@ async fn send_activity(sink: &Option<StreamSink>, label: String) {
 async fn send_card(sink: &Option<StreamSink>, card: AgentCardData) {
     if let Some(s) = sink {
         s.send(StreamEvent::Card(card)).await;
+    }
+}
+
+/// Sanitize a model-chosen flow id into a safe directory slug.
+fn slugify_flow_id(raw: &str) -> String {
+    let mut out = String::new();
+    let mut last_dash = false;
+    for ch in raw.trim().chars() {
+        if ch.is_ascii_alphanumeric() {
+            out.push(ch.to_ascii_lowercase());
+            last_dash = false;
+        } else if !last_dash && !out.is_empty() {
+            out.push('-');
+            last_dash = true;
+        }
+    }
+    out.trim_matches('-').to_string()
+}
+
+/// `compose_flow`: write a model-authored flow.md to the flows dir and
+/// validate it via the conductor, returning the result so the model can
+/// fix-and-retry. Authoring (not running) — the user runs it after.
+async fn compose_flow_tool(
+    args: &serde_json::Value,
+    sink: &Option<StreamSink>,
+) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+    let id = slugify_flow_id(
+        args["flow_id"]
+            .as_str()
+            .ok_or("compose_flow: `flow_id` missing")?,
+    );
+    if id.is_empty() {
+        return Ok("The flow_id must contain letters or numbers.".into());
+    }
+    let flow_md = args["flow_md"]
+        .as_str()
+        .ok_or("compose_flow: `flow_md` missing")?;
+
+    let home = std::env::var("HOME").unwrap_or_default();
+    let dir = std::path::Path::new(&home)
+        .join(".config/oxidemx/flows")
+        .join(&id);
+    tokio::fs::create_dir_all(&dir).await?;
+    tokio::fs::write(dir.join("flow.md"), flow_md).await?;
+
+    send_activity(sink, format!("Composing flow “{id}”…")).await;
+
+    let out = tokio::process::Command::new("oxidemx-conductor")
+        .args(["validate", &id])
+        .output()
+        .await
+        .map_err(|e| format!("could not run the conductor validator: {e}"))?;
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+
+    if out.status.success() {
+        Ok(format!(
+            "Flow '{id}' saved and VALID — {}. The user can run it now (run_flow / the Agents tab / Mission Control), or refine it in Settings → Agents.",
+            stdout.trim()
+        ))
+    } else {
+        Ok(format!(
+            "Flow '{id}' was saved but is INVALID:\n{}\nRevise the flow.md and call compose_flow again with the corrected content.",
+            stderr.trim()
+        ))
     }
 }
 
