@@ -20,7 +20,7 @@
 - Create: `oxidemx-agent/src/factory.rs`
 - Modify: `oxidemx-agent/src/bin/cli.rs` (`--backend` flag, config-driven defaults)
 
-- [ ] **Step 1:** Add to `AiConfig`:
+- [x] **Step 1:** Add to `AiConfig`:
 
 ```rust
 /// Which Gemini transport the agent runtime uses. Interactions
@@ -36,9 +36,9 @@ pub model: String,
 
 with `#[derive(..., PartialEq, Eq)] pub enum AiBackend { #[default] Interactions, GenerateContent }` (serde `rename_all = "snake_case"`), `default_ai_model() -> "gemini-2.5-flash"`. Update `Default for AiConfig`.
 
-- [ ] **Step 2:** `oxidemx-agent/Cargo.toml`: `autoagents = { version = "=0.3.7", default-features = false, features = ["google"] }`, add `oxidemx-shared = { path = "../oxidemx-shared" }`.
+- [x] **Step 2:** `oxidemx-agent/Cargo.toml`: `autoagents = { version = "=0.3.7", default-features = false, features = ["google"] }`, add `oxidemx-shared = { path = "../oxidemx-shared" }`.
 
-- [ ] **Step 3:** `factory.rs`:
+- [x] **Step 3:** `factory.rs`:
 
 ```rust
 pub fn provider_from_config(backend: AiBackend, model: &str, api_key: &str)
@@ -54,9 +54,9 @@ pub fn provider_from_config(backend: AiBackend, model: &str, api_key: &str)
 
 (adjust to the actual `LLMBuilder<Google>` API verified in `AutoAgents/crates/autoagents-llm/src/backends/google.rs:725,924`). Unit test: both arms return a provider; unknown-model string passes through untouched.
 
-- [ ] **Step 4:** CLI: `--backend interactions|generate_content` (default: read `AppConfig` via oxidemx-shared, fall back to Interactions), `--model` default from config. Live smoke test BOTH backends with the same prompt; record behavior differences in Learnings.
+- [x] **Step 4:** CLI: `--backend interactions|generate_content` (default: read `AppConfig` via oxidemx-shared, fall back to Interactions), `--model` default from config. Live smoke test BOTH backends with the same prompt; record behavior differences in Learnings.
 
-- [ ] **Step 5:** `cargo test -p oxidemx-agent` green, clippy clean, commit `feat(agent): config-selectable backend — Interactions default, generateContent fallback`.
+- [x] **Step 5:** `cargo test -p oxidemx-agent` green, clippy clean, commit `feat(agent): config-selectable backend — Interactions default, generateContent fallback`.
 
 ### Task 2: Settings **AI** tab — MILESTONE M6
 
@@ -65,28 +65,60 @@ pub fn provider_from_config(backend: AiBackend, model: &str, api_key: &str)
 - Create: `settings-rs/src/tabs/ai.rs`
 - Modify: `settings-rs/src/tabs/settings_page.rs` (drop the "AI Assistant" section; point users at the new tab)
 
-- [ ] **Step 1:** `Tab::Ai` metadata: label "AI", glyph "A", icon `applications-science-symbolic`, tag `"ai"`, insert into `ALL` before `Settings`; router arm `Tab::Ai => tabs::ai::view(state)`.
+- [x] **Step 1:** `Tab::Ai` metadata: label "AI", glyph "A", icon `applications-science-symbolic`, tag `"ai"`, insert into `ALL` before `Settings`; router arm `Tab::Ai => tabs::ai::view(state)`.
 
-- [ ] **Step 2:** New messages + update arms (all mutate `state.config.overlay.ai.*` then `state.touch()` for the 250 ms-debounced autosave):
+- [x] **Step 2:** New messages + update arms (all mutate `state.config.overlay.ai.*` then `state.touch()` for the 250 ms-debounced autosave):
   - `AiBackendChanged(AiBackend)`, `AiModelChanged(String)`
   - `AiAllowlistDraftChanged(String)`, `AiAllowlistAdd`, `AiAllowlistRemove(usize)` (Add: trim, reject empty + bare `*`, dedupe)
 
-- [ ] **Step 3:** `tabs/ai.rs` view, four sections (reuse `section_block` pattern):
+- [x] **Step 3:** `tabs/ai.rs` view, four sections (reuse `section_block` pattern):
   1. **Backend** — pick_list Interactions (recommended) / GenerateContent (fallback) + one-line explanation of the difference.
   2. **Model** — pick_list of known ids (`gemini-2.5-flash`, `gemini-2.5-pro`) + free-text input for custom ids.
   3. **API key** — `ai_key_panel` MOVED here verbatim (same `AiKey*` messages, write-only field, 0600 file).
   4. **Command allowlist** — rows with remove buttons + add form; intro text explains whole-token prefix matching and the trailing `*` convention.
 
-- [ ] **Step 4:** Remove the "AI Assistant" `section_block` from settings_page.rs (leave a one-line pointer "AI settings moved to the AI tab").
+- [x] **Step 4:** Remove the "AI Assistant" `section_block` from settings_page.rs (leave a one-line pointer "AI settings moved to the AI tab").
 
-- [ ] **Step 5:** `cargo build -p settings-rs` clean; run the settings app, screenshot/verify the tab renders and edits persist to config.json (inotify reload). Commit `feat(settings): dedicated AI tab — backend, model, API key, allowlist`.
+- [x] **Step 5:** `cargo build -p settings-rs` clean; run the settings app, screenshot/verify the tab renders and edits persist to config.json (inotify reload). Commit `feat(settings): dedicated AI tab — backend, model, API key, allowlist`.
 
 ### Task 3: Close out — MILESTONE M7
 
-- [ ] Plan checkboxes + Learnings here; brainstorm doc §12 P1 status note (both copies); memory update. Commit `docs(agent): P1a results`.
+- [x] Plan checkboxes + Learnings here; brainstorm doc §12 P1 status note (both copies); memory update. Commit `docs(agent): P1a results`.
 
 ---
 
 ## Learnings (filled during execution)
 
-- (none yet)
+Executed 2026-06-12/13, commits 1617cc8 (M5) + 9bded16 (M6). 33 lib
+tests green, clippy clean, settings app builds + launches clean.
+
+1. **Both backends live-verified with the same prompt** ("check
+   oxidemx-daemon.service"): Interactions and GenerateContent each
+   issued one allowlisted tool call and answered correctly. The
+   fallback is real, not theoretical. AutoAgents' `Google` backend
+   builder is sync (`build() -> Result<Arc<Google>, LLMError>`),
+   unlike our async-free constructor — the factory hides the
+   difference behind `provider_from_config`.
+2. The fallback provider costs ~10 lines + one feature flag because
+   the factory is the only construction seam. Keep it that way: the
+   overlay/agentd must construct providers ONLY through
+   `oxidemx_agent::factory`.
+3. Trade-offs the GenerateContent fallback accepts (documented in the
+   AI tab's intro text): no server-side sessions (full history would
+   need to ship — currently each ReAct turn carries only the newest
+   message, so multi-turn context beyond tool results is weaker), no
+   CancellationToken, no SSE delta sink. Fallback semantics only.
+4. Settings package is `oxidemx-settings`, not `settings-rs` —
+   `cargo build -p settings-rs` fails (dir name ≠ package name).
+5. The `ai_key_panel` moved verbatim (same `AiKey*` messages) — no
+   message-enum churn for the move itself; only the five new
+   `AiBackend/AiModel/AiAllowlist*` variants were added. Conflict
+   surface with Jim's concurrent settings work is therefore small
+   and append-shaped.
+6. GNOME Shell denies unprivileged `org.gnome.Shell.Screenshot` —
+   no automated visual verification for settings; the AI tab needs a
+   human walk-through (same status as the widget-plugins settings UI).
+7. Config compatibility verified implicitly: the CLI loaded Jim's
+   real config.json (which predates `backend`/`model`) through serde
+   defaults during the smoke test. New fields only get written when
+   the user first edits something in settings.

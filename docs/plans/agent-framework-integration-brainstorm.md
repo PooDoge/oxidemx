@@ -593,6 +593,13 @@ chat sub-agent card (§4.1) renders the run-layer events filtered to one run.
   steps — overlay's `== "waiting"` filter is a latent bug to fix.
   Deferred to P1: StreamChunk mapping (text-delta sink shipped instead),
   multi-call input-array live verification.
+- **P1a — DONE 2026-06-13** (commits 1617cc8, 9bded16): config-selectable
+  backend (`overlay.ai.backend`: Interactions default / GenerateContent
+  fallback via AutoAgents' `google` feature; `factory::provider_from_config`
+  is the single construction seam, both backends live-verified) + dedicated
+  settings **AI tab** (backend/model pickers, API-key panel moved from the
+  Settings page, command-allowlist GUI editor). Plan + learnings:
+  `docs/superpowers/plans/2026-06-12-agent-framework-p1a.md`.
 - **P1 (overlay-embedded MVP)** — tool bridge + `on_tool_call` ApprovalGate;
   main chat on the framework behind `agent-framework` flag. *Exit: feature
   parity with today's chat.*
