@@ -87,6 +87,49 @@ fn main() -> iced::Result {
         std::process::exit(code);
     }
 
+    // Headless agent self-test: drives the real `agent_runtime` path
+    // (OverlayAgent + tools + provider + session) against the live API
+    // with no window or bus claim. Used to verify the AutoAgents
+    // replacement end-to-end without the radial UI. Usage:
+    //   oxidemx-overlay --agent-selftest "your prompt here"
+    if let Some(pos) = std::env::args().position(|a| a == "--agent-selftest") {
+        let prompt = std::env::args()
+            .nth(pos + 1)
+            .unwrap_or_else(|| "Say hello in one short sentence.".to_string());
+        let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
+        let code = rt.block_on(async {
+            let key = match ai_client::load_api_key() {
+                Ok(k) => k,
+                Err(e) => {
+                    eprintln!("selftest: no API key: {e}");
+                    return 1;
+                }
+            };
+            match ai_client::ask_ai(
+                &key,
+                ai_client::AgentMode::GeneralChat,
+                ai_client::DEFAULT_MODEL,
+                &prompt,
+                None,
+                None,
+                &[],
+            )
+            .await
+            {
+                Ok((reply, session)) => {
+                    println!("--- reply ---\n{reply}");
+                    eprintln!("--- session: {session:?} ---");
+                    0
+                }
+                Err(e) => {
+                    eprintln!("selftest failed: {e}");
+                    1
+                }
+            }
+        });
+        std::process::exit(code);
+    }
+
     // Default filter: info-level for our crates, error-only for usvg
     // (which spams "Failed to parse marker-start value: 'none'." for
     // every freedesktop icon — the parser warns on perfectly valid
