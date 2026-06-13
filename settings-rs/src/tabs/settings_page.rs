@@ -81,6 +81,15 @@ pub fn view(state: &State) -> Element<'_, Message> {
         Space::new().height(Length::Fixed(16.0)),
         section_block(state, "Application bindings", app_bindings(state)),
         Space::new().height(Length::Fixed(16.0)),
+        section_block(
+            state,
+            "AI Assistant",
+            text("Moved — backend, model, API key, and the command allowlist now live in the AI tab.")
+                .size(11)
+                .style(style::text_dim(&state.palette))
+                .into(),
+        ),
+        Space::new().height(Length::Fixed(16.0)),
         section_block(state, "About + shortcuts", about_panel(state)),
     ]
     .spacing(10)
