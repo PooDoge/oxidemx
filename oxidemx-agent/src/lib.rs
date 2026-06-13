@@ -5,6 +5,6 @@
 //! 2026-06-12-agent-framework-p0.md.
 
 // Modules land per plan task; uncommented as each is implemented.
-// pub mod allowlist;
+pub mod allowlist;
 // pub mod provider;
 // pub mod tools;
