@@ -1,13 +1,12 @@
-//! P0 spike harness: a ReAct agent with `execute_command` against
-//! the Gemini Interactions provider.
+//! Headless harness: a ReAct agent with `execute_command` against
+//! any configured provider.
 //!
 //! ```text
-//! oxidemx-agent-cli "<prompt>" [--model <id>] [--allow "<entry>"]...
+//! oxidemx-agent-cli "<prompt>" [--provider gemini|openai|anthropic|ollama|claude_code] [--model <id>] [--allow "<entry>"]...
 //! ```
 //!
-//! API key lookup mirrors the overlay (`ai_client.rs:124-149`):
-//! `GEMINI_API_KEY` env, else `~/.config/oxidemx/gemini.key`.
-
+//! Provider + model + allowlist default to the live config.json; keys
+//! resolve via `oxidemx_agent::keys` (env var → per-provider key file).
 
 use autoagents::core::agent::memory::SlidingWindowMemory;
 use autoagents::core::agent::prebuilt::executor::ReActAgent;
@@ -16,8 +15,9 @@ use autoagents::core::agent::{AgentBuilder, DirectAgent};
 use autoagents_derive::{agent, AgentHooks};
 
 use oxidemx_agent::factory::provider_from_config;
+use oxidemx_agent::keys::provider_key;
 use oxidemx_agent::tools::{set_allowlist, ExecuteCommand};
-use oxidemx_shared::config::AiBackend;
+use oxidemx_shared::config::AiProvider;
 
 #[agent(
     name = "shell_agent",
@@ -27,33 +27,19 @@ use oxidemx_shared::config::AiBackend;
 #[derive(Default, Clone, AgentHooks)]
 pub struct ShellAgent {}
 
-fn api_key() -> Result<String, String> {
-    if let Ok(k) = std::env::var("GEMINI_API_KEY") {
-        let k = k.trim().to_string();
-        if !k.is_empty() {
-            return Ok(k);
-        }
-    }
-    let path = key_path().ok_or("no home directory")?;
-    std::fs::read_to_string(&path)
-        .map(|s| s.trim().to_string())
-        .map_err(|_| {
-            format!(
-                "Gemini API key not found. Set GEMINI_API_KEY or save it in {}",
-                path.display()
-            )
-        })
-}
-
-fn key_path() -> Option<std::path::PathBuf> {
-    std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".config/oxidemx/gemini.key"))
+fn parse_provider(s: &str) -> Result<AiProvider, String> {
+    Ok(match s {
+        "gemini" => AiProvider::Gemini,
+        "openai" => AiProvider::OpenAi,
+        "anthropic" => AiProvider::Anthropic,
+        "ollama" => AiProvider::Ollama,
+        "claude_code" | "claude-code" => AiProvider::ClaudeCode,
+        other => return Err(format!("unknown provider {other:?}")),
+    })
 }
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    // Defaults come from the live config.json (backend, model,
-    // allowlist) so the CLI behaves like the rest of the app; flags
-    // override per-invocation.
     let cfg = oxidemx_shared::config::default_config_path()
         .and_then(|p| oxidemx_shared::AppConfig::load_from(&p).ok())
         .map(|c| c.overlay.ai)
@@ -62,17 +48,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let mut args = std::env::args().skip(1);
     let mut prompt = None;
     let mut model = cfg.model.clone();
-    let mut backend = cfg.backend;
+    let mut provider = cfg.provider;
+    let mut model_overridden = false;
     let mut allow = cfg.command_allowlist.clone();
     while let Some(a) = args.next() {
         match a.as_str() {
-            "--model" => model = args.next().ok_or("--model needs a value")?,
+            "--model" => {
+                model = args.next().ok_or("--model needs a value")?;
+                model_overridden = true;
+            }
             "--allow" => allow.push(args.next().ok_or("--allow needs a value")?),
-            "--backend" => {
-                backend = match args.next().as_deref() {
-                    Some("interactions") => AiBackend::Interactions,
-                    Some("generate_content") => AiBackend::GenerateContent,
-                    other => return Err(format!("--backend must be interactions|generate_content, got {other:?}").into()),
+            "--provider" => {
+                provider = parse_provider(&args.next().ok_or("--provider needs a value")?)?;
+                // Default the model to the new provider's default unless
+                // the user also passed --model.
+                if !model_overridden {
+                    model = provider.default_model().to_string();
                 }
             }
             _ if prompt.is_none() => prompt = Some(a),
@@ -80,12 +71,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         }
     }
     let prompt = prompt.ok_or(
-        "usage: oxidemx-agent-cli \"<prompt>\" [--model <id>] [--backend interactions|generate_content] [--allow <entry>]...",
+        "usage: oxidemx-agent-cli \"<prompt>\" [--provider gemini|openai|anthropic|ollama|claude_code] [--model <id>] [--allow <entry>]...",
     )?;
 
     set_allowlist(allow);
-    eprintln!("[backend: {backend:?}, model: {model}]");
-    let provider = provider_from_config(backend, &model, &api_key()?)?;
+    let key = if provider.needs_key() {
+        provider_key(provider).ok_or_else(|| {
+            format!("no API key for {provider:?}; set the env var or ~/.config/oxidemx/<provider>.key")
+        })?
+    } else {
+        String::new()
+    };
+    eprintln!("[provider: {provider:?}, model: {model}]");
+    let provider = provider_from_config(provider, &model, &key)?;
 
     let handle = AgentBuilder::<_, DirectAgent>::new(ReActAgent::new(ShellAgent {}))
         .llm(provider)

@@ -5,11 +5,13 @@
 //! 2026-06-12-agent-framework-p0.md.
 
 pub mod allowlist;
+pub mod claude_code;
+pub mod embed;
 pub mod factory;
-pub mod provider;
+pub mod keys;
 pub mod tools;
 
-/// Embed texts with Gemini `text-embedding-004` (the provider seam
-/// for semantic memory). Re-exported for callers that need
-/// embeddings without building a full agent (e.g. memory recall).
-pub use provider::embed::{embed_texts, EMBED_DIM, EMBED_MODEL};
+/// Embed texts with Gemini `gemini-embedding-001` (the embedding seam
+/// for semantic memory — independent of the chat provider). Re-
+/// exported for callers that need embeddings without building an agent.
+pub use embed::{embed_texts, EMBED_DIM, EMBED_MODEL};

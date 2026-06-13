@@ -937,34 +937,68 @@ pub struct OverlayConfig {
     pub ai: AiConfig,
 }
 
-/// Which Gemini transport the agent runtime talks to.
+/// Which LLM provider the agent runtime uses. All ride AutoAgents'
+/// built-in backends (standard chat APIs, history shipped via memory)
+/// except `ClaudeCode`, which shells out to the `claude` CLI.
 ///
-/// `Interactions` (v1beta/interactions) is the agentic default:
-/// server-side sessions, function calling, the API the overlay chat
-/// already uses. `GenerateContent` is Gemini's classic stateless
-/// API, kept as a fallback if Interactions misbehaves or is
-/// deprecated — it rides AutoAgents' built-in `google` backend.
+/// Migration: the legacy `interactions` / `generate_content` values
+/// (the retired bespoke Gemini transport) deserialize to `Gemini`.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum AiBackend {
+pub enum AiProvider {
+    /// Gemini via the normal `generateContent` API (default).
     #[default]
-    Interactions,
-    GenerateContent,
+    #[serde(alias = "interactions", alias = "generate_content")]
+    Gemini,
+    #[serde(rename = "openai")]
+    OpenAi,
+    Anthropic,
+    /// Local models via Ollama (no API key).
+    Ollama,
+    /// The `claude` CLI / Claude subscription (no API key; chat-only).
+    ClaudeCode,
 }
 
-impl AiBackend {
+impl AiProvider {
     /// Human-readable label for pickers.
     pub fn label(&self) -> &'static str {
         match self {
-            AiBackend::Interactions => "Interactions (agentic, default)",
-            AiBackend::GenerateContent => "GenerateContent (classic, fallback)",
+            AiProvider::Gemini => "Gemini (Google)",
+            AiProvider::OpenAi => "OpenAI",
+            AiProvider::Anthropic => "Anthropic (Claude API)",
+            AiProvider::Ollama => "Ollama (local)",
+            AiProvider::ClaudeCode => "Claude Code (CLI)",
         }
     }
 
-    pub const ALL: [AiBackend; 2] = [AiBackend::Interactions, AiBackend::GenerateContent];
+    /// Default model id for this provider — used when the user
+    /// switches providers so the `model` field stays valid.
+    pub fn default_model(&self) -> &'static str {
+        match self {
+            AiProvider::Gemini => "gemini-2.5-flash",
+            AiProvider::OpenAi => "gpt-4o",
+            AiProvider::Anthropic => "claude-sonnet-4-6",
+            AiProvider::Ollama => "llama3.2",
+            AiProvider::ClaudeCode => "", // CLI uses the subscription default
+        }
+    }
+
+    /// Whether this provider needs an API key (Ollama + Claude Code
+    /// don't).
+    pub fn needs_key(&self) -> bool {
+        matches!(self, AiProvider::Gemini | AiProvider::OpenAi | AiProvider::Anthropic)
+    }
+
+    pub const ALL: [AiProvider; 5] = [
+        AiProvider::Gemini,
+        AiProvider::OpenAi,
+        AiProvider::Anthropic,
+        AiProvider::Ollama,
+        AiProvider::ClaudeCode,
+    ];
 }
 
-impl std::fmt::Display for AiBackend {
+impl std::fmt::Display for AiProvider {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(self.label())
     }
@@ -981,12 +1015,12 @@ pub struct AiConfig {
     #[serde(default = "default_command_allowlist")]
     pub command_allowlist: Vec<String>,
 
-    /// Gemini transport used by the agent runtime.
-    #[serde(default)]
-    pub backend: AiBackend,
+    /// LLM provider the agent runtime uses.
+    #[serde(default, alias = "backend")]
+    pub provider: AiProvider,
 
-    /// Model id for the agent runtime. The overlay chat keeps its
-    /// own per-thread flash/pro toggle until P1b unifies on this.
+    /// Model id for the selected provider. The settings AI tab resets
+    /// this to the provider's default when the provider changes.
     #[serde(default = "default_ai_model")]
     pub model: String,
 }
@@ -995,7 +1029,7 @@ impl Default for AiConfig {
     fn default() -> Self {
         AiConfig {
             command_allowlist: default_command_allowlist(),
-            backend: AiBackend::default(),
+            provider: AiProvider::default(),
             model: default_ai_model(),
         }
     }
