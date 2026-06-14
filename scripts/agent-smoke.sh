@@ -80,6 +80,27 @@ flow_mock_run() {
   rm -rf "$wd"
 }
 
+# ── Output-quality checks (live; assert the analysis, not just success) ─
+# A REAL system-doctor run must NOT false-alarm the atomic host's
+# read-only composefs `/` at 100% as a critical/disk-full problem.
+quality_composefs() {
+  local wd; wd="$(mktemp -d)"
+  timeout "$TIMEOUT" "$CONDUCTOR" run system-doctor --provider gemini --workdir "$wd" >/dev/null 2>&1
+  local rpt="$wd/REPORT.md"
+  if [ ! -f "$rpt" ]; then bad "quality: system-doctor root-fs verdict" "quality-composefs" "no REPORT.md (run failed)"; rm -rf "$wd"; return; fi
+  local line; line="$(grep -iE 'composefs|root file|/ \(100|root.*100%' "$rpt" | head -1)"
+  if echo "$line" | grep -qiE "critical|instability|immediate|free up|must clear|clear .*file"; then
+    bad "quality: system-doctor false-alarms composefs /" "quality-composefs" "$line"
+  elif echo "$line" | grep -qiE "normal|expected|healthy|immutable|read-only"; then
+    ok "quality: system-doctor treats composefs / as normal"
+  elif [ -z "$line" ]; then
+    bad "quality: system-doctor root-fs verdict" "quality-composefs" "no root-fs mention in report"
+  else
+    ok "quality: system-doctor root-fs (no critical language)"
+  fi
+  rm -rf "$wd"
+}
+
 echo "════ OxideMX agent smoke tests ════"
 
 if [ "${1:-}" != "--tools-only" ]; then
@@ -108,6 +129,9 @@ if [ "${1:-}" != "--flows-only" ]; then
                              "memory"          "smoke|saved|remember"
   run_tool "run_flow"        "Use run_flow to run system-doctor in mock mode and report it finished." \
                              "run_flow"        "system-doctor|finished|complete|steps"
+
+  echo "── Output quality (live; real flow run) ──"
+  quality_composefs
 fi
 
 echo "════ ${PASS} passed, ${FAIL} failed ════"
