@@ -135,6 +135,49 @@ use tools::agent_tool_declarations;
 // API KEY & CONFIG PATH RESOLVERS
 // =============================================================================
 
+/// A markdown list of the user's available flows (id · name —
+/// description), scanned from `~/.config/oxidemx/flows/<id>/flow.md`.
+/// `None` when there are no flows. Lightweight frontmatter parse — no
+/// conductor dependency (the overlay shells the conductor to run them).
+fn available_flows_block() -> Option<String> {
+    let home = std::env::var("HOME").ok()?;
+    let dir = std::path::Path::new(&home).join(".config/oxidemx/flows");
+    let mut entries: Vec<(String, String, String)> = Vec::new();
+    for e in std::fs::read_dir(&dir).ok()?.flatten() {
+        let md = e.path().join("flow.md");
+        let Ok(src) = std::fs::read_to_string(&md) else {
+            continue;
+        };
+        // Only scan the frontmatter (between the first two `---` fences).
+        let front = src.split("---").nth(1).unwrap_or(&src);
+        let field = |key: &str| -> Option<String> {
+            front.lines().find_map(|l| {
+                let l = l.trim();
+                l.strip_prefix(key)
+                    .and_then(|r| r.trim().strip_prefix('='))
+                    .map(|v| v.trim().trim_matches('"').to_string())
+                    .filter(|v| !v.is_empty())
+            })
+        };
+        let id = field("id").unwrap_or_else(|| e.file_name().to_string_lossy().to_string());
+        let name = field("name").unwrap_or_else(|| id.clone());
+        let desc = field("description").unwrap_or_default();
+        entries.push((id, name, desc));
+    }
+    if entries.is_empty() {
+        return None;
+    }
+    entries.sort_by(|a, b| a.0.cmp(&b.0));
+    let mut block = String::from(
+        "AVAILABLE FLOWS (the user's pre-authored pipelines — run by id with run_flow; \
+         offer these when relevant, and list them if asked what you can do):\n",
+    );
+    for (id, name, desc) in entries {
+        block.push_str(&format!("- `{id}` — {name}: {desc}\n"));
+    }
+    Some(block)
+}
+
 fn get_config_path() -> std::path::PathBuf {
     let home = std::env::var("HOME").unwrap_or_else(|_| "/home/jim".to_string());
     std::path::Path::new(&home).join(".config/oxidemx/config.json")
@@ -245,6 +288,13 @@ impl AgentMode {
         // the existing soul.md/user.md, no migration needed.
         let mode_key = "general";
         let mut full = base.to_string();
+        // Make the agent AWARE of the user's actual flows (ids + what
+        // they do) so it can run/recommend them by name without the
+        // user knowing exact ids — and answer "what can you do".
+        if let Some(flows) = available_flows_block() {
+            full.push_str("\n\n");
+            full.push_str(&flows);
+        }
         // soul.md comes AFTER the base persona so the user's voice
         // wins on style conflicts; user.md after the memory rules
         // (it's context, not instruction).

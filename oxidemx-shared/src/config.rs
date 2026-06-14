@@ -989,6 +989,17 @@ impl AiProvider {
         matches!(self, AiProvider::Gemini | AiProvider::OpenAi | AiProvider::Anthropic)
     }
 
+    /// Whether this backend supports the executor's STREAMING path WITH
+    /// tools (so the chat can render tokens live). The AutoAgents
+    /// OpenAI/Anthropic backends implement `chat_stream_with_tools`; the
+    /// Google (Gemini) backend does not (it errors "Streaming with
+    /// tools not supported"), and Ollama/Claude-Code have no streaming.
+    /// The agent runtime auto-detects this to enable streaming only
+    /// where it actually works (non-streaming everywhere else).
+    pub fn supports_streaming_tools(&self) -> bool {
+        matches!(self, AiProvider::OpenAi | AiProvider::Anthropic)
+    }
+
     /// Environment variable that supplies this provider's key, if any.
     pub fn key_env(&self) -> Option<&'static str> {
         match self {

@@ -219,20 +219,66 @@ pub async fn run(
     // run a flow…). At 10, a multi-tool request runs out of turns and
     // the model fabricates "no result" for tools it never reached. 30
     // gives ample headroom while still bounding runaway loops.
+    // AUTO-DETECT streaming: the AutoAgents OpenAI/Anthropic backends
+    // implement streaming-with-tools, but Google (Gemini) does not (it
+    // errors) and Ollama/Claude-Code have no streaming. So we stream
+    // tokens live ONLY when the active provider supports it, and run
+    // non-streaming everywhere else (Gemini still gets live "Thinking…"
+    // + tool cards via the sink). Either way the final reply is returned.
+    let streaming = provider.supports_streaming_tools();
     let mut handle = AgentBuilder::<_, DirectAgent>::new(ReActAgent::with_max_turns(agent, 30))
         .llm(llm)
         .memory(Box::new(memory))
+        .stream(streaming)
         .build()
         .await?;
-    drain_events(handle.subscribe_events());
 
-    let reply: String = handle.agent.run(Task::new(prompt)).await?;
-    Ok((reply, None))
+    if streaming {
+        use futures_util::StreamExt;
+        forward_stream(handle.subscribe_events(), sink.clone());
+        // run_stream drives the streaming executor (deltas emit live);
+        // the last non-empty yielded response is the final reply.
+        let mut out = handle.agent.run_stream(Task::new(prompt)).await?;
+        let mut reply = String::new();
+        while let Some(item) = out.next().await {
+            if let Ok(s) = item {
+                if !s.is_empty() {
+                    reply = s;
+                }
+            }
+        }
+        Ok((reply, None))
+    } else {
+        drain_events(handle.subscribe_events());
+        let reply: String = handle.agent.run(Task::new(prompt)).await?;
+        Ok((reply, None))
+    }
 }
 
-/// Drain the executor event stream so it never backpressures the
-/// run. Activity/cards reach the UI through the tools + hooks, not
-/// this stream, so the events are discarded here.
+/// Forward the executor's text-delta StreamChunks to the chat thread as
+/// `StreamEvent::Delta` (live token rendering). Only used for providers
+/// that support streaming-with-tools.
+fn forward_stream<S>(mut rx: S, sink: Option<StreamSink>)
+where
+    S: futures_util::Stream<Item = autoagents::protocol::Event> + Send + Unpin + 'static,
+{
+    use autoagents::protocol::{Event, StreamChunk};
+    use futures_util::StreamExt;
+    tokio::spawn(async move {
+        while let Some(ev) = rx.next().await {
+            if let Event::StreamChunk { chunk: StreamChunk::Text(t), .. } = ev {
+                if !t.is_empty() {
+                    if let Some(s) = &sink {
+                        s.send(StreamEvent::Delta(t)).await;
+                    }
+                }
+            }
+        }
+    });
+}
+
+/// Drain the executor event stream so it never backpressures the run
+/// (non-streaming path; activity/cards reach the UI via the sink).
 fn drain_events<S>(mut rx: S)
 where
     S: futures_util::Stream + Send + Unpin + 'static,
