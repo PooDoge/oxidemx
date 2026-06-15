@@ -55,24 +55,35 @@ pub fn conversation<'a>(state: &'a RadialState, kit: &Kit) -> Element<'a, Messag
             list = list.push(bubble_row(state, kit, i, msg));
         }
 
-        // In-flight streamed reply for this thread — plain text with
-        // a cursor; switches to rendered markdown on completion.
+        // In-flight streamed reply for this thread — rendered as
+        // markdown live (parsed each delta into `ai_stream_md`), so
+        // formatting appears as it streams instead of reflowing at
+        // completion. Falls back to plain text if parsing yielded
+        // nothing yet (a trailing ▌ cursor is baked into the source).
         if let Some((idx, partial)) = &state.ai_stream {
             if *idx == state.ai_active && !partial.is_empty() {
-                list = list.push(row![
-                    container(
-                        text(format!("{partial}▌"))
-                            .size(13)
-                            .color(kit.fade(kit.text, 1.0))
+                let content: Element<'a, Message> = if state.ai_stream_md.is_empty() {
+                    text(format!("{partial}\u{258c}"))
+                        .size(13)
+                        .color(kit.fade(kit.text, 1.0))
+                        .into()
+                } else {
+                    iced::widget::markdown::view(
+                        &state.ai_stream_md,
+                        iced::Theme::CatppuccinMocha,
                     )
-                    .padding(iced::Padding {
-                        top: 9.0,
-                        right: 13.0,
-                        bottom: 9.0,
-                        left: 13.0,
-                    })
-                    .max_width(bubble_max_width(state))
-                    .style(bubble_style(kit, false)),
+                    .map(|url| Message::AiLinkClicked(url.to_string()))
+                };
+                list = list.push(row![
+                    container(content)
+                        .padding(iced::Padding {
+                            top: 9.0,
+                            right: 13.0,
+                            bottom: 9.0,
+                            left: 13.0,
+                        })
+                        .max_width(bubble_max_width(state))
+                        .style(bubble_style(kit, false)),
                     Space::new().width(Length::Fill),
                 ]);
             }

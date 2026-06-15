@@ -78,6 +78,11 @@ pub struct RadialState {
     /// In-flight streamed reply: `(thread idx, text so far)`. Only
     /// one request can be in flight (`ai_loading` gates submit).
     pub ai_stream: Option<(usize, String)>,
+    /// The in-flight reply parsed as markdown, re-derived on each delta
+    /// so the streaming bubble renders formatted live (instead of plain
+    /// text that only reflows into markdown at completion). `markdown::
+    /// view` borrows these items, so they must live in state.
+    pub ai_stream_md: Vec<iced::widget::markdown::Item>,
     /// What the agent is doing right now, for the loading row.
     pub ai_activity: Option<String>,
     /// Abort handle for the in-flight request (Stop button).

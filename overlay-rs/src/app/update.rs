@@ -688,6 +688,7 @@ pub(super) fn update(state: &mut RadialState, message: Message) -> Task<Message>
             state.ai_loading = false;
             state.ai_activity = None;
             state.ai_stream = None;
+            state.ai_stream_md = Vec::new();
             state.ai_abort = None;
             let Some(chat) = state.ai_threads.get_mut(thread_idx) else {
                 return Task::none();
@@ -729,6 +730,16 @@ pub(super) fn update(state: &mut RadialState, message: Message) -> Task<Message>
                     Some((idx, buf)) if *idx == thread_idx => buf.push_str(&text),
                     _ => state.ai_stream = Some((thread_idx, text)),
                 }
+                // Re-parse the in-flight text as markdown each delta so
+                // the streaming bubble is formatted live. A trailing
+                // cursor is appended to the source so it rides the last
+                // text run. pulldown-cmark parses incomplete markdown
+                // leniently, so half-written **bold**/```fences degrade
+                // gracefully until the next delta closes them.
+                if let Some((_, buf)) = &state.ai_stream {
+                    state.ai_stream_md =
+                        iced::widget::markdown::parse(&format!("{buf}\u{258c}")).collect();
+                }
                 scroll_chat_to_end()
             }
         },
@@ -738,6 +749,7 @@ pub(super) fn update(state: &mut RadialState, message: Message) -> Task<Message>
             }
             state.ai_loading = false;
             state.ai_activity = None;
+            state.ai_stream_md = Vec::new();
             if let Some((idx, partial)) = state.ai_stream.take() {
                 if !partial.trim().is_empty() {
                     if let Some(chat) = state.ai_threads.get_mut(idx) {

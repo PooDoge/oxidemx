@@ -46,6 +46,7 @@ impl RadialState {
             ai_show_threads: false,
             ai_pending_question: None,
             ai_stream: None,
+            ai_stream_md: Vec::new(),
             ai_activity: None,
             ai_abort: None,
             ai_hover_msg: None,
