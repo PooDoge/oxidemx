@@ -236,15 +236,33 @@ pub async fn run(
     if streaming {
         use futures_util::StreamExt;
         forward_stream(handle.subscribe_events(), sink.clone());
+        let debug = std::env::var_os("OXIDEMX_AGENT_DEBUG").is_some();
         // run_stream drives the streaming executor (deltas emit live);
         // the last non-empty yielded response is the final reply.
         let mut out = handle.agent.run_stream(Task::new(prompt)).await?;
         let mut reply = String::new();
+        let mut last_err: Option<String> = None;
         while let Some(item) = out.next().await {
-            if let Ok(s) = item {
-                if !s.is_empty() {
-                    reply = s;
+            match item {
+                Ok(s) => {
+                    if debug {
+                        eprintln!("[stream item] {:?}", s);
+                    }
+                    if !s.is_empty() {
+                        reply = s;
+                    }
                 }
+                Err(e) => {
+                    if debug {
+                        eprintln!("[stream ERR] {e}");
+                    }
+                    last_err = Some(e.to_string());
+                }
+            }
+        }
+        if reply.is_empty() {
+            if let Some(e) = last_err {
+                return Err(format!("streaming run failed: {e}").into());
             }
         }
         Ok((reply, None))
@@ -264,8 +282,15 @@ where
 {
     use autoagents::protocol::{Event, StreamChunk};
     use futures_util::StreamExt;
+    let debug = std::env::var_os("OXIDEMX_AGENT_DEBUG").is_some();
     tokio::spawn(async move {
         while let Some(ev) = rx.next().await {
+            if debug {
+                // Same event trace as the non-streaming drain path, so
+                // tooling (scripts/agent-smoke.sh) that greps for
+                // ToolCallRequested/Completed works in either mode.
+                eprintln!("[event] {ev:?}");
+            }
             if let Event::StreamChunk { chunk: StreamChunk::Text(t), .. } = ev {
                 if !t.is_empty() {
                     if let Some(s) = &sink {

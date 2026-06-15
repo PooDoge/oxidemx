@@ -32,7 +32,7 @@ members = [
     "spike-iced", "iced_gtk_themer",
     "tools/oxidemx-widget-cli",
 ]
-exclude = ["pop_os_iced", "libcosmic", "oxidemx-widget-host/fixtures/*", "widgets/builtin/*"]
+exclude = ["pop_os_iced", "libcosmic", "oxidemx-widget-host/fixtures/*", "widgets/builtin/*", "vendor/AutoAgents"]
 
 [profile.release]
 # Match daemon/Cargo.toml's existing release profile so a `cargo build
@@ -48,6 +48,11 @@ codegen-units = 1
 # crates-io redirects every existing `=0.3.7` dep across the workspace
 # to the v0.3.7 git tag WITHOUT editing each dep line, keeping a single
 # `autoagents` source so `ToolT` (and friends) unify with the toolkit.
+# Vendored locally (clone of the v0.3.7 tag, commit 5c54786) so we can
+# carry a local patch: the Google (Gemini) backend's
+# `chat_stream_with_tools` (live token streaming WITH function calling —
+# upstream ships only the "not supported" default for Google). See
+# vendor/AutoAgents/crates/autoagents-llm/src/backends/google.rs.
 [patch.crates-io]
-autoagents = { git = "https://github.com/liquidos-ai/AutoAgents", tag = "v0.3.7" }
-autoagents-derive = { git = "https://github.com/liquidos-ai/AutoAgents", tag = "v0.3.7" }
+autoagents = { path = "vendor/AutoAgents/crates/autoagents" }
+autoagents-derive = { path = "vendor/AutoAgents/crates/autoagents-derive" }

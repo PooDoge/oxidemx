@@ -1,0 +1,55 @@
+[package]
+name = "autoagents-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+readme.workspace = true
+
+[features]
+default = []
+full = ["wasmtime"]
+wasmtime = ["dep:wasmtime"]
+
+[dependencies]
+autoagents-llm.workspace = true
+autoagents-protocol = { workspace = true }
+async-trait = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+uuid = { workspace = true, features = ["serde", "v4"] }
+thiserror = { workspace = true }
+futures = { workspace = true }
+regex = { workspace = true }
+log = { workspace = true, features = ["std"] }
+walkdir = { workspace = true }
+wasmtime = { workspace = true, optional = true }
+futures-core = { workspace = true }
+futures-util = { workspace = true }
+
+# Non-WASM dependencies (only when not targeting wasm32)
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+tokio = { workspace = true }
+tokio-stream = { workspace = true, features = ["sync"] }
+ractor = { workspace = true, features = ["serde", "async-trait"] }
+
+# WASM dependencies (only when targeting wasm32)
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = { workspace = true }
+wasm-bindgen-futures = { workspace = true }
+getrandom = { workspace = true, features = ["wasm_js"] }
+uuid = { workspace = true, features = ["serde", "v4", "js"] }
+
+[dev-dependencies]
+autoagents-llamacpp.workspace = true
+core_affinity = "0.8.3"
+criterion = "0.8.2"
+tempfile = { workspace = true }
+wat = "1.245.1"
+
+[[bench]]
+name = "agent_runtime"
+harness = false
