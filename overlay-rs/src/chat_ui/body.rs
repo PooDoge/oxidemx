@@ -243,6 +243,68 @@ fn bubble_style(
     }
 }
 
+/// Render AI markdown with a copy button on each code block. Non-code
+/// items render in runs via `markdown::view` (which already
+/// syntax-highlights); each `CodeBlock` renders via `markdown::code_block`
+/// with a ⧉ button overlaid top-right that copies the raw code.
+fn render_ai_markdown<'a>(
+    items: &'a [iced::widget::markdown::Item],
+    kit: Kit,
+) -> Element<'a, Message> {
+    use iced::widget::markdown;
+    let has_code = items
+        .iter()
+        .any(|it| matches!(it, markdown::Item::CodeBlock { .. }));
+    // Fast path: no code blocks → the plain view (most replies).
+    if !has_code {
+        return markdown::view(items, iced::Theme::CatppuccinMocha)
+            .map(|url| Message::AiLinkClicked(url.to_string()));
+    }
+
+    let mut col = column![].spacing(8);
+    let mut run: Vec<&'a markdown::Item> = Vec::new();
+    for item in items {
+        if let markdown::Item::CodeBlock { code, lines, .. } = item {
+            if !run.is_empty() {
+                col = col.push(
+                    markdown::view(run.drain(..), iced::Theme::CatppuccinMocha)
+                        .map(|url| Message::AiLinkClicked(url.to_string())),
+                );
+            }
+            let block = markdown::code_block(
+                markdown::Settings::from(iced::Theme::CatppuccinMocha),
+                lines,
+                |url| Message::AiLinkClicked(url.to_string()),
+            );
+            let copy = button(text("⧉").size(12).color(kit.fade(kit.subtext0, 1.0)))
+                .padding([2, 5])
+                .style(move |_, _| button::Style {
+                    background: Some(iced::Background::Color(kit.fade(kit.surface1, 0.85))),
+                    border: iced::border::Border::default().rounded(6.0),
+                    text_color: kit.fade(kit.text, 1.0),
+                    ..Default::default()
+                })
+                .on_press(Message::AiCopyText(code.clone()));
+            col = col.push(iced::widget::stack![
+                block,
+                container(copy)
+                    .width(Length::Fill)
+                    .align_x(Alignment::End)
+                    .padding(6),
+            ]);
+        } else {
+            run.push(item);
+        }
+    }
+    if !run.is_empty() {
+        col = col.push(
+            markdown::view(run.drain(..), iced::Theme::CatppuccinMocha)
+                .map(|url| Message::AiLinkClicked(url.to_string())),
+        );
+    }
+    col.into()
+}
+
 fn bubble_row<'a>(
     state: &'a RadialState,
     kit: Kit,
@@ -318,8 +380,7 @@ fn bubble_row<'a>(
             .color(kit.fade(kit.text, 1.0))
             .into()
     } else {
-        iced::widget::markdown::view(&msg.md, iced::Theme::CatppuccinMocha)
-            .map(|url| Message::AiLinkClicked(url.to_string()))
+        render_ai_markdown(&msg.md, kit)
     };
     let bubble = container(content)
         .padding(iced::Padding {

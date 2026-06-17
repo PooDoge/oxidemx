@@ -665,9 +665,26 @@ pub(super) fn update(state: &mut RadialState, message: Message) -> Task<Message>
             if state.ai_loading || (typed.is_empty() && attachment.is_none()) {
                 return Task::none();
             }
-            // The bubble shows the user's text + a 📎 chip; the agent
-            // gets an explicit instruction to read the attached file via
-            // its existing read_file / parse_document tools.
+            // An image attachment is sent to the model directly (vision);
+            // any other file is read by the agent via its read_file /
+            // parse_document tools. `image` carries (mime, bytes).
+            let image: Option<(String, Vec<u8>)> = attachment.as_ref().and_then(|p| {
+                let ext = p
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .map(|e| e.to_lowercase());
+                let mime = match ext.as_deref() {
+                    Some("png") => "image/png",
+                    Some("jpg") | Some("jpeg") => "image/jpeg",
+                    Some("gif") => "image/gif",
+                    Some("webp") => "image/webp",
+                    _ => return None,
+                };
+                let bytes = std::fs::read(p).ok()?;
+                Some((mime.to_string(), bytes))
+            });
+
+            // The bubble shows the user's text + a 📎 chip.
             let (bubble_text, prompt) = match &attachment {
                 Some(p) => {
                     let fname = p
@@ -679,11 +696,20 @@ pub(super) fn update(state: &mut RadialState, message: Message) -> Task<Message>
                     } else {
                         format!("{typed}\n\n📎 {fname}")
                     };
-                    let sent = format!(
-                        "{typed}\n\n[The user attached a file — read it with read_file \
-                         (or parse_document for PDF/DOCX/XLSX/etc.) and use its contents: {}]",
-                        p.display()
-                    );
+                    let sent = if image.is_some() {
+                        // The model sees the image; no read_file needed.
+                        if typed.is_empty() {
+                            "What's in this image?".to_string()
+                        } else {
+                            typed.clone()
+                        }
+                    } else {
+                        format!(
+                            "{typed}\n\n[The user attached a file — read it with read_file \
+                             (or parse_document for PDF/DOCX/XLSX/etc.) and use its contents: {}]",
+                            p.display()
+                        )
+                    };
                     (bubble, sent)
                 }
                 None => (typed.clone(), typed.clone()),
@@ -729,7 +755,7 @@ pub(super) fn update(state: &mut RadialState, message: Message) -> Task<Message>
             };
             let (task, handle) = Task::perform(
                 async move {
-                    crate::ai_client::ask_ai(mode, &model, &prompt, sink, &history)
+                    crate::ai_client::ask_ai(mode, &model, &prompt, sink, &history, image)
                         .await
                         .map_err(|e| e.to_string())
                 },

@@ -105,6 +105,7 @@ fn main() -> iced::Result {
                 &prompt,
                 None,
                 &[],
+                None,
             )
             .await
             {

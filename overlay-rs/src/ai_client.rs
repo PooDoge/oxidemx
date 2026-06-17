@@ -664,6 +664,7 @@ pub async fn ask_ai(
     prompt: &str,
     sink: Option<StreamSink>,
     history: &[(bool, String)],
+    image: Option<(String, Vec<u8>)>,
 ) -> Result<(String, Option<String>), Box<dyn std::error::Error + Send + Sync>> {
-    crate::agent_runtime::run(mode, model, prompt, sink, history).await
+    crate::agent_runtime::run(mode, model, prompt, sink, history, image).await
 }

@@ -161,9 +161,11 @@ should define one.**
     content); **export** a thread to Markdown (📤 → `~/.local/share/
     oxidemx/exports/`); **file attachment** via drag-drop or a 📎 picker
     (staged chip; on submit the agent reads it with read_file /
-    parse_document). Code-block **syntax highlighting** is already active
-    (iced `highlighter`). Deferred: per-code-block copy button,
-    image→vision attach (needs Task/Image plumbing to the provider).
+    parse_document). Code-block **syntax highlighting** is active (iced
+    `highlighter`) with a **per-block ⧉ copy** button. **Image
+    attachments go to the model directly (vision)** — a 📎'd
+    PNG/JPG/GIF/WEBP is decoded + shipped as an inline image (verified on
+    Gemini); other files are read via read_file/parse_document.
 11. **Memory & long context** — passive **chat→memory capture** of
     explicit cues ("remember …", "my name is …"), zero-cost/high-
     precision, complementing the agent's memory tool; **rolling thread

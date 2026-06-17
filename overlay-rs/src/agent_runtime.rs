@@ -179,6 +179,7 @@ pub async fn run(
     prompt: &str,
     sink: Option<StreamSink>,
     history: &[(bool, String)],
+    image: Option<(String, Vec<u8>)>,
 ) -> Result<(String, Option<String>), BoxError> {
     let (provider, model, key) = resolve_provider(model_hint)?;
 
@@ -220,6 +221,26 @@ pub async fn run(
                     role,
                     message_type: MessageType::Text,
                     content: text.clone(),
+                })
+                .await;
+        }
+
+        // Seed an attached image as the latest user turn so the model
+        // SEES it (vision) alongside the text prompt. Providers that
+        // support image parts (Gemini) include it; others ignore it.
+        if let Some((mime, bytes)) = &image {
+            use autoagents::llm::chat::ImageMime;
+            let im = match mime.as_str() {
+                "image/jpeg" | "image/jpg" => ImageMime::JPEG,
+                "image/gif" => ImageMime::GIF,
+                "image/webp" => ImageMime::WEBP,
+                _ => ImageMime::PNG,
+            };
+            let _ = memory
+                .remember(&ChatMessage {
+                    role: ChatRole::User,
+                    message_type: MessageType::Image((im, bytes.clone())),
+                    content: String::new(),
                 })
                 .await;
         }
@@ -456,6 +477,30 @@ where
 mod tests {
     /// Live summarization smoke (needs a Gemini key). Ignored by default
     /// so the normal test run stays offline; run with `--ignored`.
+    /// Live vision smoke: a 1×1 PNG must round-trip through the image
+    /// plumbing to Gemini and come back with a (non-error) reply —
+    /// proving the provider accepted the inline image. Needs a key.
+    #[tokio::test]
+    #[ignore]
+    async fn image_vision_live() {
+        // A real PNG asset from the repo (set OXIDEMX_TEST_IMG to override).
+        let path = std::env::var("OXIDEMX_TEST_IMG")
+            .unwrap_or_else(|_| "assets/flow-indicator.png".to_string());
+        let png = std::fs::read(&path).expect("read test image");
+        let out = super::run(
+            crate::ai_client::AgentMode::Agentic,
+            "gemini-2.5-flash",
+            "Describe this image in one short sentence.",
+            None,
+            &[],
+            Some(("image/png".to_string(), png)),
+        )
+        .await;
+        eprintln!("VISION => {out:?}");
+        let (reply, _) = out.expect("vision run should succeed");
+        assert!(!reply.trim().is_empty(), "expected a non-empty reply");
+    }
+
     #[tokio::test]
     #[ignore]
     async fn summarize_live() {
