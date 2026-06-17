@@ -33,6 +33,12 @@ pub(super) fn update(state: &mut RadialState, message: Message) -> Task<Message>
                 | Message::AiStopRequest
                 | Message::AiLinkClicked(_)
                 | Message::AiCopyText(_)
+                | Message::AiBubbleMenu(_)
+                | Message::AiBubbleSelect(_)
+                | Message::AiSelectAction(_)
+                | Message::AiSelectExit
+                | Message::AiPasteToInput
+                | Message::AiScrollToBottom
                 | Message::AiToggleMemories
                 | Message::AiMemorySearch(_)
                 | Message::AiMemoryDelete(_)
@@ -740,7 +746,13 @@ pub(super) fn update(state: &mut RadialState, message: Message) -> Task<Message>
                     state.ai_stream_md =
                         iced::widget::markdown::parse(&format!("{buf}\u{258c}")).collect();
                 }
-                scroll_chat_to_end()
+                // Follow the stream only while the user is already at the
+                // bottom; if they scrolled up to read, don't yank them.
+                if state.ai_chat_at_bottom {
+                    scroll_chat_to_end()
+                } else {
+                    Task::none()
+                }
             }
         },
         Message::AiStopRequest => {
@@ -775,6 +787,62 @@ pub(super) fn update(state: &mut RadialState, message: Message) -> Task<Message>
         Message::AiCopyText(text) => iced::clipboard::write(text),
         Message::AiBubbleHover(idx) => {
             state.ai_hover_msg = idx;
+            Task::none()
+        }
+        Message::AiBubbleMenu(opt) => {
+            // Right-click opens (Some(i)); left-click / repeat-right
+            // toggles closed.
+            state.ai_context_menu = if state.ai_context_menu == opt {
+                None
+            } else {
+                opt
+            };
+            Task::none()
+        }
+        Message::AiBubbleSelect(i) => {
+            state.ai_context_menu = None;
+            if let Some(msg) = state.chat().history.get(i) {
+                state.ai_select = Some((
+                    i,
+                    iced::widget::text_editor::Content::with_text(&msg.text),
+                ));
+            }
+            Task::none()
+        }
+        Message::AiSelectAction(action) => {
+            // Read-only: apply selection/cursor/scroll actions, drop edits.
+            if !action.is_edit() {
+                if let Some((_, content)) = &mut state.ai_select {
+                    content.perform(action);
+                }
+            }
+            Task::none()
+        }
+        Message::AiSelectExit => {
+            state.ai_select = None;
+            state.ai_context_menu = None;
+            Task::none()
+        }
+        Message::AiPasteToInput => {
+            state.ai_context_menu = None;
+            iced::clipboard::read().map(Message::AiPasteReceived)
+        }
+        Message::AiPasteReceived(opt) => {
+            if let Some(s) = opt.filter(|s| !s.is_empty()) {
+                state.ai_editor.perform(iced::widget::text_editor::Action::Edit(
+                    iced::widget::text_editor::Edit::Paste(std::sync::Arc::new(s)),
+                ));
+            }
+            Task::none()
+        }
+        Message::AiScrollToBottom => {
+            state.ai_chat_at_bottom = true;
+            scroll_chat_to_end()
+        }
+        Message::AiChatScrolled(viewport) => {
+            // y == 1.0 is the bottom; treat the last sliver as "at
+            // bottom" so follow-along auto-scroll stays on.
+            state.ai_chat_at_bottom = viewport.relative_offset().y >= 0.985;
             Task::none()
         }
         Message::AiModelToggled => {

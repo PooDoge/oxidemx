@@ -90,6 +90,19 @@ pub struct RadialState {
     /// Index (within the active thread's history) of the bubble the
     /// pointer is over — reveals its copy button.
     pub ai_hover_msg: Option<usize>,
+    /// Bubble index whose right-click context menu is open (`None` =
+    /// closed). The menu renders attached to that bubble.
+    pub ai_context_menu: Option<usize>,
+    /// A bubble switched into text-selection mode: `(bubble idx,
+    /// editable content)`. While set, that bubble renders as a
+    /// read-only `text_editor` so the pointer can select + Ctrl+C
+    /// (markdown::view can't be selected). `None` = no bubble selecting.
+    pub ai_select: Option<(usize, iced::widget::text_editor::Content)>,
+    /// Whether the conversation is scrolled to (near) the bottom. When
+    /// false, a "jump to latest" affordance appears and auto-scroll on
+    /// new deltas is suppressed so reading earlier messages isn't
+    /// yanked away.
+    pub ai_chat_at_bottom: bool,
     /// Thread-rename in progress: `(thread idx, draft title)`.
     pub ai_renaming: Option<(usize, String)>,
     /// User-tweakable animation parameters for menu / submenu /

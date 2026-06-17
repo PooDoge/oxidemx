@@ -86,6 +86,25 @@ pub enum Message {
     AiCopyText(String),
     /// Pointer entered/left a chat bubble (reveals its copy button).
     AiBubbleHover(Option<usize>),
+    /// Open the right-click context menu for bubble `Some(i)`, or close
+    /// it (`None`).
+    AiBubbleMenu(Option<usize>),
+    /// Switch bubble `i` into text-selection mode (read-only editor).
+    AiBubbleSelect(usize),
+    /// Edits from a bubble in selection mode — only selection/copy
+    /// actions are applied (the bubble is read-only).
+    AiSelectAction(iced::widget::text_editor::Action),
+    /// Leave selection mode, restoring the rendered-markdown bubble.
+    AiSelectExit,
+    /// Paste the clipboard into the prompt input (context-menu Paste).
+    AiPasteToInput,
+    /// Clipboard contents arrived for `AiPasteToInput`.
+    AiPasteReceived(Option<String>),
+    /// Jump the conversation scroll back to the newest message.
+    AiScrollToBottom,
+    /// The conversation was scrolled (tracks whether the "jump to
+    /// latest" affordance should show).
+    AiChatScrolled(iced::widget::scrollable::Viewport),
     /// Cycle the active thread's model Flash ↔ Pro.
     AiModelToggled,
     AiRenameStart(usize),

@@ -149,11 +149,36 @@ pub fn conversation<'a>(state: &'a RadialState, kit: &Kit) -> Element<'a, Messag
             .clip(true)
             .into();
     }
-    scrollable(container(list).padding(iced::Padding::default().right(12.0)))
+    let scroller = scrollable(container(list).padding(iced::Padding::default().right(12.0)))
         .id(CHAT_SCROLL_ID)
+        .on_scroll(Message::AiChatScrolled)
         .style(kit.scrollable_style())
+        .height(Length::Fill);
+
+    // When scrolled up away from the latest message, float a
+    // "jump to latest" pill over the bottom — clicking snaps back and
+    // re-enables follow-along auto-scroll.
+    if state.ai_chat_at_bottom || state.chat().history.is_empty() {
+        scroller.into()
+    } else {
+        let pill = container(
+            button(text("↓ Latest").size(12).color(kit.fade(kit.crust, 1.0)))
+                .padding([5, 12])
+                .style(move |_, _| button::Style {
+                    background: Some(iced::Background::Color(kit.fade(kit.accent, 0.95))),
+                    border: iced::border::Border::default().rounded(14.0),
+                    text_color: kit.fade(kit.crust, 1.0),
+                    ..Default::default()
+                })
+                .on_press(Message::AiScrollToBottom),
+        )
+        .width(Length::Fill)
         .height(Length::Fill)
-        .into()
+        .align_x(Alignment::Center)
+        .align_y(Alignment::End)
+        .padding(10);
+        iced::widget::stack![scroller, pill].into()
+    }
 }
 
 fn bubble_style(
@@ -199,9 +224,27 @@ fn bubble_row<'a>(
     i: usize,
     msg: &'a crate::radial::ChatMessage,
 ) -> Element<'a, Message> {
-    // AI replies render as markdown (links map to opener messages);
-    // user prompts stay plain text.
-    let content: Element<'a, Message> = if msg.is_user || msg.md.is_empty() {
+    let selecting = matches!(&state.ai_select, Some((idx, _)) if *idx == i);
+
+    // Bubble body: a read-only text_editor while selecting (so the
+    // pointer can highlight + Ctrl+C — markdown::view isn't
+    // selectable); rendered markdown for AI replies; plain text for
+    // user prompts.
+    let content: Element<'a, Message> = if selecting {
+        let ed = state.ai_select.as_ref().map(|(_, c)| c).unwrap();
+        iced::widget::text_editor(ed)
+            .size(13)
+            .padding(0)
+            .on_action(Message::AiSelectAction)
+            .style(move |_theme, _status| iced::widget::text_editor::Style {
+                background: iced::Background::Color(Color::TRANSPARENT),
+                border: iced::border::Border::default(),
+                placeholder: kit.fade(kit.subtext0, 1.0),
+                value: kit.fade(kit.text, 1.0),
+                selection: kit.fade(kit.accent, 0.45),
+            })
+            .into()
+    } else if msg.is_user || msg.md.is_empty() {
         text(&msg.text)
             .size(13)
             .color(kit.fade(kit.text, 1.0))
@@ -220,29 +263,109 @@ fn bubble_row<'a>(
         .max_width(bubble_max_width(state))
         .style(bubble_style(kit, msg.is_user));
 
-    // Hovering a bubble reveals its copy button; a fixed-width
-    // placeholder keeps the layout from shifting.
-    let hovered = state.ai_hover_msg == Some(i);
-    let copy_btn: Element<'a, Message> = if hovered {
-        button(text("⧉").size(15).color(kit.fade(kit.subtext0, 1.0)))
+    // Hovering the row (or an open menu) reveals the action buttons; a
+    // fixed-width placeholder otherwise keeps the layout from shifting.
+    let show_actions = state.ai_hover_msg == Some(i) || state.ai_context_menu == Some(i);
+    let actions: Element<'a, Message> = if show_actions {
+        let copy = button(text("⧉").size(14).color(kit.fade(kit.subtext0, 1.0)))
             .padding([2, 4])
             .style(|_, _| button::Style::default())
-            .on_press(Message::AiCopyText(msg.text.clone()))
-            .into()
+            .on_press(Message::AiCopyText(msg.text.clone()));
+        let select_glyph = if selecting { "✓" } else { "⌶" };
+        let select_msg = if selecting {
+            Message::AiSelectExit
+        } else {
+            Message::AiBubbleSelect(i)
+        };
+        let select = button(text(select_glyph).size(14).color(kit.fade(kit.subtext0, 1.0)))
+            .padding([2, 4])
+            .style(|_, _| button::Style::default())
+            .on_press(select_msg);
+        row![copy, select].spacing(2).into()
     } else {
-        Space::new().width(Length::Fixed(25.0)).into()
+        Space::new().width(Length::Fixed(48.0)).into()
     };
-    let wrapped = iced::widget::mouse_area(bubble)
-        .on_enter(Message::AiBubbleHover(Some(i)))
-        .on_exit(Message::AiBubbleHover(None));
 
-    if msg.is_user {
-        row![Space::new().width(Length::Fill), copy_btn, wrapped]
+    let inner = if msg.is_user {
+        row![Space::new().width(Length::Fill), actions, bubble]
     } else {
-        row![wrapped, copy_btn, Space::new().width(Length::Fill)]
+        row![bubble, actions, Space::new().width(Length::Fill)]
     }
     .spacing(4)
-    .align_y(Alignment::Center)
+    .align_y(Alignment::Center);
+
+    // Right-click context menu, attached under the bubble.
+    let mut stack = column![inner].spacing(4);
+    if state.ai_context_menu == Some(i) {
+        stack = stack.push(bubble_context_menu(kit, i, msg, selecting));
+    }
+
+    // One mouse_area over the whole row+menu: hover stays active when
+    // the pointer moves from the bubble onto its buttons (the old bug
+    // — the area wrapped only the bubble, so reaching for the copy
+    // button left the area and hid it). Left-click dismisses an open
+    // menu; right-click opens it.
+    iced::widget::mouse_area(stack)
+        .on_enter(Message::AiBubbleHover(Some(i)))
+        .on_exit(Message::AiBubbleHover(None))
+        .on_press(Message::AiBubbleMenu(None))
+        .on_right_press(Message::AiBubbleMenu(Some(i)))
+        .into()
+}
+
+/// The right-click context menu for a bubble: copy, toggle selection,
+/// and paste-into-input. Rendered as a small card under the bubble
+/// (iced has no native cursor-anchored menu; attaching it to the
+/// bubble is robust and needs no absolute positioning).
+fn bubble_context_menu<'a>(
+    kit: Kit,
+    i: usize,
+    msg: &'a crate::radial::ChatMessage,
+    selecting: bool,
+) -> Element<'a, Message> {
+    let item = |label: &str, m: Message| {
+        button(text(label.to_string()).size(12).color(kit.fade(kit.text, 1.0)))
+            .width(Length::Fill)
+            .padding([5, 10])
+            .style(move |_, status| {
+                let hovered = matches!(status, button::Status::Hovered);
+                button::Style {
+                    background: hovered
+                        .then(|| iced::Background::Color(kit.fade(kit.accent, 0.25))),
+                    border: iced::border::Border::default().rounded(6.0),
+                    text_color: kit.fade(kit.text, 1.0),
+                    ..Default::default()
+                }
+            })
+            .on_press(m)
+    };
+
+    let mut menu = column![item("Copy message", Message::AiCopyText(msg.text.clone()))].spacing(1);
+    menu = menu.push(if selecting {
+        item("Stop selecting", Message::AiSelectExit)
+    } else {
+        item("Select text", Message::AiBubbleSelect(i))
+    });
+    menu = menu.push(item("Paste into input", Message::AiPasteToInput));
+
+    let card = container(menu)
+        .padding(4)
+        .max_width(190.0)
+        .style(move |_| iced::widget::container::Style {
+            background: Some(iced::Background::Color(kit.fade(kit.surface0, 0.98))),
+            border: iced::border::Border {
+                color: kit.fade(kit.surface2, 1.0),
+                width: 1.0,
+                radius: 8.0.into(),
+            },
+            ..Default::default()
+        });
+
+    if msg.is_user {
+        row![Space::new().width(Length::Fill), card]
+    } else {
+        row![card, Space::new().width(Length::Fill)]
+    }
     .into()
 }
 
