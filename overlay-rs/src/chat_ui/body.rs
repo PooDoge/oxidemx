@@ -90,51 +90,7 @@ pub fn conversation<'a>(state: &'a RadialState, kit: &Kit) -> Element<'a, Messag
     }
 
     if let Some(pending) = &state.ai_pending_question {
-        let mut q = column![text(&pending.question)
-            .size(12)
-            .font(iced::Font {
-                weight: iced::font::Weight::Bold,
-                ..Default::default()
-            })
-            .color(kit.fade(kit.accent, 1.0)),]
-        .spacing(6);
-        for opt in &pending.options {
-            let opt_clone = opt.clone();
-            q = q.push(
-                button(
-                    text(opt)
-                        .size(11)
-                        .color(kit.fade(kit.text, 1.0))
-                        .align_x(iced::alignment::Horizontal::Center),
-                )
-                .width(Length::Fill)
-                .padding(6)
-                .style(move |_, _status| button::Style {
-                    background: Some(iced::Background::Color(kit.fade(kit.accent, 0.25))),
-                    border: iced::border::Border {
-                        color: kit.fade(kit.accent, 0.9),
-                        width: 1.0,
-                        radius: 8.0.into(),
-                    },
-                    text_color: kit.fade(kit.text, 1.0),
-                    ..Default::default()
-                })
-                .on_press(Message::AiChooseOption(opt_clone)),
-            );
-        }
-        list = list.push(
-            container(q)
-                .padding(10)
-                .style(move |_| iced::widget::container::Style {
-                    background: Some(iced::Background::Color(kit.fade(kit.surface0, 0.8))),
-                    border: iced::border::Border {
-                        color: kit.fade(kit.accent, 0.7),
-                        width: 1.0,
-                        radius: 10.0.into(),
-                    },
-                    ..Default::default()
-                }),
-        );
+        list = list.push(approval_view(pending, kit));
     }
 
     // While the puck is armed the chat is render-only: a scrollable
@@ -203,6 +159,205 @@ pub fn conversation<'a>(state: &'a RadialState, kit: &Kit) -> Element<'a, Messag
     } else {
         iced::widget::Stack::with_children(layers).into()
     }
+}
+
+/// The pending-question / command-approval prompt. Command approvals
+/// (question contains a `…` command) render as the rich yellow approval
+/// card from the design (preview + guardrail + Run/Always/Deny);
+/// anything else renders as a styled question with its option buttons.
+fn approval_view<'a>(
+    pending: &'a crate::ai_client::PendingQuestion,
+    kit: Kit,
+) -> Element<'a, Message> {
+    // Pull the command out of "Run `<cmd>`?" when present.
+    let cmd = pending.question.split('`').nth(1).filter(|s| !s.is_empty());
+
+    if let Some(cmd) = cmd {
+        let bang = container(
+            text("!")
+                .size(11)
+                .font(iced::Font {
+                    weight: iced::font::Weight::Bold,
+                    ..Default::default()
+                })
+                .color(kit.fade(kit.crust, 1.0)),
+        )
+        .width(Length::Fixed(17.0))
+        .height(Length::Fixed(17.0))
+        .align_x(Alignment::Center)
+        .align_y(Alignment::Center)
+        .style(move |_| iced::widget::container::Style {
+            background: Some(iced::Background::Color(kit.fade(kit.yellow, 1.0))),
+            border: iced::border::Border::default().rounded(9.0),
+            ..Default::default()
+        });
+
+        let header = row![
+            bang,
+            text("Command approval")
+                .size(12.0)
+                .font(iced::Font {
+                    weight: iced::font::Weight::Semibold,
+                    ..Default::default()
+                })
+                .color(kit.fade(kit.text, 1.0)),
+        ]
+        .spacing(8)
+        .align_y(Alignment::Center);
+
+        let preview = container(
+            text(format!("$ {cmd}"))
+                .size(11.0)
+                .font(iced::Font::MONOSPACE)
+                .color(kit.fade(kit.text, 1.0)),
+        )
+        .width(Length::Fill)
+        .padding([7, 10])
+        .style(move |_| iced::widget::container::Style {
+            background: Some(iced::Background::Color(kit.fade(kit.crust, 1.0))),
+            border: iced::border::Border {
+                color: kit.fade(kit.surface1, 1.0),
+                width: 1.0,
+                radius: 8.0.into(),
+            },
+            ..Default::default()
+        });
+
+        let guard = row![
+            icon("shield", 11.0, kit.fade(kit.green, 1.0)),
+            text("not on allowlist")
+                .size(9.5)
+                .color(kit.fade(kit.subtext0, 1.0)),
+        ]
+        .spacing(6)
+        .align_y(Alignment::Center);
+
+        // Map the options to styled actions; "Run it" is the primary,
+        // right-aligned. Others (Always allow, Don't run) sit left.
+        let mut actions = row![].spacing(6).align_y(Alignment::Center);
+        let mut primary: Option<Element<'a, Message>> = None;
+        for opt in &pending.options {
+            let o = opt.clone();
+            if opt == "Run it" {
+                primary = Some(
+                    button(
+                        text("Run it")
+                            .size(10.5)
+                            .font(iced::Font {
+                                weight: iced::font::Weight::Bold,
+                                ..Default::default()
+                            })
+                            .color(kit.fade(kit.crust, 1.0)),
+                    )
+                    .padding([4, 11])
+                    .style(move |_, _| button::Style {
+                        background: Some(iced::Background::Color(kit.fade(kit.yellow, 1.0))),
+                        border: iced::border::Border::default().rounded(6.0),
+                        text_color: kit.fade(kit.crust, 1.0),
+                        ..Default::default()
+                    })
+                    .on_press(Message::AiChooseOption(o))
+                    .into(),
+                );
+            } else {
+                let label = if opt.starts_with("Always allow") {
+                    "Always allow".to_string()
+                } else {
+                    "Deny".to_string()
+                };
+                let is_deny = !opt.starts_with("Always allow");
+                actions = actions.push(
+                    button(text(label).size(10.5).color(kit.fade(kit.subtext1, 1.0)))
+                        .padding([4, 11])
+                        .style(move |_, status| {
+                            let hov = matches!(status, button::Status::Hovered);
+                            button::Style {
+                                border: iced::border::Border {
+                                    color: if is_deny && hov {
+                                        kit.fade(kit.red, 0.5)
+                                    } else {
+                                        kit.fade(kit.surface2, 1.0)
+                                    },
+                                    width: 1.0,
+                                    radius: 6.0.into(),
+                                },
+                                text_color: if is_deny && hov {
+                                    kit.fade(kit.red, 1.0)
+                                } else {
+                                    kit.fade(kit.subtext1, 1.0)
+                                },
+                                ..Default::default()
+                            }
+                        })
+                        .on_press(Message::AiChooseOption(o)),
+                );
+            }
+        }
+        actions = actions.push(Space::new().width(Length::Fill));
+        if let Some(p) = primary {
+            actions = actions.push(p);
+        }
+
+        let card = column![header, preview, guard, actions].spacing(8);
+        return container(card)
+            .padding(12)
+            .style(move |_| iced::widget::container::Style {
+                background: Some(iced::Background::Color(kit.fade(kit.yellow, 0.07))),
+                border: iced::border::Border {
+                    color: kit.fade(kit.yellow, 0.32),
+                    width: 1.0,
+                    radius: 12.0.into(),
+                },
+                ..Default::default()
+            })
+            .into();
+    }
+
+    // Generic multiple-choice question.
+    let mut q = column![text(&pending.question)
+        .size(12)
+        .font(iced::Font {
+            weight: iced::font::Weight::Bold,
+            ..Default::default()
+        })
+        .color(kit.fade(kit.accent, 1.0)),]
+    .spacing(6);
+    for opt in &pending.options {
+        let opt_clone = opt.clone();
+        q = q.push(
+            button(
+                text(opt)
+                    .size(11)
+                    .color(kit.fade(kit.text, 1.0))
+                    .align_x(iced::alignment::Horizontal::Center),
+            )
+            .width(Length::Fill)
+            .padding(6)
+            .style(move |_, _status| button::Style {
+                background: Some(iced::Background::Color(kit.fade(kit.accent, 0.25))),
+                border: iced::border::Border {
+                    color: kit.fade(kit.accent, 0.9),
+                    width: 1.0,
+                    radius: 8.0.into(),
+                },
+                text_color: kit.fade(kit.text, 1.0),
+                ..Default::default()
+            })
+            .on_press(Message::AiChooseOption(opt_clone)),
+        );
+    }
+    container(q)
+        .padding(10)
+        .style(move |_| iced::widget::container::Style {
+            background: Some(iced::Background::Color(kit.fade(kit.surface0, 0.8))),
+            border: iced::border::Border {
+                color: kit.fade(kit.accent, 0.7),
+                width: 1.0,
+                radius: 10.0.into(),
+            },
+            ..Default::default()
+        })
+        .into()
 }
 
 fn bubble_style(
