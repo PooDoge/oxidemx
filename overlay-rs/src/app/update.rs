@@ -688,6 +688,11 @@ pub(super) fn update(state: &mut RadialState, message: Message) -> Task<Message>
                 }
                 None => (typed.clone(), typed.clone()),
             };
+            // Passive memory capture from explicit user cues
+            // ("remember …", "my name is …") — zero-cost, high-precision.
+            if !typed.is_empty() {
+                crate::agent::memory::capture_from_user(&typed);
+            }
             state.ai_editor = iced::widget::text_editor::Content::new();
             let now = crate::radial::now_secs();
             let chat = state.chat_mut();
@@ -703,15 +708,24 @@ pub(super) fn update(state: &mut RadialState, message: Message) -> Task<Message>
             let model = state.chat().model.clone();
             let thread_idx = state.ai_active;
             let sink = crate::ai_client::StreamSink::for_thread(thread_idx);
-            // Prior turns (everything before the prompt just pushed) —
-            // shipped to the model as conversational context (all
-            // providers are stateless; history lives client-side).
+            // Prior turns shipped as context (providers are stateless;
+            // history lives client-side). For long threads, ship the
+            // rolling summary + only the messages after summary_upto, so
+            // context stays bounded without losing earlier facts.
             let history: Vec<(bool, String)> = {
-                let h = &state.chat().history;
-                h.iter()
-                    .take(h.len().saturating_sub(1))
-                    .map(|m| (m.is_user, m.text.clone()))
-                    .collect()
+                let chat = state.chat();
+                let h = &chat.history;
+                let end = h.len().saturating_sub(1); // exclude the just-pushed user msg
+                let start = chat.summary_upto.min(end);
+                let mut v: Vec<(bool, String)> = Vec::new();
+                if !chat.summary.is_empty() {
+                    v.push((
+                        false,
+                        format!("[Summary of earlier conversation]\n{}", chat.summary),
+                    ));
+                }
+                v.extend(h[start..end].iter().map(|m| (m.is_user, m.text.clone())));
+                v
             };
             let (task, handle) = Task::perform(
                 async move {
@@ -746,7 +760,45 @@ pub(super) fn update(state: &mut RadialState, message: Message) -> Task<Message>
             chat.updated_at = crate::radial::now_secs();
             crate::radial::save_chat_threads(&state.ai_threads);
             state.trigger_ripple();
-            scroll_chat_to_end()
+
+            // Roll up older turns into the thread summary once the
+            // unsummarized tail grows large, so future turns stay within
+            // a bounded context. Keep the most recent RECENT_KEEP raw.
+            const SUMMARIZE_THRESHOLD: usize = 24;
+            const RECENT_KEEP: usize = 8;
+            let chat = &state.ai_threads[thread_idx];
+            let unsummarized = chat.history.len().saturating_sub(chat.summary_upto);
+            let summary_task = if unsummarized > SUMMARIZE_THRESHOLD {
+                let cutoff = chat.history.len() - RECENT_KEEP;
+                let prior = chat.summary.clone();
+                let model = chat.model.clone();
+                let msgs: Vec<(bool, String)> = chat.history[chat.summary_upto..cutoff]
+                    .iter()
+                    .filter(|m| !m.is_error)
+                    .map(|m| (m.is_user, m.text.clone()))
+                    .collect();
+                Some(Task::perform(
+                    async move { crate::agent_runtime::summarize(&model, &prior, &msgs).await },
+                    move |sum| Message::AiSummaryUpdated(thread_idx, sum, cutoff),
+                ))
+            } else {
+                None
+            };
+            match summary_task {
+                Some(t) => Task::batch([scroll_chat_to_end(), t]),
+                None => scroll_chat_to_end(),
+            }
+        }
+        Message::AiSummaryUpdated(thread_idx, summary, upto) => {
+            if let (Some(chat), Some(summary)) = (state.ai_threads.get_mut(thread_idx), summary) {
+                let summary = summary.trim().to_string();
+                if !summary.is_empty() {
+                    chat.summary = summary;
+                    chat.summary_upto = upto.min(chat.history.len());
+                    crate::radial::save_chat_threads(&state.ai_threads);
+                }
+            }
+            Task::none()
         }
         Message::AiStream((thread_idx, event)) => match event {
             crate::ai_client::StreamEvent::Activity(label) => {

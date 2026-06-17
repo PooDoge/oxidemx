@@ -164,6 +164,12 @@ should define one.**
     parse_document). Code-block **syntax highlighting** is already active
     (iced `highlighter`). Deferred: per-code-block copy button,
     image→vision attach (needs Task/Image plumbing to the provider).
+11. **Memory & long context** — passive **chat→memory capture** of
+    explicit cues ("remember …", "my name is …"), zero-cost/high-
+    precision, complementing the agent's memory tool; **rolling thread
+    summarization** (a per-thread summary rolls up older turns once the
+    tail grows past ~24 messages, keeping the recent ~8 raw) so long
+    chats stay in bounded context. No new UI surface (background).
 
 ---
 
@@ -235,8 +241,7 @@ Four themes are in flight (theme 1 shipped):
 2. ✅ **Backend reliability** — retry/backoff, token/cost telemetry
    (thread-strip readout), error bubbles + Retry. Done.
 3. ✅ **Richer I/O** — thread search, export, file attach (drag-drop + picker); code highlighting already on. Image→vision attach deferred. Done.
-4. **Memory & long context** — chat→memory auto-capture, thread
-   summarization.
+4. ✅ **Memory & long context** — chat→memory capture + rolling thread summarization. Done.
 
 Design should leave room for: a cost/usage indicator, attachment chips,
 collapsible tool-call cards, and a skills-active indicator.

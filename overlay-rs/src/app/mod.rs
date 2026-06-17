@@ -133,6 +133,8 @@ pub enum Message {
     AiAttachReceived(Option<std::path::PathBuf>),
     /// Clear the staged attachment.
     AiAttachClear,
+    /// A rolling thread summary finished: `(thread, summary, upto)`.
+    AiSummaryUpdated(usize, Option<String>, usize),
     /// The conversation was scrolled (tracks whether the "jump to
     /// latest" affordance should show).
     AiChatScrolled(iced::widget::scrollable::Viewport),

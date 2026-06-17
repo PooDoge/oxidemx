@@ -127,6 +127,14 @@ pub struct ChatThread {
     pub tokens_prompt: u64,
     #[serde(default)]
     pub tokens_completion: u64,
+    /// Rolling summary of messages `[0, summary_upto)` — keeps long
+    /// threads in context without shipping every turn. Empty until the
+    /// thread grows past the summarization threshold.
+    #[serde(default)]
+    pub summary: String,
+    /// How many leading history messages `summary` already covers.
+    #[serde(default)]
+    pub summary_upto: usize,
 }
 
 fn default_chat_model() -> String {
@@ -152,6 +160,8 @@ impl Default for ChatThread {
             updated_at: 0,
             tokens_prompt: 0,
             tokens_completion: 0,
+            summary: String::new(),
+            summary_upto: 0,
         }
     }
 }

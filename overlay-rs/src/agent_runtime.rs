@@ -340,6 +340,46 @@ async fn backoff(sink: &Option<StreamSink>, attempt: u32, max: u32) {
     tokio::time::sleep(std::time::Duration::from_millis(ms)).await;
 }
 
+/// One-shot summarization via a direct provider `chat()` (no agent loop,
+/// no tools) — rolls older turns into a thread summary so long
+/// conversations stay within a bounded context. Merges with the prior
+/// summary when present. Returns `None` on any failure (the caller just
+/// keeps the existing summary).
+pub async fn summarize(model_hint: &str, prior: &str, msgs: &[(bool, String)]) -> Option<String> {
+    if msgs.is_empty() {
+        return None;
+    }
+    let (provider, model, key) = resolve_provider(model_hint).ok()?;
+    let llm = oxidemx_agent::factory::provider_from_config(provider, &model, &key).ok()?;
+
+    let convo = msgs
+        .iter()
+        .map(|(u, t)| format!("{}: {}", if *u { "User" } else { "Assistant" }, t))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let mut prompt = if prior.is_empty() {
+        String::from("Summarize this conversation excerpt into concise notes.\n\n")
+    } else {
+        format!(
+            "Update this running summary with the new exchange below, keeping it concise.\n\n\
+             EXISTING SUMMARY:\n{prior}\n\n"
+        )
+    };
+    prompt.push_str(
+        "Preserve facts, names, decisions, preferences, and unresolved threads. \
+         Return ONLY the summary, no preamble.\n\nCONVERSATION:\n",
+    );
+    prompt.push_str(&convo);
+
+    let msg = ChatMessage {
+        role: ChatRole::User,
+        message_type: MessageType::Text,
+        content: prompt,
+    };
+    let resp = llm.chat(&[msg], None).await.ok()?;
+    resp.text().map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
+}
+
 /// Forward the executor's text-delta StreamChunks to the chat thread as
 /// `StreamEvent::Delta` (live token rendering). Only used for providers
 /// that support streaming-with-tools.
@@ -410,4 +450,23 @@ where
             }
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    /// Live summarization smoke (needs a Gemini key). Ignored by default
+    /// so the normal test run stays offline; run with `--ignored`.
+    #[tokio::test]
+    #[ignore]
+    async fn summarize_live() {
+        let msgs = vec![
+            (true, "I'm building a Rust overlay with iced.".to_string()),
+            (false, "Nice — iced 0.14 with wgpu is a solid choice.".to_string()),
+            (true, "Remember I deploy on Bazzite via /usr/local/bin.".to_string()),
+        ];
+        let out = super::summarize("gemini-2.5-flash", "", &msgs).await;
+        eprintln!("SUMMARY => {out:?}");
+        assert!(out.is_some(), "expected a summary");
+        assert!(!out.unwrap().trim().is_empty());
+    }
 }

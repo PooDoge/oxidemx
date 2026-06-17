@@ -529,6 +529,67 @@ pub fn save_entry(text: &str, scope: &str) -> MemoryEntry {
     save_entry_at(&store_path(), text, scope, unix_now())
 }
 
+/// Passive, high-precision capture of durable facts from a user message.
+/// Only fires on UNAMBIGUOUS cues ("remember …", "my name is …") so it
+/// never spams the store with conversational noise — the agent's
+/// `memory` tool still handles judgment calls. Deduped via `save_entry`.
+/// Returns the number captured.
+pub fn capture_from_user(text: &str) -> usize {
+    let facts = extract_user_captures(text);
+    for f in &facts {
+        save_entry(f, "user");
+    }
+    facts.len()
+}
+
+/// Pure extraction of durable facts from an unambiguous user message
+/// (no I/O — `capture_from_user` saves the results). High precision by
+/// design: only explicit directives + identity cues.
+fn extract_user_captures(text: &str) -> Vec<String> {
+    let lower = text.to_lowercase();
+    let mut out = Vec::new();
+
+    const CUES: &[&str] = &[
+        "remember that ",
+        "remember to ",
+        "remember ",
+        "note that ",
+        "keep in mind that ",
+        "don't forget that ",
+        "for future reference, ",
+        "for future reference ",
+    ];
+    for cue in CUES {
+        if let Some(pos) = lower.find(cue) {
+            let fact = text[pos + cue.len()..]
+                .trim()
+                .trim_end_matches(['.', '!'])
+                .to_string();
+            if (4..=240).contains(&fact.chars().count()) {
+                out.push(fact);
+            }
+            break; // one directive per message
+        }
+    }
+
+    for cue in ["my name is ", "call me "] {
+        if let Some(pos) = lower.find(cue) {
+            let name: String = text[pos + cue.len()..]
+                .trim()
+                .split([' ', ',', '.', '!'])
+                .next()
+                .unwrap_or("")
+                .to_string();
+            if (1..=40).contains(&name.chars().count()) {
+                out.push(format!("The user's name is {name}"));
+            }
+            break;
+        }
+    }
+
+    out
+}
+
 /// Remove an entry by id; `false` when no such id exists.
 pub fn delete(id: &str) -> bool {
     delete_at(&store_path(), id)
@@ -649,6 +710,17 @@ pub fn apply_consolidation(plan: &serde_json::Value) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn capture_extraction() {
+        let c = extract_user_captures("Please remember that I deploy on Fridays.");
+        assert_eq!(c, vec!["I deploy on Fridays"]);
+        let c = extract_user_captures("Hi, my name is Jim and I use Bazzite.");
+        assert_eq!(c, vec!["The user's name is Jim"]);
+        // No cue → nothing captured (high precision).
+        assert!(extract_user_captures("what's the weather today?").is_empty());
+        assert!(extract_user_captures("I think this is great").is_empty());
+    }
 
     /// Fresh store file in a unique temp dir per test.
     fn temp_store(tag: &str) -> PathBuf {
