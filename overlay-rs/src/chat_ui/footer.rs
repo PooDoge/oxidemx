@@ -56,19 +56,37 @@ pub fn view<'a>(state: &'a RadialState, kit: &Kit) -> Element<'a, Message> {
         Space::new().height(Length::Fixed(16.0)).into()
     };
 
+    let palette_open = state.ai_palette.is_some();
     let editor = iced::widget::text_editor(&state.ai_editor)
-        .placeholder("Ask, or describe an automation…")
+        .placeholder("Ask, describe an automation, or type / for commands…")
         .size(13)
         .padding(10)
         .height(Length::Fixed(44.0))
         .on_action(Message::AiEditorAction)
-        .key_binding(|key_press| {
+        .key_binding(move |key_press| {
+            use iced::keyboard::key::Named;
+            use iced::keyboard::Key;
             use iced::widget::text_editor::Binding;
-            if matches!(
-                key_press.key,
-                iced::keyboard::Key::Named(iced::keyboard::key::Named::Enter)
-            ) && !key_press.modifiers.shift()
-            {
+            // While the slash palette is open, the arrow/Enter/Esc keys
+            // drive it instead of the editor.
+            if palette_open {
+                match &key_press.key {
+                    Key::Named(Named::ArrowUp) => {
+                        return Some(Binding::Custom(Message::AiPaletteNav(-1)))
+                    }
+                    Key::Named(Named::ArrowDown) => {
+                        return Some(Binding::Custom(Message::AiPaletteNav(1)))
+                    }
+                    Key::Named(Named::Enter) if !key_press.modifiers.shift() => {
+                        return Some(Binding::Custom(Message::AiPaletteRun))
+                    }
+                    Key::Named(Named::Escape) => {
+                        return Some(Binding::Custom(Message::AiPaletteClose))
+                    }
+                    _ => {}
+                }
+            }
+            if matches!(key_press.key, Key::Named(Named::Enter)) && !key_press.modifiers.shift() {
                 return Some(Binding::Custom(Message::AiSubmitPrompt));
             }
             Binding::from_key_press(key_press)

@@ -39,6 +39,11 @@ pub(super) fn update(state: &mut RadialState, message: Message) -> Task<Message>
                 | Message::AiSelectExit
                 | Message::AiPasteToInput
                 | Message::AiScrollToBottom
+                | Message::AiToggleSkills
+                | Message::AiSkillEnable(_, _)
+                | Message::AiSkillsSearch(_)
+                | Message::AiPaletteSelect(_)
+                | Message::AiPaletteRun
                 | Message::AiToggleMemories
                 | Message::AiMemorySearch(_)
                 | Message::AiMemoryDelete(_)
@@ -646,6 +651,7 @@ pub(super) fn update(state: &mut RadialState, message: Message) -> Task<Message>
         }
         Message::AiEditorAction(action) => {
             state.ai_editor.perform(action);
+            refresh_palette(state);
             Task::none()
         }
         Message::AiSubmitPrompt => {
@@ -804,6 +810,53 @@ pub(super) fn update(state: &mut RadialState, message: Message) -> Task<Message>
             }
             Task::none()
         }
+        Message::AiToggleSkills => {
+            state.ai_show_skills = !state.ai_show_skills;
+            state.ai_show_memories = false;
+            state.ai_show_tasks = false;
+            state.ai_show_threads = false;
+            if state.ai_show_skills {
+                state.ai_skills = crate::agent::skills::discover();
+                state.ai_skills_enabled = crate::agent::skills::enabled_set();
+            }
+            Task::none()
+        }
+        Message::AiSkillEnable(name, on) => {
+            crate::agent::skills::set_enabled(&name, on);
+            state.ai_skills_enabled = crate::agent::skills::enabled_set();
+            state.ai_toast = Some((
+                format!("{} {}", if on { "✓ Enabled" } else { "○ Disabled" }, name),
+                std::time::Instant::now(),
+            ));
+            Task::perform(
+                tokio::time::sleep(std::time::Duration::from_millis(1600)),
+                |_| Message::AiToastExpire,
+            )
+        }
+        Message::AiSkillsSearch(q) => {
+            state.ai_skills_query = q;
+            Task::none()
+        }
+        Message::AiPaletteSelect(i) => {
+            if let Some((sel, _)) = &mut state.ai_palette {
+                *sel = i;
+            }
+            run_palette(state)
+        }
+        Message::AiPaletteNav(delta) => {
+            if let Some((sel, items)) = &mut state.ai_palette {
+                if !items.is_empty() {
+                    let n = items.len() as i32;
+                    *sel = (((*sel as i32 + delta) % n + n) % n) as usize;
+                }
+            }
+            Task::none()
+        }
+        Message::AiPaletteRun => run_palette(state),
+        Message::AiPaletteClose => {
+            state.ai_palette = None;
+            Task::none()
+        }
         Message::AiBubbleHover(idx) => {
             state.ai_hover_msg = idx;
             Task::none()
@@ -957,6 +1010,7 @@ pub(super) fn update(state: &mut RadialState, message: Message) -> Task<Message>
             state.ai_show_memories = !state.ai_show_memories;
             state.ai_show_tasks = false;
             state.ai_show_threads = false;
+            state.ai_show_skills = false;
             if state.ai_show_memories {
                 state.ai_memories = crate::agent::memory::load_all();
                 state.ai_memories_bytes = crate::agent::memory::store_size_bytes();
@@ -990,6 +1044,7 @@ pub(super) fn update(state: &mut RadialState, message: Message) -> Task<Message>
             state.ai_show_tasks = !state.ai_show_tasks;
             state.ai_show_memories = false;
             state.ai_show_threads = false;
+            state.ai_show_skills = false;
             if state.ai_show_tasks {
                 refresh_tasks()
             } else {
@@ -1052,6 +1107,70 @@ fn refresh_tasks() -> Task<Message> {
         },
         Message::AiTasksLoaded,
     )
+}
+
+/// Recompute the slash palette from the current input. Opens it when
+/// the input is a single line starting with `/`; closes it otherwise.
+fn refresh_palette(state: &mut RadialState) {
+    let raw = state.ai_editor.text();
+    let t = raw.trim_end_matches('\n');
+    let Some(query) = t.strip_prefix('/') else {
+        state.ai_palette = None;
+        return;
+    };
+    if t.contains('\n') {
+        // Multi-line — not a command (e.g. pasted text starting with /).
+        state.ai_palette = None;
+        return;
+    }
+    if state.ai_flow_cache.is_empty() {
+        state.ai_flow_cache = crate::ai_client::list_flows();
+    }
+    let mut enabled: Vec<String> = crate::agent::skills::enabled_set().into_iter().collect();
+    enabled.sort();
+    let items = crate::chat_ui::palette::build(query, &state.ai_flow_cache, &enabled);
+    let sel = state
+        .ai_palette
+        .as_ref()
+        .map(|(s, _)| (*s).min(items.len().saturating_sub(1)))
+        .unwrap_or(0);
+    state.ai_palette = Some((sel, items));
+}
+
+/// Run the selected palette row, then close the palette and clear the
+/// `/...` input. Non-flow actions re-emit their existing Message via
+/// `Task::done`; a flow prefills + submits a run prompt; a skill toggles
+/// its enabled state.
+fn run_palette(state: &mut RadialState) -> Task<Message> {
+    use crate::chat_ui::palette::PaletteKind;
+    let Some((sel, items)) = state.ai_palette.take() else {
+        return Task::none();
+    };
+    let Some(item) = items.into_iter().nth(sel) else {
+        return Task::none();
+    };
+    // Clear the `/...` query from the input.
+    state.ai_editor = iced::widget::text_editor::Content::new();
+
+    match item.kind {
+        PaletteKind::NewChat => Task::done(Message::AiNewChat),
+        PaletteKind::CommandCenter => Task::done(Message::AiOpenCommandCenter),
+        PaletteKind::Agents => Task::done(Message::AiOpenAgentsConfig),
+        PaletteKind::Mcp => Task::done(Message::AiOpenMcpConfig),
+        PaletteKind::Memories => Task::done(Message::AiToggleMemories),
+        PaletteKind::Tasks => Task::done(Message::AiToggleTasks),
+        PaletteKind::Skills => Task::done(Message::AiToggleSkills),
+        PaletteKind::ModelToggle => Task::done(Message::AiModelToggled),
+        PaletteKind::Flow(name) => {
+            state.ai_editor =
+                iced::widget::text_editor::Content::with_text(&format!("Run the {name} flow."));
+            Task::done(Message::AiSubmitPrompt)
+        }
+        PaletteKind::Skill(name) => {
+            let on = !state.ai_skills_enabled.contains(&name);
+            Task::done(Message::AiSkillEnable(name, on))
+        }
+    }
 }
 
 /// Outcome of a dispatch attempt — drives which haptic event

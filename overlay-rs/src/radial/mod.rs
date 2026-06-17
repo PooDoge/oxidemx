@@ -106,6 +106,20 @@ pub struct RadialState {
     /// Transient confirmation toast (e.g. "Copied"): `(label, shown
     /// at)`. A timer clears it ~1.6 s after the most recent trigger.
     pub ai_toast: Option<(String, std::time::Instant)>,
+    /// Skills management panel open (mutually exclusive with the
+    /// memories / tasks / threads panels).
+    pub ai_show_skills: bool,
+    /// Discovered skills (refreshed when the panel opens / palette opens).
+    pub ai_skills: Vec<crate::agent::skills::Skill>,
+    /// Names of currently-enabled skills (the agent's candidate pool).
+    pub ai_skills_enabled: std::collections::HashSet<String>,
+    /// Search filter for the skills panel.
+    pub ai_skills_query: String,
+    /// Open slash-command palette: `(selected index, filtered items)`.
+    /// `None` when the input doesn't start with `/`.
+    pub ai_palette: Option<(usize, Vec<crate::chat_ui::palette::PaletteItem>)>,
+    /// Cached `(id, name)` of the user's flows, for the palette.
+    pub ai_flow_cache: Vec<(String, String)>,
     /// Thread-rename in progress: `(thread idx, draft title)`.
     pub ai_renaming: Option<(usize, String)>,
     /// User-tweakable animation parameters for menu / submenu /

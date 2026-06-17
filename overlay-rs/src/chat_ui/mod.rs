@@ -16,6 +16,8 @@ pub mod cards;
 pub mod footer;
 pub mod header;
 pub mod memories;
+pub mod palette;
+pub mod skills;
 pub mod tasks;
 pub mod threads;
 
@@ -126,7 +128,9 @@ impl Kit {
 pub fn view(state: &RadialState, alpha: f32) -> Element<'_, Message> {
     let kit = Kit::from_state(state, alpha);
 
-    let middle: Element<'_, Message> = if state.ai_show_memories {
+    let middle: Element<'_, Message> = if state.ai_show_skills {
+        skills::view(state, &kit)
+    } else if state.ai_show_memories {
         memories::view(state, &kit)
     } else if state.ai_show_tasks {
         tasks::view(state, &kit)
@@ -151,7 +155,7 @@ pub fn view(state: &RadialState, alpha: f32) -> Element<'_, Message> {
         footer::view(state, &kit),
     ];
 
-    iced::widget::container(content)
+    let base = iced::widget::container(content)
         .width(Length::Fill)
         .height(Length::Fill)
         .padding(iced::Padding {
@@ -159,6 +163,12 @@ pub fn view(state: &RadialState, alpha: f32) -> Element<'_, Message> {
             // fades in — reads as the chat rising into place.
             top: (1.0 - alpha) * 18.0,
             ..iced::Padding::default()
-        })
-        .into()
+        });
+
+    // Slash-command palette floats above everything when open.
+    if state.ai_palette.is_some() {
+        iced::widget::stack![base, palette::overlay(state, kit)].into()
+    } else {
+        base.into()
+    }
 }

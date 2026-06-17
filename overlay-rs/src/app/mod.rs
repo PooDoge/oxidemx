@@ -104,6 +104,20 @@ pub enum Message {
     AiScrollToBottom,
     /// Timer to clear the transient confirmation toast.
     AiToastExpire,
+    /// Open/close the Skills management panel.
+    AiToggleSkills,
+    /// Enable/disable a skill by name.
+    AiSkillEnable(String, bool),
+    /// Search filter in the Skills panel.
+    AiSkillsSearch(String),
+    /// Slash palette: click row `i`.
+    AiPaletteSelect(usize),
+    /// Slash palette: move selection by delta (Up/Down).
+    AiPaletteNav(i32),
+    /// Slash palette: run the selected row (Enter).
+    AiPaletteRun,
+    /// Slash palette: dismiss (Esc).
+    AiPaletteClose,
     /// The conversation was scrolled (tracks whether the "jump to
     /// latest" affordance should show).
     AiChatScrolled(iced::widget::scrollable::Viewport),

@@ -139,11 +139,19 @@ use tools::agent_tool_declarations;
 /// description), scanned from `~/.config/oxidemx/flows/<id>/flow.md`.
 /// `None` when there are no flows. Lightweight frontmatter parse — no
 /// conductor dependency (the overlay shells the conductor to run them).
-fn available_flows_block() -> Option<String> {
-    let home = std::env::var("HOME").ok()?;
+/// Scan `~/.config/oxidemx/flows/<id>/flow.md`, returning `(id, name,
+/// description)` for each, sorted by id. Lightweight frontmatter parse —
+/// no conductor dependency (the overlay shells the conductor to run them).
+fn scan_flows() -> Vec<(String, String, String)> {
+    let Ok(home) = std::env::var("HOME") else {
+        return Vec::new();
+    };
     let dir = std::path::Path::new(&home).join(".config/oxidemx/flows");
+    let Ok(rd) = std::fs::read_dir(&dir) else {
+        return Vec::new();
+    };
     let mut entries: Vec<(String, String, String)> = Vec::new();
-    for e in std::fs::read_dir(&dir).ok()?.flatten() {
+    for e in rd.flatten() {
         let md = e.path().join("flow.md");
         let Ok(src) = std::fs::read_to_string(&md) else {
             continue;
@@ -164,10 +172,23 @@ fn available_flows_block() -> Option<String> {
         let desc = field("description").unwrap_or_default();
         entries.push((id, name, desc));
     }
+    entries.sort_by(|a, b| a.0.cmp(&b.0));
+    entries
+}
+
+/// `(id, name)` of the user's flows — for the slash palette.
+pub fn list_flows() -> Vec<(String, String)> {
+    scan_flows()
+        .into_iter()
+        .map(|(id, name, _)| (id, name))
+        .collect()
+}
+
+fn available_flows_block() -> Option<String> {
+    let entries = scan_flows();
     if entries.is_empty() {
         return None;
     }
-    entries.sort_by(|a, b| a.0.cmp(&b.0));
     let mut block = String::from(
         "AVAILABLE FLOWS (the user's pre-authored pipelines — run by id with run_flow; \
          offer these when relevant, and list them if asked what you can do):\n",
