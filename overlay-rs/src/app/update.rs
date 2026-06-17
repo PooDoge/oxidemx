@@ -40,6 +40,7 @@ pub(super) fn update(state: &mut RadialState, message: Message) -> Task<Message>
                 | Message::AiPasteToInput
                 | Message::AiScrollToBottom
                 | Message::AiToggleSkills
+                | Message::AiShowView(_)
                 | Message::AiSkillEnable(_, _)
                 | Message::AiSkillsSearch(_)
                 | Message::AiPaletteSelect(_)
@@ -968,6 +969,27 @@ pub(super) fn update(state: &mut RadialState, message: Message) -> Task<Message>
                 state.ai_skills_enabled = crate::agent::skills::enabled_set();
             }
             Task::none()
+        }
+        Message::AiShowView(view) => {
+            use crate::app::ChatView;
+            state.ai_show_skills = view == ChatView::Skills;
+            state.ai_show_memories = view == ChatView::Memory;
+            state.ai_show_tasks = view == ChatView::Tasks;
+            state.ai_show_threads = false;
+            match view {
+                ChatView::Skills => {
+                    state.ai_skills = crate::agent::skills::discover();
+                    state.ai_skills_enabled = crate::agent::skills::enabled_set();
+                    Task::none()
+                }
+                ChatView::Memory => {
+                    state.ai_memories = crate::agent::memory::load_all();
+                    state.ai_memories_bytes = crate::agent::memory::store_size_bytes();
+                    Task::none()
+                }
+                ChatView::Tasks => refresh_tasks(),
+                ChatView::Conversation => Task::none(),
+            }
         }
         Message::AiSkillEnable(name, on) => {
             crate::agent::skills::set_enabled(&name, on);

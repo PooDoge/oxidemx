@@ -4,6 +4,7 @@
 use iced::widget::{button, row, text, Space};
 use iced::{Alignment, Element, Length};
 
+use super::icons::icon;
 use super::Kit;
 use crate::app::Message;
 use crate::radial::RadialState;
@@ -105,7 +106,29 @@ pub fn strip<'a>(state: &'a RadialState, kit: &Kit) -> Element<'a, Message> {
             Message::AiSelectThread(idx),
         ));
     }
-    bar = bar.push(chip("+ New".to_string(), false, true, Message::AiNewChat));
+    bar = bar.push(
+        button(
+            row![
+                icon("plus", 13.0, kit.fade(kit.subtext0, 1.0)),
+                text("New")
+                    .size(11)
+                    .wrapping(iced::widget::text::Wrapping::None)
+                    .color(kit.fade(kit.subtext0, 1.0)),
+            ]
+            .spacing(4)
+            .align_y(Alignment::Center),
+        )
+        .padding([5, 11])
+        .style(move |_, _| button::Style {
+            border: iced::border::Border {
+                color: kit.fade(kit.surface1, 1.0),
+                width: 1.0,
+                radius: 999.0.into(),
+            },
+            ..Default::default()
+        })
+        .on_press(Message::AiNewChat),
+    );
     if recent.len() > MAX_CHIPS {
         bar = bar.push(chip(
             "…".to_string(),
@@ -117,12 +140,9 @@ pub fn strip<'a>(state: &'a RadialState, kit: &Kit) -> Element<'a, Message> {
 
     bar = bar.push(Space::new().width(Length::Fill));
 
-    // Action icons (the agent is one unified "Agentic" mode now, so the
-    // old General/Menu-Setup toggle is gone): open the Command Center
-    // (Mission Control), the Agents & skills config, and MCP servers.
-    bar = bar.push(chip("▦".into(), false, true, Message::AiOpenCommandCenter));
-    bar = bar.push(chip("⚙".into(), false, true, Message::AiOpenAgentsConfig));
-    bar = bar.push(chip("🔌".into(), false, true, Message::AiOpenMcpConfig));
+    // Command Center / Agents / MCP moved into the slash palette + the
+    // Command Center window (IA consolidation, P0 §06), so the strip is
+    // now just conversation context: threads, New, and the model pill.
 
     // Token/cost readout for the active thread (when any usage recorded).
     let tp = state.chat().tokens_prompt;
@@ -143,17 +163,36 @@ pub fn strip<'a>(state: &'a RadialState, kit: &Kit) -> Element<'a, Message> {
         bar = bar.push(Space::new().width(Length::Fixed(6.0)));
     }
 
-    // Flash/Pro indicator, right-aligned with the sparkle.
+    // Labeled model pill (the picker across providers is P2; for now it
+    // toggles Flash ↔ Pro on click).
     let is_pro = state.chat().model == crate::ai_client::PRO_MODEL;
     bar = bar.push(
         button(
-            text(if is_pro { "✦ Pro" } else { "✦ Flash" })
-                .size(10.5)
+            row![
+                icon("model", 13.0, kit.fade(kit.accent, 1.0)),
+                text(if is_pro {
+                    "Gemini · Pro"
+                } else {
+                    "Gemini · Flash"
+                })
+                .size(11)
                 .wrapping(iced::widget::text::Wrapping::None)
-                .color(kit.fade(if is_pro { kit.accent } else { kit.subtext0 }, 1.0)),
+                .color(kit.fade(kit.subtext1, 1.0)),
+                icon("chevron", 12.0, kit.fade(kit.subtext0, 1.0)),
+            ]
+            .spacing(6)
+            .align_y(Alignment::Center),
         )
-        .padding([4, 6])
-        .style(|_, _| button::Style::default())
+        .padding([4, 10])
+        .style(move |_, _| button::Style {
+            background: Some(iced::Background::Color(kit.fade(kit.surface0, 1.0))),
+            border: iced::border::Border {
+                color: kit.fade(kit.surface1, 1.0),
+                width: 1.0,
+                radius: 999.0.into(),
+            },
+            ..Default::default()
+        })
         .on_press(Message::AiModelToggled),
     );
 

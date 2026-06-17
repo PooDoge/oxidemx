@@ -33,6 +33,15 @@ use view::view;
 
 const APP_ID: &str = "org.oxidemx.overlay";
 
+/// The four primary chat views the header segmented switcher selects.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChatView {
+    Conversation,
+    Skills,
+    Memory,
+    Tasks,
+}
+
 #[derive(Debug, Clone)]
 pub enum Message {
     Tick,
@@ -110,6 +119,8 @@ pub enum Message {
     AiSkillEnable(String, bool),
     /// Search filter in the Skills panel.
     AiSkillsSearch(String),
+    /// Header segmented switcher selected a view.
+    AiShowView(ChatView),
     /// Slash palette: click row `i`.
     AiPaletteSelect(usize),
     /// Slash palette: move selection by delta (Up/Down).

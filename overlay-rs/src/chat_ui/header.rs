@@ -7,8 +7,9 @@
 use iced::widget::{button, column, container, row, text, Space};
 use iced::{Alignment, Element, Length};
 
-use super::Kit;
-use crate::app::Message;
+use super::icons::icon;
+use super::{tokens, Kit};
+use crate::app::{ChatView, Message};
 use crate::chat_shell::{EDGE_PAD, HEADER_H};
 use crate::radial::RadialState;
 
@@ -55,55 +56,65 @@ pub fn view<'a>(state: &'a RadialState, kit: &Kit) -> Element<'a, Message> {
     ]
     .spacing(1);
 
-    let icon_btn = move |glyph: &'static str, tip_active: bool, msg: Message| {
-        button(
-            text(glyph)
-                .size(19)
-                .line_height(1.0)
-                .width(Length::Fill)
-                .height(Length::Fill)
-                .align_x(iced::alignment::Horizontal::Center)
-                .align_y(iced::alignment::Vertical::Center)
-                .color(kit.fade(if tip_active { kit.accent } else { kit.subtext0 }, 1.0)),
-        )
-        .width(Length::Fixed(32.0))
-        .height(Length::Fixed(32.0))
-        .padding(0)
-        .style(move |_, _status| button::Style {
-            background: if tip_active {
-                Some(iced::Background::Color(kit.fade(kit.accent, 0.13)))
-            } else {
-                None
-            },
-            border: iced::border::Border {
-                color: if tip_active {
-                    kit.fade(kit.accent, 0.33)
-                } else {
-                    iced::Color::TRANSPARENT
-                },
-                width: 1.0,
-                radius: 9.0.into(),
-            },
-            ..Default::default()
-        })
-        .on_press(msg)
+    // Which of the four primary views is active (drives the switcher).
+    let active = if state.ai_show_skills {
+        ChatView::Skills
+    } else if state.ai_show_memories {
+        ChatView::Memory
+    } else if state.ai_show_tasks {
+        ChatView::Tasks
+    } else {
+        ChatView::Conversation
     };
 
-    // Close: light filled circle with a bold, dead-centre ×.
-    let close_btn = button(
-        text("✕")
-            .size(18)
-            .line_height(1.0)
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .align_x(iced::alignment::Horizontal::Center)
-            .align_y(iced::alignment::Vertical::Center)
-            .font(iced::Font {
-                weight: iced::font::Weight::Bold,
-                ..Default::default()
-            })
-            .color(kit.fade(kit.crust, 1.0)),
+    // One segment of the view switcher: icon + label, accent when active.
+    let seg = move |view: ChatView, name: &'static str, label: &'static str| {
+        let on = active == view;
+        let col = kit.fade(if on { kit.accent } else { kit.subtext0 }, 1.0);
+        button(
+            row![
+                icon(name, 15.0, col),
+                text(label).size(tokens::T_LABEL).color(col),
+            ]
+            .spacing(5)
+            .align_y(Alignment::Center),
+        )
+        .padding([4, 9])
+        .style(move |_, _| button::Style {
+            background: on.then(|| iced::Background::Color(kit.fade(kit.accent, 0.16))),
+            border: iced::border::Border::default().rounded(7.0),
+            text_color: col,
+            ..Default::default()
+        })
+        .on_press(Message::AiShowView(view))
+    };
+
+    let switcher = container(
+        row![
+            seg(ChatView::Conversation, "message", "Chat"),
+            seg(ChatView::Skills, "flask", "Skills"),
+            seg(ChatView::Memory, "memory", "Memory"),
+            seg(ChatView::Tasks, "clock", "Tasks"),
+        ]
+        .spacing(2),
     )
+    .padding(2)
+    .style(move |_| iced::widget::container::Style {
+        background: Some(iced::Background::Color(kit.fade(kit.crust, 1.0))),
+        border: iced::border::Border {
+            color: kit.fade(kit.surface2, 1.0),
+            width: 1.0,
+            radius: tokens::R_BUTTON.into(),
+        },
+        ..Default::default()
+    });
+
+    // Close: light filled circle with a centred × icon.
+    let close_btn = button(iced::widget::center(icon(
+        "close",
+        11.0,
+        kit.fade(kit.crust, 1.0),
+    )))
     .width(Length::Fixed(32.0))
     .height(Length::Fixed(32.0))
     .padding(0)
@@ -123,13 +134,10 @@ pub fn view<'a>(state: &'a RadialState, kit: &Kit) -> Element<'a, Message> {
         Space::new().width(Length::Fixed(14.0 + 32.0 + 10.0)),
         title_block,
         Space::new().width(Length::Fill),
-        icon_btn("❖", state.ai_show_skills, Message::AiToggleSkills),
-        icon_btn("✱", state.ai_show_memories, Message::AiToggleMemories),
-        icon_btn("◔", state.ai_show_tasks, Message::AiToggleTasks),
-        icon_btn("＋", false, Message::AiNewChat),
+        switcher,
         close_btn,
     ]
-    .spacing(4)
+    .spacing(6)
     .align_y(Alignment::Center);
 
     container(bar)
