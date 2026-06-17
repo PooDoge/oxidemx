@@ -102,6 +102,8 @@ pub enum Message {
     AiPasteReceived(Option<String>),
     /// Jump the conversation scroll back to the newest message.
     AiScrollToBottom,
+    /// Timer to clear the transient confirmation toast.
+    AiToastExpire,
     /// The conversation was scrolled (tracks whether the "jump to
     /// latest" affordance should show).
     AiChatScrolled(iced::widget::scrollable::Viewport),

@@ -103,6 +103,9 @@ pub struct RadialState {
     /// new deltas is suppressed so reading earlier messages isn't
     /// yanked away.
     pub ai_chat_at_bottom: bool,
+    /// Transient confirmation toast (e.g. "Copied"): `(label, shown
+    /// at)`. A timer clears it ~1.6 s after the most recent trigger.
+    pub ai_toast: Option<(String, std::time::Instant)>,
     /// Thread-rename in progress: `(thread idx, draft title)`.
     pub ai_renaming: Option<(usize, String)>,
     /// User-tweakable animation parameters for menu / submenu /

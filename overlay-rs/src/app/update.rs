@@ -784,7 +784,26 @@ pub(super) fn update(state: &mut RadialState, message: Message) -> Task<Message>
             }
             Task::none()
         }
-        Message::AiCopyText(text) => iced::clipboard::write(text),
+        Message::AiCopyText(text) => {
+            state.ai_toast = Some(("✓ Copied".to_string(), std::time::Instant::now()));
+            Task::batch([
+                iced::clipboard::write(text),
+                Task::perform(
+                    tokio::time::sleep(std::time::Duration::from_millis(1600)),
+                    |_| Message::AiToastExpire,
+                ),
+            ])
+        }
+        Message::AiToastExpire => {
+            // Only clear if no newer toast replaced this one (the newer
+            // one resets the instant and ships its own timer).
+            if let Some((_, at)) = &state.ai_toast {
+                if at.elapsed() >= std::time::Duration::from_millis(1500) {
+                    state.ai_toast = None;
+                }
+            }
+            Task::none()
+        }
         Message::AiBubbleHover(idx) => {
             state.ai_hover_msg = idx;
             Task::none()

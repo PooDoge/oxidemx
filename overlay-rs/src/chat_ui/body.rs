@@ -155,12 +155,12 @@ pub fn conversation<'a>(state: &'a RadialState, kit: &Kit) -> Element<'a, Messag
         .style(kit.scrollable_style())
         .height(Length::Fill);
 
-    // When scrolled up away from the latest message, float a
-    // "jump to latest" pill over the bottom — clicking snaps back and
-    // re-enables follow-along auto-scroll.
-    if state.ai_chat_at_bottom || state.chat().history.is_empty() {
-        scroller.into()
-    } else {
+    // Overlay layers float above the scroller via a Stack: a
+    // "jump to latest" pill (bottom) when scrolled up, and a transient
+    // confirmation toast (top) e.g. after copying.
+    let mut layers: Vec<Element<'a, Message>> = vec![scroller.into()];
+
+    if !state.ai_chat_at_bottom && !state.chat().history.is_empty() {
         let pill = container(
             button(text("↓ Latest").size(12).color(kit.fade(kit.crust, 1.0)))
                 .padding([5, 12])
@@ -177,7 +177,32 @@ pub fn conversation<'a>(state: &'a RadialState, kit: &Kit) -> Element<'a, Messag
         .align_x(Alignment::Center)
         .align_y(Alignment::End)
         .padding(10);
-        iced::widget::stack![scroller, pill].into()
+        layers.push(pill.into());
+    }
+
+    if let Some((label, _)) = &state.ai_toast {
+        let toast = container(
+            container(text(label).size(12).color(kit.fade(kit.crust, 1.0)))
+                .padding([5, 12])
+                .style(move |_| iced::widget::container::Style {
+                    background: Some(iced::Background::Color(kit.fade(kit.green, 0.96))),
+                    border: iced::border::Border::default().rounded(14.0),
+                    text_color: Some(kit.fade(kit.crust, 1.0)),
+                    ..Default::default()
+                }),
+        )
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .align_x(Alignment::Center)
+        .align_y(Alignment::Start)
+        .padding(10);
+        layers.push(toast.into());
+    }
+
+    if layers.len() == 1 {
+        layers.pop().unwrap()
+    } else {
+        iced::widget::Stack::with_children(layers).into()
     }
 }
 

@@ -50,6 +50,7 @@ impl RadialState {
             ai_context_menu: None,
             ai_select: None,
             ai_chat_at_bottom: true,
+            ai_toast: None,
             ai_activity: None,
             ai_abort: None,
             ai_hover_msg: None,
