@@ -161,18 +161,32 @@ pub fn view<'a>(state: &'a RadialState, kit: &Kit) -> Element<'a, Message> {
             .file_name()
             .map(|n| n.to_string_lossy().to_string())
             .unwrap_or_else(|| path.display().to_string());
+        let is_img = matches!(
+            path.extension().and_then(|e| e.to_str()).map(|e| e.to_lowercase()).as_deref(),
+            Some("png" | "jpg" | "jpeg" | "gif" | "webp")
+        );
+        let mut chip = row![].spacing(6).align_y(Alignment::Center);
+        if is_img {
+            // Small thumbnail preview for image attachments.
+            chip = chip.push(
+                iced::widget::image(iced::widget::image::Handle::from_path(path))
+                    .width(Length::Fixed(28.0))
+                    .height(Length::Fixed(28.0)),
+            );
+        }
+        chip = chip.push(
+            text(format!("{}{name}", if is_img { "" } else { "📎 " }))
+                .size(11)
+                .color(kit.fade(kit.text, 1.0)),
+        );
+        chip = chip.push(
+            button(text("✕").size(12).color(kit.fade(kit.subtext0, 1.0)))
+                .padding([0, 4])
+                .style(|_, _| button::Style::default())
+                .on_press(Message::AiAttachClear),
+        );
         col = col.push(
-            container(
-                row![
-                    text(format!("📎 {name}")).size(11).color(kit.fade(kit.text, 1.0)),
-                    button(text("✕").size(12).color(kit.fade(kit.subtext0, 1.0)))
-                        .padding([0, 4])
-                        .style(|_, _| button::Style::default())
-                        .on_press(Message::AiAttachClear),
-                ]
-                .spacing(6)
-                .align_y(Alignment::Center),
-            )
+            container(chip)
             .padding([3, 8])
             .style(move |_| iced::widget::container::Style {
                 background: Some(iced::Background::Color(kit.fade(kit.surface0, 0.9))),

@@ -135,6 +135,8 @@ pub enum Message {
     AiAttachClear,
     /// A rolling thread summary finished: `(thread, summary, upto)`.
     AiSummaryUpdated(usize, Option<String>, usize),
+    /// A remote AI-reply image finished fetching: `(url, bytes)`.
+    AiImageFetched(String, Option<Vec<u8>>),
     /// The conversation was scrolled (tracks whether the "jump to
     /// latest" affordance should show).
     AiChatScrolled(iced::widget::scrollable::Viewport),

@@ -10,6 +10,17 @@ use oxidemx_shared::{AnimationConfig, RadialPage, Slice, VisualSettings};
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
+/// Fetch state for a remote image referenced in an AI reply.
+#[derive(Clone)]
+pub enum ImgState {
+    /// Request in flight.
+    Loading,
+    /// Decoded and ready to render.
+    Ready(iced::widget::image::Handle),
+    /// Fetch/decoding failed — render the alt text + link instead.
+    Failed,
+}
+
 use crate::anim::Tween;
 use crate::render::icons::IconCache;
 use crate::theme::ActiveTheme;
@@ -126,6 +137,10 @@ pub struct RadialState {
     /// On submit, the agent is told to read it (via read_file /
     /// parse_document).
     pub ai_attachment: Option<std::path::PathBuf>,
+    /// Cache of remote images referenced in AI replies (`![](url)`),
+    /// keyed by URL — fetched async when a message finalizes and
+    /// rendered inline once ready.
+    pub ai_image_cache: std::collections::HashMap<String, ImgState>,
     /// Thread-rename in progress: `(thread idx, draft title)`.
     pub ai_renaming: Option<(usize, String)>,
     /// User-tweakable animation parameters for menu / submenu /

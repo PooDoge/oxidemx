@@ -59,6 +59,7 @@ impl RadialState {
             ai_flow_cache: Vec::new(),
             ai_threads_query: String::new(),
             ai_attachment: None,
+            ai_image_cache: std::collections::HashMap::new(),
             ai_activity: None,
             ai_abort: None,
             ai_hover_msg: None,

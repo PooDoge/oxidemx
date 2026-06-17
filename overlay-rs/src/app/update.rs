@@ -719,6 +719,12 @@ pub(super) fn update(state: &mut RadialState, message: Message) -> Task<Message>
             if !typed.is_empty() {
                 crate::agent::memory::capture_from_user(&typed);
             }
+            // Keep the image path for the bubble thumbnail.
+            let thumb_path: Option<String> = if image.is_some() {
+                attachment.as_ref().map(|p| p.display().to_string())
+            } else {
+                None
+            };
             state.ai_editor = iced::widget::text_editor::Content::new();
             let now = crate::radial::now_secs();
             let chat = state.chat_mut();
@@ -726,7 +732,9 @@ pub(super) fn update(state: &mut RadialState, message: Message) -> Task<Message>
                 // First prompt names the thread for the history list.
                 chat.title = bubble_text.chars().take(48).collect();
             }
-            chat.history.push(ChatMessage::user(bubble_text));
+            let mut user_msg = ChatMessage::user(bubble_text);
+            user_msg.image_path = thumb_path;
+            chat.history.push(user_msg);
             chat.updated_at = now;
             state.ai_loading = true;
             state.ai_activity = Some("Thinking…".to_string());
@@ -810,10 +818,37 @@ pub(super) fn update(state: &mut RadialState, message: Message) -> Task<Message>
             } else {
                 None
             };
-            match summary_task {
-                Some(t) => Task::batch([scroll_chat_to_end(), t]),
-                None => scroll_chat_to_end(),
+            let mut tasks: Vec<Task<Message>> = vec![scroll_chat_to_end()];
+            if let Some(t) = summary_task {
+                tasks.push(t);
             }
+            // Fetch any remote images in the new AI reply for inline display.
+            let urls: Vec<String> = state
+                .ai_threads
+                .get(thread_idx)
+                .and_then(|c| c.history.last())
+                .filter(|m| !m.is_user)
+                .map(|m| collect_remote_image_urls(&m.md))
+                .unwrap_or_default();
+            for url in urls {
+                if !state.ai_image_cache.contains_key(&url) {
+                    state
+                        .ai_image_cache
+                        .insert(url.clone(), crate::radial::ImgState::Loading);
+                    tasks.push(fetch_image_task(url));
+                }
+            }
+            Task::batch(tasks)
+        }
+        Message::AiImageFetched(url, bytes) => {
+            let entry = match bytes {
+                Some(b) => {
+                    crate::radial::ImgState::Ready(iced::widget::image::Handle::from_bytes(b))
+                }
+                None => crate::radial::ImgState::Failed,
+            };
+            state.ai_image_cache.insert(url, entry);
+            Task::none()
         }
         Message::AiSummaryUpdated(thread_idx, summary, upto) => {
             if let (Some(chat), Some(summary)) = (state.ai_threads.get_mut(thread_idx), summary) {
@@ -1357,6 +1392,41 @@ fn export_thread_markdown(t: &crate::radial::ChatThread) -> Result<String, Strin
     Ok(file.display().to_string())
 }
 
+/// Collect remote (`http`/`https`) image URLs referenced in an AI
+/// reply's markdown (top level + inside quotes), for inline fetch.
+fn collect_remote_image_urls(items: &[iced::widget::markdown::Item]) -> Vec<String> {
+    use iced::widget::markdown::Item;
+    let mut out = Vec::new();
+    for it in items {
+        match it {
+            Item::Image { url, .. } => {
+                let u = url.to_string();
+                if u.starts_with("http://") || u.starts_with("https://") {
+                    out.push(u);
+                }
+            }
+            Item::Quote(inner) => out.extend(collect_remote_image_urls(inner)),
+            _ => {}
+        }
+    }
+    out
+}
+
+/// Fetch one remote image's bytes for inline display.
+fn fetch_image_task(url: String) -> Task<Message> {
+    let fetch_url = url.clone();
+    Task::perform(
+        async move {
+            let resp = reqwest::get(&fetch_url).await.ok()?;
+            if !resp.status().is_success() {
+                return None;
+            }
+            resp.bytes().await.ok().map(|b| b.to_vec())
+        },
+        move |opt| Message::AiImageFetched(url.clone(), opt),
+    )
+}
+
 /// Recompute the slash palette from the current input. Opens it when
 /// the input is a single line starting with `/`; closes it otherwise.
 fn refresh_palette(state: &mut RadialState) {
@@ -1577,4 +1647,17 @@ fn haptic_on_submenu_change(before: Option<usize>, after: Option<usize>) -> Task
         crate::haptic_client::trigger_haptic(event.to_string()),
         |_| Message::Noop,
     )
+}
+
+#[cfg(test)]
+mod img_tests {
+    #[test]
+    fn extracts_remote_image_urls() {
+        let md: Vec<_> = iced::widget::markdown::parse(
+            "Here is a pic:\n\n![cat](https://example.com/cat.png)\n\nand a local ![x](/tmp/y.png)",
+        )
+        .collect();
+        let urls = super::collect_remote_image_urls(&md);
+        assert_eq!(urls, vec!["https://example.com/cat.png"], "got {urls:?}");
+    }
 }

@@ -24,6 +24,12 @@ pub struct ChatMessage {
     /// button. `false` for everything written before this field existed.
     #[serde(default)]
     pub is_error: bool,
+
+    /// Path to an image the user attached to this (user) message —
+    /// rendered as a thumbnail in the bubble. `None` for text-only and
+    /// pre-existing messages.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image_path: Option<String>,
 }
 
 impl ChatMessage {
@@ -34,6 +40,7 @@ impl ChatMessage {
             md: Vec::new(),
             card: None,
             is_error: false,
+            image_path: None,
         }
     }
 
@@ -45,6 +52,7 @@ impl ChatMessage {
             md,
             card: None,
             is_error: false,
+            image_path: None,
         }
     }
 
@@ -56,6 +64,7 @@ impl ChatMessage {
             md: Vec::new(),
             card: None,
             is_error: true,
+            image_path: None,
         }
     }
 
@@ -92,6 +101,7 @@ impl ChatMessage {
             md: Vec::new(),
             card: Some(card),
             is_error: false,
+            image_path: None,
         }
     }
 }

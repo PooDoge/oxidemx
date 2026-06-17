@@ -250,59 +250,100 @@ fn bubble_style(
 fn render_ai_markdown<'a>(
     items: &'a [iced::widget::markdown::Item],
     kit: Kit,
+    img_cache: &std::collections::HashMap<String, crate::radial::ImgState>,
 ) -> Element<'a, Message> {
     use iced::widget::markdown;
-    let has_code = items
-        .iter()
-        .any(|it| matches!(it, markdown::Item::CodeBlock { .. }));
-    // Fast path: no code blocks → the plain view (most replies).
-    if !has_code {
+    let special = items.iter().any(|it| {
+        matches!(it, markdown::Item::CodeBlock { .. } | markdown::Item::Image { .. })
+    });
+    // Fast path: no code blocks or images → the plain view (most replies).
+    if !special {
         return markdown::view(items, iced::Theme::CatppuccinMocha)
             .map(|url| Message::AiLinkClicked(url.to_string()));
     }
 
     let mut col = column![].spacing(8);
     let mut run: Vec<&'a markdown::Item> = Vec::new();
-    for item in items {
-        if let markdown::Item::CodeBlock { code, lines, .. } = item {
-            if !run.is_empty() {
-                col = col.push(
-                    markdown::view(run.drain(..), iced::Theme::CatppuccinMocha)
-                        .map(|url| Message::AiLinkClicked(url.to_string())),
-                );
-            }
-            let block = markdown::code_block(
-                markdown::Settings::from(iced::Theme::CatppuccinMocha),
-                lines,
-                |url| Message::AiLinkClicked(url.to_string()),
-            );
-            let copy = button(text("⧉").size(12).color(kit.fade(kit.subtext0, 1.0)))
-                .padding([2, 5])
-                .style(move |_, _| button::Style {
-                    background: Some(iced::Background::Color(kit.fade(kit.surface1, 0.85))),
-                    border: iced::border::Border::default().rounded(6.0),
-                    text_color: kit.fade(kit.text, 1.0),
-                    ..Default::default()
-                })
-                .on_press(Message::AiCopyText(code.clone()));
-            col = col.push(iced::widget::stack![
-                block,
-                container(copy)
-                    .width(Length::Fill)
-                    .align_x(Alignment::End)
-                    .padding(6),
-            ]);
+    let flush = |col: iced::widget::Column<'a, Message>, run: &mut Vec<&'a markdown::Item>| {
+        if run.is_empty() {
+            col
         } else {
-            run.push(item);
+            col.push(
+                markdown::view(run.drain(..), iced::Theme::CatppuccinMocha)
+                    .map(|url| Message::AiLinkClicked(url.to_string())),
+            )
+        }
+    };
+    for item in items {
+        match item {
+            markdown::Item::CodeBlock { code, lines, .. } => {
+                col = flush(col, &mut run);
+                let block = markdown::code_block(
+                    markdown::Settings::from(iced::Theme::CatppuccinMocha),
+                    lines,
+                    |url| Message::AiLinkClicked(url.to_string()),
+                );
+                let copy = button(text("⧉").size(12).color(kit.fade(kit.subtext0, 1.0)))
+                    .padding([2, 5])
+                    .style(move |_, _| button::Style {
+                        background: Some(iced::Background::Color(kit.fade(kit.surface1, 0.85))),
+                        border: iced::border::Border::default().rounded(6.0),
+                        text_color: kit.fade(kit.text, 1.0),
+                        ..Default::default()
+                    })
+                    .on_press(Message::AiCopyText(code.clone()));
+                col = col.push(iced::widget::stack![
+                    block,
+                    container(copy)
+                        .width(Length::Fill)
+                        .align_x(Alignment::End)
+                        .padding(6),
+                ]);
+            }
+            markdown::Item::Image { url, .. } => {
+                col = flush(col, &mut run);
+                col = col.push(render_md_image(&url.to_string(), kit, img_cache));
+            }
+            other => run.push(other),
         }
     }
-    if !run.is_empty() {
-        col = col.push(
-            markdown::view(run.drain(..), iced::Theme::CatppuccinMocha)
-                .map(|url| Message::AiLinkClicked(url.to_string())),
-        );
+    flush(col, &mut run).into()
+}
+
+/// Render an image referenced in an AI reply. Local paths load directly;
+/// remote URLs use the fetch cache (loading / ready / failed→link).
+fn render_md_image<'a>(
+    url: &str,
+    kit: Kit,
+    img_cache: &std::collections::HashMap<String, crate::radial::ImgState>,
+) -> Element<'a, Message> {
+    use crate::radial::ImgState;
+    let show = |handle: iced::widget::image::Handle| -> Element<'a, Message> {
+        container(iced::widget::image(handle).width(Length::Fill))
+            .max_width(360.0)
+            .into()
+    };
+    // Local file path → load directly.
+    if url.starts_with('/') || url.starts_with("file://") {
+        let path = url.strip_prefix("file://").unwrap_or(url);
+        return show(iced::widget::image::Handle::from_path(path));
     }
-    col.into()
+    match img_cache.get(url) {
+        Some(ImgState::Ready(h)) => show(h.clone()),
+        Some(ImgState::Loading) => text("🖼 loading image…")
+            .size(11)
+            .color(kit.fade(kit.subtext0, 1.0))
+            .into(),
+        _ => {
+            // Failed or not-yet-requested → a clickable open-in-browser chip.
+            let owned = url.to_string();
+            button(text("🖼 Open image ↗").size(12).color(kit.fade(kit.accent, 1.0)))
+                .padding([3, 8])
+                .style(|_, _| button::Style::default())
+                .on_press(Message::AiLinkClicked(owned))
+                .into()
+        }
+    }
 }
 
 fn bubble_row<'a>(
@@ -375,12 +416,28 @@ fn bubble_row<'a>(
             })
             .into()
     } else if msg.is_user || msg.md.is_empty() {
-        text(&msg.text)
-            .size(13)
-            .color(kit.fade(kit.text, 1.0))
+        let txt = text(&msg.text).size(13).color(kit.fade(kit.text, 1.0));
+        // Attached-image thumbnail above the user's text.
+        if let Some(path) = &msg.image_path {
+            column![
+                container(
+                    iced::widget::image(iced::widget::image::Handle::from_path(path))
+                        .width(Length::Fill)
+                )
+                .max_width(220.0)
+                .style(move |_| iced::widget::container::Style {
+                    border: iced::border::Border::default().rounded(8.0),
+                    ..Default::default()
+                }),
+                txt,
+            ]
+            .spacing(6)
             .into()
+        } else {
+            txt.into()
+        }
     } else {
-        render_ai_markdown(&msg.md, kit)
+        render_ai_markdown(&msg.md, kit, &state.ai_image_cache)
     };
     let bubble = container(content)
         .padding(iced::Padding {

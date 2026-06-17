@@ -166,6 +166,12 @@ should define one.**
     attachments go to the model directly (vision)** — a 📎'd
     PNG/JPG/GIF/WEBP is decoded + shipped as an inline image (verified on
     Gemini); other files are read via read_file/parse_document.
+    **Attachment thumbnails** show in the input chip + the sent bubble.
+    **Images in AI replies are displayed inline** — local paths load
+    directly; remote `![](url)` images are fetched async + cached
+    (loading / ready / failed→open-in-browser). Still deferred:
+    model-generated inline images (response `inlineData` parsing),
+    multi-attachment, size guardrails, click-to-zoom lightbox.
 11. **Memory & long context** — passive **chat→memory capture** of
     explicit cues ("remember …", "my name is …"), zero-cost/high-
     precision, complementing the agent's memory tool; **rolling thread
