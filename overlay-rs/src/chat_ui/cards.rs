@@ -6,33 +6,41 @@
 use iced::widget::{button, column, container, row, text, Space};
 use iced::{Alignment, Element, Length};
 
+use super::icons::icon;
 use super::Kit;
 use crate::ai_client::AgentCardData;
 use crate::app::Message;
 
-pub fn view<'a>(card: &'a AgentCardData, kit: &Kit) -> Element<'a, Message> {
+/// Render an agent card. `index` is the owning history index (for the
+/// collapse toggle); `expanded` is whether the user opened it.
+pub fn view<'a>(
+    card: &'a AgentCardData,
+    kit: &Kit,
+    index: usize,
+    expanded: bool,
+) -> Element<'a, Message> {
     let kit = *kit;
-    let (tone, glyph, title, meta) = match card {
+    let (tone, icon_name, title, meta) = match card {
         AgentCardData::Command {
             command, exit_code, ..
         } => {
             let head = command.split_whitespace().next().unwrap_or("sh");
             (
-                kit.green,
-                "$",
+                if *exit_code == 0 { kit.green } else { kit.red },
+                "terminal",
                 "Command executed",
                 format!("{head} · exit {exit_code}"),
             )
         }
         AgentCardData::Task { .. } => (
             kit.accent,
-            "🕓",
+            "clock",
             "Task scheduled",
             "systemd user timer".into(),
         ),
         AgentCardData::Memory { retention, .. } => (
             kit.mauve,
-            "✱",
+            "memory",
             "Memory saved",
             format!("retention: {retention}"),
         ),
@@ -45,7 +53,7 @@ pub fn view<'a>(card: &'a AgentCardData, kit: &Kit) -> Element<'a, Message> {
             let done = steps.iter().filter(|s| s.status == "done").count();
             (
                 if *success { kit.accent } else { kit.red },
-                "⛓",
+                "agents",
                 if *success {
                     "Flow completed"
                 } else {
@@ -56,8 +64,11 @@ pub fn view<'a>(card: &'a AgentCardData, kit: &Kit) -> Element<'a, Message> {
         }
     };
 
-    let header = row![
-        text(glyph).size(15).color(kit.fade(tone, 1.0)),
+    // Tool-call (Command) cards collapse; the others always show.
+    let collapsible = matches!(card, AgentCardData::Command { .. });
+
+    let mut header_row = row![
+        icon(icon_name, 15.0, kit.fade(tone, 1.0)),
         text(title)
             .size(11.5)
             .font(iced::Font {
@@ -73,6 +84,21 @@ pub fn view<'a>(card: &'a AgentCardData, kit: &Kit) -> Element<'a, Message> {
     ]
     .spacing(8)
     .align_y(Alignment::Center);
+    if collapsible {
+        header_row = header_row.push(icon("chevron", 13.0, kit.fade(kit.subtext0, 1.0)));
+    }
+
+    // For collapsible cards the header is a toggle button.
+    let header: Element<'a, Message> = if collapsible {
+        button(header_row)
+            .width(Length::Fill)
+            .padding(0)
+            .style(|_, _| button::Style::default())
+            .on_press(Message::AiCardToggle(index))
+            .into()
+    } else {
+        header_row.into()
+    };
 
     let chip = move |label: String, msg: Message| {
         button(text(label).size(10.5).color(kit.fade(kit.subtext1, 1.0)))
@@ -90,17 +116,55 @@ pub fn view<'a>(card: &'a AgentCardData, kit: &Kit) -> Element<'a, Message> {
 
     let (body, chips): (Element<'_, Message>, Vec<Element<'_, Message>>) = match card {
         AgentCardData::Command {
-            command, stdout, ..
+            command,
+            stdout,
+            exit_code,
         } => {
-            let mono = format!("$ {command}\n{stdout}");
-            (
-                text(mono)
-                    .size(11)
+            let body: Element<'a, Message> = if expanded {
+                column![
+                    io_block(kit, "input", &format!("$ {command}")),
+                    super::body::hairline(kit, kit.surface0),
+                    io_block(
+                        kit,
+                        "output",
+                        if stdout.is_empty() {
+                            "(no output)"
+                        } else {
+                            stdout
+                        }
+                    ),
+                ]
+                .into()
+            } else {
+                // Collapsed: a one-line summary, ellipsized.
+                let line = stdout
+                    .lines()
+                    .find(|l| !l.trim().is_empty())
+                    .unwrap_or("")
+                    .trim()
+                    .to_string();
+                let summary = if line.is_empty() {
+                    format!("exit {exit_code}")
+                } else if line.chars().count() > 72 {
+                    line.chars().take(71).collect::<String>() + "…"
+                } else {
+                    line
+                };
+                text(summary)
+                    .size(11.0)
                     .font(iced::Font::MONOSPACE)
-                    .color(kit.fade(kit.subtext1, 1.0))
-                    .into(),
-                vec![],
-            )
+                    .wrapping(iced::widget::text::Wrapping::None)
+                    .color(kit.fade(
+                        if *exit_code == 0 {
+                            kit.subtext1
+                        } else {
+                            kit.red
+                        },
+                        1.0,
+                    ))
+                    .into()
+            };
+            (body, vec![])
         }
         AgentCardData::Task {
             name,
@@ -240,6 +304,35 @@ pub fn view<'a>(card: &'a AgentCardData, kit: &Kit) -> Element<'a, Message> {
         container(framed).width(Length::FillPortion(92)),
         Space::new().width(Length::FillPortion(8)),
     ]
+    .into()
+}
+
+/// A labeled mono code block (the expanded tool-call card's input/output).
+fn io_block<'a>(kit: Kit, label: &'static str, body: &str) -> Element<'a, Message> {
+    column![
+        text(label)
+            .size(9.5)
+            .font(iced::Font::MONOSPACE)
+            .color(kit.fade(kit.subtext0, 1.0)),
+        container(
+            text(body.to_string())
+                .size(11.0)
+                .font(iced::Font::MONOSPACE)
+                .color(kit.fade(kit.text, 1.0))
+        )
+        .width(Length::Fill)
+        .padding([6, 9])
+        .style(move |_| iced::widget::container::Style {
+            background: Some(iced::Background::Color(kit.fade(kit.crust, 1.0))),
+            border: iced::border::Border {
+                color: kit.fade(kit.surface1, 1.0),
+                width: 1.0,
+                radius: 6.0.into(),
+            },
+            ..Default::default()
+        }),
+    ]
+    .spacing(5)
     .into()
 }
 

@@ -121,6 +121,8 @@ pub enum Message {
     AiSkillsSearch(String),
     /// Header segmented switcher selected a view.
     AiShowView(ChatView),
+    /// Expand/collapse an agent/tool card by history index.
+    AiCardToggle(usize),
     /// Slash palette: click row `i`.
     AiPaletteSelect(usize),
     /// Slash palette: move selection by delta (Up/Down).

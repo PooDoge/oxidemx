@@ -141,6 +141,12 @@ pub struct RadialState {
     /// keyed by URL — fetched async when a message finalizes and
     /// rendered inline once ready.
     pub ai_image_cache: std::collections::HashMap<String, ImgState>,
+    /// Token usage accumulated for the in-flight turn `(prompt,
+    /// completion)` — reset on submit, attached to the assistant message
+    /// when it finalizes (drives the per-bubble cost meta).
+    pub ai_turn_tokens: (u32, u32),
+    /// Agent/flow card messages (by history index) the user expanded.
+    pub ai_card_expanded: std::collections::HashSet<usize>,
     /// Thread-rename in progress: `(thread idx, draft title)`.
     pub ai_renaming: Option<(usize, String)>,
     /// User-tweakable animation parameters for menu / submenu /

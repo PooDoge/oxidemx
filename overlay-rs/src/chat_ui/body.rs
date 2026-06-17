@@ -50,7 +50,8 @@ pub fn conversation<'a>(state: &'a RadialState, kit: &Kit) -> Element<'a, Messag
     } else {
         for (i, msg) in state.chat().history.iter().enumerate() {
             if let Some(card) = &msg.card {
-                list = list.push(super::cards::view(card, &kit));
+                let expanded = state.ai_card_expanded.contains(&i);
+                list = list.push(super::cards::view(card, &kit, i, expanded));
                 continue;
             }
             list = list.push(bubble_row(state, kit, i, msg));
@@ -495,23 +496,94 @@ fn bubble_row<'a>(
     .spacing(4)
     .align_y(Alignment::Center);
 
-    // Right-click context menu, attached under the bubble.
-    let mut stack = column![inner].spacing(4);
+    // Per-bubble meta line: time · (model · tokens · cost for AI / "you").
+    let meta_line = bubble_meta(state, kit, msg);
+
+    // bubble + meta + (optional) context menu, stacked.
+    let mut col = column![inner].spacing(2);
+    col = col.push(meta_line);
     if state.ai_context_menu == Some(i) {
-        stack = stack.push(bubble_context_menu(kit, i, msg, selecting));
+        col = col.push(bubble_context_menu(kit, i, msg, selecting));
     }
 
-    // One mouse_area over the whole row+menu: hover stays active when
-    // the pointer moves from the bubble onto its buttons (the old bug
-    // — the area wrapped only the bubble, so reaching for the copy
-    // button left the area and hid it). Left-click dismisses an open
-    // menu; right-click opens it.
-    iced::widget::mouse_area(stack)
+    // AI replies get a sparkle avatar to their left; user messages don't.
+    let body: Element<'a, Message> = if msg.is_user {
+        col.into()
+    } else {
+        let avatar = container(icon("sparkle", 13.0, kit.fade(kit.accent, 1.0)))
+            .width(Length::Fixed(24.0))
+            .height(Length::Fixed(24.0))
+            .align_x(Alignment::Center)
+            .align_y(Alignment::Center)
+            .style(move |_| iced::widget::container::Style {
+                background: Some(iced::Background::Color(kit.fade(kit.surface0, 1.0))),
+                border: iced::border::Border {
+                    color: kit.fade(kit.surface2, 1.0),
+                    width: 1.0,
+                    radius: 12.0.into(),
+                },
+                ..Default::default()
+            });
+        row![avatar, col]
+            .spacing(8)
+            .align_y(Alignment::Start)
+            .into()
+    };
+
+    // One mouse_area over the whole row+menu: hover stays active when the
+    // pointer moves from the bubble onto its buttons. Left-click dismisses
+    // an open menu; right-click opens it.
+    iced::widget::mouse_area(body)
         .on_enter(Message::AiBubbleHover(Some(i)))
         .on_exit(Message::AiBubbleHover(None))
         .on_press(Message::AiBubbleMenu(None))
         .on_right_press(Message::AiBubbleMenu(Some(i)))
         .into()
+}
+
+/// The per-bubble meta line — monospace micro text under the bubble.
+/// AI: `time · model · N tok · $cost`; user: `time · you` (right-aligned).
+fn bubble_meta<'a>(
+    state: &RadialState,
+    kit: Kit,
+    msg: &crate::radial::ChatMessage,
+) -> Element<'a, Message> {
+    let when = if msg.created_at == 0 {
+        String::new()
+    } else {
+        format!("{} · ", crate::app::rel_time(msg.created_at))
+    };
+    let label = if msg.is_user {
+        format!("{when}you")
+    } else {
+        let model = state.chat().model.clone();
+        let model_short = model
+            .strip_prefix("gemini-")
+            .map(|m| format!("gemini {m}"))
+            .unwrap_or(model);
+        let (p, c) = msg.tokens;
+        if p + c > 0 {
+            let cost = (p as f64 / 1e6) * 0.075 + (c as f64 / 1e6) * 0.30;
+            let tot = p + c;
+            let tok = if tot >= 1000 {
+                format!("{:.1}k", tot as f64 / 1000.0)
+            } else {
+                tot.to_string()
+            };
+            format!("{when}{model_short} · {tok} tok · ${cost:.4}")
+        } else {
+            format!("{when}{model_short}")
+        }
+    };
+    let txt = text(label)
+        .size(10.0)
+        .font(iced::Font::MONOSPACE)
+        .color(kit.fade(kit.overlay0, 1.0));
+    if msg.is_user {
+        row![Space::new().width(Length::Fill), txt].into()
+    } else {
+        row![txt].into()
+    }
 }
 
 /// The right-click context menu for a bubble: copy, toggle selection,

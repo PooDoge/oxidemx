@@ -41,6 +41,7 @@ pub(super) fn update(state: &mut RadialState, message: Message) -> Task<Message>
                 | Message::AiScrollToBottom
                 | Message::AiToggleSkills
                 | Message::AiShowView(_)
+                | Message::AiCardToggle(_)
                 | Message::AiSkillEnable(_, _)
                 | Message::AiSkillsSearch(_)
                 | Message::AiPaletteSelect(_)
@@ -738,6 +739,7 @@ pub(super) fn update(state: &mut RadialState, message: Message) -> Task<Message>
             chat.history.push(user_msg);
             chat.updated_at = now;
             state.ai_loading = true;
+            state.ai_turn_tokens = (0, 0);
             state.ai_activity = Some("Thinking…".to_string());
             let mode = state.chat().mode;
             let model = state.chat().model.clone();
@@ -786,7 +788,9 @@ pub(super) fn update(state: &mut RadialState, message: Message) -> Task<Message>
             match res {
                 Ok((reply, next_session_id)) => {
                     chat.session_id = next_session_id;
-                    chat.history.push(ChatMessage::assistant(reply));
+                    let mut m = ChatMessage::assistant(reply);
+                    m.tokens = state.ai_turn_tokens;
+                    chat.history.push(m);
                 }
                 Err(err) => {
                     chat.history.push(ChatMessage::error(err));
@@ -884,6 +888,8 @@ pub(super) fn update(state: &mut RadialState, message: Message) -> Task<Message>
                     chat.tokens_prompt += prompt as u64;
                     chat.tokens_completion += completion as u64;
                 }
+                state.ai_turn_tokens.0 += prompt;
+                state.ai_turn_tokens.1 += completion;
                 Task::none()
             }
             crate::ai_client::StreamEvent::Delta(text) => {
@@ -967,6 +973,12 @@ pub(super) fn update(state: &mut RadialState, message: Message) -> Task<Message>
             if state.ai_show_skills {
                 state.ai_skills = crate::agent::skills::discover();
                 state.ai_skills_enabled = crate::agent::skills::enabled_set();
+            }
+            Task::none()
+        }
+        Message::AiCardToggle(i) => {
+            if !state.ai_card_expanded.remove(&i) {
+                state.ai_card_expanded.insert(i);
             }
             Task::none()
         }

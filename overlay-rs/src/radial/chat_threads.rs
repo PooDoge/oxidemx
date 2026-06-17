@@ -30,6 +30,15 @@ pub struct ChatMessage {
     /// pre-existing messages.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub image_path: Option<String>,
+
+    /// Unix seconds the message was created — drives the per-bubble
+    /// timestamp in the meta line. `0` for pre-existing messages.
+    #[serde(default)]
+    pub created_at: u64,
+    /// Provider token usage for the turn that produced this (assistant)
+    /// message — `(prompt, completion)`. Drives the per-bubble cost meta.
+    #[serde(default)]
+    pub tokens: (u32, u32),
 }
 
 impl ChatMessage {
@@ -41,6 +50,8 @@ impl ChatMessage {
             card: None,
             is_error: false,
             image_path: None,
+            created_at: now_secs(),
+            tokens: (0, 0),
         }
     }
 
@@ -53,6 +64,8 @@ impl ChatMessage {
             card: None,
             is_error: false,
             image_path: None,
+            created_at: now_secs(),
+            tokens: (0, 0),
         }
     }
 
@@ -65,6 +78,8 @@ impl ChatMessage {
             card: None,
             is_error: true,
             image_path: None,
+            created_at: now_secs(),
+            tokens: (0, 0),
         }
     }
 
@@ -102,6 +117,8 @@ impl ChatMessage {
             card: Some(card),
             is_error: false,
             image_path: None,
+            created_at: now_secs(),
+            tokens: (0, 0),
         }
     }
 }

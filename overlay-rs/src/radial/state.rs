@@ -60,6 +60,8 @@ impl RadialState {
             ai_threads_query: String::new(),
             ai_attachment: None,
             ai_image_cache: std::collections::HashMap::new(),
+            ai_turn_tokens: (0, 0),
+            ai_card_expanded: std::collections::HashSet::new(),
             ai_activity: None,
             ai_abort: None,
             ai_hover_msg: None,
