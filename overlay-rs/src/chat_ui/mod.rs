@@ -167,10 +167,18 @@ pub fn view(state: &RadialState, alpha: f32) -> Element<'_, Message> {
             ..iced::Padding::default()
         });
 
-    // Slash-command palette floats above everything when open.
+    // Overlays, back to front: slash palette, then the image lightbox
+    // (modal, on top of everything).
+    let mut layers: Vec<Element<'_, Message>> = vec![base.into()];
     if state.ai_palette.is_some() {
-        iced::widget::stack![base, palette::overlay(state, kit)].into()
+        layers.push(palette::overlay(state, kit));
+    }
+    if let Some(lb) = body::lightbox(state, &kit) {
+        layers.push(lb);
+    }
+    if layers.len() == 1 {
+        layers.pop().unwrap()
     } else {
-        base.into()
+        iced::widget::Stack::with_children(layers).into()
     }
 }

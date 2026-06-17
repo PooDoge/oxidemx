@@ -475,29 +475,76 @@ fn render_md_image<'a>(
     img_cache: &std::collections::HashMap<String, crate::radial::ImgState>,
 ) -> Element<'a, Message> {
     use crate::radial::ImgState;
-    let show = |handle: iced::widget::image::Handle| -> Element<'a, Message> {
-        container(iced::widget::image(handle).width(Length::Fill))
+    // A ready image → click to open the lightbox, with a "zoom" badge.
+    let show = |handle: iced::widget::image::Handle, open_url: String| -> Element<'a, Message> {
+        let img = container(iced::widget::image(handle).width(Length::Fill))
             .max_width(360.0)
+            .style(move |_| iced::widget::container::Style {
+                border: iced::border::Border {
+                    color: kit.fade(kit.surface1, 1.0),
+                    width: 1.0,
+                    radius: 10.0.into(),
+                },
+                ..Default::default()
+            });
+        let badge = container(
+            row![
+                icon("search", 11.0, kit.fade(kit.text, 1.0)),
+                text("Zoom").size(10.0).color(kit.fade(kit.text, 1.0)),
+            ]
+            .spacing(4)
+            .align_y(Alignment::Center),
+        )
+        .padding([2, 7])
+        .style(move |_| iced::widget::container::Style {
+            background: Some(iced::Background::Color(kit.fade(kit.crust, 0.7))),
+            border: iced::border::Border::default().rounded(6.0),
+            ..Default::default()
+        });
+        let stacked = iced::widget::stack![
+            img,
+            container(badge)
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .align_x(Alignment::End)
+                .align_y(Alignment::End)
+                .padding(6),
+        ];
+        iced::widget::mouse_area(stacked)
+            .on_press(Message::AiLightboxOpen(open_url))
             .into()
     };
     // Local file path → load directly.
     if url.starts_with('/') || url.starts_with("file://") {
         let path = url.strip_prefix("file://").unwrap_or(url);
-        return show(iced::widget::image::Handle::from_path(path));
+        return show(
+            iced::widget::image::Handle::from_path(path),
+            url.to_string(),
+        );
     }
     match img_cache.get(url) {
-        Some(ImgState::Ready(h)) => show(h.clone()),
-        Some(ImgState::Loading) => text("🖼 loading image…")
-            .size(11)
-            .color(kit.fade(kit.subtext0, 1.0))
-            .into(),
+        Some(ImgState::Ready(h)) => show(h.clone(), url.to_string()),
+        Some(ImgState::Loading) => row![
+            icon("imgx", 13.0, kit.fade(kit.subtext0, 1.0)),
+            text("loading image…")
+                .size(11)
+                .color(kit.fade(kit.subtext0, 1.0)),
+        ]
+        .spacing(6)
+        .align_y(Alignment::Center)
+        .into(),
         _ => {
-            // Failed or not-yet-requested → a clickable open-in-browser chip.
+            // Failed or not-yet-requested → open-in-browser chip.
             let owned = url.to_string();
             button(
-                text("🖼 Open image ↗")
-                    .size(12)
-                    .color(kit.fade(kit.accent, 1.0)),
+                row![
+                    icon("imgx", 13.0, kit.fade(kit.accent, 1.0)),
+                    text("Open image ↗")
+                        .size(12)
+                        .color(kit.fade(kit.accent, 1.0)),
+                ]
+                .spacing(6)
+                .align_y(Alignment::Center),
             )
             .padding([3, 8])
             .style(|_, _| button::Style::default())
@@ -505,6 +552,66 @@ fn render_md_image<'a>(
             .into()
         }
     }
+}
+
+/// The full-window image lightbox (modal e3 over a dark scrim) when
+/// `ai_lightbox` is set and the image is available. Click anywhere or
+/// the Close button to dismiss.
+pub fn lightbox<'a>(state: &RadialState, kit: &Kit) -> Option<Element<'a, Message>> {
+    let kit = *kit;
+    let url = state.ai_lightbox.as_ref()?;
+    let handle = if url.starts_with('/') || url.starts_with("file://") {
+        iced::widget::image::Handle::from_path(url.strip_prefix("file://").unwrap_or(url))
+    } else {
+        match state.ai_image_cache.get(url) {
+            Some(crate::radial::ImgState::Ready(h)) => h.clone(),
+            _ => return None,
+        }
+    };
+    let name = url.rsplit('/').next().unwrap_or(url).to_string();
+
+    let bar = row![
+        text(name).size(12.0).color(kit.fade(kit.text, 1.0)),
+        Space::new().width(Length::Fill),
+        button(
+            row![
+                icon("close", 11.0, kit.fade(kit.text, 1.0)),
+                text("Close").size(11.0).color(kit.fade(kit.text, 1.0)),
+            ]
+            .spacing(5)
+            .align_y(Alignment::Center),
+        )
+        .padding([4, 10])
+        .style(move |_, _| button::Style {
+            background: Some(iced::Background::Color(kit.fade(kit.surface0, 1.0))),
+            border: iced::border::Border::default().rounded(8.0),
+            ..Default::default()
+        })
+        .on_press(Message::AiLightboxClose),
+    ]
+    .spacing(8)
+    .align_y(Alignment::Center);
+
+    let frame = iced::widget::center(iced::widget::image(handle).width(Length::Fill));
+
+    let content = column![bar, frame].spacing(10).padding(16);
+
+    let scrim = container(content)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .style(move |_| iced::widget::container::Style {
+            background: Some(iced::Background::Color(iced::Color {
+                a: 0.88 * kit.alpha,
+                ..kit.crust
+            })),
+            ..Default::default()
+        });
+
+    Some(
+        iced::widget::mouse_area(scrim)
+            .on_press(Message::AiLightboxClose)
+            .into(),
+    )
 }
 
 fn bubble_row<'a>(

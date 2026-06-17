@@ -147,6 +147,9 @@ pub struct RadialState {
     pub ai_turn_tokens: (u32, u32),
     /// Agent/flow card messages (by history index) the user expanded.
     pub ai_card_expanded: std::collections::HashSet<usize>,
+    /// A reply image opened in the full-window lightbox (its URL/path),
+    /// or `None` when the lightbox is closed.
+    pub ai_lightbox: Option<String>,
     /// Thread-rename in progress: `(thread idx, draft title)`.
     pub ai_renaming: Option<(usize, String)>,
     /// User-tweakable animation parameters for menu / submenu /

@@ -123,6 +123,10 @@ pub enum Message {
     AiShowView(ChatView),
     /// Expand/collapse an agent/tool card by history index.
     AiCardToggle(usize),
+    /// Open a reply image in the full-window lightbox.
+    AiLightboxOpen(String),
+    /// Close the lightbox.
+    AiLightboxClose,
     /// Slash palette: click row `i`.
     AiPaletteSelect(usize),
     /// Slash palette: move selection by delta (Up/Down).

@@ -42,6 +42,8 @@ pub(super) fn update(state: &mut RadialState, message: Message) -> Task<Message>
                 | Message::AiToggleSkills
                 | Message::AiShowView(_)
                 | Message::AiCardToggle(_)
+                | Message::AiLightboxOpen(_)
+                | Message::AiLightboxClose
                 | Message::AiSkillEnable(_, _)
                 | Message::AiSkillsSearch(_)
                 | Message::AiPaletteSelect(_)
@@ -982,6 +984,14 @@ pub(super) fn update(state: &mut RadialState, message: Message) -> Task<Message>
             }
             Task::none()
         }
+        Message::AiLightboxOpen(url) => {
+            state.ai_lightbox = Some(url);
+            Task::none()
+        }
+        Message::AiLightboxClose => {
+            state.ai_lightbox = None;
+            Task::none()
+        }
         Message::AiShowView(view) => {
             use crate::app::ChatView;
             state.ai_show_skills = view == ChatView::Skills;
@@ -1091,16 +1101,7 @@ pub(super) fn update(state: &mut RadialState, message: Message) -> Task<Message>
             // Only stage drops while the overlay is on screen (drops can
             // only reach our window when it's visible anyway).
             if state.is_drawable() {
-                let name = path
-                    .file_name()
-                    .map(|n| n.to_string_lossy().to_string())
-                    .unwrap_or_default();
-                state.ai_attachment = Some(path);
-                state.ai_toast = Some((format!("📎 Attached {name}"), std::time::Instant::now()));
-                Task::perform(
-                    tokio::time::sleep(std::time::Duration::from_millis(1600)),
-                    |_| Message::AiToastExpire,
-                )
+                stage_attachment(state, path)
             } else {
                 Task::none()
             }
@@ -1115,22 +1116,10 @@ pub(super) fn update(state: &mut RadialState, message: Message) -> Task<Message>
             },
             Message::AiAttachReceived,
         ),
-        Message::AiAttachReceived(opt) => {
-            if let Some(path) = opt {
-                let name = path
-                    .file_name()
-                    .map(|n| n.to_string_lossy().to_string())
-                    .unwrap_or_default();
-                state.ai_attachment = Some(path);
-                state.ai_toast = Some((format!("📎 Attached {name}"), std::time::Instant::now()));
-                Task::perform(
-                    tokio::time::sleep(std::time::Duration::from_millis(1600)),
-                    |_| Message::AiToastExpire,
-                )
-            } else {
-                Task::none()
-            }
-        }
+        Message::AiAttachReceived(opt) => match opt {
+            Some(path) => stage_attachment(state, path),
+            None => Task::none(),
+        },
         Message::AiAttachClear => {
             state.ai_attachment = None;
             Task::none()
@@ -1445,6 +1434,28 @@ fn export_thread_markdown(t: &crate::radial::ChatThread) -> Result<String, Strin
     }
     std::fs::write(&file, md).map_err(|e| e.to_string())?;
     Ok(file.display().to_string())
+}
+
+/// Stage a file as the next prompt's attachment, enforcing the 20 MB
+/// cap (oversize is rejected with a toast). Either way a toast shows.
+fn stage_attachment(state: &mut RadialState, path: std::path::PathBuf) -> Task<Message> {
+    const CAP: u64 = 20 * 1024 * 1024;
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+    let toast = if size > CAP {
+        format!("⚠ {name} is over the 20 MB limit")
+    } else {
+        state.ai_attachment = Some(path);
+        format!("📎 Attached {name}")
+    };
+    state.ai_toast = Some((toast, std::time::Instant::now()));
+    Task::perform(
+        tokio::time::sleep(std::time::Duration::from_millis(1800)),
+        |_| Message::AiToastExpire,
+    )
 }
 
 /// Collect remote (`http`/`https`) image URLs referenced in an AI

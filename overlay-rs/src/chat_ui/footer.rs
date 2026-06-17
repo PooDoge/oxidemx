@@ -175,12 +175,10 @@ pub fn view<'a>(state: &'a RadialState, kit: &Kit) -> Element<'a, Message> {
                     .width(Length::Fixed(28.0))
                     .height(Length::Fixed(28.0)),
             );
+        } else {
+            chip = chip.push(icon("doc", 16.0, kit.fade(kit.subtext0, 1.0)));
         }
-        chip = chip.push(
-            text(format!("{}{name}", if is_img { "" } else { "📎 " }))
-                .size(11)
-                .color(kit.fade(kit.text, 1.0)),
-        );
+        chip = chip.push(text(name).size(11).color(kit.fade(kit.text, 1.0)));
         chip = chip.push(
             button(icon("close", 11.0, kit.fade(kit.subtext0, 1.0)))
                 .padding([0, 4])
