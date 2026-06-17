@@ -147,13 +147,51 @@ pub fn view<'a>(state: &'a RadialState, kit: &Kit) -> Element<'a, Message> {
         .on_press(Message::AiSubmitPrompt)
     };
 
-    container(
-        column![
-            activity,
-            row![editor, action_btn].spacing(8).align_y(Alignment::End),
-        ]
-        .spacing(6),
-    )
+    // 📎 attach button (opens the native picker; drag-drop also works).
+    let attach_btn = button(text("📎").size(16).color(kit.fade(kit.subtext0, 1.0)))
+        .height(Length::Fixed(40.0))
+        .padding([0, 8])
+        .style(|_, _| button::Style::default())
+        .on_press(Message::AiAttachPick);
+
+    let mut col = column![activity];
+    // Staged-attachment chip (drag-drop or picker), with a clear ✕.
+    if let Some(path) = &state.ai_attachment {
+        let name = path
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| path.display().to_string());
+        col = col.push(
+            container(
+                row![
+                    text(format!("📎 {name}")).size(11).color(kit.fade(kit.text, 1.0)),
+                    button(text("✕").size(12).color(kit.fade(kit.subtext0, 1.0)))
+                        .padding([0, 4])
+                        .style(|_, _| button::Style::default())
+                        .on_press(Message::AiAttachClear),
+                ]
+                .spacing(6)
+                .align_y(Alignment::Center),
+            )
+            .padding([3, 8])
+            .style(move |_| iced::widget::container::Style {
+                background: Some(iced::Background::Color(kit.fade(kit.surface0, 0.9))),
+                border: iced::border::Border {
+                    color: kit.fade(kit.surface2, 1.0),
+                    width: 1.0,
+                    radius: 8.0.into(),
+                },
+                ..Default::default()
+            }),
+        );
+    }
+    col = col.push(
+        row![editor, attach_btn, action_btn]
+            .spacing(8)
+            .align_y(Alignment::End),
+    );
+
+    container(col.spacing(6))
     .width(Length::Fill)
     .height(Length::Fixed(EDGE_PAD + FOOTER_H))
     .padding(iced::Padding {

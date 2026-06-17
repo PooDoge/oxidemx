@@ -120,6 +120,12 @@ pub struct RadialState {
     pub ai_palette: Option<(usize, Vec<crate::chat_ui::palette::PaletteItem>)>,
     /// Cached `(id, name)` of the user's flows, for the palette.
     pub ai_flow_cache: Vec<(String, String)>,
+    /// Search filter for the thread list view.
+    pub ai_threads_query: String,
+    /// A file staged to attach to the next prompt (drag-drop or picker).
+    /// On submit, the agent is told to read it (via read_file /
+    /// parse_document).
+    pub ai_attachment: Option<std::path::PathBuf>,
     /// Thread-rename in progress: `(thread idx, draft title)`.
     pub ai_renaming: Option<(usize, String)>,
     /// User-tweakable animation parameters for menu / submenu /

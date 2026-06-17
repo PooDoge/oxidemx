@@ -120,6 +120,19 @@ pub enum Message {
     AiPaletteClose,
     /// Retry the last failed turn (Retry button on an error bubble).
     AiRetryLast,
+    /// Search filter in the thread-list view.
+    AiThreadsSearch(String),
+    /// Export a thread (by index) to a Markdown file.
+    AiExportThread(usize),
+    /// A file was dropped onto the overlay window — stage it as an
+    /// attachment for the next prompt.
+    AiFileDropped(std::path::PathBuf),
+    /// Open the native file picker to attach a file.
+    AiAttachPick,
+    /// Picker result.
+    AiAttachReceived(Option<std::path::PathBuf>),
+    /// Clear the staged attachment.
+    AiAttachClear,
     /// The conversation was scrolled (tracks whether the "jump to
     /// latest" affordance should show).
     AiChatScrolled(iced::widget::scrollable::Viewport),

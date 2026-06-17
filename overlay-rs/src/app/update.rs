@@ -45,6 +45,10 @@ pub(super) fn update(state: &mut RadialState, message: Message) -> Task<Message>
                 | Message::AiPaletteSelect(_)
                 | Message::AiPaletteRun
                 | Message::AiRetryLast
+                | Message::AiThreadsSearch(_)
+                | Message::AiExportThread(_)
+                | Message::AiAttachPick
+                | Message::AiAttachClear
                 | Message::AiToggleMemories
                 | Message::AiMemorySearch(_)
                 | Message::AiMemoryDelete(_)
@@ -656,18 +660,42 @@ pub(super) fn update(state: &mut RadialState, message: Message) -> Task<Message>
             Task::none()
         }
         Message::AiSubmitPrompt => {
-            let prompt = state.ai_editor.text().trim().to_string();
-            if state.ai_loading || prompt.is_empty() {
+            let typed = state.ai_editor.text().trim().to_string();
+            let attachment = state.ai_attachment.take();
+            if state.ai_loading || (typed.is_empty() && attachment.is_none()) {
                 return Task::none();
             }
+            // The bubble shows the user's text + a 📎 chip; the agent
+            // gets an explicit instruction to read the attached file via
+            // its existing read_file / parse_document tools.
+            let (bubble_text, prompt) = match &attachment {
+                Some(p) => {
+                    let fname = p
+                        .file_name()
+                        .map(|n| n.to_string_lossy().to_string())
+                        .unwrap_or_else(|| p.display().to_string());
+                    let bubble = if typed.is_empty() {
+                        format!("📎 {fname}")
+                    } else {
+                        format!("{typed}\n\n📎 {fname}")
+                    };
+                    let sent = format!(
+                        "{typed}\n\n[The user attached a file — read it with read_file \
+                         (or parse_document for PDF/DOCX/XLSX/etc.) and use its contents: {}]",
+                        p.display()
+                    );
+                    (bubble, sent)
+                }
+                None => (typed.clone(), typed.clone()),
+            };
             state.ai_editor = iced::widget::text_editor::Content::new();
             let now = crate::radial::now_secs();
             let chat = state.chat_mut();
             if chat.history.is_empty() {
                 // First prompt names the thread for the history list.
-                chat.title = prompt.chars().take(48).collect();
+                chat.title = bubble_text.chars().take(48).collect();
             }
-            chat.history.push(ChatMessage::user(prompt.clone()));
+            chat.history.push(ChatMessage::user(bubble_text));
             chat.updated_at = now;
             state.ai_loading = true;
             state.ai_activity = Some("Thinking…".to_string());
@@ -893,6 +921,72 @@ pub(super) fn update(state: &mut RadialState, message: Message) -> Task<Message>
             } else {
                 Task::none()
             }
+        }
+        Message::AiThreadsSearch(q) => {
+            state.ai_threads_query = q;
+            Task::none()
+        }
+        Message::AiExportThread(idx) => {
+            let toast = match state.ai_threads.get(idx) {
+                Some(t) => match export_thread_markdown(t) {
+                    Ok(path) => format!("✓ Exported to {path}"),
+                    Err(e) => format!("⚠ Export failed: {e}"),
+                },
+                None => "⚠ No such thread".to_string(),
+            };
+            state.ai_toast = Some((toast, std::time::Instant::now()));
+            Task::perform(
+                tokio::time::sleep(std::time::Duration::from_millis(2200)),
+                |_| Message::AiToastExpire,
+            )
+        }
+        Message::AiFileDropped(path) => {
+            // Only stage drops while the overlay is on screen (drops can
+            // only reach our window when it's visible anyway).
+            if state.is_drawable() {
+                let name = path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_default();
+                state.ai_attachment = Some(path);
+                state.ai_toast = Some((format!("📎 Attached {name}"), std::time::Instant::now()));
+                Task::perform(
+                    tokio::time::sleep(std::time::Duration::from_millis(1600)),
+                    |_| Message::AiToastExpire,
+                )
+            } else {
+                Task::none()
+            }
+        }
+        Message::AiAttachPick => Task::perform(
+            async {
+                rfd::AsyncFileDialog::new()
+                    .set_title("Attach a file")
+                    .pick_file()
+                    .await
+                    .map(|h| h.path().to_path_buf())
+            },
+            Message::AiAttachReceived,
+        ),
+        Message::AiAttachReceived(opt) => {
+            if let Some(path) = opt {
+                let name = path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_default();
+                state.ai_attachment = Some(path);
+                state.ai_toast = Some((format!("📎 Attached {name}"), std::time::Instant::now()));
+                Task::perform(
+                    tokio::time::sleep(std::time::Duration::from_millis(1600)),
+                    |_| Message::AiToastExpire,
+                )
+            } else {
+                Task::none()
+            }
+        }
+        Message::AiAttachClear => {
+            state.ai_attachment = None;
+            Task::none()
         }
         Message::AiBubbleHover(idx) => {
             state.ai_hover_msg = idx;
@@ -1144,6 +1238,45 @@ fn refresh_tasks() -> Task<Message> {
         },
         Message::AiTasksLoaded,
     )
+}
+
+/// Write a thread to a Markdown file under
+/// `~/.local/share/oxidemx/exports/` and return the path (as a string).
+fn export_thread_markdown(t: &crate::radial::ChatThread) -> Result<String, String> {
+    let home = std::env::var("HOME").map_err(|_| "no HOME".to_string())?;
+    let dir = std::path::Path::new(&home).join(".local/share/oxidemx/exports");
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let slug: String = t
+        .title
+        .chars()
+        .map(|c| if c.is_alphanumeric() { c.to_ascii_lowercase() } else { '-' })
+        .collect::<String>()
+        .trim_matches('-')
+        .chars()
+        .take(40)
+        .collect();
+    let slug = if slug.is_empty() { "chat".to_string() } else { slug };
+    let file = dir.join(format!("{slug}-{}.md", t.updated_at));
+
+    let mut md = String::new();
+    md.push_str(&format!("# {}\n\n", if t.title.is_empty() { "Untitled chat" } else { &t.title }));
+    md.push_str(&format!(
+        "_Model: {} · {} messages · exported from OxideMX_\n\n---\n\n",
+        t.model,
+        t.history.len()
+    ));
+    for m in &t.history {
+        if m.is_error {
+            md.push_str(&format!("> ⚠ **Error:** {}\n\n", m.text));
+        } else if let Some(card) = &m.card {
+            let _ = card;
+            md.push_str(&format!("> 🔧 {}\n\n", m.text));
+        } else {
+            md.push_str(&format!("**{}**\n\n{}\n\n", if m.is_user { "You" } else { "Oxide" }, m.text));
+        }
+    }
+    std::fs::write(&file, md).map_err(|e| e.to_string())?;
+    Ok(file.display().to_string())
 }
 
 /// Recompute the slash palette from the current input. Opens it when

@@ -441,21 +441,48 @@ fn bubble_context_menu<'a>(
 /// from the pre-redesign toolbar, reached via the strip's "…" chip.
 pub fn threads_list<'a>(state: &'a RadialState, kit: &Kit) -> Element<'a, Message> {
     let kit = *kit;
+
+    let query = state.ai_threads_query.trim().to_lowercase();
+    let matches = |t: &crate::radial::ChatThread| -> bool {
+        query.is_empty()
+            || t.title.to_lowercase().contains(&query)
+            || t.history.iter().any(|m| m.text.to_lowercase().contains(&query))
+    };
+
+    let search = text_input("Search chats…", &state.ai_threads_query)
+        .size(12)
+        .padding(7)
+        .on_input(Message::AiThreadsSearch)
+        .style(move |theme, status| {
+            let mut s = iced::widget::text_input::default(theme, status);
+            s.background = iced::Background::Color(kit.fade(kit.crust, 1.0));
+            s.border.color = kit.fade(kit.surface2, 1.0);
+            s.border.radius = 10.0.into();
+            s.value = kit.fade(kit.text, 1.0);
+            s.placeholder = kit.fade(kit.subtext0, 1.0);
+            s
+        })
+        .width(Length::Fill);
+
     let mut list = column![].spacing(6);
     let saved = state
         .ai_threads
         .iter()
-        .filter(|t| !t.history.is_empty())
+        .filter(|t| !t.history.is_empty() && matches(t))
         .count();
     if saved == 0 {
         list = list.push(
-            text("No previous chats yet.")
-                .size(12)
-                .color(kit.fade(kit.subtext0, 1.0)),
+            text(if query.is_empty() {
+                "No previous chats yet."
+            } else {
+                "No chats match the search."
+            })
+            .size(12)
+            .color(kit.fade(kit.subtext0, 1.0)),
         );
     }
     for (idx, thread) in state.ai_threads.iter().enumerate().rev() {
-        if thread.history.is_empty() {
+        if thread.history.is_empty() || !matches(thread) {
             continue;
         }
         let is_active = idx == state.ai_active;
@@ -534,14 +561,19 @@ pub fn threads_list<'a>(state: &'a RadialState, kit: &Kit) -> Element<'a, Messag
             row![
                 open_btn,
                 rename_btn,
+                small_btn("📤", Message::AiExportThread(idx)),
                 small_btn("✕", Message::AiDeleteThread(idx)),
             ]
             .spacing(4)
             .align_y(Alignment::Center),
         );
     }
-    scrollable(container(list).padding(iced::Padding::default().right(12.0)))
-        .style(kit.scrollable_style())
-        .height(Length::Fill)
-        .into()
+    column![
+        search,
+        scrollable(container(list).padding(iced::Padding::default().right(12.0)))
+            .style(kit.scrollable_style())
+            .height(Length::Fill),
+    ]
+    .spacing(8)
+    .into()
 }

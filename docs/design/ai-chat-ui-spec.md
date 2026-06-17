@@ -123,7 +123,7 @@ should define one.**
 - **Slash palette:** typing `/` opens a floating fuzzy command list
   (actions, flows, enabled skills). Up/Down/Enter/Esc.
 - **Issues:** palette styling is minimal; no icons-with-meaning; input has
-  no attach affordance (file/image); no token/cost display.
+  no attach affordance (file/image); (token/cost now shown in the thread strip).
 
 ### Panels (mutually exclusive with conversation)
 - **Skills** (`skills.rs`, `❖`): search + per-skill enable toggle, source
@@ -157,6 +157,13 @@ should define one.**
    render a red **error bubble with a Retry button**; per-thread
    **token usage + rough cost** readout in the thread strip
    (`↑in ↓out · ~$cost`).
+10. **Richer I/O** — **thread search** (filter the chat list by title +
+    content); **export** a thread to Markdown (📤 → `~/.local/share/
+    oxidemx/exports/`); **file attachment** via drag-drop or a 📎 picker
+    (staged chip; on submit the agent reads it with read_file /
+    parse_document). Code-block **syntax highlighting** is already active
+    (iced `highlighter`). Deferred: per-code-block copy button,
+    image→vision attach (needs Task/Image plumbing to the provider).
 
 ---
 
@@ -227,7 +234,7 @@ Four themes are in flight (theme 1 shipped):
    `use_skill` (progressive disclosure) + commands-as-templates. Done.
 2. ✅ **Backend reliability** — retry/backoff, token/cost telemetry
    (thread-strip readout), error bubbles + Retry. Done.
-3. **Richer I/O** — file/image attach, code highlighting, export, search.
+3. ✅ **Richer I/O** — thread search, export, file attach (drag-drop + picker); code highlighting already on. Image→vision attach deferred. Done.
 4. **Memory & long context** — chat→memory auto-capture, thread
    summarization.
 

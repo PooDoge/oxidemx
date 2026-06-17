@@ -57,6 +57,8 @@ impl RadialState {
             ai_skills_query: String::new(),
             ai_palette: None,
             ai_flow_cache: Vec::new(),
+            ai_threads_query: String::new(),
+            ai_attachment: None,
             ai_activity: None,
             ai_abort: None,
             ai_hover_msg: None,

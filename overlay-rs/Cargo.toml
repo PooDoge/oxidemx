@@ -60,6 +60,10 @@ futures-util = "0.3"
 # kill-on-timeout, which std::process can't do without threads).
 tokio = { version = "1", features = ["rt", "macros", "time", "fs", "process"] }
 
+# Native file picker for chat attachments (xdg-desktop-portal on
+# Wayland — no GTK/Qt runtime dep). Async API pairs with Task::perform.
+rfd = "0.15"
+
 # Image loading for slice icons. iced::widget::svg + the `image`
 # crate cover SVG/PNG/JPEG; tiny-skia rasterises SVGs through resvg
 # when iced isn't doing it itself.

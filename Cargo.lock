@@ -5388,6 +5388,7 @@ dependencies = [
  "percent-encoding",
  "reqwest 0.12.28",
  "resvg 0.44.0",
+ "rfd",
  "serde",
  "serde_json",
  "tiny-skia",
