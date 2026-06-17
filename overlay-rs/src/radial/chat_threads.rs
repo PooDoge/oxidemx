@@ -19,6 +19,11 @@ pub struct ChatMessage {
     /// load unchanged.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub card: Option<crate::ai_client::AgentCardData>,
+
+    /// A failed turn — rendered as a red error bubble with a Retry
+    /// button. `false` for everything written before this field existed.
+    #[serde(default)]
+    pub is_error: bool,
 }
 
 impl ChatMessage {
@@ -28,6 +33,7 @@ impl ChatMessage {
             text,
             md: Vec::new(),
             card: None,
+            is_error: false,
         }
     }
 
@@ -38,6 +44,18 @@ impl ChatMessage {
             text,
             md,
             card: None,
+            is_error: false,
+        }
+    }
+
+    /// A failed turn. Rendered distinctly with a Retry affordance.
+    pub fn error(text: String) -> Self {
+        ChatMessage {
+            is_user: false,
+            text,
+            md: Vec::new(),
+            card: None,
+            is_error: true,
         }
     }
 
@@ -73,6 +91,7 @@ impl ChatMessage {
             text,
             md: Vec::new(),
             card: Some(card),
+            is_error: false,
         }
     }
 }
@@ -102,6 +121,12 @@ pub struct ChatThread {
     /// labels in the thread list.
     #[serde(default)]
     pub updated_at: u64,
+    /// Cumulative provider token usage for this thread (prompt /
+    /// completion), summed across turns for the usage + cost readout.
+    #[serde(default)]
+    pub tokens_prompt: u64,
+    #[serde(default)]
+    pub tokens_completion: u64,
 }
 
 fn default_chat_model() -> String {
@@ -125,6 +150,8 @@ impl Default for ChatThread {
             session_id: None,
             model: default_chat_model(),
             updated_at: 0,
+            tokens_prompt: 0,
+            tokens_completion: 0,
         }
     }
 }

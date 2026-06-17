@@ -44,6 +44,7 @@ pub(super) fn update(state: &mut RadialState, message: Message) -> Task<Message>
                 | Message::AiSkillsSearch(_)
                 | Message::AiPaletteSelect(_)
                 | Message::AiPaletteRun
+                | Message::AiRetryLast
                 | Message::AiToggleMemories
                 | Message::AiMemorySearch(_)
                 | Message::AiMemoryDelete(_)
@@ -711,8 +712,7 @@ pub(super) fn update(state: &mut RadialState, message: Message) -> Task<Message>
                     chat.history.push(ChatMessage::assistant(reply));
                 }
                 Err(err) => {
-                    chat.history
-                        .push(ChatMessage::assistant(format!("Error: {}", err)));
+                    chat.history.push(ChatMessage::error(err));
                 }
             }
             chat.updated_at = crate::radial::now_secs();
@@ -736,6 +736,13 @@ pub(super) fn update(state: &mut RadialState, message: Message) -> Task<Message>
                 }
                 crate::radial::save_chat_threads(&state.ai_threads);
                 scroll_chat_to_end()
+            }
+            crate::ai_client::StreamEvent::Usage { prompt, completion } => {
+                if let Some(chat) = state.ai_threads.get_mut(thread_idx) {
+                    chat.tokens_prompt += prompt as u64;
+                    chat.tokens_completion += completion as u64;
+                }
+                Task::none()
             }
             crate::ai_client::StreamEvent::Delta(text) => {
                 match &mut state.ai_stream {
@@ -856,6 +863,36 @@ pub(super) fn update(state: &mut RadialState, message: Message) -> Task<Message>
         Message::AiPaletteClose => {
             state.ai_palette = None;
             Task::none()
+        }
+        Message::AiRetryLast => {
+            if state.ai_loading {
+                return Task::none();
+            }
+            // Drop trailing non-user messages (the error + any cards from
+            // the failed turn) and the last user message, then resubmit
+            // it through the normal submit path.
+            let prompt = {
+                let chat = state.chat_mut();
+                while chat.history.last().is_some_and(|m| !m.is_user) {
+                    chat.history.pop();
+                }
+                match chat.history.pop() {
+                    Some(u) if u.is_user => Some(u.text),
+                    other => {
+                        // Put it back if it wasn't a user message.
+                        if let Some(m) = other {
+                            chat.history.push(m);
+                        }
+                        None
+                    }
+                }
+            };
+            if let Some(text) = prompt {
+                state.ai_editor = iced::widget::text_editor::Content::with_text(&text);
+                Task::done(Message::AiSubmitPrompt)
+            } else {
+                Task::none()
+            }
         }
         Message::AiBubbleHover(idx) => {
             state.ai_hover_msg = idx;

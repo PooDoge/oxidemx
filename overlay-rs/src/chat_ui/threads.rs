@@ -8,6 +8,23 @@ use super::Kit;
 use crate::app::Message;
 use crate::radial::RadialState;
 
+/// Compact token count: `1.2k` past a thousand, else the raw number.
+fn fmt_tokens(n: u64) -> String {
+    if n >= 1000 {
+        format!("{:.1}k", n as f64 / 1000.0)
+    } else {
+        n.to_string()
+    }
+}
+
+/// Rough USD cost estimate from token counts. Rates are approximate
+/// Gemini per-1M-token prices (Flash vs Pro); shown with a `~` since the
+/// active provider/model may differ. Good enough for a budget feel.
+fn est_cost(prompt: u64, completion: u64, pro: bool) -> f64 {
+    let (in_rate, out_rate) = if pro { (1.25, 10.0) } else { (0.075, 0.30) };
+    (prompt as f64 / 1_000_000.0) * in_rate + (completion as f64 / 1_000_000.0) * out_rate
+}
+
 /// How many recent threads render as chips before the "…" chip
 /// hands off to the full list view. Two keeps the strip inside the
 /// default 484 px window next to the mode pill + flash indicator.
@@ -106,6 +123,25 @@ pub fn strip<'a>(state: &'a RadialState, kit: &Kit) -> Element<'a, Message> {
     bar = bar.push(chip("▦".into(), false, true, Message::AiOpenCommandCenter));
     bar = bar.push(chip("⚙".into(), false, true, Message::AiOpenAgentsConfig));
     bar = bar.push(chip("🔌".into(), false, true, Message::AiOpenMcpConfig));
+
+    // Token/cost readout for the active thread (when any usage recorded).
+    let tp = state.chat().tokens_prompt;
+    let tc = state.chat().tokens_completion;
+    if tp + tc > 0 {
+        let cost = est_cost(tp, tc, state.chat().model == crate::ai_client::PRO_MODEL);
+        bar = bar.push(
+            text(format!(
+                "↑{} ↓{} · ~${:.4}",
+                fmt_tokens(tp),
+                fmt_tokens(tc),
+                cost
+            ))
+            .size(10.0)
+            .wrapping(iced::widget::text::Wrapping::None)
+            .color(kit.fade(kit.subtext0, 1.0)),
+        );
+        bar = bar.push(Space::new().width(Length::Fixed(6.0)));
+    }
 
     // Flash/Pro indicator, right-aligned with the sparkle.
     let is_pro = state.chat().model == crate::ai_client::PRO_MODEL;

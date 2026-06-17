@@ -152,6 +152,11 @@ should define one.**
    system prompt; the agent loads a skill's full body on demand via a
    `use_skill` tool (progressive disclosure). Slash palette also runs
    `.claude/commands/*.md` prompt-templates (`$ARGUMENTS`/`$1`..`$9`).
+9. **Backend reliability** — transient errors (429/5xx/timeout/conn)
+   auto-retry with backoff (a "retrying" activity shows); failed turns
+   render a red **error bubble with a Retry button**; per-thread
+   **token usage + rough cost** readout in the thread strip
+   (`↑in ↓out · ~$cost`).
 
 ---
 
@@ -220,8 +225,8 @@ Four themes are in flight (theme 1 shipped):
 
 1. ✅ **Discoverability / Skills** — palette + skills system + agent
    `use_skill` (progressive disclosure) + commands-as-templates. Done.
-2. **Backend reliability** — retry/backoff, **token/cost telemetry**
-   (needs a UI surface), error bubbles + Retry.
+2. ✅ **Backend reliability** — retry/backoff, token/cost telemetry
+   (thread-strip readout), error bubbles + Retry. Done.
 3. **Richer I/O** — file/image attach, code highlighting, export, search.
 4. **Memory & long context** — chat→memory auto-capture, thread
    summarization.

@@ -183,94 +183,161 @@ pub async fn run(
     let (provider, model, key) = resolve_provider(model_hint)?;
 
     // Hybrid lexical+semantic memory recall (falls back to lexical
-    // internally if embeddings are unavailable).
+    // internally if embeddings are unavailable). Computed once; the
+    // agent (system + tools) is cheap to clone per retry attempt.
     let system = mode.system_instruction_async(prompt).await;
     let tools = build_tools(mode, &sink);
-    let agent = OverlayAgent {
-        system,
-        tools,
-        sink: sink.clone(),
-    };
-
-    let llm: Arc<dyn LLMProvider> = oxidemx_agent::factory::provider_from_config(
-        provider, &model, &key,
-    )
-    .map_err(|e| Box::new(e) as BoxError)?;
-
-    // Ship the thread transcript so the model has multi-turn context.
-    let mut memory = SlidingWindowMemory::new(40);
-    for (is_user, text) in history {
-        let role = if *is_user {
-            ChatRole::User
-        } else {
-            ChatRole::Assistant
-        };
-        let _ = memory
-            .remember(&ChatMessage {
-                role,
-                message_type: MessageType::Text,
-                content: text.clone(),
-            })
-            .await;
-    }
-
-    // 10 (the ReAct default) is too few for a chat agent that may chain
-    // several tools in one turn (read a file, run a command, search,
-    // run a flow…). At 10, a multi-tool request runs out of turns and
-    // the model fabricates "no result" for tools it never reached. 30
-    // gives ample headroom while still bounding runaway loops.
-    // AUTO-DETECT streaming: the AutoAgents OpenAI/Anthropic backends
-    // implement streaming-with-tools, but Google (Gemini) does not (it
-    // errors) and Ollama/Claude-Code have no streaming. So we stream
-    // tokens live ONLY when the active provider supports it, and run
-    // non-streaming everywhere else (Gemini still gets live "Thinking…"
-    // + tool cards via the sink). Either way the final reply is returned.
     let streaming = provider.supports_streaming_tools();
-    let mut handle = AgentBuilder::<_, DirectAgent>::new(ReActAgent::with_max_turns(agent, 30))
-        .llm(llm)
-        .memory(Box::new(memory))
-        .stream(streaming)
-        .build()
-        .await?;
+    let debug = std::env::var_os("OXIDEMX_AGENT_DEBUG").is_some();
 
-    if streaming {
-        use futures_util::StreamExt;
-        forward_stream(handle.subscribe_events(), sink.clone());
-        let debug = std::env::var_os("OXIDEMX_AGENT_DEBUG").is_some();
-        // run_stream drives the streaming executor (deltas emit live);
-        // the last non-empty yielded response is the final reply.
-        let mut out = handle.agent.run_stream(Task::new(prompt)).await?;
-        let mut reply = String::new();
-        let mut last_err: Option<String> = None;
-        while let Some(item) = out.next().await {
-            match item {
-                Ok(s) => {
-                    if debug {
-                        eprintln!("[stream item] {:?}", s);
+    // Retry transient provider failures (rate limits, 5xx, timeouts,
+    // connection resets) with exponential backoff. Non-transient errors
+    // (auth, bad request) fail fast so the user sees the real problem.
+    const MAX_ATTEMPTS: u32 = 3;
+    let mut attempt = 0u32;
+    loop {
+        attempt += 1;
+
+        let agent = OverlayAgent {
+            system: system.clone(),
+            tools: tools.clone(),
+            sink: sink.clone(),
+        };
+        let llm: Arc<dyn LLMProvider> =
+            oxidemx_agent::factory::provider_from_config(provider, &model, &key)
+                .map_err(|e| Box::new(e) as BoxError)?;
+
+        // Ship the thread transcript so the model has multi-turn context.
+        let mut memory = SlidingWindowMemory::new(40);
+        for (is_user, text) in history {
+            let role = if *is_user {
+                ChatRole::User
+            } else {
+                ChatRole::Assistant
+            };
+            let _ = memory
+                .remember(&ChatMessage {
+                    role,
+                    message_type: MessageType::Text,
+                    content: text.clone(),
+                })
+                .await;
+        }
+
+        // max_turns 30: a chat agent may chain several tools in one turn
+        // (read a file, run a command, search, run a flow…); the ReAct
+        // default of 10 runs out and the model fabricates "no result".
+        let built = AgentBuilder::<_, DirectAgent>::new(ReActAgent::with_max_turns(agent, 30))
+            .llm(llm)
+            .memory(Box::new(memory))
+            .stream(streaming)
+            .build()
+            .await;
+        let mut handle = match built {
+            Ok(h) => h,
+            Err(e) => {
+                let msg = e.to_string();
+                if attempt < MAX_ATTEMPTS && is_retryable(&msg) {
+                    backoff(&sink, attempt, MAX_ATTEMPTS).await;
+                    continue;
+                }
+                return Err(Box::new(e) as BoxError);
+            }
+        };
+
+        // Either path returns Ok(reply) or Err(message) for this attempt.
+        let outcome: Result<String, String> = if streaming {
+            use futures_util::StreamExt;
+            forward_stream(handle.subscribe_events(), sink.clone());
+            match handle.agent.run_stream(Task::new(prompt)).await {
+                Ok(mut out) => {
+                    let mut reply = String::new();
+                    let mut last_err: Option<String> = None;
+                    while let Some(item) = out.next().await {
+                        match item {
+                            Ok(s) => {
+                                if debug {
+                                    eprintln!("[stream item] {s:?}");
+                                }
+                                if !s.is_empty() {
+                                    reply = s;
+                                }
+                            }
+                            Err(e) => {
+                                if debug {
+                                    eprintln!("[stream ERR] {e}");
+                                }
+                                last_err = Some(e.to_string());
+                            }
+                        }
                     }
-                    if !s.is_empty() {
-                        reply = s;
+                    match (reply.is_empty(), last_err) {
+                        (true, Some(e)) => Err(e),
+                        _ => Ok(reply),
                     }
                 }
-                Err(e) => {
-                    if debug {
-                        eprintln!("[stream ERR] {e}");
-                    }
-                    last_err = Some(e.to_string());
+                Err(e) => Err(e.to_string()),
+            }
+        } else {
+            drain_events(handle.subscribe_events());
+            handle
+                .agent
+                .run(Task::new(prompt))
+                .await
+                .map_err(|e| e.to_string())
+        };
+
+        match outcome {
+            Ok(reply) => return Ok((reply, None)),
+            Err(msg) => {
+                if attempt < MAX_ATTEMPTS && is_retryable(&msg) {
+                    backoff(&sink, attempt, MAX_ATTEMPTS).await;
+                    continue;
                 }
+                return Err(msg.into());
             }
         }
-        if reply.is_empty() {
-            if let Some(e) = last_err {
-                return Err(format!("streaming run failed: {e}").into());
-            }
-        }
-        Ok((reply, None))
-    } else {
-        drain_events(handle.subscribe_events());
-        let reply: String = handle.agent.run(Task::new(prompt)).await?;
-        Ok((reply, None))
     }
+}
+
+/// Whether an error message looks like a transient/retryable provider
+/// failure (rate limit, 5xx, timeout, connection) rather than a hard
+/// error (auth, bad request, quota exhausted).
+fn is_retryable(msg: &str) -> bool {
+    let m = msg.to_lowercase();
+    const TRANSIENT: &[&str] = &[
+        "429",
+        "rate limit",
+        "rate-limit",
+        "ratelimit",
+        "overloaded",
+        "503",
+        "502",
+        "504",
+        "500 internal",
+        "unavailable",
+        "temporarily",
+        "timeout",
+        "timed out",
+        "connection",
+        "reset by peer",
+        "broken pipe",
+        "dns",
+    ];
+    TRANSIENT.iter().any(|p| m.contains(p))
+}
+
+/// Exponential backoff (0.5s, 1s, 2s) between attempts, with a
+/// user-visible "Retrying" activity.
+async fn backoff(sink: &Option<StreamSink>, attempt: u32, max: u32) {
+    if let Some(s) = sink {
+        s.send(StreamEvent::Activity(format!(
+            "Connection hiccup — retrying ({attempt}/{max})…"
+        )))
+        .await;
+    }
+    let ms = 500u64 * 2u64.pow(attempt - 1);
+    tokio::time::sleep(std::time::Duration::from_millis(ms)).await;
 }
 
 /// Forward the executor's text-delta StreamChunks to the chat thread as
@@ -284,21 +351,46 @@ where
     use futures_util::StreamExt;
     let debug = std::env::var_os("OXIDEMX_AGENT_DEBUG").is_some();
     tokio::spawn(async move {
+        // Gemini reports usageMetadata cumulatively WITHIN a round (the
+        // count grows across chunks), so summing every Usage event would
+        // over-count. Track the latest per round and flush it once on
+        // the round's Done — that sums correctly across multi-round
+        // (tool-using) turns.
+        let mut pending_usage: Option<(u32, u32)> = None;
+        macro_rules! flush_usage {
+            () => {
+                if let Some((p, c)) = pending_usage.take() {
+                    if let Some(s) = &sink {
+                        s.send(StreamEvent::Usage {
+                            prompt: p,
+                            completion: c,
+                        })
+                        .await;
+                    }
+                }
+            };
+        }
         while let Some(ev) = rx.next().await {
             if debug {
-                // Same event trace as the non-streaming drain path, so
-                // tooling (scripts/agent-smoke.sh) that greps for
-                // ToolCallRequested/Completed works in either mode.
                 eprintln!("[event] {ev:?}");
             }
-            if let Event::StreamChunk { chunk: StreamChunk::Text(t), .. } = ev {
-                if !t.is_empty() {
+            match ev {
+                Event::StreamChunk { chunk: StreamChunk::Text(t), .. } if !t.is_empty() => {
                     if let Some(s) = &sink {
                         s.send(StreamEvent::Delta(t)).await;
                     }
                 }
+                Event::StreamChunk { chunk: StreamChunk::Usage(u), .. } => {
+                    pending_usage = Some((u.prompt_tokens, u.completion_tokens));
+                }
+                Event::StreamChunk { chunk: StreamChunk::Done { .. }, .. } => {
+                    flush_usage!();
+                }
+                _ => {}
             }
         }
+        // Safety net if the stream ended without a trailing Done.
+        flush_usage!();
     });
 }
 

@@ -18,7 +18,7 @@ use crate::{
     builder::LLMBuilder,
     chat::{
         ChatMessage, ChatProvider, ChatResponse, ChatRole, MessageType, StreamChunk,
-        StructuredOutputFormat, Tool,
+        StructuredOutputFormat, Tool, Usage,
     },
     completion::{CompletionProvider, CompletionRequest, CompletionResponse},
     embedding::{EmbeddingBuilder, EmbeddingProvider},
@@ -133,6 +133,21 @@ struct GoogleChatResponse {
 struct GoogleStreamResponse {
     /// Generated completion candidates
     candidates: Option<Vec<GoogleCandidate>>,
+    /// Token accounting — present on the final SSE chunk.
+    #[serde(rename = "usageMetadata", default)]
+    usage_metadata: Option<GoogleUsageMetadata>,
+}
+
+/// Gemini's `usageMetadata` (token counts), mapped to the cross-provider
+/// `Usage` so the executor's `StreamChunk::Usage` carries it.
+#[derive(Deserialize, Debug)]
+struct GoogleUsageMetadata {
+    #[serde(rename = "promptTokenCount", default)]
+    prompt_token_count: u32,
+    #[serde(rename = "candidatesTokenCount", default)]
+    candidates_token_count: u32,
+    #[serde(rename = "totalTokenCount", default)]
+    total_token_count: u32,
 }
 
 impl std::fmt::Display for GoogleChatResponse {
@@ -849,6 +864,16 @@ fn extract_google_stream_chunks(
             Ok(r) => r,
             Err(_) => continue,
         };
+        // Token accounting (final chunk) → StreamChunk::Usage.
+        if let Some(um) = &response.usage_metadata {
+            out.push(Ok(StreamChunk::Usage(Usage {
+                prompt_tokens: um.prompt_token_count,
+                completion_tokens: um.candidates_token_count,
+                total_tokens: um.total_token_count,
+                completion_tokens_details: None,
+                prompt_tokens_details: None,
+            })));
+        }
         let Some(candidates) = response.candidates else {
             continue;
         };

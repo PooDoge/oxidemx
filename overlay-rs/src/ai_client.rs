@@ -43,6 +43,10 @@ pub enum StreamEvent {
     /// saved). Rendered by `chat_ui::cards` and persisted on the
     /// owning `ChatMessage`.
     Card(AgentCardData),
+    /// Token usage reported by the provider for this turn (prompt,
+    /// completion). Accumulated into the thread for the usage/cost
+    /// readout.
+    Usage { prompt: u32, completion: u32 },
 }
 
 /// Payload for the three agent-feature card types. Serialized into

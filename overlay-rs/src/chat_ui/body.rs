@@ -249,6 +249,49 @@ fn bubble_row<'a>(
     i: usize,
     msg: &'a crate::radial::ChatMessage,
 ) -> Element<'a, Message> {
+    // Failed-turn bubble: red-tinted, with a Retry that re-runs the
+    // last user prompt.
+    if msg.is_error {
+        let card = container(
+            column![
+                row![
+                    text("⚠").size(13).color(kit.fade(kit.red, 1.0)),
+                    text(format!("Something went wrong: {}", msg.text))
+                        .size(12.5)
+                        .color(kit.fade(kit.text, 1.0)),
+                ]
+                .spacing(8),
+                button(text("↻ Retry").size(12).color(kit.fade(kit.crust, 1.0)))
+                    .padding([4, 12])
+                    .style(move |_, _| button::Style {
+                        background: Some(iced::Background::Color(kit.fade(kit.red, 0.9))),
+                        border: iced::border::Border::default().rounded(10.0),
+                        text_color: kit.fade(kit.crust, 1.0),
+                        ..Default::default()
+                    })
+                    .on_press(Message::AiRetryLast),
+            ]
+            .spacing(8),
+        )
+        .padding(iced::Padding {
+            top: 9.0,
+            right: 13.0,
+            bottom: 9.0,
+            left: 13.0,
+        })
+        .max_width(bubble_max_width(state))
+        .style(move |_| iced::widget::container::Style {
+            background: Some(iced::Background::Color(kit.fade(kit.red, 0.12))),
+            border: iced::border::Border {
+                color: kit.fade(kit.red, 0.6),
+                width: 1.0,
+                radius: 12.0.into(),
+            },
+            ..Default::default()
+        });
+        return row![card, Space::new().width(Length::Fill)].into();
+    }
+
     let selecting = matches!(&state.ai_select, Some((idx, _)) if *idx == i);
 
     // Bubble body: a read-only text_editor while selecting (so the

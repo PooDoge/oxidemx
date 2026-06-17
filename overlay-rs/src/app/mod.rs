@@ -118,6 +118,8 @@ pub enum Message {
     AiPaletteRun,
     /// Slash palette: dismiss (Esc).
     AiPaletteClose,
+    /// Retry the last failed turn (Retry button on an error bubble).
+    AiRetryLast,
     /// The conversation was scrolled (tracks whether the "jump to
     /// latest" affordance should show).
     AiChatScrolled(iced::widget::scrollable::Viewport),
