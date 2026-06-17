@@ -1128,7 +1128,12 @@ fn refresh_palette(state: &mut RadialState) {
     }
     let mut enabled: Vec<String> = crate::agent::skills::enabled_set().into_iter().collect();
     enabled.sort();
-    let items = crate::chat_ui::palette::build(query, &state.ai_flow_cache, &enabled);
+    let commands: Vec<(String, String, std::path::PathBuf)> =
+        crate::agent::skills::discover_commands()
+            .into_iter()
+            .map(|c| (c.name, c.description, c.path))
+            .collect();
+    let items = crate::chat_ui::palette::build(query, &state.ai_flow_cache, &enabled, &commands);
     let sel = state
         .ai_palette
         .as_ref()
@@ -1169,6 +1174,15 @@ fn run_palette(state: &mut RadialState) -> Task<Message> {
         PaletteKind::Skill(name) => {
             let on = !state.ai_skills_enabled.contains(&name);
             Task::done(Message::AiSkillEnable(name, on))
+        }
+        PaletteKind::Command(path, args) => {
+            match crate::agent::skills::render_command(&path, &args) {
+                Some(prompt) if !prompt.is_empty() => {
+                    state.ai_editor = iced::widget::text_editor::Content::with_text(&prompt);
+                    Task::done(Message::AiSubmitPrompt)
+                }
+                _ => Task::none(),
+            }
         }
     }
 }

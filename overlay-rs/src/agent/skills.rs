@@ -107,6 +107,104 @@ pub fn discover() -> Vec<Skill> {
     out
 }
 
+/// A discovered prompt-template command (`.claude/commands/<name>.md`).
+/// The file body is a prompt with `$ARGUMENTS` / `$1`..`$9` placeholders
+/// — the Claude slash-command convention.
+#[derive(Clone, Debug)]
+pub struct PromptCommand {
+    pub name: String,
+    pub description: String,
+    pub path: PathBuf,
+}
+
+/// Command roots: `<dir>/commands/*.md` siblings of the skill roots.
+fn command_roots() -> Vec<PathBuf> {
+    let mut v = Vec::new();
+    if let Some(h) = home() {
+        v.push(h.join(".claude/commands"));
+        v.push(h.join(".gemini/antigravity/commands"));
+    }
+    v.push(PathBuf::from(".claude/commands"));
+    v
+}
+
+/// Discover prompt-template commands across the command roots
+/// (top-level `*.md` only), de-duplicated by name, sorted.
+pub fn discover_commands() -> Vec<PromptCommand> {
+    let mut out = Vec::new();
+    let mut seen = HashSet::new();
+    for root in command_roots() {
+        let Ok(rd) = std::fs::read_dir(&root) else {
+            continue;
+        };
+        for e in rd.flatten() {
+            let path = e.path();
+            if path.extension().and_then(|x| x.to_str()) != Some("md") {
+                continue;
+            }
+            let name = match path.file_stem().and_then(|s| s.to_str()) {
+                Some(n) => n.to_string(),
+                None => continue,
+            };
+            if !seen.insert(name.clone()) {
+                continue;
+            }
+            // Optional `description:` frontmatter; else first non-empty
+            // body line as a hint.
+            let src = std::fs::read_to_string(&path).unwrap_or_default();
+            let (_n, desc) = parse_frontmatter(&src);
+            let description = desc.unwrap_or_else(|| {
+                command_body_of(&src)
+                    .lines()
+                    .map(str::trim)
+                    .find(|l| !l.is_empty())
+                    .unwrap_or("")
+                    .chars()
+                    .take(80)
+                    .collect()
+            });
+            out.push(PromptCommand { name, description, path });
+        }
+    }
+    out.sort_by_key(|c| c.name.to_lowercase());
+    out
+}
+
+/// Body of a command/skill file with the leading `---` frontmatter
+/// (if any) stripped.
+fn command_body_of(src: &str) -> String {
+    if src.trim_start().starts_with("---") {
+        let mut parts = src.splitn(3, "---");
+        if let (Some(_), Some(_), Some(body)) = (parts.next(), parts.next(), parts.next()) {
+            return body.trim_start().to_string();
+        }
+    }
+    src.to_string()
+}
+
+/// Render a command's prompt: substitute `$ARGUMENTS` with the full arg
+/// string and `$1`..`$9` with positional words. If the template has no
+/// placeholders, the args are appended on a new line.
+pub fn render_command(path: &Path, args: &str) -> Option<String> {
+    let src = std::fs::read_to_string(path).ok()?;
+    let mut body = command_body_of(&src);
+    let has_placeholder = body.contains("$ARGUMENTS") || (1..=9).any(|i| body.contains(&format!("${i}")));
+    if has_placeholder {
+        body = body.replace("$ARGUMENTS", args);
+        for (i, word) in args.split_whitespace().enumerate().take(9) {
+            body = body.replace(&format!("${}", i + 1), word);
+        }
+        // Clear any unfilled positionals.
+        for i in 1..=9 {
+            body = body.replace(&format!("${i}"), "");
+        }
+    } else if !args.trim().is_empty() {
+        body.push_str("\n\n");
+        body.push_str(args);
+    }
+    Some(body.trim().to_string())
+}
+
 #[derive(Default, serde::Serialize, serde::Deserialize)]
 struct SkillsConfig {
     #[serde(default)]
@@ -174,5 +272,27 @@ mod tests {
             eprintln!("  [{}] {} — {}", s.source, s.name, &s.description.chars().take(60).collect::<String>());
         }
         assert!(!skills.is_empty(), "expected to discover skills");
+    }
+
+    #[test]
+    fn render_command_substitutes_args() {
+        let dir = std::env::temp_dir().join("oxidemx-cmd-test");
+        let _ = std::fs::create_dir_all(&dir);
+        let f = dir.join("deploy.md");
+        std::fs::write(
+            &f,
+            "---\ndescription: deploy it\n---\nDeploy to $1 with notes: $ARGUMENTS",
+        )
+        .unwrap();
+        let out = super::render_command(&f, "staging fast rollback").unwrap();
+        assert!(out.contains("Deploy to staging"), "got: {out}");
+        assert!(out.contains("notes: staging fast rollback"), "got: {out}");
+
+        // No-placeholder template appends args.
+        let g = dir.join("note.md");
+        std::fs::write(&g, "Summarize this:").unwrap();
+        let out2 = super::render_command(&g, "the meeting").unwrap();
+        assert_eq!(out2, "Summarize this:\n\nthe meeting");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

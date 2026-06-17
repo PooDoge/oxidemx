@@ -148,6 +148,10 @@ should define one.**
 6. **`✓ Copied` toast.**
 7. **Skills system** — native SKILL.md discovery (Claude + Antigravity),
    Skills panel, slash palette (`/`).
+8. **Agent uses skills** — enabled skills' name+description go in the
+   system prompt; the agent loads a skill's full body on demand via a
+   `use_skill` tool (progressive disclosure). Slash palette also runs
+   `.claude/commands/*.md` prompt-templates (`$ARGUMENTS`/`$1`..`$9`).
 
 ---
 
@@ -214,8 +218,8 @@ patterns.
 
 Four themes are in flight (theme 1 shipped):
 
-1. ✅ **Discoverability / Skills** — palette + skills system (slice 2:
-   `use_skill` tool + commands-as-templates still to come).
+1. ✅ **Discoverability / Skills** — palette + skills system + agent
+   `use_skill` (progressive disclosure) + commands-as-templates. Done.
 2. **Backend reliability** — retry/backoff, **token/cost telemetry**
    (needs a UI surface), error bubbles + Retry.
 3. **Richer I/O** — file/image attach, code highlighting, export, search.

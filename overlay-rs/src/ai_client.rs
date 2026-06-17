@@ -199,6 +199,34 @@ fn available_flows_block() -> Option<String> {
     Some(block)
 }
 
+/// A block listing the user's ENABLED skills (`name — description`) so
+/// the agent knows its candidate pool. The full instructions for any one
+/// skill are loaded on demand via the `use_skill` tool — progressive
+/// disclosure, so a large skill library doesn't bloat every prompt.
+/// `None` when no skills are enabled.
+fn available_skills_block() -> Option<String> {
+    let enabled = crate::agent::skills::enabled_set();
+    if enabled.is_empty() {
+        return None;
+    }
+    let mut lines = Vec::new();
+    for s in crate::agent::skills::discover() {
+        if enabled.contains(&s.name) {
+            lines.push(format!("- `{}` — {}", s.name, s.description));
+        }
+    }
+    if lines.is_empty() {
+        return None;
+    }
+    let mut block = String::from(
+        "AVAILABLE SKILLS (enabled by the user). When one is clearly relevant to the \
+         request, call use_skill with its exact name to load its full instructions, then \
+         follow them. Apply skills silently — don't announce them unless asked:\n",
+    );
+    block.push_str(&lines.join("\n"));
+    Some(block)
+}
+
 fn get_config_path() -> std::path::PathBuf {
     let home = std::env::var("HOME").unwrap_or_else(|_| "/home/jim".to_string());
     std::path::Path::new(&home).join(".config/oxidemx/config.json")
@@ -315,6 +343,13 @@ impl AgentMode {
         if let Some(flows) = available_flows_block() {
             full.push_str("\n\n");
             full.push_str(&flows);
+        }
+        // Progressive disclosure: the agent sees the names + one-liners
+        // of the user's ENABLED skills, and loads a skill's full body on
+        // demand via use_skill when it's relevant.
+        if let Some(skills) = available_skills_block() {
+            full.push_str("\n\n");
+            full.push_str(&skills);
         }
         // soul.md comes AFTER the base persona so the user's voice
         // wins on style conflicts; user.md after the memory rules

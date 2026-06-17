@@ -26,6 +26,9 @@ pub enum PaletteKind {
     Flow(String),
     /// Toggle a skill's enabled state — carries the skill name.
     Skill(String),
+    /// Run a prompt-template command — carries the file path + the
+    /// argument string (text typed after the command name).
+    Command(std::path::PathBuf, String),
 }
 
 /// One palette row.
@@ -44,8 +47,23 @@ impl PaletteItem {
 }
 
 /// Build the (filtered) command list from the query, the user's flows
-/// (`(id, name)`), and their enabled skills.
-pub fn build(query: &str, flows: &[(String, String)], skills: &[String]) -> Vec<PaletteItem> {
+/// (`(id, name)`), their enabled skills, and their prompt-template
+/// commands (`(name, description, path)`). For commands the first query
+/// word selects the command and the rest is passed as its arguments.
+pub fn build(
+    query: &str,
+    flows: &[(String, String)],
+    skills: &[String],
+    commands: &[(String, String, std::path::PathBuf)],
+) -> Vec<PaletteItem> {
+    let q = query.trim();
+    let q_lower = q.to_lowercase();
+    let first = q.split_whitespace().next().unwrap_or("").to_lowercase();
+    let args = q
+        .split_once(char::is_whitespace)
+        .map(|(_, rest)| rest.trim().to_string())
+        .unwrap_or_default();
+
     let mut items = vec![
         PaletteItem::new("＋", "New chat", "Start a fresh conversation", PaletteKind::NewChat),
         PaletteItem::new("▦", "Command Center", "Open Mission Control", PaletteKind::CommandCenter),
@@ -72,15 +90,27 @@ pub fn build(query: &str, flows: &[(String, String)], skills: &[String]) -> Vec<
             PaletteKind::Skill(name.clone()),
         ));
     }
+    for (name, desc, path) in commands {
+        items.push(PaletteItem::new(
+            "⌘",
+            format!("/{name}"),
+            desc.clone(),
+            PaletteKind::Command(path.clone(), args.clone()),
+        ));
+    }
 
-    let q = query.trim().to_lowercase();
     if q.is_empty() {
         return items;
     }
     items
         .into_iter()
-        .filter(|it| {
-            it.label.to_lowercase().contains(&q) || it.hint.to_lowercase().contains(&q)
+        .filter(|it| match &it.kind {
+            // Commands match on the first word (the rest is arguments).
+            PaletteKind::Command(..) => first.is_empty() || it.label.to_lowercase().contains(&first),
+            _ => {
+                it.label.to_lowercase().contains(&q_lower)
+                    || it.hint.to_lowercase().contains(&q_lower)
+            }
         })
         .collect()
 }

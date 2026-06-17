@@ -85,6 +85,18 @@ pub(super) fn agent_tool_declarations() -> Vec<serde_json::Value> {
         }),
         json!({
             "type": "function",
+            "name": "use_skill",
+            "description": "Load the full instructions for one of the AVAILABLE SKILLS (listed in your system context) by its exact name, then follow them. Call this when an enabled skill is clearly relevant to the user's request. Returns the skill's instruction body.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": { "type": "string", "description": "The exact skill name from AVAILABLE SKILLS" }
+                },
+                "required": ["name"]
+            }
+        }),
+        json!({
+            "type": "function",
             "name": "run_flow",
             "description": "Run a multi-agent OxideMX flow (a named, pre-authored pipeline of agent steps) via the conductor. Use when the user asks to run a flow by name, or for a multi-step task a flow exists for (e.g. 'research-digest' to fetch+digest+answer a URL). List available flows is out of scope — the user knows the flow id. Streams live per-step progress and returns a summary; a card with a 'Watch' button to Mission Control appears in chat.",
             "parameters": {
@@ -280,6 +292,7 @@ pub(crate) async fn execute_local_tool(
             read_tool(name, args, sink).await
         }
         "compose_flow" => compose_flow_tool(&args, sink).await,
+        "use_skill" => use_skill_tool(&args, sink).await,
         "run_flow" => run_flow_tool(&args, sink).await,
         "execute_command" => execute_command_tool(&args, sink).await,
         "schedule_task" => schedule_task_tool(&args, sink).await,
@@ -465,6 +478,46 @@ fn slugify_flow_id(raw: &str) -> String {
 /// `compose_flow`: write a model-authored flow.md to the flows dir and
 /// validate it via the conductor, returning the result so the model can
 /// fix-and-retry. Authoring (not running) — the user runs it after.
+/// `use_skill`: load an enabled skill's full instructions (progressive
+/// disclosure — the agent only sees name+description until it asks). The
+/// body becomes the tool result so the model can follow it this turn.
+async fn use_skill_tool(
+    args: &serde_json::Value,
+    sink: &Option<StreamSink>,
+) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+    let name = args["name"]
+        .as_str()
+        .ok_or("use_skill: `name` missing or not a string")?;
+    send_activity(sink, format!("Loading skill: {name}…")).await;
+
+    let enabled = crate::agent::skills::enabled_set();
+    let skill = crate::agent::skills::discover()
+        .into_iter()
+        .find(|s| s.name == name && enabled.contains(&s.name));
+    let Some(skill) = skill else {
+        return Ok(format!(
+            "No enabled skill named '{name}'. Only enabled skills can be used — \
+             check the AVAILABLE SKILLS list for exact names."
+        ));
+    };
+    match crate::agent::skills::read_body(&skill.path) {
+        Some(body) => {
+            // Cap so an oversized skill can't blow the context window.
+            let capped: String = body.chars().take(12_000).collect();
+            let suffix = if capped.len() < body.len() {
+                "\n\n…[skill truncated]"
+            } else {
+                ""
+            };
+            Ok(format!(
+                "SKILL '{}' — follow these instructions for the current task:\n\n{capped}{suffix}",
+                skill.name
+            ))
+        }
+        None => Ok(format!("Skill '{name}' could not be read.")),
+    }
+}
+
 async fn compose_flow_tool(
     args: &serde_json::Value,
     sink: &Option<StreamSink>,
