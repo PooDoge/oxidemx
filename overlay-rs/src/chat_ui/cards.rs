@@ -46,7 +46,11 @@ pub fn view<'a>(card: &'a AgentCardData, kit: &Kit) -> Element<'a, Message> {
             (
                 if *success { kit.accent } else { kit.red },
                 "⛓",
-                if *success { "Flow completed" } else { "Flow run" },
+                if *success {
+                    "Flow completed"
+                } else {
+                    "Flow run"
+                },
                 format!("{flow_id} · {done}/{} steps", steps.len()),
             )
         }
@@ -160,7 +164,9 @@ pub fn view<'a>(card: &'a AgentCardData, kit: &Kit) -> Element<'a, Message> {
                 col = col.push(
                     row![
                         text(g).size(11).color(kit.fade(c, 1.0)),
-                        text(s.step.clone()).size(11.5).color(kit.fade(kit.subtext1, 1.0)),
+                        text(s.step.clone())
+                            .size(11.5)
+                            .color(kit.fade(kit.subtext1, 1.0)),
                     ]
                     .spacing(7)
                     .align_y(Alignment::Center),

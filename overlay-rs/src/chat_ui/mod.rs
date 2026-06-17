@@ -15,11 +15,13 @@ pub mod body;
 pub mod cards;
 pub mod footer;
 pub mod header;
+pub mod icons;
 pub mod memories;
 pub mod palette;
 pub mod skills;
 pub mod tasks;
 pub mod threads;
+pub mod tokens;
 
 use iced::{Color, Element, Length};
 

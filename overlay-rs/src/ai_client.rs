@@ -426,62 +426,62 @@ impl AgentMode {
         // One agent → the union of every capability.
         {
             let mut tools = vec![
-                    json!({
-                        "type": "function",
-                        "name": "get_menu_config",
-                        "description": "Retrieve the current OxideMX radial menu layout, animation curves, and mouse button configuration.",
-                        "parameters": {
-                            "type": "object",
-                            "properties": {}
-                        }
-                    }),
-                    json!({
-                        "type": "function",
-                        "name": "set_menu_config",
-                        "description": "Overwrite the current OxideMX radial menu configuration with a new JSON setup. Use this to save changes to themes, layout slices, custom pages, or animation speeds.",
-                        "parameters": {
-                            "type": "object",
-                            "properties": {
-                                "config_json": {
-                                    "type": "string",
-                                    "description": "The complete new configuration JSON string"
-                                }
+                json!({
+                    "type": "function",
+                    "name": "get_menu_config",
+                    "description": "Retrieve the current OxideMX radial menu layout, animation curves, and mouse button configuration.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {}
+                    }
+                }),
+                json!({
+                    "type": "function",
+                    "name": "set_menu_config",
+                    "description": "Overwrite the current OxideMX radial menu configuration with a new JSON setup. Use this to save changes to themes, layout slices, custom pages, or animation speeds.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "config_json": {
+                                "type": "string",
+                                "description": "The complete new configuration JSON string"
+                            }
+                        },
+                        "required": ["config_json"]
+                    }
+                }),
+                json!({
+                    "type": "function",
+                    "name": "list_system_apps",
+                    "description": "Scan the host system's desktop directories to list installed applications, commands, and icons. Helpful for recommending executables to bind to custom slices.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {}
+                    }
+                }),
+                search_fn,
+                json!({
+                    "type": "function",
+                    "name": "ask_multiple_choice_question",
+                    "description": "Ask the user a clarifying multiple-choice question. Used when there are multiple valid options or parameters to clarify.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "question": {
+                                "type": "string",
+                                "description": "The question text to present"
                             },
-                            "required": ["config_json"]
-                        }
-                    }),
-                    json!({
-                        "type": "function",
-                        "name": "list_system_apps",
-                        "description": "Scan the host system's desktop directories to list installed applications, commands, and icons. Helpful for recommending executables to bind to custom slices.",
-                        "parameters": {
-                            "type": "object",
-                            "properties": {}
-                        }
-                    }),
-                    search_fn,
-                    json!({
-                        "type": "function",
-                        "name": "ask_multiple_choice_question",
-                        "description": "Ask the user a clarifying multiple-choice question. Used when there are multiple valid options or parameters to clarify.",
-                        "parameters": {
-                            "type": "object",
-                            "properties": {
-                                "question": {
-                                    "type": "string",
-                                    "description": "The question text to present"
+                            "options": {
+                                "type": "array",
+                                "items": {
+                                    "type": "string"
                                 },
-                                "options": {
-                                    "type": "array",
-                                    "items": {
-                                        "type": "string"
-                                    },
-                                    "description": "The list of choices/options the user can click"
-                                }
-                            },
-                            "required": ["question", "options"]
-                        }
-                    }),
+                                "description": "The list of choices/options the user can click"
+                            }
+                        },
+                        "required": ["question", "options"]
+                    }
+                }),
             ];
             // + run_flow/execute_command/schedule_task/memory/persona
             // (search_fn is already in the vec above).

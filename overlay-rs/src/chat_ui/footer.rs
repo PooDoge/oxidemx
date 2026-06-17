@@ -5,6 +5,7 @@
 use iced::widget::{button, column, container, row, text, Space};
 use iced::{Alignment, Element, Length};
 
+use super::icons::icon;
 use super::Kit;
 use crate::app::Message;
 use crate::chat_shell::{EDGE_PAD, FOOTER_H};
@@ -103,12 +104,11 @@ pub fn view<'a>(state: &'a RadialState, kit: &Kit) -> Element<'a, Message> {
 
     // Send flips to Stop while a turn is in flight.
     let action_btn = if state.ai_loading {
-        button(iced::widget::center(
-            text("■")
-                .size(18)
-                .line_height(1.0)
-                .color(kit.fade(kit.crust, 1.0)),
-        ))
+        button(iced::widget::center(icon(
+            "stop",
+            16.0,
+            kit.fade(kit.crust, 1.0),
+        )))
         .width(Length::Fixed(40.0))
         .height(Length::Fixed(40.0))
         .padding(0)
@@ -122,19 +122,18 @@ pub fn view<'a>(state: &'a RadialState, kit: &Kit) -> Element<'a, Message> {
         })
         .on_press(Message::AiStopRequest)
     } else {
-        button(iced::widget::center(
-            text("➤")
-                .size(22)
-                .line_height(1.0)
-                .color(kit.fade(kit.crust, 1.0)),
-        ))
+        button(iced::widget::center(icon(
+            "send",
+            18.0,
+            kit.fade(kit.crust, 1.0),
+        )))
         .width(Length::Fixed(40.0))
         .height(Length::Fixed(40.0))
         .padding(0)
         .style(move |_, _status| button::Style {
             background: Some(iced::Background::Color(kit.fade(kit.accent, 1.0))),
             border: iced::border::Border {
-                radius: 12.0.into(),
+                radius: super::tokens::R_CARD.into(),
                 ..Default::default()
             },
             shadow: iced::Shadow {
@@ -147,8 +146,8 @@ pub fn view<'a>(state: &'a RadialState, kit: &Kit) -> Element<'a, Message> {
         .on_press(Message::AiSubmitPrompt)
     };
 
-    // 📎 attach button (opens the native picker; drag-drop also works).
-    let attach_btn = button(text("📎").size(16).color(kit.fade(kit.subtext0, 1.0)))
+    // Attach button (opens the native picker; drag-drop also works).
+    let attach_btn = button(icon("attach", 16.0, kit.fade(kit.subtext0, 1.0)))
         .height(Length::Fixed(40.0))
         .padding([0, 8])
         .style(|_, _| button::Style::default())
@@ -162,7 +161,10 @@ pub fn view<'a>(state: &'a RadialState, kit: &Kit) -> Element<'a, Message> {
             .map(|n| n.to_string_lossy().to_string())
             .unwrap_or_else(|| path.display().to_string());
         let is_img = matches!(
-            path.extension().and_then(|e| e.to_str()).map(|e| e.to_lowercase()).as_deref(),
+            path.extension()
+                .and_then(|e| e.to_str())
+                .map(|e| e.to_lowercase())
+                .as_deref(),
             Some("png" | "jpg" | "jpeg" | "gif" | "webp")
         );
         let mut chip = row![].spacing(6).align_y(Alignment::Center);
@@ -180,15 +182,13 @@ pub fn view<'a>(state: &'a RadialState, kit: &Kit) -> Element<'a, Message> {
                 .color(kit.fade(kit.text, 1.0)),
         );
         chip = chip.push(
-            button(text("✕").size(12).color(kit.fade(kit.subtext0, 1.0)))
+            button(icon("close", 11.0, kit.fade(kit.subtext0, 1.0)))
                 .padding([0, 4])
                 .style(|_, _| button::Style::default())
                 .on_press(Message::AiAttachClear),
         );
-        col = col.push(
-            container(chip)
-            .padding([3, 8])
-            .style(move |_| iced::widget::container::Style {
+        col = col.push(container(chip).padding([3, 8]).style(move |_| {
+            iced::widget::container::Style {
                 background: Some(iced::Background::Color(kit.fade(kit.surface0, 0.9))),
                 border: iced::border::Border {
                     color: kit.fade(kit.surface2, 1.0),
@@ -196,8 +196,8 @@ pub fn view<'a>(state: &'a RadialState, kit: &Kit) -> Element<'a, Message> {
                     radius: 8.0.into(),
                 },
                 ..Default::default()
-            }),
-        );
+            }
+        }));
     }
     col = col.push(
         row![editor, attach_btn, action_btn]
@@ -206,13 +206,13 @@ pub fn view<'a>(state: &'a RadialState, kit: &Kit) -> Element<'a, Message> {
     );
 
     container(col.spacing(6))
-    .width(Length::Fill)
-    .height(Length::Fixed(EDGE_PAD + FOOTER_H))
-    .padding(iced::Padding {
-        top: 10.0,
-        right: EDGE_PAD + 10.0,
-        bottom: EDGE_PAD + 10.0,
-        left: EDGE_PAD + 10.0,
-    })
-    .into()
+        .width(Length::Fill)
+        .height(Length::Fixed(EDGE_PAD + FOOTER_H))
+        .padding(iced::Padding {
+            top: 10.0,
+            right: EDGE_PAD + 10.0,
+            bottom: EDGE_PAD + 10.0,
+            left: EDGE_PAD + 10.0,
+        })
+        .into()
 }

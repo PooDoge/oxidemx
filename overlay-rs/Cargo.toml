@@ -43,7 +43,7 @@ once_cell = "1"
 # Mutter doesn't advertise wlr-layer-shell on stable GNOME (verified
 # via wayland-info from the dev distrobox), and keeping the build
 # pure-Rust avoids the *-devel rpm-ostree pain on atomic Fedora.
-iced = { version = "0.14", features = ["canvas", "wayland", "x11", "tokio", "image", "markdown", "highlighter"] }
+iced = { version = "0.14", features = ["canvas", "wayland", "x11", "tokio", "image", "markdown", "highlighter", "svg"] }
 # Direct wgpu access for the aurora backdrop shader. Versions
 # pinned to whatever iced_wgpu 0.14 itself uses so the wgpu
 # device/queue handed in by iced are ABI-compatible — bumping

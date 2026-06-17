@@ -1118,10 +1118,8 @@ pub(super) fn update(state: &mut RadialState, message: Message) -> Task<Message>
         Message::AiBubbleSelect(i) => {
             state.ai_context_menu = None;
             if let Some(msg) = state.chat().history.get(i) {
-                state.ai_select = Some((
-                    i,
-                    iced::widget::text_editor::Content::with_text(&msg.text),
-                ));
+                state.ai_select =
+                    Some((i, iced::widget::text_editor::Content::with_text(&msg.text)));
             }
             Task::none()
         }
@@ -1145,9 +1143,11 @@ pub(super) fn update(state: &mut RadialState, message: Message) -> Task<Message>
         }
         Message::AiPasteReceived(opt) => {
             if let Some(s) = opt.filter(|s| !s.is_empty()) {
-                state.ai_editor.perform(iced::widget::text_editor::Action::Edit(
-                    iced::widget::text_editor::Edit::Paste(std::sync::Arc::new(s)),
-                ));
+                state
+                    .ai_editor
+                    .perform(iced::widget::text_editor::Action::Edit(
+                        iced::widget::text_editor::Edit::Paste(std::sync::Arc::new(s)),
+                    ));
             }
             Task::none()
         }
@@ -1362,17 +1362,34 @@ fn export_thread_markdown(t: &crate::radial::ChatThread) -> Result<String, Strin
     let slug: String = t
         .title
         .chars()
-        .map(|c| if c.is_alphanumeric() { c.to_ascii_lowercase() } else { '-' })
+        .map(|c| {
+            if c.is_alphanumeric() {
+                c.to_ascii_lowercase()
+            } else {
+                '-'
+            }
+        })
         .collect::<String>()
         .trim_matches('-')
         .chars()
         .take(40)
         .collect();
-    let slug = if slug.is_empty() { "chat".to_string() } else { slug };
+    let slug = if slug.is_empty() {
+        "chat".to_string()
+    } else {
+        slug
+    };
     let file = dir.join(format!("{slug}-{}.md", t.updated_at));
 
     let mut md = String::new();
-    md.push_str(&format!("# {}\n\n", if t.title.is_empty() { "Untitled chat" } else { &t.title }));
+    md.push_str(&format!(
+        "# {}\n\n",
+        if t.title.is_empty() {
+            "Untitled chat"
+        } else {
+            &t.title
+        }
+    ));
     md.push_str(&format!(
         "_Model: {} · {} messages · exported from OxideMX_\n\n---\n\n",
         t.model,
@@ -1385,7 +1402,11 @@ fn export_thread_markdown(t: &crate::radial::ChatThread) -> Result<String, Strin
             let _ = card;
             md.push_str(&format!("> 🔧 {}\n\n", m.text));
         } else {
-            md.push_str(&format!("**{}**\n\n{}\n\n", if m.is_user { "You" } else { "Oxide" }, m.text));
+            md.push_str(&format!(
+                "**{}**\n\n{}\n\n",
+                if m.is_user { "You" } else { "Oxide" },
+                m.text
+            ));
         }
     }
     std::fs::write(&file, md).map_err(|e| e.to_string())?;

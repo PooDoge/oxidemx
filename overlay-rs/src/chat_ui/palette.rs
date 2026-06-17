@@ -41,8 +41,18 @@ pub struct PaletteItem {
 }
 
 impl PaletteItem {
-    fn new(icon: &'static str, label: impl Into<String>, hint: impl Into<String>, kind: PaletteKind) -> Self {
-        Self { icon, label: label.into(), hint: hint.into(), kind }
+    fn new(
+        icon: &'static str,
+        label: impl Into<String>,
+        hint: impl Into<String>,
+        kind: PaletteKind,
+    ) -> Self {
+        Self {
+            icon,
+            label: label.into(),
+            hint: hint.into(),
+            kind,
+        }
     }
 }
 
@@ -65,14 +75,39 @@ pub fn build(
         .unwrap_or_default();
 
     let mut items = vec![
-        PaletteItem::new("＋", "New chat", "Start a fresh conversation", PaletteKind::NewChat),
-        PaletteItem::new("▦", "Command Center", "Open Mission Control", PaletteKind::CommandCenter),
-        PaletteItem::new("⚙", "Configure agents & skills", "Agents tab", PaletteKind::Agents),
+        PaletteItem::new(
+            "＋",
+            "New chat",
+            "Start a fresh conversation",
+            PaletteKind::NewChat,
+        ),
+        PaletteItem::new(
+            "▦",
+            "Command Center",
+            "Open Mission Control",
+            PaletteKind::CommandCenter,
+        ),
+        PaletteItem::new(
+            "⚙",
+            "Configure agents & skills",
+            "Agents tab",
+            PaletteKind::Agents,
+        ),
         PaletteItem::new("✱", "Skills", "Browse & enable skills", PaletteKind::Skills),
         PaletteItem::new("🔌", "MCP servers", "Configure MCP", PaletteKind::Mcp),
-        PaletteItem::new("✦", "Memories", "Browse saved memories", PaletteKind::Memories),
+        PaletteItem::new(
+            "✦",
+            "Memories",
+            "Browse saved memories",
+            PaletteKind::Memories,
+        ),
         PaletteItem::new("◔", "Tasks", "Scheduled flows", PaletteKind::Tasks),
-        PaletteItem::new("⇄", "Switch model", "Toggle Flash / Pro", PaletteKind::ModelToggle),
+        PaletteItem::new(
+            "⇄",
+            "Switch model",
+            "Toggle Flash / Pro",
+            PaletteKind::ModelToggle,
+        ),
     ];
     for (id, name) in flows {
         items.push(PaletteItem::new(
@@ -106,7 +141,9 @@ pub fn build(
         .into_iter()
         .filter(|it| match &it.kind {
             // Commands match on the first word (the rest is arguments).
-            PaletteKind::Command(..) => first.is_empty() || it.label.to_lowercase().contains(&first),
+            PaletteKind::Command(..) => {
+                first.is_empty() || it.label.to_lowercase().contains(&first)
+            }
             _ => {
                 it.label.to_lowercase().contains(&q_lower)
                     || it.hint.to_lowercase().contains(&q_lower)

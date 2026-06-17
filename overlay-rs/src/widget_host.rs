@@ -160,7 +160,9 @@ pub fn run_smoke() -> i32 {
             }
             for (slot, slice) in page.slices.iter().enumerate() {
                 let Some(w) = &slice.widget else { continue };
-                let oxidemx_shared::WidgetSource::Custom(id) = &w.source else { continue };
+                let oxidemx_shared::WidgetSource::Custom(id) = &w.source else {
+                    continue;
+                };
                 let instance_key = w
                     .instance_key
                     .clone()
@@ -169,7 +171,10 @@ pub fn run_smoke() -> i32 {
                     .get(id)
                     .is_some_and(|i| i.manifest.permissions.iter().any(|p| p == "system-stats"));
                 expected.insert(
-                    InstanceId { instance_key, widget_id: id.clone() },
+                    InstanceId {
+                        instance_key,
+                        widget_id: id.clone(),
+                    },
                     if stats_fed { 2 } else { 1 },
                 );
             }
@@ -178,7 +183,10 @@ pub fn run_smoke() -> i32 {
             eprintln!("widget-smoke: config places no Custom widgets — nothing to smoke");
             return 1;
         }
-        println!("widget-smoke: expecting scenes from {} instance(s)", expected.len());
+        println!(
+            "widget-smoke: expecting scenes from {} instance(s)",
+            expected.len()
+        );
 
         // ConfigChanged then MenuOpened: the worker handles ctl
         // messages in order, so reconcile (instance load + initial

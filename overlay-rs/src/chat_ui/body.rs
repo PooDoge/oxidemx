@@ -6,6 +6,7 @@
 use iced::widget::{button, column, container, row, scrollable, text, text_input, Space};
 use iced::{Alignment, Color, Element, Length};
 
+use super::icons::icon;
 use super::Kit;
 use crate::app::Message;
 use crate::radial::RadialState;
@@ -68,11 +69,8 @@ pub fn conversation<'a>(state: &'a RadialState, kit: &Kit) -> Element<'a, Messag
                         .color(kit.fade(kit.text, 1.0))
                         .into()
                 } else {
-                    iced::widget::markdown::view(
-                        &state.ai_stream_md,
-                        iced::Theme::CatppuccinMocha,
-                    )
-                    .map(|url| Message::AiLinkClicked(url.to_string()))
+                    iced::widget::markdown::view(&state.ai_stream_md, iced::Theme::CatppuccinMocha)
+                        .map(|url| Message::AiLinkClicked(url.to_string()))
                 };
                 list = list.push(row![
                     container(content)
@@ -254,7 +252,10 @@ fn render_ai_markdown<'a>(
 ) -> Element<'a, Message> {
     use iced::widget::markdown;
     let special = items.iter().any(|it| {
-        matches!(it, markdown::Item::CodeBlock { .. } | markdown::Item::Image { .. })
+        matches!(
+            it,
+            markdown::Item::CodeBlock { .. } | markdown::Item::Image { .. }
+        )
     });
     // Fast path: no code blocks or images → the plain view (most replies).
     if !special {
@@ -283,7 +284,7 @@ fn render_ai_markdown<'a>(
                     lines,
                     |url| Message::AiLinkClicked(url.to_string()),
                 );
-                let copy = button(text("⧉").size(12).color(kit.fade(kit.subtext0, 1.0)))
+                let copy = button(icon("copy", 13.0, kit.fade(kit.subtext0, 1.0)))
                     .padding([2, 5])
                     .style(move |_, _| button::Style {
                         background: Some(iced::Background::Color(kit.fade(kit.surface1, 0.85))),
@@ -337,11 +338,15 @@ fn render_md_image<'a>(
         _ => {
             // Failed or not-yet-requested → a clickable open-in-browser chip.
             let owned = url.to_string();
-            button(text("🖼 Open image ↗").size(12).color(kit.fade(kit.accent, 1.0)))
-                .padding([3, 8])
-                .style(|_, _| button::Style::default())
-                .on_press(Message::AiLinkClicked(owned))
-                .into()
+            button(
+                text("🖼 Open image ↗")
+                    .size(12)
+                    .color(kit.fade(kit.accent, 1.0)),
+            )
+            .padding([3, 8])
+            .style(|_, _| button::Style::default())
+            .on_press(Message::AiLinkClicked(owned))
+            .into()
         }
     }
 }
@@ -364,15 +369,22 @@ fn bubble_row<'a>(
                         .color(kit.fade(kit.text, 1.0)),
                 ]
                 .spacing(8),
-                button(text("↻ Retry").size(12).color(kit.fade(kit.crust, 1.0)))
-                    .padding([4, 12])
-                    .style(move |_, _| button::Style {
-                        background: Some(iced::Background::Color(kit.fade(kit.red, 0.9))),
-                        border: iced::border::Border::default().rounded(10.0),
-                        text_color: kit.fade(kit.crust, 1.0),
-                        ..Default::default()
-                    })
-                    .on_press(Message::AiRetryLast),
+                button(
+                    row![
+                        icon("retry", 13.0, kit.fade(kit.crust, 1.0)),
+                        text("Retry").size(12).color(kit.fade(kit.crust, 1.0)),
+                    ]
+                    .spacing(5)
+                    .align_y(Alignment::Center),
+                )
+                .padding([4, 12])
+                .style(move |_, _| button::Style {
+                    background: Some(iced::Background::Color(kit.fade(kit.red, 0.9))),
+                    border: iced::border::Border::default().rounded(10.0),
+                    text_color: kit.fade(kit.crust, 1.0),
+                    ..Default::default()
+                })
+                .on_press(Message::AiRetryLast),
             ]
             .spacing(8),
         )
@@ -453,17 +465,20 @@ fn bubble_row<'a>(
     // fixed-width placeholder otherwise keeps the layout from shifting.
     let show_actions = state.ai_hover_msg == Some(i) || state.ai_context_menu == Some(i);
     let actions: Element<'a, Message> = if show_actions {
-        let copy = button(text("⧉").size(14).color(kit.fade(kit.subtext0, 1.0)))
+        let copy = button(icon("copy", 14.0, kit.fade(kit.subtext0, 1.0)))
             .padding([2, 4])
             .style(|_, _| button::Style::default())
             .on_press(Message::AiCopyText(msg.text.clone()));
-        let select_glyph = if selecting { "✓" } else { "⌶" };
-        let select_msg = if selecting {
-            Message::AiSelectExit
+        let (select_icon, select_color, select_msg) = if selecting {
+            ("check", kit.fade(kit.accent, 1.0), Message::AiSelectExit)
         } else {
-            Message::AiBubbleSelect(i)
+            (
+                "select",
+                kit.fade(kit.subtext0, 1.0),
+                Message::AiBubbleSelect(i),
+            )
         };
-        let select = button(text(select_glyph).size(14).color(kit.fade(kit.subtext0, 1.0)))
+        let select = button(icon(select_icon, 14.0, select_color))
             .padding([2, 4])
             .style(|_, _| button::Style::default())
             .on_press(select_msg);
@@ -510,20 +525,23 @@ fn bubble_context_menu<'a>(
     selecting: bool,
 ) -> Element<'a, Message> {
     let item = |label: &str, m: Message| {
-        button(text(label.to_string()).size(12).color(kit.fade(kit.text, 1.0)))
-            .width(Length::Fill)
-            .padding([5, 10])
-            .style(move |_, status| {
-                let hovered = matches!(status, button::Status::Hovered);
-                button::Style {
-                    background: hovered
-                        .then(|| iced::Background::Color(kit.fade(kit.accent, 0.25))),
-                    border: iced::border::Border::default().rounded(6.0),
-                    text_color: kit.fade(kit.text, 1.0),
-                    ..Default::default()
-                }
-            })
-            .on_press(m)
+        button(
+            text(label.to_string())
+                .size(12)
+                .color(kit.fade(kit.text, 1.0)),
+        )
+        .width(Length::Fill)
+        .padding([5, 10])
+        .style(move |_, status| {
+            let hovered = matches!(status, button::Status::Hovered);
+            button::Style {
+                background: hovered.then(|| iced::Background::Color(kit.fade(kit.accent, 0.25))),
+                border: iced::border::Border::default().rounded(6.0),
+                text_color: kit.fade(kit.text, 1.0),
+                ..Default::default()
+            }
+        })
+        .on_press(m)
     };
 
     let mut menu = column![item("Copy message", Message::AiCopyText(msg.text.clone()))].spacing(1);
@@ -534,10 +552,8 @@ fn bubble_context_menu<'a>(
     });
     menu = menu.push(item("Paste into input", Message::AiPasteToInput));
 
-    let card = container(menu)
-        .padding(4)
-        .max_width(190.0)
-        .style(move |_| iced::widget::container::Style {
+    let card = container(menu).padding(4).max_width(190.0).style(move |_| {
+        iced::widget::container::Style {
             background: Some(iced::Background::Color(kit.fade(kit.surface0, 0.98))),
             border: iced::border::Border {
                 color: kit.fade(kit.surface2, 1.0),
@@ -545,7 +561,8 @@ fn bubble_context_menu<'a>(
                 radius: 8.0.into(),
             },
             ..Default::default()
-        });
+        }
+    });
 
     if msg.is_user {
         row![Space::new().width(Length::Fill), card]
@@ -564,7 +581,9 @@ pub fn threads_list<'a>(state: &'a RadialState, kit: &Kit) -> Element<'a, Messag
     let matches = |t: &crate::radial::ChatThread| -> bool {
         query.is_empty()
             || t.title.to_lowercase().contains(&query)
-            || t.history.iter().any(|m| m.text.to_lowercase().contains(&query))
+            || t.history
+                .iter()
+                .any(|m| m.text.to_lowercase().contains(&query))
     };
 
     let search = text_input("Search chats…", &state.ai_threads_query)
@@ -663,24 +682,24 @@ pub fn threads_list<'a>(state: &'a RadialState, kit: &Kit) -> Element<'a, Messag
         })
         .on_press(Message::AiSelectThread(idx));
 
-        let small_btn = |label: &'static str, msg: Message| {
-            button(text(label).size(14).color(kit.fade(kit.subtext0, 1.0)))
+        let small_btn = |name: &'static str, msg: Message| {
+            button(icon(name, 14.0, kit.fade(kit.subtext0, 1.0)))
                 .padding([4, 6])
                 .style(|_, _| button::Style::default())
                 .on_press(msg)
         };
         let rename_btn = if renaming {
-            small_btn("✓", Message::AiRenameCommit)
+            small_btn("check", Message::AiRenameCommit)
         } else {
-            small_btn("✎", Message::AiRenameStart(idx))
+            small_btn("rename", Message::AiRenameStart(idx))
         };
 
         list = list.push(
             row![
                 open_btn,
                 rename_btn,
-                small_btn("📤", Message::AiExportThread(idx)),
-                small_btn("✕", Message::AiDeleteThread(idx)),
+                small_btn("export", Message::AiExportThread(idx)),
+                small_btn("trash", Message::AiDeleteThread(idx)),
             ]
             .spacing(4)
             .align_y(Alignment::Center),

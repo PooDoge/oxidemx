@@ -398,7 +398,9 @@ pub async fn summarize(model_hint: &str, prior: &str, msgs: &[(bool, String)]) -
         content: prompt,
     };
     let resp = llm.chat(&[msg], None).await.ok()?;
-    resp.text().map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
+    resp.text()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
 }
 
 /// Forward the executor's text-delta StreamChunks to the chat thread as
@@ -436,15 +438,24 @@ where
                 eprintln!("[event] {ev:?}");
             }
             match ev {
-                Event::StreamChunk { chunk: StreamChunk::Text(t), .. } if !t.is_empty() => {
+                Event::StreamChunk {
+                    chunk: StreamChunk::Text(t),
+                    ..
+                } if !t.is_empty() => {
                     if let Some(s) = &sink {
                         s.send(StreamEvent::Delta(t)).await;
                     }
                 }
-                Event::StreamChunk { chunk: StreamChunk::Usage(u), .. } => {
+                Event::StreamChunk {
+                    chunk: StreamChunk::Usage(u),
+                    ..
+                } => {
                     pending_usage = Some((u.prompt_tokens, u.completion_tokens));
                 }
-                Event::StreamChunk { chunk: StreamChunk::Done { .. }, .. } => {
+                Event::StreamChunk {
+                    chunk: StreamChunk::Done { .. },
+                    ..
+                } => {
                     flush_usage!();
                 }
                 _ => {}
@@ -506,8 +517,14 @@ mod tests {
     async fn summarize_live() {
         let msgs = vec![
             (true, "I'm building a Rust overlay with iced.".to_string()),
-            (false, "Nice — iced 0.14 with wgpu is a solid choice.".to_string()),
-            (true, "Remember I deploy on Bazzite via /usr/local/bin.".to_string()),
+            (
+                false,
+                "Nice — iced 0.14 with wgpu is a solid choice.".to_string(),
+            ),
+            (
+                true,
+                "Remember I deploy on Bazzite via /usr/local/bin.".to_string(),
+            ),
         ];
         let out = super::summarize("gemini-2.5-flash", "", &msgs).await;
         eprintln!("SUMMARY => {out:?}");

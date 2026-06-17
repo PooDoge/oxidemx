@@ -593,7 +593,10 @@ async fn run_flow_tool(
         .as_str()
         .ok_or("run_flow: `flow_id` argument missing or not a string")?
         .to_string();
-    let mock = args.get("mock").and_then(serde_json::Value::as_bool).unwrap_or(false);
+    let mock = args
+        .get("mock")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false);
 
     let mut cmd_args = vec!["run".to_string(), flow_id.clone()];
     if mock {
@@ -630,7 +633,10 @@ async fn run_flow_tool(
             format!("could not launch the conductor (is `oxidemx-conductor` on PATH?): {e}")
         })?;
 
-    let stdout = child.stdout.take().ok_or("run_flow: no stdout from conductor")?;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or("run_flow: no stdout from conductor")?;
     let mut lines = tokio::io::BufReader::new(stdout).lines();
 
     let mut steps: Vec<FlowStep> = Vec::new();

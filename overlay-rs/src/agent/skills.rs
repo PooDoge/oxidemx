@@ -89,9 +89,7 @@ pub fn discover() -> Vec<Skill> {
                 continue;
             };
             let (name, desc) = parse_frontmatter(&src);
-            let name = name.unwrap_or_else(|| {
-                e.file_name().to_string_lossy().to_string()
-            });
+            let name = name.unwrap_or_else(|| e.file_name().to_string_lossy().to_string());
             if name.is_empty() || !seen.insert(name.clone()) {
                 continue;
             }
@@ -163,7 +161,11 @@ pub fn discover_commands() -> Vec<PromptCommand> {
                     .take(80)
                     .collect()
             });
-            out.push(PromptCommand { name, description, path });
+            out.push(PromptCommand {
+                name,
+                description,
+                path,
+            });
         }
     }
     out.sort_by_key(|c| c.name.to_lowercase());
@@ -188,7 +190,8 @@ fn command_body_of(src: &str) -> String {
 pub fn render_command(path: &Path, args: &str) -> Option<String> {
     let src = std::fs::read_to_string(path).ok()?;
     let mut body = command_body_of(&src);
-    let has_placeholder = body.contains("$ARGUMENTS") || (1..=9).any(|i| body.contains(&format!("${i}")));
+    let has_placeholder =
+        body.contains("$ARGUMENTS") || (1..=9).any(|i| body.contains(&format!("${i}")));
     if has_placeholder {
         body = body.replace("$ARGUMENTS", args);
         for (i, word) in args.split_whitespace().enumerate().take(9) {
@@ -269,7 +272,12 @@ mod tests {
         let skills = super::discover();
         eprintln!("discovered {} skills:", skills.len());
         for s in &skills {
-            eprintln!("  [{}] {} — {}", s.source, s.name, &s.description.chars().take(60).collect::<String>());
+            eprintln!(
+                "  [{}] {} — {}",
+                s.source,
+                s.name,
+                &s.description.chars().take(60).collect::<String>()
+            );
         }
         assert!(!skills.is_empty(), "expected to discover skills");
     }

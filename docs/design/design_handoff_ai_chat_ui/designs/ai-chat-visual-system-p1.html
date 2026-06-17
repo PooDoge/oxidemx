@@ -1,0 +1,584 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OxideMX AI Chat — Components · P1</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --crust:#11111b; --mantle:#181825; --base:#1e1e2e;
+    --surface0:#313244; --surface1:#45475a; --surface2:#585b70;
+    --overlay0:#6c7086; --text:#cdd6f4; --subtext1:#bac2de; --subtext0:#a6adc8;
+    --accent:#89b4fa; --green:#a6e3a1; --yellow:#f9e2af; --red:#f38ba8; --mauve:#cba6f7; --teal:#94e2d5; --peach:#fab387;
+    --font:"Inter",system-ui,sans-serif; --mono:"JetBrains Mono",ui-monospace,monospace;
+  }
+  *{box-sizing:border-box;}
+  html{scroll-behavior:smooth;}
+  body{margin:0;background:var(--base);color:var(--text);font-family:var(--font);font-size:14px;line-height:1.55;-webkit-font-smoothing:antialiased;}
+  .wrap{max-width:1080px;margin:0 auto;padding:0 40px 120px;}
+  header.top{padding:64px 40px 40px;max-width:1080px;margin:0 auto;border-bottom:1px solid var(--surface0);}
+  .eyebrow{font-family:var(--mono);font-size:12px;letter-spacing:.18em;text-transform:uppercase;color:var(--accent);margin:0 0 14px;}
+  header.top h1{font-size:40px;line-height:1.08;font-weight:700;letter-spacing:-.02em;margin:0 0 16px;max-width:18ch;}
+  header.top p{font-size:15.5px;color:var(--subtext0);max-width:64ch;margin:0;}
+  .badges{display:flex;flex-wrap:wrap;gap:8px;margin-top:24px;}
+  .badge{font-family:var(--mono);font-size:11.5px;color:var(--subtext1);background:var(--mantle);border:1px solid var(--surface1);border-radius:999px;padding:5px 12px;}
+  .badge b{color:var(--accent);font-weight:500;}
+  section{padding-top:72px;}
+  .kicker{display:flex;align-items:baseline;gap:14px;margin-bottom:8px;}
+  .kicker .num{font-family:var(--mono);font-size:13px;color:var(--accent);font-weight:600;}
+  .kicker h2{font-size:26px;font-weight:700;letter-spacing:-.015em;margin:0;}
+  .lede{color:var(--subtext0);font-size:15px;max-width:72ch;margin:0 0 28px;}
+  code{font-family:var(--mono);font-size:.86em;color:var(--mauve);background:var(--mantle);padding:1px 6px;border-radius:5px;}
+  h3.sub{font-size:13px;font-family:var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--subtext0);margin:40px 0 16px;font-weight:600;}
+  .stage{display:flex;flex-wrap:wrap;gap:28px;align-items:flex-start;}
+  .demo-wrap{display:flex;flex-direction:column;gap:10px;}
+  .demo-cap{font-family:var(--mono);font-size:11px;color:var(--subtext0);}
+  .demo-cap b{color:var(--subtext1);font-weight:500;}
+
+  /* chat surface frame */
+  .chat{width:380px;background:var(--base);border:1px solid var(--surface1);border-radius:14px;padding:16px;box-shadow:0 18px 46px rgba(0,0,0,.5);}
+  .col{display:flex;flex-direction:column;}
+
+  /* bubbles */
+  .bub{padding:9px 13px;font-size:13px;line-height:1.5;max-width:86%;}
+  .bub.ai{align-self:flex-start;background:var(--surface0);border:1px solid rgba(205,214,244,.05);border-radius:14px 14px 14px 4px;}
+  .bub.user{align-self:flex-end;background:color-mix(in srgb,var(--accent) 11%,transparent);border:1px solid color-mix(in srgb,var(--accent) 23%,transparent);border-radius:14px 14px 4px 14px;}
+  .meta{font-size:10px;font-family:var(--mono);color:var(--overlay0);margin-top:4px;display:flex;gap:8px;}
+  .meta.r{justify-content:flex-end;}
+  .avatar{width:24px;height:24px;border-radius:12px;flex:0 0 24px;background:radial-gradient(circle at 36% 30%,var(--surface2),var(--crust));border:1.5px solid var(--accent);display:grid;place-items:center;}
+  .avatar svg{width:13px;height:13px;color:var(--accent);}
+  .airow{display:flex;gap:8px;align-items:flex-start;}
+
+  a.lnk{color:var(--accent);text-decoration:underline;text-underline-offset:2px;}
+  blockquote{margin:8px 0;padding:4px 12px;border-left:2.5px solid var(--surface2);color:var(--subtext0);font-style:italic;}
+  table.md{width:100%;border-collapse:collapse;margin:8px 0;font-size:12px;}
+  table.md th{font-family:var(--mono);font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--subtext0);text-align:left;padding:5px 8px;border-bottom:1px solid var(--surface2);}
+  table.md td{padding:5px 8px;border-bottom:1px solid var(--surface0);color:var(--subtext1);}
+  table.md tr:nth-child(even) td{background:rgba(255,255,255,.015);}
+
+  /* code block w/ refined chrome */
+  .code{border-radius:8px;overflow:hidden;border:1px solid var(--surface1);margin:8px 0;}
+  .code .cbar{display:flex;align-items:center;gap:8px;padding:6px 10px;background:var(--surface0);border-bottom:1px solid var(--surface1);}
+  .code .lang{font-family:var(--mono);font-size:10px;color:var(--subtext0);letter-spacing:.04em;}
+  .code .cact{margin-left:auto;display:flex;gap:6px;color:var(--subtext0);}
+  .code .cact .b{display:flex;align-items:center;gap:4px;font-size:10px;cursor:pointer;padding:2px 6px;border-radius:5px;}
+  .code .cact .b:hover{background:var(--surface1);color:var(--text);}
+  .code .cact svg{width:12px;height:12px;}
+  .code pre{margin:0;padding:10px 12px;background:var(--crust);font-family:var(--mono);font-size:11.5px;line-height:1.6;overflow-x:auto;}
+  .t-k{color:var(--mauve);} .t-s{color:var(--green);} .t-f{color:var(--accent);} .t-c{color:var(--overlay0);} .t-n{color:var(--peach);}
+
+  /* attachments */
+  .composer{background:var(--crust);border:1px solid var(--surface2);border-radius:12px;padding:8px;display:flex;flex-direction:column;gap:8px;}
+  .attrow{display:flex;flex-wrap:wrap;gap:7px;}
+  .att{display:flex;align-items:center;gap:8px;background:var(--surface0);border:1px solid var(--surface1);border-radius:9px;padding:5px 9px 5px 5px;position:relative;}
+  .att .thumb{width:34px;height:34px;border-radius:6px;overflow:hidden;flex:0 0 34px;}
+  .att .ficon{width:34px;height:34px;border-radius:6px;flex:0 0 34px;display:grid;place-items:center;background:var(--surface1);color:var(--subtext0);}
+  .att .ficon svg{width:16px;height:16px;}
+  .att .fn{font-size:11.5px;color:var(--text);font-weight:500;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .att .fs{font-family:var(--mono);font-size:9.5px;color:var(--subtext0);margin-top:1px;}
+  .att .x{width:16px;height:16px;border-radius:8px;display:grid;place-items:center;color:var(--subtext0);background:var(--surface2);cursor:pointer;margin-left:2px;}
+  .att .x svg{width:9px;height:9px;}
+  .att.err{border-color:color-mix(in srgb,var(--red) 55%,transparent);background:color-mix(in srgb,var(--red) 8%,var(--surface0));}
+  .att.warn{border-color:color-mix(in srgb,var(--yellow) 50%,transparent);background:color-mix(in srgb,var(--yellow) 7%,var(--surface0));}
+  .att .errlab{font-size:10px;color:var(--red);margin-top:1px;}
+  .att .warnlab{font-size:10px;color:var(--yellow);margin-top:1px;}
+  .att .ringwrap{position:absolute;inset:5px auto 5px 5px;width:34px;height:34px;display:grid;place-items:center;background:rgba(17,17,27,.55);border-radius:6px;}
+  .att .ringwrap svg{width:20px;height:20px;}
+  .inputline{display:flex;align-items:center;gap:8px;padding:4px 4px 4px 8px;}
+  .inputline .ph-txt{flex:1;font-size:13px;color:var(--subtext0);}
+  .inputline .iconbtn{width:30px;height:30px;border-radius:8px;display:grid;place-items:center;color:var(--subtext0);}
+  .inputline .iconbtn svg{width:16px;height:16px;}
+  .inputline .send{width:34px;height:34px;border-radius:10px;background:var(--accent);color:var(--crust);display:grid;place-items:center;}
+  .inputline .send svg{width:15px;height:15px;}
+
+  .ph{background:repeating-linear-gradient(135deg,#272839,#272839 7px,#2e2f42 7px,#2e2f42 14px);display:grid;place-items:center;width:100%;height:100%;}
+  .ph .lab{font-family:var(--mono);font-size:10px;color:var(--subtext0);background:rgba(17,17,27,.62);padding:2px 7px;border-radius:5px;}
+
+  /* sent bubble thumbnails */
+  .bubthumbs{display:grid;gap:5px;margin-bottom:7px;}
+  .bubthumbs.g1{grid-template-columns:1fr;} .bubthumbs.g2{grid-template-columns:1fr 1fr;}
+  .bubthumbs .t{border-radius:8px;overflow:hidden;height:84px;}
+
+  /* reply image */
+  .replyimg{border-radius:10px;overflow:hidden;border:1px solid var(--surface1);margin:8px 0 2px;position:relative;cursor:zoom-in;}
+  .replyimg .img{height:150px;}
+  .replyimg .zoom{position:absolute;right:8px;bottom:8px;background:rgba(17,17,27,.7);border:1px solid var(--surface2);border-radius:6px;padding:3px 7px;font-size:10px;color:var(--subtext1);display:flex;align-items:center;gap:4px;}
+  .replyimg .zoom svg{width:11px;height:11px;}
+  .imgcap{font-family:var(--mono);font-size:10px;color:var(--subtext0);}
+  .loading{height:150px;border-radius:10px;border:1px solid var(--surface1);background:var(--surface0);position:relative;overflow:hidden;display:grid;place-items:center;}
+  .loading .sh{position:absolute;inset:0;background:linear-gradient(90deg,transparent,rgba(255,255,255,.05),transparent);transform:translateX(-100%);animation:sh 1.3s infinite;}
+  @keyframes sh{to{transform:translateX(100%);}}
+  .loading .lt{font-family:var(--mono);font-size:10.5px;color:var(--subtext0);}
+  .imgerr{height:110px;border-radius:10px;border:1px dashed color-mix(in srgb,var(--red) 45%,var(--surface2));background:color-mix(in srgb,var(--red) 5%,var(--surface0));display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;color:var(--red);}
+  .imgerr svg{width:20px;height:20px;}
+  .imgerr .rt{font-size:11px;color:var(--subtext1);border:1px solid var(--surface2);border-radius:6px;padding:3px 10px;display:flex;align-items:center;gap:5px;cursor:pointer;}
+  .imgerr .rt svg{width:11px;height:11px;color:var(--subtext1);}
+
+  /* lightbox */
+  #lb{position:fixed;inset:0;background:rgba(8,9,12,.88);backdrop-filter:blur(6px);z-index:50;display:none;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:40px;}
+  #lb.open{display:flex;}
+  #lb .frame{max-width:760px;width:100%;border-radius:14px;overflow:hidden;border:1px solid var(--surface2);box-shadow:0 24px 60px rgba(0,0,0,.6);}
+  #lb .frame .img{height:440px;}
+  #lb .bar{display:flex;align-items:center;gap:14px;color:var(--subtext1);font-size:12px;font-family:var(--mono);}
+  #lb .bar .ib{display:flex;align-items:center;gap:6px;cursor:pointer;color:var(--subtext0);}
+  #lb .bar .ib:hover{color:var(--text);}
+  #lb .bar svg{width:15px;height:15px;}
+
+  /* agent / tool cards */
+  .tcard{background:color-mix(in srgb,var(--mantle) 96%,transparent);border:1px solid var(--surface1);border-radius:12px;overflow:hidden;display:flex;}
+  .tcard .rule{width:2.5px;flex:0 0 2.5px;}
+  .tcard .inner{flex:1;min-width:0;}
+  .tcard .thead{display:flex;align-items:center;gap:8px;padding:8px 12px;cursor:pointer;}
+  .tcard .thead .ico{display:inline-flex;}
+  .tcard .thead .ico svg{width:14px;height:14px;}
+  .tcard .thead .tt{font-size:11.5px;font-weight:600;color:var(--text);}
+  .tcard .thead .st{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;}
+  .tcard .thead .mt{margin-left:auto;font-family:var(--mono);font-size:10px;color:var(--subtext0);}
+  .tcard .thead .chev{color:var(--subtext0);transition:transform .15s;}
+  .tcard .thead .chev svg{width:13px;height:13px;}
+  .tcard.open .thead .chev{transform:rotate(180deg);}
+  .tcard .tbody{display:none;border-top:1px solid var(--surface0);}
+  .tcard.open .tbody{display:block;}
+  .tcard .collapsed{padding:0 12px 9px;font-size:11.5px;color:var(--subtext0);}
+  .io{padding:9px 12px;}
+  .io .l{font-family:var(--mono);font-size:9.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--subtext0);margin-bottom:5px;}
+  .io pre{margin:0 0 4px;background:var(--crust);border:1px solid var(--surface1);border-radius:7px;padding:7px 10px;font-family:var(--mono);font-size:11px;line-height:1.55;color:var(--subtext1);overflow-x:auto;}
+  .spin{animation:spin 1.1s linear infinite;transform-origin:center;}
+  @keyframes spin{to{transform:rotate(360deg);}}
+
+  .prog{height:4px;border-radius:2px;background:var(--surface0);overflow:hidden;margin-top:7px;}
+  .prog .f{height:100%;border-radius:2px;background:var(--accent);box-shadow:0 0 6px var(--accent);}
+  .subrow{display:flex;align-items:center;gap:8px;padding:4px 0;font-size:11px;}
+  .subrow .d{width:6px;height:6px;border-radius:3px;flex:0 0 6px;}
+  .subrow .id{font-family:var(--mono);color:var(--subtext1);width:84px;flex:0 0 84px;}
+  .subrow .ds{color:var(--subtext0);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .subrow .el{font-family:var(--mono);font-size:9.5px;color:var(--subtext0);}
+
+  .chips{display:flex;gap:6px;padding:0 12px 9px;flex-wrap:wrap;}
+  .chip{font-size:10.5px;color:var(--subtext1);border:1px solid var(--surface2);border-radius:6px;padding:3px 9px;cursor:pointer;white-space:nowrap;}
+  .chip.pri{font-weight:700;color:var(--crust);border-color:transparent;}
+
+  .legend{display:flex;flex-wrap:wrap;gap:16px;margin-top:16px;font-size:12px;color:var(--subtext0);}
+  .legend span{display:flex;align-items:center;gap:7px;}
+  .legend .d{width:9px;height:9px;border-radius:3px;}
+
+  /* approval card */
+  .appr{background:color-mix(in srgb,var(--yellow) 7%,var(--mantle));border:1px solid color-mix(in srgb,var(--yellow) 32%,transparent);border-radius:12px;overflow:hidden;}
+  .appr .ah{display:flex;align-items:center;gap:8px;padding:9px 12px;}
+  .appr .bang{width:17px;height:17px;border-radius:9px;background:var(--yellow);color:var(--crust);font-size:11px;font-weight:800;display:grid;place-items:center;flex:0 0 17px;}
+  .appr .at{font-size:12px;font-weight:600;color:var(--text);}
+  .appr .aq{margin-left:auto;font-family:var(--mono);font-size:9.5px;color:var(--subtext0);}
+  .appr .cmd{margin:0 12px;border-radius:8px;background:var(--crust);border:1px solid var(--surface1);padding:7px 10px;font-family:var(--mono);font-size:11px;color:var(--text);}
+  .appr .grd{display:flex;align-items:center;gap:6px;padding:7px 12px 2px;font-size:9.5px;color:var(--subtext0);}
+  .appr .grd svg{width:11px;height:11px;color:var(--green);}
+  .appr .acts{display:flex;gap:6px;align-items:center;padding:9px 12px;flex-wrap:wrap;}
+  .appr .acts .sp{margin-left:auto;}
+  .abtn{font-size:10.5px;font-weight:500;color:var(--subtext1);border:1px solid var(--surface2);border-radius:6px;padding:4px 11px;cursor:pointer;white-space:nowrap;}
+  .abtn.deny:hover{border-color:color-mix(in srgb,var(--red) 50%,transparent);color:var(--red);}
+  .abtn.pri{font-weight:700;color:var(--crust);background:var(--yellow);border-color:transparent;}
+  .exp{margin:0 12px 10px;border-radius:8px;background:var(--crust);border:1px solid var(--surface1);padding:8px 10px;}
+  .exp .el{font-family:var(--mono);font-size:9.5px;letter-spacing:.05em;text-transform:uppercase;color:var(--subtext0);margin-bottom:5px;}
+  .exp .field{font-family:var(--mono);font-size:11px;color:var(--text);background:var(--mantle);border:1px solid var(--surface2);border-radius:6px;padding:6px 9px;}
+  .exp .field.txt{color:var(--subtext0);min-height:36px;}
+  .exp .hint{font-size:10px;color:var(--subtext0);margin-top:6px;}
+  .tabs{display:flex;gap:6px;margin-bottom:14px;flex-wrap:wrap;}
+  .tab{font-size:11.5px;color:var(--subtext0);background:var(--mantle);border:1px solid var(--surface1);border-radius:8px;padding:6px 12px;cursor:pointer;}
+  .tab.on{color:var(--accent);border-color:color-mix(in srgb,var(--accent) 45%,transparent);background:color-mix(in srgb,var(--accent) 12%,transparent);}
+
+  .callout{display:flex;gap:12px;background:color-mix(in srgb,var(--accent) 7%,var(--mantle));border:1px solid color-mix(in srgb,var(--accent) 26%,transparent);border-left:3px solid var(--accent);border-radius:10px;padding:14px 16px;margin:22px 0;}
+  .callout .ti{font-weight:600;font-size:13px;margin:0 0 4px;}
+  .callout p{margin:0;font-size:13px;color:var(--subtext1);}
+  .callout code{background:rgba(17,17,27,.5);}
+  .rl{font-family:var(--mono);font-size:11px;color:var(--subtext0);line-height:1.7;background:var(--mantle);border:1px solid var(--surface1);border-radius:10px;padding:14px 16px;margin-top:18px;}
+  .rl b{color:var(--accent);font-weight:500;}
+  .rl .k{color:var(--subtext1);}
+
+  footer.end{margin-top:90px;padding-top:32px;border-top:1px solid var(--surface0);color:var(--subtext0);font-size:13px;}
+  footer.end b{color:var(--text);font-weight:600;}
+</style>
+</head>
+<body>
+
+<header class="top">
+  <p class="eyebrow">OxideMX AI Chat · P1 — Components</p>
+  <h1>Attachments &amp; the conversation surface</h1>
+  <p>Built on the P0 tokens + icon set. Every component below maps to a specific <code>chat_ui</code> module, shows its states, and carries redlines an engineer reads straight into iced 0.14.</p>
+  <div class="badges">
+    <span class="badge">Tokens from <b>P0</b></span>
+    <span class="badge"><b>chat_ui/</b> body · cards · footer</span>
+    <span class="badge">Placeholders = <b>your real assets</b></span>
+    <span class="badge">All states shown</span>
+  </div>
+</header>
+
+<div class="wrap">
+
+  <!-- ════════ 07 · ATTACHMENTS ════════ -->
+  <section id="att">
+    <div class="kicker"><span class="num">07</span><h2>Attachments — staged &amp; sent</h2></div>
+    <p class="lede">Today an attached file is a text chip <code>📎 name</code>. Give it a real <b>thumbnail</b> in the composer and in the sent bubble, a multi-attach row with overflow, a distinct doc chip, and clear over-size / unsupported guardrails. Lives in <code>footer.rs</code> (staged) + <code>body.rs</code> (sent bubble).</p>
+
+    <div class="stage">
+      <div class="demo-wrap">
+        <div class="demo-cap"><b>Composer — staged, mixed types</b></div>
+        <div class="chat" style="width:400px">
+          <div class="composer">
+            <div class="attrow">
+              <div class="att">
+                <div class="thumb"><div class="ph"><span class="lab">screenshot.png</span></div></div>
+                <div><div class="fn">screenshot.png</div><div class="fs">88 KB · 1920×1080</div></div>
+                <div class="x" data-ic="close"></div>
+              </div>
+              <div class="att">
+                <div class="ficon" data-ic="doc"></div>
+                <div><div class="fn">migration-notes.md</div><div class="fs">12 KB · markdown</div></div>
+                <div class="x" data-ic="close"></div>
+              </div>
+            </div>
+            <div class="inputline">
+              <div class="iconbtn" data-ic="attach"></div>
+              <div class="ph-txt">Describe what to do with these…</div>
+              <div class="send" data-ic="send"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="demo-wrap">
+        <div class="demo-cap"><b>States</b> — uploading · oversize · unsupported</div>
+        <div class="chat" style="width:320px">
+          <div class="composer">
+            <div class="attrow">
+              <div class="att">
+                <div class="thumb"><div class="ph"></div></div>
+                <div class="ringwrap"><svg viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="8" stroke="#585b70" stroke-width="2"/><circle cx="10" cy="10" r="8" stroke="#89b4fa" stroke-width="2" stroke-dasharray="50" stroke-dashoffset="20" stroke-linecap="round" transform="rotate(-90 10 10)"/></svg></div>
+                <div><div class="fn">photo.jpg</div><div class="fs">uploading · 64%</div></div>
+              </div>
+              <div class="att err">
+                <div class="ficon" data-ic="doc"></div>
+                <div><div class="fn">dump.bin</div><div class="errlab">38 MB · over 20 MB limit</div></div>
+                <div class="x" data-ic="close"></div>
+              </div>
+              <div class="att warn">
+                <div class="ficon" data-ic="doc"></div>
+                <div><div class="fn">app.exe</div><div class="warnlab">unsupported type</div></div>
+                <div class="x" data-ic="close"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <h3 class="sub">In the sent user bubble</h3>
+    <div class="stage">
+      <div class="demo-wrap">
+        <div class="demo-cap"><b>Single image</b></div>
+        <div class="chat" style="width:300px"><div class="col">
+          <div class="bub user">
+            <div class="bubthumbs g1"><div class="t"><div class="ph"><span class="lab">screenshot.png</span></div></div></div>
+            What's wrong with this layout?
+          </div>
+          <div class="meta r">14:32</div>
+        </div></div>
+      </div>
+      <div class="demo-wrap">
+        <div class="demo-cap"><b>Multiple</b> — 2-up grid, “+2” overflow</div>
+        <div class="chat" style="width:320px"><div class="col">
+          <div class="bub user">
+            <div class="bubthumbs g2">
+              <div class="t"><div class="ph"><span class="lab">a.png</span></div></div>
+              <div class="t"><div class="ph"><span class="lab">b.png</span></div></div>
+              <div class="t"><div class="ph"><span class="lab">c.png</span></div></div>
+              <div class="t"><div class="ph"><span class="lab">+2 more</span></div></div>
+            </div>
+            Compare these four mockups.
+          </div>
+          <div class="meta r">14:33</div>
+        </div></div>
+      </div>
+    </div>
+    <div class="rl">
+      <b>redline</b> · thumb <span class="k">34×34</span>, r-control <span class="k">6</span> · chip r-button <span class="k">9</span>, pad <span class="k">5 9 5 5</span>, gap <span class="k">8</span> · remove <span class="k">16×16</span> surface2 circle · bubble grid gap <span class="k">5</span>, thumb h <span class="k">84</span> · oversize→<span class="k">red</span> border+label, unsupported→<span class="k">yellow</span> · cap <span class="k">20 MB</span>, types png/jpg/webp/gif/pdf/txt/md
+    </div>
+  </section>
+
+  <!-- ════════ 08 · IMAGES IN REPLIES ════════ -->
+  <section id="reply">
+    <div class="kicker"><span class="num">08</span><h2>Images in AI replies</h2></div>
+    <p class="lede">iced’s markdown viewer renders only <i>alt text</i> for <code>![](url)</code> — so we intercept image nodes and draw them with the <code>image</code> widget ourselves (also covers model-generated inline images). Loading, error+retry, and click-to-zoom lightbox states. In <code>body.rs::bubble_row</code>.</p>
+
+    <div class="stage">
+      <div class="demo-wrap">
+        <div class="demo-cap"><b>Loaded</b> — click to zoom</div>
+        <div class="chat" style="width:340px"><div class="col">
+          <div class="airow">
+            <div class="avatar" data-ic="sparkle"></div>
+            <div style="flex:1">
+              <div class="bub ai" style="max-width:100%">
+                Here's the generated chart:
+                <div class="replyimg" onclick="document.getElementById('lb').classList.add('open')">
+                  <div class="img"><div class="ph"><span class="lab">chart.png · 1024×640</span></div></div>
+                  <div class="zoom" data-ic="search">Zoom</div>
+                </div>
+                <div class="imgcap">chart.png</div>
+              </div>
+              <div class="meta">14:35 · 1.2k tok · $0.004</div>
+            </div>
+          </div>
+        </div></div>
+      </div>
+      <div class="demo-wrap">
+        <div class="demo-cap"><b>Loading</b> · <b>error + retry</b></div>
+        <div class="chat" style="width:300px"><div class="col" style="gap:12px">
+          <div class="bub ai" style="max-width:100%">
+            Rendering…
+            <div class="loading"><div class="sh"></div><span class="lt">loading image…</span></div>
+          </div>
+          <div class="bub ai" style="max-width:100%">
+            <div class="imgerr">
+              <span data-ic="imgx"></span>
+              <span style="font-size:11px">Couldn't load image</span>
+              <span class="rt" data-ic="retry">Retry</span>
+            </div>
+          </div>
+        </div></div>
+      </div>
+    </div>
+    <div class="rl"><b>redline</b> · reply image r-card <span class="k">10</span>, border surface1 · max-h <span class="k">~150</span> inline, scales to width · zoom badge bottom-right crust@.7 · lightbox e3, scrim <span class="k">rgba(8,9,12,.88)</span>+blur · loading shimmer 1.3s · error dashed <span class="k">red</span> border + Retry → re-request</div>
+  </section>
+
+  <!-- ════════ 09 · MESSAGE BUBBLES ════════ -->
+  <section id="bubbles">
+    <div class="kicker"><span class="num">09</span><h2>Message bubbles</h2></div>
+    <p class="lede">Keep the tail-asymmetry + accent/surface split that ships today; <b>add</b> an assistant avatar, a per-bubble <b>timestamp + token/cost</b> meta line, and proper markdown chrome — links, blockquotes, tables, and a refined code-block header. <code>body.rs::bubble_row</code> + the <code>markdown::view</code> theme.</p>
+
+    <div class="stage">
+      <div class="demo-wrap">
+        <div class="demo-cap"><b>Roles + meta line</b></div>
+        <div class="chat" style="width:380px"><div class="col" style="gap:14px">
+          <div class="col">
+            <div class="bub user">Change the slice colors to a green theme and explain how.</div>
+            <div class="meta r">14:30 · you</div>
+          </div>
+          <div class="airow">
+            <div class="avatar" data-ic="sparkle"></div>
+            <div style="flex:1">
+              <div class="bub ai" style="max-width:100%">
+                Done. I edited <a class="lnk">config.json</a> — here's the relevant block and a note on theming.
+                <blockquote>Slice colors resolve from the active theme; overrides win per-slice.</blockquote>
+              </div>
+              <div class="meta">14:30 · gemini flash · 2.1k tok · $0.006</div>
+            </div>
+          </div>
+        </div></div>
+      </div>
+
+      <div class="demo-wrap">
+        <div class="demo-cap"><b>Code block</b> (lang label + copy) · <b>table</b></div>
+        <div class="chat" style="width:380px"><div class="col" style="gap:14px">
+          <div class="bub ai" style="max-width:100%">
+            <div class="code">
+              <div class="cbar"><span class="lang">json</span><div class="cact"><span class="b" data-ic="copy">Copy</span></div></div>
+<pre><span class="t-c">// menu.slices[0]</span>
+<span class="t-f">"color"</span>: <span class="t-s">"green"</span>,
+<span class="t-f">"icon"</span>:  <span class="t-s">"flask"</span>,
+<span class="t-f">"big"</span>:   <span class="t-n">true</span></pre>
+            </div>
+            <table class="md">
+              <thead><tr><th>token</th><th>role</th></tr></thead>
+              <tbody><tr><td><code>accent</code></td><td>active state</td></tr><tr><td><code>green</code></td><td>success</td></tr></tbody>
+            </table>
+          </div>
+        </div></div>
+      </div>
+    </div>
+    <div class="callout">
+      <div><p class="ti">Streaming → settled</p><p>Partial deltas render plain with a <code>▌</code> caret (today’s behaviour). On completion swap to the markdown view; the meta line (cost/tokens) appears only once the turn closes and totals are known.</p></div>
+    </div>
+    <div class="rl"><b>redline</b> · bubble pad <span class="k">9 13</span>, radius user <span class="k">14/14/4/14</span> ai <span class="k">14/14/14/4</span> · avatar <span class="k">24</span>, gap <span class="k">8</span> · meta <span class="k">micro/mono overlay0</span>, margin-top <span class="k">4</span> · code header surface0, body crust, lang=subtext0, copy hover surface1 · blockquote 2.5px surface2 rule</div>
+  </section>
+
+  <!-- ════════ 10 · AGENT & TOOL CARDS ════════ -->
+  <section id="cards">
+    <div class="kicker"><span class="num">10</span><h2>Agent &amp; tool cards</h2></div>
+    <p class="lede">Today cards dump <code>stdout</code> raw. Promote them to a real system: a <b>collapsible tool-call card</b> (one-line summary → Input/Output on expand), status-colored, plus a flow-run card with progress + sub-agent rows. Status colors come straight from P0 semantics. <code>cards.rs</code>.</p>
+
+    <h3 class="sub">Tool-call card — click the header to expand</h3>
+    <div class="stage">
+      <div class="demo-wrap">
+        <div class="demo-cap"><b>Collapsed</b> (default)</div>
+        <div class="chat" style="width:380px">
+          <div class="tcard" id="tc1">
+            <div class="rule" style="background:var(--green)"></div>
+            <div class="inner">
+              <div class="thead" onclick="document.getElementById('tc1').classList.toggle('open')">
+                <span class="ico" style="color:var(--green)" data-ic="terminal"></span>
+                <span class="tt">execute_command</span>
+                <span class="st" style="color:var(--green)">done</span>
+                <span class="mt">exit 0 · 0:02</span>
+                <span class="chev" data-ic="chevron"></span>
+              </div>
+              <div class="collapsed">tokei ~/src/oxidemx → 61,204 lines</div>
+              <div class="tbody">
+                <div class="io"><div class="l">input</div><pre>$ tokei ~/src/oxidemx --output json</pre></div>
+                <div class="io" style="border-top:1px solid var(--surface0)"><div class="l">output</div><pre>{ "Total": { "code": 61204,
+            "files": 412 } }</pre></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="demo-wrap">
+        <div class="demo-cap"><b>Running</b> · <b>error</b></div>
+        <div class="chat" style="width:340px"><div class="col" style="gap:10px">
+          <div class="tcard">
+            <div class="rule" style="background:var(--accent)"></div>
+            <div class="inner"><div class="thead">
+              <span class="ico" style="color:var(--accent)"><svg class="spin" viewBox="0 0 22 22" fill="none"><circle cx="11" cy="11" r="9" stroke="#89b4fa" stroke-width="2" stroke-dasharray="16 40" stroke-linecap="round"/></svg></span>
+              <span class="tt">google_search</span><span class="st" style="color:var(--accent)">running</span>
+              <span class="mt">0:03</span><span class="chev" data-ic="chevron"></span>
+            </div><div class="collapsed">“iced 0.13 multi-window”…</div></div>
+          </div>
+          <div class="tcard">
+            <div class="rule" style="background:var(--red)"></div>
+            <div class="inner"><div class="thead">
+              <span class="ico" style="color:var(--red)" data-ic="terminal"></span>
+              <span class="tt">execute_command</span><span class="st" style="color:var(--red)">failed</span>
+              <span class="mt">exit 1</span><span class="chev" data-ic="chevron"></span>
+            </div><div class="collapsed" style="color:var(--red)">command not allowlisted</div></div>
+          </div>
+        </div></div>
+      </div>
+    </div>
+
+    <h3 class="sub">Flow-run card — progress + sub-agents</h3>
+    <div class="stage">
+      <div class="chat" style="width:380px">
+        <div class="tcard">
+          <div class="rule" style="background:var(--accent)"></div>
+          <div class="inner">
+            <div class="thead" style="cursor:default">
+              <span class="ico" style="color:var(--accent)" data-ic="agents"></span>
+              <span class="tt">research.md</span><span class="st" style="color:var(--accent)">step 2/4</span>
+              <span class="mt">1:24 · 22.1k tok</span>
+            </div>
+            <div class="io" style="padding-top:4px">
+              <div class="subrow"><span class="d" style="background:var(--green)"></span><span class="id">researcher</span><span class="ds">google_search · call 3</span><span class="el">0:31</span></div>
+              <div class="subrow"><span class="d" style="background:var(--yellow)"></span><span class="id">shell-op</span><span class="ds">awaiting approval</span><span class="el">0:12</span></div>
+              <div class="subrow"><span class="d" style="background:var(--overlay0)"></span><span class="id">summarizer</span><span class="ds">queued</span><span class="el">—</span></div>
+              <div class="prog"><div class="f" style="width:52%"></div></div>
+            </div>
+            <div class="chips"><span class="chip">Pause</span><span class="chip">Cancel</span><span class="chip" style="margin-left:auto" data-ic="monitor">&nbsp;Mission Control</span></div>
+          </div>
+        </div>
+      </div>
+      <div class="demo-wrap" style="justify-content:center">
+        <div class="legend">
+          <span><span class="d" style="background:var(--accent)"></span> running</span>
+          <span><span class="d" style="background:var(--green)"></span> done</span>
+          <span><span class="d" style="background:var(--yellow)"></span> approval</span>
+          <span><span class="d" style="background:var(--overlay0)"></span> queued</span>
+          <span><span class="d" style="background:var(--red)"></span> failed</span>
+        </div>
+      </div>
+    </div>
+    <div class="rl"><b>redline</b> · card r <span class="k">12</span>, e1, 2.5px left rule = status tone · header pad <span class="k">8 12</span>, chevron rotates 180° · IO pre = crust/surface1, mono <span class="k">11</span> · collapsed summary one line, ellipsis · sub-row dot <span class="k">6</span>, id col <span class="k">84</span> mono · keep 92% width left-align from <code>cards.rs</code></div>
+  </section>
+
+  <!-- ════════ 11 · APPROVAL CARD ════════ -->
+  <section id="approval">
+    <div class="kicker"><span class="num">11</span><h2>Rich approval card</h2></div>
+    <p class="lede">The permission prompt is plain option-buttons today (<code>body.rs</code> pending-question). Promote it to a real card: command preview, guardrail line, and the four actions the roadmap calls for — <b>Deny w/ reason</b>, <b>Edit &amp; approve</b>, <b>Always allow</b> (shows the pattern), <b>Run it</b>. Uses <code>yellow</code> (the approval tone — see P0 token gap).</p>
+
+    <div class="tabs" id="apprTabs">
+      <span class="tab on" data-s="default">Default</span>
+      <span class="tab" data-s="reason">Deny + reason</span>
+      <span class="tab" data-s="edit">Edit &amp; approve</span>
+      <span class="tab" data-s="always">Always allow</span>
+    </div>
+
+    <div class="chat" style="width:440px">
+      <div class="appr">
+        <div class="ah">
+          <span class="bang">!</span>
+          <span class="at">shell-op wants to run a command</span>
+          <span class="aq">queued 0:12</span>
+        </div>
+        <div class="cmd">$ tokei ~/src/oxidemx --output json</div>
+        <div class="grd" data-ic="shield">&nbsp;injection scan clean · not on allowlist</div>
+
+        <div class="exp" data-panel="reason" style="display:none">
+          <div class="el">reason (sent back to the agent)</div>
+          <div class="field txt">Don't scan the whole tree — just the daemon crate.</div>
+        </div>
+        <div class="exp" data-panel="edit" style="display:none">
+          <div class="el">edit command before running</div>
+          <div class="field">$ tokei ~/src/oxidemx/daemon --output json</div>
+        </div>
+        <div class="exp" data-panel="always" style="display:none">
+          <div class="el">allowlist pattern to add</div>
+          <div class="field">tokei *</div>
+          <div class="hint">Matches every <code>tokei …</code> invocation. Editable before saving; compound commands (<code>&amp;&amp;</code>, <code>;</code>) are split and matched per-segment.</div>
+        </div>
+
+        <div class="acts">
+          <span class="abtn deny" data-act="reason">Deny…</span>
+          <span class="abtn" data-act="edit">Edit &amp; approve</span>
+          <span class="abtn" data-act="always">Always allow</span>
+          <span class="sp"></span>
+          <span class="abtn pri">Run it</span>
+        </div>
+      </div>
+    </div>
+    <div class="rl"><b>redline</b> · card tone <span class="k">yellow</span> (bg @7%, border @32%) · bang <span class="k">17</span> circle · cmd block crust/surface1 mono <span class="k">11</span> · actions right-align primary · expanders push down in-place (no popover) · “Always” shows first-token+<code>*</code> pattern, editable · Deny reason returned as <code>user declined: …</code></div>
+  </section>
+
+  <footer class="end">
+    <p><b>P1 delivered:</b> attachments (staged + sent + guardrails), images-in-replies + lightbox, message bubbles with cost meta &amp; markdown chrome, the collapsible tool/flow card system, and the rich approval card.</p>
+    <p style="margin-top:10px">Remaining: <b>P2</b> — model/provider picker, unified hover message actions, empty/onboarding states, the shared list/row/toggle panel component, feedback &amp; motion, and the accessibility pass. The Claude-Code handoff package bundles P0 + P1 as implementation guidance against the <code>chat_ui/</code> modules.</p>
+  </footer>
+</div>
+
+<!-- lightbox -->
+<div id="lb" onclick="if(event.target===this)this.classList.remove('open')">
+  <div class="bar"><span>chart.png · 1024×640</span><span class="ib" data-ic="export">&nbsp;Save</span><span class="ib" onclick="document.getElementById('lb').classList.remove('open')" data-ic="close">&nbsp;Close</span></div>
+  <div class="frame"><div class="img"><div class="ph"><span class="lab">chart.png</span></div></div></div>
+</div>
+
+<script>
+const I = {
+  close:'<path d="M6 6l12 12M18 6L6 18"/>',
+  attach:'<path d="M21 8.5 12 17.5a4 4 0 0 1-5.7-5.7L13.5 4.6a2.5 2.5 0 0 1 3.6 3.5l-7.2 7.2a1 1 0 0 1-1.5-1.4l6.6-6.6"/>',
+  send:'<path d="M22 2 11 13"/><path d="M22 2l-7 20-4-9-9-4z"/>',
+  doc:'<path d="M14 3v5h5"/><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M9 13h6M9 17h4"/>',
+  sparkle:'<path d="M12 3l1.9 5.6L19.5 10.5l-5.6 1.9L12 18l-1.9-5.6L4.5 10.5l5.6-1.9z" fill="currentColor" stroke="none"/>',
+  copy:'<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
+  search:'<circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/>',
+  retry:'<path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 4v5h-5"/>',
+  imgx:'<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 16l5-5 4 4M21 14l-3-3-2 2"/><path d="M3 3l18 18"/>',
+  terminal:'<rect x="2" y="4" width="20" height="16" rx="2"/><path d="M6 9l3 3-3 3M12 15h5"/>',
+  chevron:'<path d="M6 9l6 6 6-6"/>',
+  agents:'<circle cx="12" cy="12" r="2.4"/><circle cx="12" cy="4" r="1.8"/><circle cx="5" cy="18.5" r="1.8"/><circle cx="19" cy="18.5" r="1.8"/><path d="M12 6.4v3.2M10.3 13.4 6.2 17M13.7 13.4l4.1 3.6"/>',
+  monitor:'<rect x="2" y="4" width="20" height="13" rx="2"/><path d="M8 21h8M12 17v4"/>',
+  shield:'<path d="M12 3l8 3v6c0 5-3.5 7.5-8 9-4.5-1.5-8-4-8-9V6z"/><path d="M9 12l2 2 4-4"/>',
+  export:'<path d="M12 15V3"/><path d="M8 7l4-4 4 4"/><path d="M4 13v6a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-6"/>',
+};
+const svg = k => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">${I[k]||''}</svg>`;
+document.querySelectorAll('[data-ic]').forEach(el=>el.insertAdjacentHTML('afterbegin', svg(el.dataset.ic)));
+
+// approval card tabs
+const tabs = document.getElementById('apprTabs');
+const setState = s => {
+  tabs.querySelectorAll('.tab').forEach(t=>t.classList.toggle('on', t.dataset.s===s));
+  document.querySelectorAll('.exp').forEach(p=>p.style.display = (p.dataset.panel===s)?'block':'none');
+};
+tabs.querySelectorAll('.tab').forEach(t=>t.addEventListener('click',()=>setState(t.dataset.s)));
+document.querySelectorAll('.acts [data-act]').forEach(b=>b.addEventListener('click',()=>setState(b.dataset.act)));
+</script>
+</body>
+</html>

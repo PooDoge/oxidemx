@@ -893,8 +893,13 @@ mod recall_tests {
             100,
         );
         save_entry_at(&path, "Jim plays guitar on weekends", "hobby", 9_000_000);
-        let block =
-            injection_block_at(&path, "change the weather widget location", 10_000_000, None).unwrap();
+        let block = injection_block_at(
+            &path,
+            "change the weather widget location",
+            10_000_000,
+            None,
+        )
+        .unwrap();
         let weather_pos = block.find("weather widget").unwrap();
         let guitar_pos = block.find("guitar").unwrap();
         assert!(

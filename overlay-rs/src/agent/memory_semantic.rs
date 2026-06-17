@@ -102,7 +102,10 @@ async fn ensure_embeddings(texts: &[String]) -> HashMap<String, Vec<f32>> {
 /// itself can't be embedded (no key / offline) — the signal to fall
 /// back to pure lexical recall. Entries whose embedding is missing
 /// are omitted (scored lexical-only upstream).
-pub async fn semantic_scores(query: &str, entries: &[(String, String)]) -> Option<HashMap<String, f32>> {
+pub async fn semantic_scores(
+    query: &str,
+    entries: &[(String, String)],
+) -> Option<HashMap<String, f32>> {
     let key = crate::ai_client::load_api_key().ok()?;
     let client = reqwest::Client::new();
     let cancel = CancellationToken::new();

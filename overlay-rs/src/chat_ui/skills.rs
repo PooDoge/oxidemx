@@ -71,9 +71,10 @@ pub fn view<'a>(state: &'a RadialState, kit: &Kit) -> Element<'a, Message> {
         )
         .padding([3, 8])
         .style(move |_, _| button::Style {
-            background: Some(iced::Background::Color(
-                kit.fade(if on { kit.green } else { kit.surface1 }, if on { 0.22 } else { 0.6 }),
-            )),
+            background: Some(iced::Background::Color(kit.fade(
+                if on { kit.green } else { kit.surface1 },
+                if on { 0.22 } else { 0.6 },
+            ))),
             border: iced::border::Border::default().rounded(8.0),
             text_color: kit.fade(kit.text, 1.0),
             ..Default::default()
@@ -85,12 +86,7 @@ pub fn view<'a>(state: &'a RadialState, kit: &Kit) -> Element<'a, Message> {
         } else {
             s.description.clone()
         };
-        let meta = row![
-            text(s.source)
-                .size(10)
-                .color(kit.fade(kit.accent, 1.0)),
-        ]
-        .spacing(8);
+        let meta = row![text(s.source).size(10).color(kit.fade(kit.accent, 1.0)),].spacing(8);
 
         rows = rows.push(
             container(
