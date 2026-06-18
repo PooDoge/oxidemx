@@ -25,17 +25,7 @@ pub fn view<'a>(state: &'a RadialState, kit: &Kit) -> Element<'a, Message> {
     let tool_count = state.chat().mode.tool_count();
 
     let status = row![
-        container(Space::new())
-            .width(Length::Fixed(6.0))
-            .height(Length::Fixed(6.0))
-            .style(move |_| iced::widget::container::Style {
-                background: Some(iced::Background::Color(kit.fade(kit.green, 1.0))),
-                border: iced::border::Border {
-                    radius: 3.0.into(),
-                    ..Default::default()
-                },
-                ..Default::default()
-            }),
+        super::widgets::status_dot(kit, kit.green, true),
         text(format!("{model_short} · {tool_count} tools armed"))
             .size(10.5)
             .color(kit.fade(kit.subtext0, 1.0)),

@@ -1,10 +1,9 @@
 //! Thread chip strip: recent conversation chips + "+ New" on the
 //! left, agent-mode pill + Flash/Pro indicator right-aligned.
 
-use iced::widget::{button, row, text, Space};
+use iced::widget::{row, text, Space};
 use iced::{Alignment, Element, Length};
 
-use super::icons::icon;
 use super::Kit;
 use crate::app::Message;
 use crate::radial::RadialState;
@@ -34,48 +33,11 @@ const MAX_CHIPS: usize = 2;
 pub fn strip<'a>(state: &'a RadialState, kit: &Kit) -> Element<'a, Message> {
     let kit = *kit;
 
+    // The strip's conversation chips use the shared 3-state Chip
+    // (`controls::pill_dim`). A chip must never wrap — long titles are
+    // pre-truncated with an ellipsis before they reach here.
     let chip = move |label: String, active: bool, dim: bool, msg: Message| {
-        button(
-            text(label)
-                .size(11.5)
-                // A chip must never wrap into a second line — the
-                // strip is one fixed-height row; long titles are
-                // pre-truncated with an ellipsis.
-                .wrapping(iced::widget::text::Wrapping::None)
-                .color(kit.fade(
-                    if active {
-                        kit.accent
-                    } else if dim {
-                        kit.subtext0
-                    } else {
-                        kit.subtext1
-                    },
-                    1.0,
-                )),
-        )
-        .padding([5, 12])
-        .style(move |_, _status| button::Style {
-            background: Some(iced::Background::Color(if active {
-                kit.fade(kit.accent, 0.12)
-            } else if dim {
-                iced::Color::TRANSPARENT
-            } else {
-                kit.fade(kit.surface0, 1.0)
-            })),
-            border: iced::border::Border {
-                color: if active {
-                    kit.fade(kit.accent, 0.4)
-                } else if dim {
-                    kit.fade(kit.surface1, 1.0)
-                } else {
-                    iced::Color::TRANSPARENT
-                },
-                width: 1.0,
-                radius: 999.0.into(),
-            },
-            ..Default::default()
-        })
-        .on_press(msg)
+        super::widgets::pill_dim(kit, None, label, active, dim, msg)
     };
 
     let mut bar = row![].spacing(6).align_y(Alignment::Center);
@@ -106,29 +68,15 @@ pub fn strip<'a>(state: &'a RadialState, kit: &Kit) -> Element<'a, Message> {
             Message::AiSelectThread(idx),
         ));
     }
-    bar = bar.push(
-        button(
-            row![
-                icon("plus", 13.0, kit.fade(kit.subtext0, 1.0)),
-                text("New")
-                    .size(11)
-                    .wrapping(iced::widget::text::Wrapping::None)
-                    .color(kit.fade(kit.subtext0, 1.0)),
-            ]
-            .spacing(4)
-            .align_y(Alignment::Center),
-        )
-        .padding([5, 11])
-        .style(move |_, _| button::Style {
-            border: iced::border::Border {
-                color: kit.fade(kit.surface1, 1.0),
-                width: 1.0,
-                radius: 999.0.into(),
-            },
-            ..Default::default()
-        })
-        .on_press(Message::AiNewChat),
-    );
+    // "New" — a dim (ghost) chip with a leading plus.
+    bar = bar.push(super::widgets::pill_dim(
+        kit,
+        Some("plus"),
+        "New",
+        false,
+        true,
+        Message::AiNewChat,
+    ));
     if recent.len() > MAX_CHIPS {
         bar = bar.push(chip(
             "…".to_string(),
@@ -166,35 +114,18 @@ pub fn strip<'a>(state: &'a RadialState, kit: &Kit) -> Element<'a, Message> {
     // Labeled model pill (the picker across providers is P2; for now it
     // toggles Flash ↔ Pro on click).
     let is_pro = state.chat().model == crate::ai_client::PRO_MODEL;
-    bar = bar.push(
-        button(
-            row![
-                icon("model", 13.0, kit.fade(kit.accent, 1.0)),
-                text(if is_pro {
-                    "Gemini · Pro"
-                } else {
-                    "Gemini · Flash"
-                })
-                .size(11)
-                .wrapping(iced::widget::text::Wrapping::None)
-                .color(kit.fade(kit.subtext1, 1.0)),
-                icon("chevron", 12.0, kit.fade(kit.subtext0, 1.0)),
-            ]
-            .spacing(6)
-            .align_y(Alignment::Center),
-        )
-        .padding([4, 10])
-        .style(move |_, _| button::Style {
-            background: Some(iced::Background::Color(kit.fade(kit.surface0, 1.0))),
-            border: iced::border::Border {
-                color: kit.fade(kit.surface1, 1.0),
-                width: 1.0,
-                radius: 999.0.into(),
-            },
-            ..Default::default()
-        })
-        .on_press(Message::AiModelToggled),
-    );
+    let model_label = if is_pro {
+        "Gemini · Pro"
+    } else {
+        "Gemini · Flash"
+    };
+    bar = bar.push(super::widgets::model_pill(
+        kit,
+        "model",
+        model_label,
+        false,
+        Message::AiModelToggled,
+    ));
 
     iced::widget::container(bar)
         .width(Length::Fill)

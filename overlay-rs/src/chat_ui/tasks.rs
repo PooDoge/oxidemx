@@ -93,42 +93,5 @@ pub fn view<'a>(state: &'a RadialState, kit: &Kit) -> Element<'a, Message> {
 }
 
 fn toggle<'a>(kit: Kit, on: bool, msg: Message) -> Element<'a, Message> {
-    let knob = container(Space::new())
-        .width(Length::Fixed(14.0))
-        .height(Length::Fixed(14.0))
-        .style(move |_| iced::widget::container::Style {
-            background: Some(iced::Background::Color(
-                kit.fade(if on { kit.crust } else { kit.subtext0 }, 1.0),
-            )),
-            border: iced::border::Border {
-                radius: 7.0.into(),
-                ..Default::default()
-            },
-            ..Default::default()
-        });
-    let inner = if on {
-        row![Space::new().width(Length::Fill), knob]
-    } else {
-        row![knob, Space::new().width(Length::Fill)]
-    };
-    button(
-        container(inner.align_y(Alignment::Center))
-            .width(Length::Fixed(32.0))
-            .height(Length::Fixed(18.0))
-            .padding(2)
-            .style(move |_| iced::widget::container::Style {
-                background: Some(iced::Background::Color(
-                    kit.fade(if on { kit.accent } else { kit.surface2 }, 1.0),
-                )),
-                border: iced::border::Border {
-                    radius: 9.0.into(),
-                    ..Default::default()
-                },
-                ..Default::default()
-            }),
-    )
-    .padding(0)
-    .style(|_, _| button::Style::default())
-    .on_press(msg)
-    .into()
+    super::widgets::switch(kit, on, msg)
 }

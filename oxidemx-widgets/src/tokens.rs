@@ -19,6 +19,8 @@ pub const S5: f32 = 20.0;
 pub const S6: f32 = 24.0;
 
 // ── Corner radii (by role) ────────────────────────────────────────────
+// Scale matches the design-system spec (--jr-r-xs…xl: 4/6/9/12/16).
+pub const R_XS: f32 = 4.0; // tiny swatches, chrome chips, badges
 pub const R_CONTROL: f32 = 6.0; // input inner, code block
 pub const R_BUTTON: f32 = 9.0; // icon buttons
 pub const R_CARD: f32 = 12.0; // agent / tool cards

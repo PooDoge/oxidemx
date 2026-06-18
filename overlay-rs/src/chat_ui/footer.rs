@@ -34,21 +34,8 @@ pub fn view<'a>(state: &'a RadialState, kit: &Kit) -> Element<'a, Message> {
     // Activity line — present while a turn is in flight.
     let activity: Element<'a, Message> = if state.ai_loading {
         row![
-            container(Space::new())
-                .width(Length::Fixed(5.0))
-                .height(Length::Fixed(5.0))
-                .style(move |_| iced::widget::container::Style {
-                    // Breathes with the shared status pulse so the
-                    // "working" state is alive, not a static dot.
-                    background: Some(iced::Background::Color(
-                        kit.fade(kit.accent, 0.45 + 0.55 * kit.pulse),
-                    )),
-                    border: iced::border::Border {
-                        radius: 3.0.into(),
-                        ..Default::default()
-                    },
-                    ..Default::default()
-                }),
+            // Breathes with the shared status pulse so "working" is alive.
+            super::widgets::status_dot_sized(kit, kit.accent, true, 5.0),
             text(
                 state
                     .ai_activity
