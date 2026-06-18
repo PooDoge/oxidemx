@@ -28,6 +28,9 @@ pub enum Surface {
     Chip,
     /// Recessed code/preview well: crust, surface1 border, r-control.
     CrustWell,
+    /// A flat list-row card (panel rows: tasks / memories / skills) —
+    /// like [`Surface::Card`] but with no elevation shadow.
+    Row,
     /// A message bubble (tail-asymmetric radius); `true` = user side.
     Bubble(bool),
     /// A semantic-tinted card (approvals=yellow, errors=red): `tone` bg
@@ -78,6 +81,17 @@ pub fn surface_style(kit: Kit, s: Surface) -> impl Fn(&iced::Theme) -> container
                 color: kit.fade(kit.surface1, 1.0),
                 width: 1.0,
                 radius: tokens::R_CONTROL.into(),
+            },
+            ..Default::default()
+        },
+        // Flat row: Card colors, no shadow. r=10 (the established panel
+        // row radius — between R_BUTTON and R_CARD on the scale).
+        Surface::Row => container::Style {
+            background: Some(Background::Color(kit.fade(kit.mantle, 0.96))),
+            border: Border {
+                color: kit.fade(kit.surface1, 1.0),
+                width: 1.0,
+                radius: 10.0.into(),
             },
             ..Default::default()
         },

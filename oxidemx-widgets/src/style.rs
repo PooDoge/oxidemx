@@ -1,16 +1,19 @@
-//! iced widget styles wired to the active `Palette`.
+//! iced widget styles wired to the active theme — the **form-widget +
+//! settings-surface** half of the design system (slider / toggler /
+//! pick_list / rule / the settings card/sidebar/nav chrome). The
+//! chat-overlay's design-language surfaces live in [`catalog`](crate::catalog);
+//! both halves now resolve from one render context, [`Kit`](crate::kit::Kit).
 //!
 //! iced 0.14 styles are functions of `&Theme` returning a per-widget
-//! `Style` struct. Most widgets accept either a built-in style
-//! (`button::primary`, `container::bordered_box`) or a closure. We
-//! ship our own closures here so the whole settings UI re-themes
-//! when the user picks a different palette in the Theme picker.
+//! `Style` struct. We ship closures here so the whole settings UI
+//! re-themes when the user picks a different palette.
 //!
-//! Helpers are organised by widget: `card_*`, `sidebar_*`, `btn_*`,
-//! etc. They're returned as boxed closures because every callsite
-//! needs to capture the live palette.
+//! Every function takes `impl Into<Kit>`, so the existing call-sites that
+//! pass `&Palette` keep working (there's a `From<&Palette> for Kit`) while
+//! the crate runs on a single `Kit` context. New code can pass a `Kit`
+//! directly. Helpers are organised by widget: `card_*`, `btn_*`, etc.
 
-use crate::palette::Palette;
+use crate::kit::Kit;
 use iced::widget::{button, container, pick_list, rule, scrollable, slider, text, toggler};
 use iced::{Background, Border, Color, Shadow, Theme};
 
@@ -20,69 +23,62 @@ use iced::{Background, Border, Color, Shadow, Theme};
 
 /// Window-level frame: sets the body background and ensures every
 /// child without an explicit container style gets the right colour.
-pub fn window(palette: &Palette) -> impl Fn(&Theme) -> container::Style + 'static {
-    let bg = palette.crust;
-    let text = palette.text;
+pub fn window(kit: impl Into<Kit>) -> impl Fn(&Theme) -> container::Style + 'static {
+    let kit = kit.into();
     move |_| container::Style {
-        background: Some(Background::Color(bg)),
-        text_color: Some(text),
+        background: Some(Background::Color(kit.crust)),
+        text_color: Some(kit.text),
         ..Default::default()
     }
 }
 
-/// Settings card — the elevated `panel_bg` panel with a 1px hairline
+/// Settings card — the elevated `mantle` panel with a 1px hairline
 /// border and 10 px radius.
-pub fn card(palette: &Palette) -> impl Fn(&Theme) -> container::Style + 'static {
-    let bg = palette.mantle;
-    let border = palette.hairline;
-    let text = palette.text;
+pub fn card(kit: impl Into<Kit>) -> impl Fn(&Theme) -> container::Style + 'static {
+    let kit = kit.into();
     move |_| container::Style {
-        background: Some(Background::Color(bg)),
+        background: Some(Background::Color(kit.mantle)),
         border: Border {
-            color: border,
+            color: kit.hairline,
             width: 1.0,
             radius: 10.0.into(),
         },
-        text_color: Some(text),
+        text_color: Some(kit.text),
         ..Default::default()
     }
 }
 
 /// Quieter card variant for nested groups (e.g. info boxes).
-pub fn card_quiet(palette: &Palette) -> impl Fn(&Theme) -> container::Style + 'static {
-    let bg = palette.crust;
-    let border = palette.hairline_faint;
-    let text = palette.text;
+pub fn card_quiet(kit: impl Into<Kit>) -> impl Fn(&Theme) -> container::Style + 'static {
+    let kit = kit.into();
     move |_| container::Style {
-        background: Some(Background::Color(bg)),
+        background: Some(Background::Color(kit.crust)),
         border: Border {
-            color: border,
+            color: kit.hairline_faint,
             width: 1.0,
             radius: 10.0.into(),
         },
-        text_color: Some(text),
+        text_color: Some(kit.text),
         ..Default::default()
     }
 }
 
 /// Sidebar rail — `mantle` background + 1px right border.
-pub fn sidebar(palette: &Palette) -> impl Fn(&Theme) -> container::Style + 'static {
-    let bg = palette.mantle;
-    let border = palette.hairline;
-    let text = palette.text;
+pub fn sidebar(kit: impl Into<Kit>) -> impl Fn(&Theme) -> container::Style + 'static {
+    let kit = kit.into();
     move |_| container::Style {
-        background: Some(Background::Color(bg)),
+        background: Some(Background::Color(kit.mantle)),
         border: Border {
-            color: border,
+            color: kit.hairline,
             width: 0.0,
             radius: 0.0.into(),
         },
-        text_color: Some(text),
+        text_color: Some(kit.text),
         // Right edge only — iced doesn't have per-edge borders, so we
         // approximate with a 1 px shadow leaning right. Acceptable
         // hack; lands cleaner once iced exposes per-edge borders.
         shadow: Shadow {
-            color: border,
+            color: kit.hairline,
             offset: iced::Vector::new(1.0, 0.0),
             blur_radius: 0.0,
         },
@@ -92,50 +88,46 @@ pub fn sidebar(palette: &Palette) -> impl Fn(&Theme) -> container::Style + 'stat
 
 /// Header bar — sits above the sidebar+content. Same window
 /// background; thin bottom hairline drawn separately as a Rule.
-pub fn header(palette: &Palette) -> impl Fn(&Theme) -> container::Style + 'static {
-    let bg = palette.crust;
-    let text = palette.text;
+pub fn header(kit: impl Into<Kit>) -> impl Fn(&Theme) -> container::Style + 'static {
+    let kit = kit.into();
     move |_| container::Style {
-        background: Some(Background::Color(bg)),
-        text_color: Some(text),
+        background: Some(Background::Color(kit.crust)),
+        text_color: Some(kit.text),
         ..Default::default()
     }
 }
 
 /// Footer / status bar.
-pub fn footer(palette: &Palette) -> impl Fn(&Theme) -> container::Style + 'static {
-    let bg = palette.crust;
-    let text = palette.subtext0;
+pub fn footer(kit: impl Into<Kit>) -> impl Fn(&Theme) -> container::Style + 'static {
+    let kit = kit.into();
     move |_| container::Style {
-        background: Some(Background::Color(bg)),
-        text_color: Some(text),
+        background: Some(Background::Color(kit.crust)),
+        text_color: Some(kit.subtext0),
         ..Default::default()
     }
 }
 
 /// Device chip / badge — small uppercase pill with hairline border.
-pub fn chip(palette: &Palette) -> impl Fn(&Theme) -> container::Style + 'static {
-    let border = palette.hairline_strong;
-    let text = palette.subtext0;
+pub fn chip(kit: impl Into<Kit>) -> impl Fn(&Theme) -> container::Style + 'static {
+    let kit = kit.into();
     move |_| container::Style {
         background: None,
         border: Border {
-            color: border,
+            color: kit.hairline_strong,
             width: 1.0,
             radius: 4.0.into(),
         },
-        text_color: Some(text),
+        text_color: Some(kit.subtext0),
         ..Default::default()
     }
 }
 
 /// Page-content scroll wrapper.
-pub fn page(palette: &Palette) -> impl Fn(&Theme) -> container::Style + 'static {
-    let bg = palette.base;
-    let text = palette.text;
+pub fn page(kit: impl Into<Kit>) -> impl Fn(&Theme) -> container::Style + 'static {
+    let kit = kit.into();
     move |_| container::Style {
-        background: Some(Background::Color(bg)),
-        text_color: Some(text),
+        background: Some(Background::Color(kit.base)),
+        text_color: Some(kit.text),
         ..Default::default()
     }
 }
@@ -147,27 +139,21 @@ pub fn page(palette: &Palette) -> impl Fn(&Theme) -> container::Style + 'static 
 /// Primary suggested-action button. Solid accent fill.
 #[allow(dead_code)]
 pub fn btn_primary(
-    palette: &Palette,
+    kit: impl Into<Kit>,
 ) -> impl Fn(&Theme, button::Status) -> button::Style + 'static {
-    let accent = palette.accent;
-    let on_accent = if palette.is_dark {
-        palette.crust
-    } else {
-        Color::WHITE
-    };
+    let kit = kit.into();
+    let on_accent = if kit.is_dark { kit.crust } else { Color::WHITE };
     move |_, status| {
         let pressed = matches!(status, button::Status::Pressed);
-        let hovered = matches!(status, button::Status::Hovered);
-        let mut bg = accent;
+        let mut bg = kit.accent;
         if pressed {
             bg.a = 0.9;
         }
-        let _ = hovered;
         button::Style {
             background: Some(Background::Color(bg)),
             text_color: on_accent,
             border: Border {
-                color: accent,
+                color: kit.accent,
                 width: 1.0,
                 radius: 6.0.into(),
             },
@@ -178,23 +164,24 @@ pub fn btn_primary(
 
 /// Secondary / outline button.
 pub fn btn_secondary(
-    palette: &Palette,
+    kit: impl Into<Kit>,
 ) -> impl Fn(&Theme, button::Status) -> button::Style + 'static {
-    let border = palette.hairline_strong;
-    let border_hover = palette.accent;
-    let text = palette.text;
-    let row_hover = palette.row_hover;
+    let kit = kit.into();
     move |_, status| {
         let hovered = matches!(status, button::Status::Hovered);
         button::Style {
             background: if hovered {
-                Some(Background::Color(row_hover))
+                Some(Background::Color(kit.row_hover))
             } else {
                 None
             },
-            text_color: text,
+            text_color: kit.text,
             border: Border {
-                color: if hovered { border_hover } else { border },
+                color: if hovered {
+                    kit.accent
+                } else {
+                    kit.hairline_strong
+                },
                 width: 1.0,
                 radius: 6.0.into(),
             },
@@ -206,28 +193,25 @@ pub fn btn_secondary(
 /// Sidebar nav item. Active and inactive variants — caller picks
 /// which closure to apply.
 pub fn nav_item(
-    palette: &Palette,
+    kit: impl Into<Kit>,
     active: bool,
 ) -> impl Fn(&Theme, button::Status) -> button::Style + 'static {
-    let text_active = palette.text;
-    let text_dim = palette.subtext0;
-    let row_hover = palette.row_hover;
-    let row_active = palette.row_active;
+    let kit = kit.into();
     move |_, status| {
         let hovered = matches!(status, button::Status::Hovered);
         let bg = if active {
-            row_active
+            kit.row_active
         } else if hovered {
-            row_hover
+            kit.row_hover
         } else {
             Color::TRANSPARENT
         };
         button::Style {
             background: Some(Background::Color(bg)),
             text_color: if active || hovered {
-                text_active
+                kit.text
             } else {
-                text_dim
+                kit.subtext0
             },
             border: Border {
                 color: Color::TRANSPARENT,
@@ -241,18 +225,17 @@ pub fn nav_item(
 
 /// Flat / tertiary button (icon-only, header bar actions).
 #[allow(dead_code)]
-pub fn btn_flat(palette: &Palette) -> impl Fn(&Theme, button::Status) -> button::Style + 'static {
-    let text = palette.text;
-    let row_hover = palette.row_hover;
+pub fn btn_flat(kit: impl Into<Kit>) -> impl Fn(&Theme, button::Status) -> button::Style + 'static {
+    let kit = kit.into();
     move |_, status| {
         let hovered = matches!(status, button::Status::Hovered);
         button::Style {
             background: if hovered {
-                Some(Background::Color(row_hover))
+                Some(Background::Color(kit.row_hover))
             } else {
                 None
             },
-            text_color: text,
+            text_color: kit.text,
             border: Border {
                 color: Color::TRANSPARENT,
                 width: 0.0,
@@ -264,9 +247,11 @@ pub fn btn_flat(palette: &Palette) -> impl Fn(&Theme, button::Status) -> button:
 }
 
 /// Destructive button — outline + danger text.
-pub fn btn_danger(palette: &Palette) -> impl Fn(&Theme, button::Status) -> button::Style + 'static {
-    let danger = palette.danger;
-    let border = palette.hairline_strong;
+pub fn btn_danger(
+    kit: impl Into<Kit>,
+) -> impl Fn(&Theme, button::Status) -> button::Style + 'static {
+    let kit = kit.into();
+    let danger = kit.danger;
     move |_, status| {
         let hovered = matches!(status, button::Status::Hovered);
         button::Style {
@@ -279,7 +264,7 @@ pub fn btn_danger(palette: &Palette) -> impl Fn(&Theme, button::Status) -> butto
             },
             text_color: danger,
             border: Border {
-                color: if hovered { danger } else { border },
+                color: if hovered { danger } else { kit.hairline_strong },
                 width: 1.0,
                 radius: 6.0.into(),
             },
@@ -297,17 +282,17 @@ pub fn btn_danger(palette: &Palette) -> impl Fn(&Theme, button::Status) -> butto
 /// case a per-slider override is needed later.
 #[allow(dead_code)]
 pub fn slider_style(
-    palette: &Palette,
+    kit: impl Into<Kit>,
 ) -> impl Fn(&Theme, slider::Status) -> slider::Style + 'static {
-    let track_bg = palette.surface0;
-    let highlight = palette.accent;
-    let handle = palette.text;
-    let handle_hover = palette.accent;
+    let kit = kit.into();
     move |_, status| {
         let hovered = matches!(status, slider::Status::Hovered | slider::Status::Dragged);
         slider::Style {
             rail: slider::Rail {
-                backgrounds: (Background::Color(highlight), Background::Color(track_bg)),
+                backgrounds: (
+                    Background::Color(kit.accent),
+                    Background::Color(kit.surface0),
+                ),
                 width: 6.0,
                 border: Border {
                     color: Color::TRANSPARENT,
@@ -317,7 +302,7 @@ pub fn slider_style(
             },
             handle: slider::Handle {
                 shape: slider::HandleShape::Circle { radius: 10.0 },
-                background: Background::Color(if hovered { handle_hover } else { handle }),
+                background: Background::Color(if hovered { kit.accent } else { kit.text }),
                 border_color: Color::TRANSPARENT,
                 border_width: 0.0,
             },
@@ -326,17 +311,10 @@ pub fn slider_style(
 }
 
 pub fn toggler_style(
-    palette: &Palette,
+    kit: impl Into<Kit>,
 ) -> impl Fn(&Theme, toggler::Status) -> toggler::Style + 'static {
-    let off_bg = palette.surface0;
-    let off_border = palette.hairline_strong;
-    let on_bg = palette.accent;
-    let knob_off = palette.text;
-    let knob_on = if palette.is_dark {
-        palette.crust
-    } else {
-        Color::WHITE
-    };
+    let kit = kit.into();
+    let knob_on = if kit.is_dark { kit.crust } else { Color::WHITE };
     move |_, status| {
         let active = matches!(
             status,
@@ -345,10 +323,14 @@ pub fn toggler_style(
                 | toggler::Status::Disabled { is_toggled: true }
         );
         toggler::Style {
-            background: Background::Color(if active { on_bg } else { off_bg }),
-            background_border_color: if active { on_bg } else { off_border },
+            background: Background::Color(if active { kit.accent } else { kit.surface0 }),
+            background_border_color: if active {
+                kit.accent
+            } else {
+                kit.hairline_strong
+            },
             background_border_width: 1.0,
-            foreground: Background::Color(if active { knob_on } else { knob_off }),
+            foreground: Background::Color(if active { knob_on } else { kit.text }),
             foreground_border_color: Color::TRANSPARENT,
             foreground_border_width: 0.0,
             text_color: None,
@@ -359,28 +341,28 @@ pub fn toggler_style(
 }
 
 pub fn pick_list_style(
-    palette: &Palette,
+    kit: impl Into<Kit>,
 ) -> impl Fn(&Theme, pick_list::Status) -> pick_list::Style + 'static {
-    let bg = palette.mantle;
-    let border = palette.hairline_strong;
-    let border_hover = palette.accent;
-    let text = palette.text;
-    let placeholder = palette.subtext0;
+    let kit = kit.into();
     move |_, status| {
         let hovered = matches!(
             status,
             pick_list::Status::Hovered | pick_list::Status::Opened { .. }
         );
         pick_list::Style {
-            background: Background::Color(bg),
+            background: Background::Color(kit.mantle),
             border: Border {
-                color: if hovered { border_hover } else { border },
+                color: if hovered {
+                    kit.accent
+                } else {
+                    kit.hairline_strong
+                },
                 width: 1.0,
                 radius: 6.0.into(),
             },
-            text_color: text,
-            placeholder_color: placeholder,
-            handle_color: text,
+            text_color: kit.text,
+            placeholder_color: kit.subtext0,
+            handle_color: kit.text,
         }
     }
 }
@@ -390,19 +372,20 @@ pub fn pick_list_style(
 // ============================================================================
 
 pub fn scrollable_style(
-    palette: &Palette,
+    kit: impl Into<Kit>,
 ) -> impl Fn(&Theme, scrollable::Status) -> scrollable::Style + 'static {
-    let thumb = if palette.is_dark {
+    let kit = kit.into();
+    let thumb = if kit.is_dark {
         Color::from_rgba(1.0, 1.0, 1.0, 0.14)
     } else {
         Color::from_rgba(0.0, 0.0, 0.0, 0.18)
     };
-    let thumb_hover = if palette.is_dark {
+    let thumb_hover = if kit.is_dark {
         Color::from_rgba(1.0, 1.0, 1.0, 0.24)
     } else {
         Color::from_rgba(0.0, 0.0, 0.0, 0.30)
     };
-    let panel_bg = palette.crust;
+    let panel_bg = kit.crust;
     move |_, status| {
         let hovered = matches!(
             status,
@@ -449,10 +432,10 @@ pub fn scrollable_style(
     }
 }
 
-pub fn rule_style(palette: &Palette) -> impl Fn(&Theme) -> rule::Style + 'static {
-    let color = palette.hairline;
+pub fn rule_style(kit: impl Into<Kit>) -> impl Fn(&Theme) -> rule::Style + 'static {
+    let kit = kit.into();
     move |_| rule::Style {
-        color,
+        color: kit.hairline,
         radius: 0.0.into(),
         fill_mode: rule::FillMode::Full,
         snap: true,
@@ -463,17 +446,17 @@ pub fn rule_style(palette: &Palette) -> impl Fn(&Theme) -> rule::Style + 'static
 // TEXT — explicit colour helpers used inline by the views
 // ============================================================================
 
-pub fn text_dim(palette: &Palette) -> impl Fn(&Theme) -> text::Style + 'static {
-    let color = palette.subtext0;
+pub fn text_dim(kit: impl Into<Kit>) -> impl Fn(&Theme) -> text::Style + 'static {
+    let color = kit.into().subtext0;
     move |_| text::Style { color: Some(color) }
 }
 
-pub fn text_faint(palette: &Palette) -> impl Fn(&Theme) -> text::Style + 'static {
-    let color = palette.overlay0;
+pub fn text_faint(kit: impl Into<Kit>) -> impl Fn(&Theme) -> text::Style + 'static {
+    let color = kit.into().overlay0;
     move |_| text::Style { color: Some(color) }
 }
 
-pub fn text_accent(palette: &Palette) -> impl Fn(&Theme) -> text::Style + 'static {
-    let color = palette.accent;
+pub fn text_accent(kit: impl Into<Kit>) -> impl Fn(&Theme) -> text::Style + 'static {
+    let color = kit.into().accent;
     move |_| text::Style { color: Some(color) }
 }

@@ -20,8 +20,14 @@ pub struct Kit {
     /// 0‥1 animation phase (a breathing sine) — e.g. the "working" dot.
     /// `0.0` for static surfaces.
     pub pulse: f32,
+    /// Whether the active theme is dark — drives on-accent text + the
+    /// direction hairlines/row-washes tint (white on dark, black on light).
+    pub is_dark: bool,
     pub crust: Color,
     pub mantle: Color,
+    /// The page/content background (between crust and surface0). Settings
+    /// surfaces use this for the scroll body.
+    pub base: Color,
     pub surface0: Color,
     pub surface1: Color,
     pub surface2: Color,
@@ -34,6 +40,15 @@ pub struct Kit {
     pub yellow: Color,
     pub mauve: Color,
     pub red: Color,
+    /// Semantic danger (== red; named for intent at call-sites).
+    pub danger: Color,
+    /// CSS-derived 1px borders (theme-tinted): faint < default < strong.
+    pub hairline: Color,
+    pub hairline_strong: Color,
+    pub hairline_faint: Color,
+    /// Row interaction washes (hover < active) for list/nav rows.
+    pub row_hover: Color,
+    pub row_active: Color,
 }
 
 impl Kit {
@@ -43,8 +58,10 @@ impl Kit {
         Kit {
             alpha,
             pulse,
+            is_dark: p.is_dark,
             crust: p.crust,
             mantle: p.mantle,
+            base: p.base,
             surface0: p.surface0,
             surface1: p.surface1,
             surface2: p.surface2,
@@ -57,6 +74,12 @@ impl Kit {
             yellow: p.yellow,
             mauve: p.mauve,
             red: p.red,
+            danger: p.danger,
+            hairline: p.hairline,
+            hairline_strong: p.hairline_strong,
+            hairline_faint: p.hairline_faint,
+            row_hover: p.row_hover,
+            row_active: p.row_active,
         }
     }
 
@@ -64,6 +87,11 @@ impl Kit {
     /// entry point for non-animated surfaces (settings / popup / MC).
     pub fn from_theme(theme: &oxidemx_shared::theme::Theme) -> Self {
         Self::from_palette(&Palette::from_theme(theme), 1.0, 0.0)
+    }
+
+    /// Build a static (fully-opaque, unanimated) `Kit` from a palette.
+    pub fn from_palette_static(p: &Palette) -> Self {
+        Self::from_palette(p, 1.0, 0.0)
     }
 
     /// Scale a colour's alpha by the surface fade × `k`.
@@ -99,5 +127,21 @@ impl Kit {
             s.horizontal_rail = rail;
             s
         }
+    }
+}
+
+// Bridge: the legacy `style` module's closures are keyed on `Kit` but
+// accept `impl Into<Kit>`, so the ~600 settings/popup/MC call-sites that
+// still pass `&Palette` keep compiling while the whole crate runs on one
+// render context. `&Palette` → a static (alpha=1, pulse=0) `Kit`.
+impl From<&Palette> for Kit {
+    fn from(p: &Palette) -> Self {
+        Kit::from_palette(p, 1.0, 0.0)
+    }
+}
+
+impl From<Palette> for Kit {
+    fn from(p: Palette) -> Self {
+        Kit::from_palette(&p, 1.0, 0.0)
     }
 }

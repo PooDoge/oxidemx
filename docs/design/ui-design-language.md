@@ -116,8 +116,38 @@ joined; overlay now depends on it).
   `text_editor` default-derived styles, the pulsing activity dot) stays
   inline by design — the catalog holds *recurring* variants, not
   singletons.
-- ⏳ **Step 4 — per-surface adoption.** settings/popup/MC migrate their
-  hand-rolled chrome + text glyphs to `icons::icon` + the builders.
+- ✅ **Step 4 — one render context (the unification).** Before this step
+  there were *two* parallel style systems in `oxidemx-widgets`: the older
+  `style.rs` (slider/toggler/pick_list/rule + the settings card/sidebar/
+  nav chrome) keyed on `&Palette` and used by settings/popup/MC (~600
+  call-sites), and the newer `catalog`/`controls`/`kit` keyed on `Kit`
+  and used by the overlay. Same job, two context types — neither family
+  could use the other's widgets. **Unified onto `Kit`:**
+  - `Kit` expanded to carry the full semantic palette it was missing
+    (`is_dark`, `base`, `danger`, `hairline`/`_strong`/`_faint`,
+    `row_hover`/`row_active`) — now a superset of every role either system
+    reads.
+  - `style.rs` functions take `impl Into<Kit>` and read from `Kit`;
+    `From<&Palette> for Kit` (a static `alpha=1, pulse=0` kit) means the
+    ~600 existing `style::card(&palette)` call-sites **compile unchanged**
+    while the crate runs on a single context. Zero settings churn, zero
+    visual change; the whole UI is now one `Kit`-keyed system.
+  - Dead duplicates folded: `controls::card`/`chip` (0 callers, and pure
+    value-dups of the catalog) now *delegate* to `catalog::surface_style`
+    — one source of truth per surface.
+  - `Surface::Row` added (flat list-row card); the chat panels
+    (tasks/memories/skills) migrated off their inline row closures.
+
+  **The two style *modules* remain by domain** — `catalog` (chat
+  design-language surfaces/buttons, animated via `Kit.alpha/pulse`) and
+  `style` (form-widget + settings-surface chrome) — but both now resolve
+  from the same `Kit`, so any surface can call either. A re-skin of
+  settings onto the chat look is a *separate, opt-in* decision, not
+  required by the unification.
+- ⏳ **Step 5 — icon adoption (remaining).** settings/MC still use ~40
+  Unicode glyphs; migrate them to `icons::icon`. (Two known widget dups
+  also remain: `tasks::toggle` ≈ `cards::mini_switch` — fold into one
+  `controls::switch` builder when next touched.)
 
 ## Roadmap — libcosmic-informed patterns (researched 2026-06)
 

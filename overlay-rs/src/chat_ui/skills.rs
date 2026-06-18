@@ -116,15 +116,7 @@ pub fn view<'a>(state: &'a RadialState, kit: &Kit) -> Element<'a, Message> {
                 bottom: 9.0,
                 left: 12.0,
             })
-            .style(move |_| iced::widget::container::Style {
-                background: Some(iced::Background::Color(kit.fade(kit.mantle, 0.96))),
-                border: iced::border::Border {
-                    color: kit.fade(kit.surface1, 1.0),
-                    width: 1.0,
-                    radius: 10.0.into(),
-                },
-                ..Default::default()
-            }),
+            .style(super::catalog::surface_style(kit, super::Surface::Row)),
         );
     }
 

@@ -126,41 +126,32 @@ pub fn action_button<'a, Message: Clone + 'a>(
         .on_press(msg)
 }
 
-/// Wrap content in the standard elevated card (mantle, surface1 border,
-/// r-card, e1 shadow). `tone` paints the 2.5px left status rule when
-/// `Some` (agent/tool cards); `None` for a plain card.
+/// Wrap content in the standard elevated card. Convenience builder over
+/// [`catalog::surface_style`](crate::catalog::surface_style)`(kit,
+/// Surface::Card)` — the style lives in the catalog (single source of
+/// truth), this just saves the `container(..).style(..)` boilerplate.
 pub fn card<'a, Message: 'a>(
     kit: Kit,
     content: impl Into<Element<'a, Message>>,
 ) -> Container<'a, Message> {
-    container(content).style(move |_| container::Style {
-        background: Some(Background::Color(kit.fade(kit.mantle, 0.96))),
-        border: Border {
-            color: kit.fade(kit.surface1, 1.0),
-            width: 1.0,
-            radius: tokens::R_CARD.into(),
-        },
-        shadow: tokens::e1(),
-        ..Default::default()
-    })
+    container(content).style(crate::catalog::surface_style(
+        kit,
+        crate::catalog::Surface::Card,
+    ))
 }
 
 /// A small bordered chip container (status badges, doc/attachment chips).
+/// Convenience builder over `catalog` `Surface::Chip`.
 pub fn chip<'a, Message: 'a>(
     kit: Kit,
     content: impl Into<Element<'a, Message>>,
 ) -> Container<'a, Message> {
     container(content)
         .padding([tokens::S0_5 + 1.0, tokens::S2])
-        .style(move |_| container::Style {
-            background: Some(Background::Color(kit.fade(kit.surface0, 0.9))),
-            border: Border {
-                color: kit.fade(kit.surface2, 1.0),
-                width: 1.0,
-                radius: tokens::R_CONTROL.into(),
-            },
-            ..Default::default()
-        })
+        .style(crate::catalog::surface_style(
+            kit,
+            crate::catalog::Surface::Chip,
+        ))
 }
 
 /// A 2.5px vertical status rule (the left edge of agent/tool cards).
