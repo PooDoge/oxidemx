@@ -10,7 +10,10 @@ repository = "https://github.com/PooDoge/oxidemx"
 # Shared config types: Theme, ThemeName, parse_hex_rgba used by palette.rs.
 oxidemx-shared = { path = "../oxidemx-shared" }
 
-# Iced version pinned to match settings-rs / overlay-rs. Feature list
-# kept minimal (no tokio, no image, no canvas) so consumers don't
-# pay for what they don't need - they can re-enable per-binary.
-iced = { version = "0.14", features = ["wayland", "x11"] }
+# Iced version pinned to match settings-rs / overlay-rs. `svg` is on for
+# the shared icon set (icons.rs); the rest stays minimal so consumers
+# don't pay for what they don't need.
+iced = { version = "0.14", features = ["wayland", "x11", "svg"] }
+
+# Lazy icon-handle cache (icons.rs).
+once_cell = "1"

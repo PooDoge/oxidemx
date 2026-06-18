@@ -146,7 +146,9 @@ pub fn page(palette: &Palette) -> impl Fn(&Theme) -> container::Style + 'static 
 
 /// Primary suggested-action button. Solid accent fill.
 #[allow(dead_code)]
-pub fn btn_primary(palette: &Palette) -> impl Fn(&Theme, button::Status) -> button::Style + 'static {
+pub fn btn_primary(
+    palette: &Palette,
+) -> impl Fn(&Theme, button::Status) -> button::Style + 'static {
     let accent = palette.accent;
     let on_accent = if palette.is_dark {
         palette.crust
@@ -294,7 +296,9 @@ pub fn btn_danger(palette: &Palette) -> impl Fn(&Theme, button::Status) -> butto
 /// look from the iced::Theme::custom built in main(). Kept here in
 /// case a per-slider override is needed later.
 #[allow(dead_code)]
-pub fn slider_style(palette: &Palette) -> impl Fn(&Theme, slider::Status) -> slider::Style + 'static {
+pub fn slider_style(
+    palette: &Palette,
+) -> impl Fn(&Theme, slider::Status) -> slider::Style + 'static {
     let track_bg = palette.surface0;
     let highlight = palette.accent;
     let handle = palette.text;
@@ -303,10 +307,7 @@ pub fn slider_style(palette: &Palette) -> impl Fn(&Theme, slider::Status) -> sli
         let hovered = matches!(status, slider::Status::Hovered | slider::Status::Dragged);
         slider::Style {
             rail: slider::Rail {
-                backgrounds: (
-                    Background::Color(highlight),
-                    Background::Color(track_bg),
-                ),
+                backgrounds: (Background::Color(highlight), Background::Color(track_bg)),
                 width: 6.0,
                 border: Border {
                     color: Color::TRANSPARENT,
@@ -324,7 +325,9 @@ pub fn slider_style(palette: &Palette) -> impl Fn(&Theme, slider::Status) -> sli
     }
 }
 
-pub fn toggler_style(palette: &Palette) -> impl Fn(&Theme, toggler::Status) -> toggler::Style + 'static {
+pub fn toggler_style(
+    palette: &Palette,
+) -> impl Fn(&Theme, toggler::Status) -> toggler::Style + 'static {
     let off_bg = palette.surface0;
     let off_border = palette.hairline_strong;
     let on_bg = palette.accent;

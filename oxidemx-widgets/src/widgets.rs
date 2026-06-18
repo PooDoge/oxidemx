@@ -30,8 +30,7 @@ where
     let display = fmt(value);
     let value_label = text(display).size(13).width(Length::Fixed(70.0));
     column![
-        row![text(label).size(13), Space::new().width(Length::Fill)]
-            .spacing(8),
+        row![text(label).size(13), Space::new().width(Length::Fill)].spacing(8),
         row![
             slider(range, value, on_change)
                 .step(step)
@@ -59,8 +58,7 @@ where
     let display = fmt(value);
     let value_label = text(display).size(13).width(Length::Fixed(70.0));
     column![
-        row![text(label).size(13), Space::new().width(Length::Fill)]
-            .spacing(8),
+        row![text(label).size(13), Space::new().width(Length::Fill)].spacing(8),
         row![
             slider(range, value, on_change).width(Length::FillPortion(4)),
             Space::new().width(Length::Fixed(8.0)),

@@ -12,6 +12,9 @@ path = "src/main.rs"
 
 [dependencies]
 oxidemx-shared = { path = "../oxidemx-shared" }
+# Shared design system: Palette + the token/icon layers (moved here so
+# every iced surface shares them). See docs/design/ui-design-language.md.
+oxidemx-widgets = { path = "../oxidemx-widgets" }
 # AutoAgents-based agent runtime: Gemini Interactions provider +
 # GenerateContent fallback + the allowlist matcher. The overlay's
 # chat loop runs on this (see src/agent_runtime.rs).

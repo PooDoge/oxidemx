@@ -15,14 +15,18 @@ pub mod body;
 pub mod cards;
 pub mod footer;
 pub mod header;
-pub mod icons;
 pub mod memories;
 pub mod palette;
 pub mod skills;
 pub mod tasks;
 pub mod threads;
-pub mod tokens;
 pub mod widgets;
+
+// The token + icon layers of the design system now live in the shared
+// `oxidemx-widgets` crate so every iced surface (settings / popup /
+// Mission Control) shares them. Re-exported here so `super::tokens` /
+// `super::icons` paths across chat_ui keep resolving unchanged.
+pub use oxidemx_widgets::{icons, tokens};
 
 use iced::{Color, Element, Length};
 
@@ -56,35 +60,44 @@ pub struct Kit {
 
 impl Kit {
     pub fn from_state(state: &RadialState, alpha: f32) -> Self {
-        let p = &state.theme.theme.colors;
-        let c = |hex: &str, fb: Color| {
-            oxidemx_shared::theme::parse_hex_rgba(hex)
-                .map(|(r, g, b, a)| Color::from_rgba(r as f32, g as f32, b as f32, a as f32))
-                .unwrap_or(fb)
-        };
+        // Colors come from the SHARED palette (one hex-parsing + fallback
+        // source for every iced surface); the overlay only adds the
+        // animation context (alpha fade + breathing pulse).
+        let pulse = state
+            .show_time
+            .map(|t| {
+                let secs = t.elapsed().as_secs_f32();
+                ((secs * std::f32::consts::TAU / 1.4).sin() + 1.0) / 2.0
+            })
+            .unwrap_or(0.0);
+        Self::from_palette(
+            &oxidemx_widgets::palette::Palette::from_theme(&state.theme.theme),
+            alpha,
+            pulse,
+        )
+    }
+
+    /// Build a `Kit` from the shared palette + animation context. Pure
+    /// (no `RadialState`), so any iced surface can reuse it (static UIs
+    /// pass `alpha = 1.0`, `pulse = 0.0`).
+    pub fn from_palette(p: &oxidemx_widgets::palette::Palette, alpha: f32, pulse: f32) -> Self {
         Kit {
             alpha,
-            pulse: state
-                .show_time
-                .map(|t| {
-                    let secs = t.elapsed().as_secs_f32();
-                    ((secs * std::f32::consts::TAU / 1.4).sin() + 1.0) / 2.0
-                })
-                .unwrap_or(0.0),
-            crust: c(&p.crust, Color::from_rgb(0.04, 0.05, 0.06)),
-            mantle: c(&p.mantle, Color::from_rgb(0.06, 0.07, 0.09)),
-            surface0: c(&p.surface0, Color::from_rgb(0.10, 0.11, 0.14)),
-            surface1: c(&p.surface1, Color::from_rgb(0.14, 0.16, 0.20)),
-            surface2: c(&p.surface2, Color::from_rgb(0.18, 0.20, 0.25)),
-            overlay0: c(&p.overlay0, Color::from_rgb(0.25, 0.27, 0.33)),
-            text: c(&p.text, Color::WHITE),
-            subtext0: c(&p.subtext0, Color::from_rgb(0.60, 0.65, 0.71)),
-            subtext1: c(&p.subtext1, Color::from_rgb(0.78, 0.82, 0.86)),
-            accent: c(&p.accent, Color::from_rgb(0.0, 0.83, 1.0)),
-            green: c(&p.green, Color::from_rgb(0.0, 0.90, 0.46)),
-            yellow: c(&p.yellow, Color::from_rgb(1.0, 0.84, 0.31)),
-            mauve: c(&p.mauve, Color::from_rgb(0.70, 0.53, 1.0)),
-            red: c(&p.red, Color::from_rgb(1.0, 0.32, 0.32)),
+            pulse,
+            crust: p.crust,
+            mantle: p.mantle,
+            surface0: p.surface0,
+            surface1: p.surface1,
+            surface2: p.surface2,
+            overlay0: p.overlay0,
+            text: p.text,
+            subtext0: p.subtext0,
+            subtext1: p.subtext1,
+            accent: p.accent,
+            green: p.green,
+            yellow: p.yellow,
+            mauve: p.mauve,
+            red: p.red,
         }
     }
 

@@ -19,18 +19,26 @@ and a token change re-tints the whole surface.
 4 · views        header.rs · footer.rs · body.rs · cards.rs · panels…
                  compose layer-3 components; hold no raw style
        ▲
-3 · components    chat_ui/widgets.rs
+3 · components    overlay-rs/chat_ui/widgets.rs   ← (moving → shared, see roadmap)
                  ghost_icon_button · pill · action_button · card · chip ·
                  status_rule   (encode the recurring chrome ONCE)
        ▲
-2 · primitives    chat_ui/tokens.rs        chat_ui/icons.rs
-                 spacing/radii/elevation/   28 monochrome SVGs, recolored
-                 type ramp (named consts)   via svg::Style.color
+2 · primitives    oxidemx-widgets::tokens     oxidemx-widgets::icons   ← SHARED
+                 spacing/radii/elevation/    28 monochrome SVGs, recolored
+                 type ramp (named consts)    via svg::Style.color (cached handles)
        ▲
-1 · theme         chat_ui/mod.rs :: Kit
-                 semantic color roles resolved from the active theme
-                 palette at view time (crust…red, never a literal hex)
+1 · theme         oxidemx-widgets::palette::Palette   ← SHARED (one parse source)
+                 + overlay Kit = Palette + {alpha, pulse} animation context
+                 semantic color roles, theme-resolved (crust…red, never a hex)
 ```
+
+**As of 2026-06-18 layers 1–2 are SHARED** — `tokens` + `icons` moved
+into the `oxidemx-widgets` crate (which already held `Palette` + style
+closures used by settings / popup / Mission-Control), and the overlay's
+`Kit` now sources its colors from `Palette::from_theme` (one hex-parsing
++ fallback path for every surface; the 14 duplicated color literals in
+`chat_ui` are gone). `Kit::from_palette(p, alpha, pulse)` is pure, so
+static apps can reuse it (alpha=1, pulse=0).
 
 **Rule of thumb:** a view should reach for layer 3 (a `widgets::*`
 builder) or, failing that, layer 2 (`tokens::*` + `icons::icon`). A raw
@@ -66,24 +74,72 @@ exact-fit of (activity + chip + input row + padding) floored at the
 painted-arc base, so it grows **upward over the body** rather than
 squishing the text. (Fixes the "attaching shrinks the input" bug.)
 
-## Cross-app path — a shared crate
+## Cross-app consolidation — status & next steps
 
-The chat is one of several iced surfaces (`settings-rs`, `popup-rs`/
-`oxidemx-popup`, `oxidemx-mission-control`). Today each has its own
-chrome. To make the design language app-wide:
+The chat is one of several iced surfaces (`oxidemx-settings`,
+`oxidemx-popup`, `oxidemx-mission-control`, overlay). The shared crate is
+**`oxidemx-widgets`** (`palette` + `style` closures + composite
+`widgets` were already there for the first three; `tokens` + `icons` just
+joined; overlay now depends on it).
 
-1. **Lift layers 1–3 into a shared crate** — `oxidemx-widgets` already
-   exists; move `Kit` (or a palette trait it implements), `tokens`,
-   `icons`, and `widgets` there. They depend only on `iced` + a theme
-   palette, so the lift is mechanical.
-2. **One palette source** — `Kit::from_state` reads
-   `oxidemx_shared::theme`; expose that as the shared palette so every
-   app re-tints from the same theme switch.
-3. **Adopt per surface** — settings/popup/MC import the crate and
-   migrate their chrome to the builders incrementally.
+- ✅ **Step 1 — shared primitives.** `tokens`, `icons` moved to
+  `oxidemx-widgets`; overlay's `Kit` re-sourced from `Palette`. One parse
+  path, one icon cache, one token scale for every surface.
+- ⏳ **Step 2 — shared components.** Move `chat_ui/widgets.rs` builders
+  into `oxidemx-widgets`, changed to take a `Palette` (+ optional alpha)
+  instead of the overlay-only `Kit`. Then settings/popup/MC build the
+  *same* button/pill/card the same way. (Reconcile with the existing
+  `style.rs` closures — keep one component model: builders that return
+  widgets, with style closures as their internals.)
+- ⏳ **Step 3 — per-surface adoption.** settings/popup/MC migrate their
+  hand-rolled chrome + text glyphs to `icons::icon` + the builders,
+  incrementally.
 
-This is a deliberate, separate effort (it touches four crates); the chat
-module is the proving ground. Do it once the builder API has settled.
+## Roadmap — libcosmic-informed patterns (researched 2026-06)
+
+System76's **libcosmic** (vendored at `libcosmic/`) is the reference
+iced design system. Patterns worth adopting, in priority order:
+
+1. **Typed component builders with implicit variants** — `button::standard`
+   / `suggested` / `destructive` apply the right tokens automatically (no
+   per-call color choice). We've started this (`widgets::action_button`'s
+   `tone`/`primary`); extend to named variants
+   (`button::primary/ghost/danger`) so call-sites never pass raw colors.
+   *Evidence: libcosmic `widget/button/text.rs`.*
+2. **The iced `Catalog` / `Class` style-resolution pattern** — instead of
+   inline `move |_,_| Style{…}` closures per call-site, define a style
+   enum (`Button::{Primary,Ghost,Danger,…}`) and one `Catalog` impl that
+   computes appearance from tokens + widget state (hover/press/focus) at
+   render time. Decouples style from widget code, enables live theme
+   switching, kills the ~57 inline style blocks. *libcosmic
+   `theme/style/button.rs`.* **This is the highest-leverage refactor.**
+3. **Density / Roundness as orthogonal config** — enums that transform
+   the *whole* spacing / radii table (Compact/Standard/Spacious ×
+   Round/Square), independent of color theme. A future user setting.
+   *libcosmic `cosmic-theme/src/model/{spacing,corner}.rs`.*
+4. **Layered semantic surfaces** — model UI as Background/Primary/
+   Secondary layers; components query the current container instead of
+   hardcoding a surface color. Richer than our flat `Palette`; adopt if
+   nesting depth grows. *libcosmic `widget/layer_container.rs`.*
+5. **Color math for derived tones** — derive hover/pressed/disabled via
+   `palette` crate compositing (`over()`), not hand-tuned values. Our
+   `Palette` already pre-mixes a few (`accent_06/15/40`); generalize.
+
+Anti-patterns (libcosmic avoids, so do we): per-call-site color
+constants, mixed spacing units, `widget.hover_color()`-style state
+setters (let the Catalog compute state), hardcoded "if in sidebar use X"
+(use layer context).
+
+## What stays OUTSIDE the design language
+
+The **canvas/shader layer is a different system.** The radial menu's
+slices, the 3D framing shaders, and the chat shell's painted caps
+(`chat_shell::CapsPainter`, the footer arc, the page puck) are drawn on
+`iced::canvas` / wgpu — not from tokens/widgets. The design language
+governs the **widget chrome layered over** that canvas; the shader stack
+is modularized on its own terms (per-effect WGSL passes). Keep the seam
+clean: widgets don't know about shaders, and the canvas doesn't consume
+`widgets::*`.
 
 ## What stays OUTSIDE the design language
 
