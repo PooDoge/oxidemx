@@ -43,6 +43,7 @@ pub fn view(state: &State) -> Element<'_, Message> {
 
     body.push(section_block(state, "API key", key_panel(state)))
         .push(section_block(state, "Hybrid routing", routing_panel(state)))
+        .push(section_block(state, "Local Models", local_models_panel(state)))
         .push(section_block(state, "Command allowlist", allowlist_editor(state)))
         .into()
 }
@@ -304,6 +305,59 @@ fn routing_panel(state: &State) -> Element<'_, Message> {
     ]
     .spacing(8)
     .into()
+}
+
+// ============================================================================
+// Local Models — download directory + idle timeout
+// ============================================================================
+
+fn local_models_panel(state: &State) -> Element<'_, Message> {
+    let pal = &state.palette;
+    let lm = &state.config.overlay.local_models;
+
+    let intro = text(
+        "Where mistral.rs stores downloaded GGUF models, and how long \
+         an idle model engine is kept loaded before being released. \
+         Changes take effect when the local-model service next \
+         starts or after a daemon reload.",
+    )
+    .size(11)
+    .style(style::text_dim(pal));
+
+    // Download directory row: text input + folder-picker button.
+    let dir_input = text_input(
+        "~/.local/share/oxidemx/models",
+        &lm.download_dir.display().to_string(),
+    )
+    .on_input(Message::AiModelDirChanged)
+    .padding(6)
+    .size(12)
+    .width(Length::Fill);
+
+    let pick_btn = button(text("Choose folder…").size(11))
+        .style(style::btn_primary(pal))
+        .on_press(Message::AiModelDirPick);
+
+    let dir_row = row![dir_input, pick_btn]
+        .spacing(8)
+        .align_y(Alignment::Center);
+
+    // Idle timeout row.
+    let timeout_label = text("Idle timeout (seconds):").size(12);
+    let timeout_input = text_input(
+        "600",
+        &lm.idle_timeout_secs.to_string(),
+    )
+    .on_input(Message::AiIdleTimeoutChanged)
+    .padding(6)
+    .size(12)
+    .width(Length::Fixed(120.0));
+
+    let timeout_row = row![timeout_label, timeout_input]
+        .spacing(8)
+        .align_y(Alignment::Center);
+
+    column![intro, dir_row, timeout_row].spacing(8).into()
 }
 
 // ============================================================================

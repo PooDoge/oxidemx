@@ -375,6 +375,12 @@ pub enum Message {
     AiAllowlistAdd,
     /// AI tab: remove the allowlist entry at this index.
     AiAllowlistRemove(usize),
+    /// AI tab: local-model download directory path edited directly.
+    AiModelDirChanged(String),
+    /// AI tab: open a native folder picker to choose the model download dir.
+    AiModelDirPick,
+    /// AI tab: idle-timeout (seconds) text field edited.
+    AiIdleTimeoutChanged(String),
     /// AI Assistant: persist the drafted key to
     /// `~/.config/oxidemx/gemini.key` (created 0600). The overlay
     /// re-reads the file on every prompt, so no restart is needed.
@@ -2736,6 +2742,36 @@ fn update_inner(state: &mut State, message: Message) -> Task<Message> {
             if i < list.len() {
                 let removed = list.remove(i);
                 state.status = format!("Removed \"{removed}\" from the allowlist");
+                state.touch();
+            }
+            Task::none()
+        }
+        Message::AiModelDirChanged(s) => {
+            state.config.overlay.local_models.download_dir = std::path::PathBuf::from(s);
+            state.touch();
+            Task::none()
+        }
+        Message::AiModelDirPick => Task::perform(
+            async {
+                let chosen = rfd::AsyncFileDialog::new()
+                    .set_title("Choose model download folder")
+                    .pick_folder()
+                    .await;
+                chosen
+                    .map(|h| h.path().display().to_string())
+                    .unwrap_or_default()
+            },
+            |path| {
+                if path.is_empty() {
+                    Message::Noop
+                } else {
+                    Message::AiModelDirChanged(path)
+                }
+            },
+        ),
+        Message::AiIdleTimeoutChanged(s) => {
+            if let Ok(secs) = s.parse::<u64>() {
+                state.config.overlay.local_models.idle_timeout_secs = secs;
                 state.touch();
             }
             Task::none()
