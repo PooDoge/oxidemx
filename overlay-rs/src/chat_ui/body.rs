@@ -32,7 +32,7 @@ pub fn hairline<'a>(kit: Kit, color: Color) -> Element<'a, Message> {
 /// (narrow windows keep the old 360 px; very wide windows cap at
 /// 760 px so prose lines don't get uncomfortably long).
 fn bubble_max_width(state: &RadialState) -> f32 {
-    (state.win_size.0 * 0.72).clamp(360.0, 760.0)
+    (state.win_size.0 * 0.82).clamp(360.0, 760.0)
 }
 
 pub fn conversation<'a>(state: &'a RadialState, kit: &Kit) -> Element<'a, Message> {

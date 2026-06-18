@@ -85,7 +85,9 @@ pub fn view<'a>(
     .spacing(8)
     .align_y(Alignment::Center);
     if collapsible {
-        header_row = header_row.push(icon("chevron", 13.0, kit.fade(kit.subtext0, 1.0)));
+        // Chevron points down collapsed, up when expanded (spec: rotates 180°).
+        let chev = if expanded { "chevron-up" } else { "chevron" };
+        header_row = header_row.push(icon(chev, 13.0, kit.fade(kit.subtext0, 1.0)));
     }
 
     // For collapsible cards the header is a toggle button.

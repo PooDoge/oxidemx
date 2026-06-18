@@ -46,6 +46,9 @@ pub enum Surface {
 /// Resolve a [`Surface`] to a container style closure.
 pub fn surface_style(kit: Kit, s: Surface) -> impl Fn(&iced::Theme) -> container::Style {
     move |_| match s {
+        // Spec (doc 2 · AgentCard/ToolCard): mantle / surface1 / r-card,
+        // flat — the design language uses no card elevation shadow (matches
+        // the flat bubbles). Only the send button + status dots glow.
         Surface::Card => container::Style {
             background: Some(Background::Color(kit.fade(kit.mantle, 0.96))),
             border: Border {
@@ -53,7 +56,6 @@ pub fn surface_style(kit: Kit, s: Surface) -> impl Fn(&iced::Theme) -> container
                 width: 1.0,
                 radius: tokens::R_CARD.into(),
             },
-            shadow: tokens::e1(),
             ..Default::default()
         },
         Surface::Panel => container::Style {

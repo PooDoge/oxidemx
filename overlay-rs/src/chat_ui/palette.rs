@@ -187,10 +187,19 @@ pub fn overlay<'a>(state: &'a RadialState, kit: Kit) -> Element<'a, Message> {
                 .padding([6, 10])
                 .style(move |_, status| {
                     let hovered = active || matches!(status, button::Status::Hovered);
+                    // Spec: selected row = tone@16% fill + tone@40% ring.
                     button::Style {
                         background: hovered
-                            .then(|| iced::Background::Color(kit.fade(kit.accent, 0.22))),
-                        border: iced::border::Border::default().rounded(7.0),
+                            .then(|| iced::Background::Color(kit.fade(kit.accent, 0.16))),
+                        border: iced::border::Border {
+                            color: if hovered {
+                                kit.fade(kit.accent, 0.4)
+                            } else {
+                                iced::Color::TRANSPARENT
+                            },
+                            width: 1.0,
+                            radius: 7.0.into(),
+                        },
                         text_color: kit.fade(kit.text, 1.0),
                         ..Default::default()
                     }
@@ -203,9 +212,11 @@ pub fn overlay<'a>(state: &'a RadialState, kit: Kit) -> Element<'a, Message> {
         .padding(5)
         .max_width(420.0)
         .style(move |_| iced::widget::container::Style {
-            background: Some(iced::Background::Color(kit.fade(kit.surface0, 0.99))),
+            // Spec: sheet = mantle@97% fill, surface1 border (+ a drop
+            // shadow since it floats — the one place the palette elevates).
+            background: Some(iced::Background::Color(kit.fade(kit.mantle, 0.97))),
             border: iced::border::Border {
-                color: kit.fade(kit.surface2, 1.0),
+                color: kit.fade(kit.surface1, 1.0),
                 width: 1.0,
                 radius: 10.0.into(),
             },

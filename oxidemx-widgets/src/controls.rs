@@ -129,7 +129,11 @@ pub fn action_button<'a, Message: Clone + 'a>(
 ) -> Button<'a, Message> {
     let label = text(label).size(tokens::T_LABEL);
     let btn = if primary {
-        button(label.color(kit.fade(kit.crust, 1.0)))
+        // Spec (doc 1 · Button): primary text is bold (700).
+        button(label.color(kit.fade(kit.crust, 1.0)).font(iced::Font {
+            weight: iced::font::Weight::Bold,
+            ..Default::default()
+        }))
     } else {
         button(label.color(kit.fade(kit.subtext1, 1.0)))
     };
@@ -161,7 +165,8 @@ pub fn action_button<'a, Message: Clone + 'a>(
         .on_press(msg)
 }
 
-/// Wrap content in the standard elevated card. Convenience builder over
+/// Wrap content in the standard card (mantle / surface1 / r-card, flat).
+/// Convenience builder over
 /// [`catalog::surface_style`](crate::catalog::surface_style)`(kit,
 /// Surface::Card)` — the style lives in the catalog (single source of
 /// truth), this just saves the `container(..).style(..)` boilerplate.
