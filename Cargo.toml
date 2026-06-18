@@ -25,6 +25,7 @@ members = [
     "oxidemx-window",
     "overlay-rs",
     "oxidemx-agent",
+    "oxidemx-agent-core",
     "oxidemx-conductor",
     "oxidemx-mission-control",
     "popup-rs",
