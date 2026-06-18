@@ -7,6 +7,7 @@ pub mod error;
 pub mod guard;
 pub mod mode;
 pub mod types;
+pub(crate) mod engine;
 
 pub use error::LocalError;
 pub use guard::{Action, Check, GuardConfig, Reason, SchemaKind, Verdict};
