@@ -174,3 +174,54 @@ pub fn status_rule<'a, Message: 'a>(kit: Kit, tone: Color) -> Element<'a, Messag
         })
         .into()
 }
+
+/// One segment of a segmented switcher: icon + label, accent-tinted when
+/// `active`. Compose several inside a bordered container for the control.
+pub fn segment<'a, Message: Clone + 'a>(
+    kit: Kit,
+    icon_name: &str,
+    label: impl text::IntoFragment<'a>,
+    active: bool,
+    msg: Message,
+) -> Button<'a, Message> {
+    let col = kit.fade(if active { kit.accent } else { kit.subtext0 }, 1.0);
+    button(
+        row![
+            icon(icon_name, 15.0, col),
+            text(label).size(tokens::T_LABEL).color(col),
+        ]
+        .spacing(tokens::S1_5 - 1.0)
+        .align_y(Alignment::Center),
+    )
+    .padding([tokens::S1, tokens::S2 + 1.0])
+    .style(move |_, _| button::Style {
+        background: active.then(|| Background::Color(kit.fade(kit.accent, 0.16))),
+        border: Border::default().rounded(7.0),
+        text_color: col,
+        ..Default::default()
+    })
+    .on_press(msg)
+}
+
+/// A fixed-size filled icon button — a circle (`radius` ≥ half the
+/// `diameter`) or a rounded square. Used for send / stop / close.
+pub fn round_icon_button<'a, Message: Clone + 'a>(
+    icon_name: &str,
+    icon_size: f32,
+    diameter: f32,
+    radius: f32,
+    bg: Color,
+    fg: Color,
+    msg: Message,
+) -> Button<'a, Message> {
+    button(iced::widget::center(icon(icon_name, icon_size, fg)))
+        .width(Length::Fixed(diameter))
+        .height(Length::Fixed(diameter))
+        .padding(0)
+        .style(move |_, _| button::Style {
+            background: Some(Background::Color(bg)),
+            border: Border::default().rounded(radius),
+            ..Default::default()
+        })
+        .on_press(msg)
+}

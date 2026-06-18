@@ -85,15 +85,24 @@ joined; overlay now depends on it).
 - ✅ **Step 1 — shared primitives.** `tokens`, `icons` moved to
   `oxidemx-widgets`; overlay's `Kit` re-sourced from `Palette`. One parse
   path, one icon cache, one token scale for every surface.
-- ⏳ **Step 2 — shared components.** Move `chat_ui/widgets.rs` builders
-  into `oxidemx-widgets`, changed to take a `Palette` (+ optional alpha)
-  instead of the overlay-only `Kit`. Then settings/popup/MC build the
-  *same* button/pill/card the same way. (Reconcile with the existing
-  `style.rs` closures — keep one component model: builders that return
-  widgets, with style closures as their internals.)
-- ⏳ **Step 3 — per-surface adoption.** settings/popup/MC migrate their
-  hand-rolled chrome + text glyphs to `icons::icon` + the builders,
-  incrementally.
+- ✅ **Step 2 — shared components + render context.** `Kit` moved to
+  `oxidemx-widgets::kit` (built via `Kit::from_theme` static /
+  `from_palette` animated); the builders moved to
+  `oxidemx-widgets::controls` (`ghost_icon_button` / `pill` /
+  `action_button` / `segment` / `round_icon_button` / `card` / `chip` /
+  `status_rule`). Every iced surface can now build the same control the
+  same way. chat_ui re-exports them so `super::*` paths are unchanged.
+- ◐ **Step 3 — kill inline styles via typed builders.** In progress: the
+  header (segmented switcher + close) now composes `segment` +
+  `round_icon_button` instead of hand-written `Style{…}` closures.
+  Migrate the remaining inline styles (footer send/stop, threads pill,
+  panels) as they're touched. The **full iced `Catalog`/custom-`Theme`
+  switch** (style enums resolved by one `Catalog` impl, zero per-site
+  closures, app-wide) is the deeper finish — deferred deliberately
+  because it touches every app's `iced::application(…).theme(…)` root and
+  the `markdown::view` theme; do it attended, not mid-session.
+- ⏳ **Step 4 — per-surface adoption.** settings/popup/MC migrate their
+  hand-rolled chrome + text glyphs to `icons::icon` + the builders.
 
 ## Roadmap — libcosmic-informed patterns (researched 2026-06)
 

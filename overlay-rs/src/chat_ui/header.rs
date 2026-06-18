@@ -4,10 +4,9 @@
 //! and the drag pill are painted by `chat_shell::CapsPainter`;
 //! empty header surface drags the window via the canvas hit test.
 
-use iced::widget::{button, column, container, row, text, Space};
+use iced::widget::{column, container, row, text, Space};
 use iced::{Alignment, Element, Length};
 
-use super::icons::icon;
 use super::{tokens, Kit};
 use crate::app::{ChatView, Message};
 use crate::chat_shell::{EDGE_PAD, HEADER_H};
@@ -67,28 +66,10 @@ pub fn view<'a>(state: &'a RadialState, kit: &Kit) -> Element<'a, Message> {
         ChatView::Conversation
     };
 
-    // One segment of the view switcher: icon + label, accent when active.
-    let seg = move |view: ChatView, name: &'static str, label: &'static str| {
-        let on = active == view;
-        let col = kit.fade(if on { kit.accent } else { kit.subtext0 }, 1.0);
-        button(
-            row![
-                icon(name, 15.0, col),
-                text(label).size(tokens::T_LABEL).color(col),
-            ]
-            .spacing(5)
-            .align_y(Alignment::Center),
-        )
-        .padding([4, 9])
-        .style(move |_, _| button::Style {
-            background: on.then(|| iced::Background::Color(kit.fade(kit.accent, 0.16))),
-            border: iced::border::Border::default().rounded(7.0),
-            text_color: col,
-            ..Default::default()
-        })
-        .on_press(Message::AiShowView(view))
+    // View switcher — one shared `segment` builder per view.
+    let seg = |view: ChatView, name: &'static str, label: &'static str| {
+        super::widgets::segment(kit, name, label, active == view, Message::AiShowView(view))
     };
-
     let switcher = container(
         row![
             seg(ChatView::Conversation, "message", "Chat"),
@@ -110,23 +91,15 @@ pub fn view<'a>(state: &'a RadialState, kit: &Kit) -> Element<'a, Message> {
     });
 
     // Close: light filled circle with a centred × icon.
-    let close_btn = button(iced::widget::center(icon(
+    let close_btn = super::widgets::round_icon_button(
         "close",
         11.0,
+        32.0,
+        16.0,
+        kit.fade(kit.text, 1.0),
         kit.fade(kit.crust, 1.0),
-    )))
-    .width(Length::Fixed(32.0))
-    .height(Length::Fixed(32.0))
-    .padding(0)
-    .style(move |_, _status| button::Style {
-        background: Some(iced::Background::Color(kit.fade(kit.text, 1.0))),
-        border: iced::border::Border {
-            radius: 16.0.into(),
-            ..Default::default()
-        },
-        ..Default::default()
-    })
-    .on_press(Message::ToggleDismiss);
+        Message::ToggleDismiss,
+    );
 
     let bar = row![
         // Left slot for the canvas-drawn 32 px puck: 14 px header
