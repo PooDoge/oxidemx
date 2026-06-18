@@ -8,12 +8,10 @@ use tracing::error;
 // GLOBAL CHANNELS FOR ASYNC TOOL-TO-UI COMMUNICATION
 // =============================================================================
 
-#[derive(Debug, Clone)]
-pub struct PendingQuestion {
-    pub question: String,
-    pub options: Vec<String>,
-    pub response_tx: mpsc::Sender<String>,
-}
+// Pure-data event/card types now live in oxidemx-agent-core.
+pub use oxidemx_agent_core::events::{
+    AgentCardData, FlowStep, PendingQuestion, StreamEvent, StreamEventTx, StreamSink,
+};
 
 /// Channel to send pending multiple choice questions to the UI event loop.
 pub static QUESTION_TX: Lazy<Mutex<Option<mpsc::Sender<PendingQuestion>>>> =
@@ -23,112 +21,20 @@ pub static QUESTION_TX: Lazy<Mutex<Option<mpsc::Sender<PendingQuestion>>>> =
 pub static CONFIG_CHANGED_TX: Lazy<Mutex<Option<mpsc::Sender<String>>>> =
     Lazy::new(|| Mutex::new(None));
 
-/// Live progress events for an in-flight agent turn, tagged with the
-/// chat-thread index that issued the request so late events file
-/// into the right conversation.
-#[derive(Debug, Clone)]
-pub enum StreamEvent {
-    /// A chunk of the model's text reply, in order. Not produced in
-    /// the current non-streaming runtime (the reply arrives complete
-    /// via `AiResponseReceived`); the variant + its UI scaffolding are
-    /// kept so token streaming can be re-added without rewiring.
-    #[allow(dead_code)]
-    Delta(String),
-    /// What the agent is doing right now ("Searching the web…",
-    /// "Scheduling task — writing systemd unit…"). Dynamic so tool
-    /// executors can interpolate the target into the label.
-    Activity(String),
-    /// A structured agent-feature card to append to the
-    /// conversation (command executed / task scheduled / memory
-    /// saved). Rendered by `chat_ui::cards` and persisted on the
-    /// owning `ChatMessage`.
-    Card(AgentCardData),
-    /// Token usage reported by the provider for this turn (prompt,
-    /// completion). Accumulated into the thread for the usage/cost
-    /// readout.
-    Usage { prompt: u32, completion: u32 },
-}
-
-/// Payload for the three agent-feature card types. Serialized into
-/// `ai-chats.json` as part of `ChatMessage`, so every field is
-/// plain data (chips/buttons are derived in the view).
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum AgentCardData {
-    /// `execute_command` ran. `stdout` is trimmed to the card cap.
-    Command {
-        command: String,
-        stdout: String,
-        exit_code: i32,
-    },
-    /// `schedule_task` created/changed a systemd user timer.
-    Task {
-        name: String,
-        /// Unit base name ("oxidemx-task-<slug>").
-        unit: String,
-        /// OnCalendar expression as written to the timer.
-        schedule: String,
-        /// Human "next run" from `systemctl --user list-timers`,
-        /// `None` when the timer is disabled.
-        next_run: Option<String>,
-        enabled: bool,
-    },
-    /// `memory` saved an entry.
-    Memory {
-        id: String,
-        text: String,
-        /// "until changed" (pinned) or "auto · 90d" (unpinned).
-        retention: String,
-    },
-    /// `run_flow` ran a conductor flow. Live per-step progress streams
-    /// as `Activity` while it runs; this card is the final summary,
-    /// with a "Watch" chip that opens Mission Control on the flow.
-    Flow {
-        flow_id: String,
-        run_id: String,
-        success: bool,
-        steps: Vec<FlowStep>,
-        artifacts: Vec<String>,
-    },
-}
-
-/// One step's terminal status inside a `Flow` card.
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct FlowStep {
-    pub step: String,
-    /// `pending` | `running` | `done` | `failed` | `skipped`.
-    pub status: String,
-}
-
 /// Channel to push (thread_idx, StreamEvent) into the UI loop.
 /// Registered by app.rs's stream subscription at boot.
-/// Channel type for thread-tagged stream events flowing into the
-/// iced subscription.
-pub type StreamEventTx = mpsc::Sender<(usize, StreamEvent)>;
-
 pub static STREAM_TX: Lazy<Mutex<Option<StreamEventTx>>> = Lazy::new(|| Mutex::new(None));
 
-/// Per-request handle for forwarding stream events. Cheap to clone.
-#[derive(Clone, Debug)]
-pub struct StreamSink {
-    pub thread: usize,
-    pub tx: mpsc::Sender<(usize, StreamEvent)>,
-}
-
-impl StreamSink {
-    /// Build a sink for `thread` from the globally-registered
-    /// channel, if the subscription has installed one.
-    pub fn for_thread(thread: usize) -> Option<StreamSink> {
-        STREAM_TX
-            .lock()
-            .unwrap()
-            .clone()
-            .map(|tx| StreamSink { thread, tx })
-    }
-
-    pub(crate) async fn send(&self, event: StreamEvent) {
-        let _ = self.tx.send((self.thread, event)).await;
-    }
+/// Build a `StreamSink` for `thread` from the globally-registered channel,
+/// if the subscription has installed one. Replaces the former
+/// `StreamSink::for_thread(thread)` associated function (which referenced
+/// the global `STREAM_TX` and could not move to the UI-free core crate).
+pub fn stream_sink_for_thread(thread: usize) -> Option<StreamSink> {
+    STREAM_TX
+        .lock()
+        .unwrap()
+        .clone()
+        .map(|tx| StreamSink { thread, tx })
 }
 
 pub mod tools;

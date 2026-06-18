@@ -5301,6 +5301,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "oxidemx-agent-core"
+version = "0.0.1"
+dependencies = [
+ "async-trait",
+ "autoagents",
+ "autoagents-derive",
+ "futures-util",
+ "once_cell",
+ "oxidemx-agent",
+ "oxidemx-conductor",
+ "oxidemx-shared",
+ "percent-encoding",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "url",
+]
+
+[[package]]
 name = "oxidemx-conductor"
 version = "0.1.0"
 dependencies = [
@@ -5380,6 +5402,7 @@ dependencies = [
  "notify",
  "once_cell",
  "oxidemx-agent",
+ "oxidemx-agent-core",
  "oxidemx-icons",
  "oxidemx-scene-render",
  "oxidemx-shared",

@@ -12,6 +12,7 @@ path = "src/main.rs"
 
 [dependencies]
 oxidemx-shared = { path = "../oxidemx-shared" }
+oxidemx-agent-core = { path = "../oxidemx-agent-core" }
 # Shared design system: Palette + the token/icon layers (moved here so
 # every iced surface shares them). See docs/design/ui-design-language.md.
 oxidemx-widgets = { path = "../oxidemx-widgets" }

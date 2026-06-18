@@ -756,7 +756,7 @@ pub(super) fn update(state: &mut RadialState, message: Message) -> Task<Message>
                 }
                 chat.session_id.clone().unwrap()
             };
-            let sink = crate::ai_client::StreamSink::for_thread(thread_idx);
+            let sink = crate::ai_client::stream_sink_for_thread(thread_idx);
             // Prior turns shipped as context (providers are stateless;
             // history lives client-side). For long threads, ship the
             // rolling summary + only the messages after summary_upto, so
