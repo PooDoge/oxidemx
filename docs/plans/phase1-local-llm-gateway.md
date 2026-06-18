@@ -1,5 +1,7 @@
 # Phase 1 — Local LLM gateway (mistral.rs via the provider seam)
 
+> **SUPERSEDED (2026-06-18):** the local-LLM mechanism here — mistral.rs as an OpenAI-compatible HTTP **server** (`AiProvider::MistralRs` via the OpenAI backend + `base_url`) — is replaced by the **embedded** approach in `docs/superpowers/specs/2026-06-18-local-model-manager-design.md` (`oxidemx-agent-local`). The multi-provider factory work still stands; the `MistralRs` variant will be re-pointed at the in-process `LocalChatProvider` (no HTTP). Orient via `docs/AI-ARCHITECTURE-STATUS.md`.
+
 **Branch:** `phase1-local-llm-gateway` (worktree `../oxidemx-phase1`)
 **Status:** implemented + verified against a live `mistralrs-server` (Qwen3-4B) on 2026-06-18.
 

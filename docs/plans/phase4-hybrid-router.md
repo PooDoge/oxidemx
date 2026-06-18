@@ -1,5 +1,7 @@
 # Phase 4 — Hybrid router (cost-efficient local/cloud routing)
 
+> **NOTE (2026-06-18):** Current. The router logic stands; its local backend is moving from the HTTP `MistralRs` provider to the embedded `LocalChatProvider` (`oxidemx-agent-local`). See `docs/AI-ARCHITECTURE-STATUS.md`.
+
 **Branch:** `phase1-local-llm-gateway` (worktree `../oxidemx-phase1`)
 **Status:** implemented + verified (compile, unit tests, live local route) 2026-06-18.
 

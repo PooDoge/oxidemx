@@ -1,5 +1,7 @@
 # Agent Framework Re-architecture — coding-first, agentd-hosted
 
+> **AMENDED (2026-06-18):** the "mistral.rs-as-a-server" local-LLM assumption is superseded — local models are now **embedded** in-process via `oxidemx-agent-local` (spec `2026-06-18-local-model-manager-design.md`), hosted by agentd. Everything else stands. SP1a (agent-core extraction) is DONE. Index: `docs/AI-ARCHITECTURE-STATUS.md`.
+
 Date: 2026-06-18
 Status: design (brainstormed + approved section-by-section; pending user spec review → writing-plans)
 Supersedes (renamed `*_OLD.md`, kept as the research quarry — do not implement from them):

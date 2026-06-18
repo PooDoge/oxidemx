@@ -1,5 +1,7 @@
 # Phase 2 — Session manager substrate
 
+> **NOTE (2026-06-18):** Current. The session-manager design stands unchanged; only the local-LLM backend changed (HTTP server → embedded). See `docs/AI-ARCHITECTURE-STATUS.md`.
+
 **Branch:** `phase1-local-llm-gateway` (worktree `../oxidemx-phase1`)
 **Status:** implemented + verified (compile, 32 unit tests, live path reached the
 mistral.rs model) on 2026-06-18.
