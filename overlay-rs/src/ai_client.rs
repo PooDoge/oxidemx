@@ -143,32 +143,7 @@ fn get_config_path() -> std::path::PathBuf {
 }
 
 pub fn load_api_key() -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-    if let Ok(key) = std::env::var("GEMINI_API_KEY") {
-        if !key.is_empty() {
-            return Ok(key);
-        }
-    }
-
-    let home = std::env::var("HOME").unwrap_or_else(|_| "/home/jim".to_string());
-    let path = std::path::Path::new(&home).join(".config/oxidemx/gemini.key");
-    if path.exists() {
-        let key = std::fs::read_to_string(path)?;
-        let trimmed = key.trim().to_string();
-        if !trimmed.is_empty() {
-            return Ok(trimmed);
-        }
-    }
-
-    let path_legacy = std::path::Path::new(&home).join(".config/juhradial/gemini.key");
-    if path_legacy.exists() {
-        let key = std::fs::read_to_string(path_legacy)?;
-        let trimmed = key.trim().to_string();
-        if !trimmed.is_empty() {
-            return Ok(trimmed);
-        }
-    }
-
-    Err("Gemini API key not found. Please set GEMINI_API_KEY or save it in ~/.config/oxidemx/gemini.key".into())
+    oxidemx_agent_core::api_key::load_api_key()
 }
 
 // =============================================================================
