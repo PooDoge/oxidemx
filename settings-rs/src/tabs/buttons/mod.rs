@@ -21,6 +21,7 @@ use iced::widget::{
 };
 use iced::{Alignment, Element, Length};
 use oxidemx_shared::{ActionKind, Condition, RadialPage, Slice};
+use oxidemx_widgets::icons::icon;
 use oxidemx_widgets::style;
 
 // ============================================================================
@@ -126,11 +127,13 @@ fn page_picker_card(state: &State) -> Element<'_, Message> {
 fn page_move_buttons(state: &State, active: usize) -> Element<'_, Message> {
     let pal = &state.palette;
     let last = state.config.radial_menu.pages.len().saturating_sub(1);
-    let mut left_btn = button(text("◀").size(11)).style(style::btn_secondary(pal));
+    let mut left_btn =
+        button(icon("chevron-left", 11.0, pal.text)).style(style::btn_secondary(pal));
     if active > 0 {
         left_btn = left_btn.on_press(Message::MovePageLeft(active));
     }
-    let mut right_btn = button(text("▶").size(11)).style(style::btn_secondary(pal));
+    let mut right_btn =
+        button(icon("chevron-right", 11.0, pal.text)).style(style::btn_secondary(pal));
     if active < last {
         right_btn = right_btn.on_press(Message::MovePageRight(active));
     }
@@ -900,18 +903,18 @@ fn submenu_item_row<'a>(
     .style(style::pick_list_style(pal))
     .text_size(11);
 
-    let mut up_btn = button(text("↑").size(10)).style(style::btn_secondary(pal));
+    let mut up_btn = button(icon("arrow-up", 10.0, pal.text)).style(style::btn_secondary(pal));
     if idx > 0 {
         up_btn = up_btn.on_press(Message::MoveSubItemUp(parent, idx));
     }
-    let mut down_btn = button(text("↓").size(10)).style(style::btn_secondary(pal));
+    let mut down_btn = button(icon("arrow-down", 10.0, pal.text)).style(style::btn_secondary(pal));
     if idx < last_idx {
         down_btn = down_btn.on_press(Message::MoveSubItemDown(parent, idx));
     }
-    let test_btn = button(text("▶").size(10))
+    let test_btn = button(icon("play", 10.0, pal.text))
         .style(style::btn_secondary(pal))
         .on_press(Message::TestSubItemAction { parent, idx });
-    let del_btn = button(text("✕").size(10))
+    let del_btn = button(icon("close", 10.0, pal.text))
         .style(style::btn_danger(pal))
         .on_press(Message::DeleteSubItem(parent, idx));
 

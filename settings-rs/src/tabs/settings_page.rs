@@ -5,6 +5,7 @@
 use crate::{tabs, Message, State};
 use iced::widget::{button, column, container, pick_list, row, rule, text, text_input, Space};
 use iced::{Alignment, Element, Length};
+use oxidemx_widgets::icons::icon;
 use oxidemx_widgets::palette::theme_catalogue;
 use oxidemx_widgets::style;
 use oxidemx_widgets::widgets::section_header;
@@ -147,7 +148,7 @@ fn app_bindings(state: &State) -> Element<'_, Message> {
             .padding(6)
             .size(12)
             .width(Length::FillPortion(2)),
-        text("→").size(13).style(style::text_faint(pal)),
+        icon("arrow-right", 13.0, pal.overlay0),
         text_input("Profile name", &profile)
             .on_input(move |v| Message::SetAppBindingDraft {
                 class: class_for_msg.clone(),
@@ -182,7 +183,7 @@ fn binding_row<'a>(state: &'a State, class: &str, profile: &str) -> Element<'a, 
             .padding([3, 8])
             .style(style::chip(pal))
             .width(Length::FillPortion(2)),
-        text("→").size(11).style(style::text_faint(pal)),
+        icon("arrow-right", 11.0, pal.overlay0),
         text(profile.to_string())
             .size(12)
             .width(Length::FillPortion(2)),

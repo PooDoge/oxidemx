@@ -23,6 +23,7 @@
 use iced::widget::{button, column, container, pick_list, row, text, text_input, Space};
 use iced::{Alignment, Element, Length};
 use oxidemx_shared::{ActionKind, Slice};
+use oxidemx_widgets::icons::icon;
 use oxidemx_widgets::style;
 
 use super::{picker, widget_options, ColorOption, VisibilityTarget, FULL_COLOR_KEY};
@@ -63,15 +64,19 @@ pub fn slice_card<'a>(
     // Test is always rendered for a stable UI; non-testable kinds
     // report a status hint from the handler.
     header = header.push(
-        button(text("▶ Test").size(11))
-            .style(style::btn_secondary(pal))
-            .on_press(Message::TestSliceAction(idx)),
+        button(
+            row![icon("play", 11.0, pal.text), text("Test").size(11)]
+                .spacing(5)
+                .align_y(Alignment::Center),
+        )
+        .style(style::btn_secondary(pal))
+        .on_press(Message::TestSliceAction(idx)),
     );
-    let mut up_btn = button(text("↑").size(11)).style(style::btn_secondary(pal));
+    let mut up_btn = button(icon("arrow-up", 11.0, pal.text)).style(style::btn_secondary(pal));
     if idx > 0 {
         up_btn = up_btn.on_press(Message::MoveSliceUp(idx));
     }
-    let mut down_btn = button(text("↓").size(11)).style(style::btn_secondary(pal));
+    let mut down_btn = button(icon("arrow-down", 11.0, pal.text)).style(style::btn_secondary(pal));
     if idx < last_idx {
         down_btn = down_btn.on_press(Message::MoveSliceDown(idx));
     }
@@ -79,7 +84,7 @@ pub fn slice_card<'a>(
         .push(up_btn)
         .push(down_btn)
         .push(
-            button(text("✕").size(11))
+            button(icon("close", 11.0, pal.text))
                 .style(style::btn_danger(pal))
                 .on_press(Message::DeleteSlice(idx)),
         )

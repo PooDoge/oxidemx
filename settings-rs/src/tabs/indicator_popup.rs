@@ -7,6 +7,7 @@
 use oxidemx_shared::{
     HostLabelStyle, PopupMode, QuickEntry, QUICK_SLIDER_CATALOG, QUICK_TOGGLE_CATALOG,
 };
+use oxidemx_widgets::icons::icon;
 use oxidemx_widgets::style;
 use oxidemx_widgets::widgets::section_header;
 
@@ -492,7 +493,7 @@ fn reorder_row<'a>(
     // Icon placeholder — QuickEntry.icon is a freedesktop symbolic
     // name; rendering it would require an icon resolver pass here.
     // Use a small text glyph as a stand-in for now.
-    let icon_text = text("◯").size(14).style(style::text_dim(pal));
+    let icon_text = icon("circle", 14.0, pal.subtext0);
 
     let label_col = column![
         text(entry.label).size(13),
@@ -500,17 +501,17 @@ fn reorder_row<'a>(
     ]
     .spacing(2);
 
-    let mut up_btn = button(text("▲").size(10)).style(style::btn_secondary(pal));
+    let mut up_btn = button(icon("chevron-up", 10.0, pal.text)).style(style::btn_secondary(pal));
     if !up_disabled {
         up_btn = up_btn.on_press(move_up);
     }
 
-    let mut down_btn = button(text("▼").size(10)).style(style::btn_secondary(pal));
+    let mut down_btn = button(icon("chevron", 10.0, pal.text)).style(style::btn_secondary(pal));
     if !down_disabled {
         down_btn = down_btn.on_press(move_down);
     }
 
-    let trash_btn = button(text("✕").size(10))
+    let trash_btn = button(icon("close", 10.0, pal.text))
         .style(style::btn_danger(pal))
         .on_press(remove);
 
@@ -535,7 +536,7 @@ fn add_row<'a>(
     entry: &'a QuickEntry,
     add: Message,
 ) -> Element<'a, Message> {
-    let icon_text = text("◯").size(14).style(style::text_dim(pal));
+    let icon_text = icon("circle", 14.0, pal.subtext0);
 
     let label_col = column![
         text(entry.label).size(13),

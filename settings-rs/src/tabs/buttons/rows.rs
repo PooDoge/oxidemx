@@ -14,6 +14,7 @@
 use iced::widget::{button, column, container, mouse_area, row, text, Space};
 use iced::{Alignment, Element, Length};
 use oxidemx_shared::{ActionKind, Slice};
+use oxidemx_widgets::icons::icon;
 use oxidemx_widgets::style;
 
 use super::picker;
@@ -100,11 +101,15 @@ pub fn slot_row<'a>(
     let empty = slice.is_none_or(is_placeholder);
 
     // --- reorder handle: stacked chevrons (design's jr-reorder-handle)
-    let mut up_btn = button(text("▲").size(7)).padding([1, 5]).style(style::btn_flat(pal));
+    let mut up_btn = button(icon("chevron-up", 7.0, pal.text))
+        .padding([1, 5])
+        .style(style::btn_flat(pal));
     if slice.is_some() && idx > 0 {
         up_btn = up_btn.on_press(Message::MoveSliceUp(idx));
     }
-    let mut down_btn = button(text("▼").size(7)).padding([1, 5]).style(style::btn_flat(pal));
+    let mut down_btn = button(icon("chevron", 7.0, pal.text))
+        .padding([1, 5])
+        .style(style::btn_flat(pal));
     if slice.is_some() && idx < last_idx {
         down_btn = down_btn.on_press(Message::MoveSliceDown(idx));
     }

@@ -79,6 +79,24 @@ fn paths(name: &str) -> Option<&'static str> {
         }
         "rename" => r#"<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/>"#,
         "check" => r#"<path d="M5 12.5l4.5 4.5L19 7"/>"#,
+        // Directional chevrons (the base `chevron` points down).
+        "chevron-up" => r#"<path d="M6 15l6-6 6 6"/>"#,
+        "chevron-left" => r#"<path d="M15 6l-6 6 6 6"/>"#,
+        "chevron-right" => r#"<path d="M9 6l6 6-6 6"/>"#,
+        // Full arrows (reorder / navigation / move).
+        "arrow-up" => r#"<path d="M12 19V5"/><path d="M6 11l6-6 6 6"/>"#,
+        "arrow-down" => r#"<path d="M12 5v14"/><path d="M6 13l6 6 6-6"/>"#,
+        "arrow-left" => r#"<path d="M19 12H5"/><path d="M11 6l-6 6 6 6"/>"#,
+        "arrow-right" => r#"<path d="M5 12h14"/><path d="M13 6l6 6-6 6"/>"#,
+        // Solid play triangle (test / preview / run).
+        "play" => r#"<path d="M7 4.5v15l13-7.5z" fill="currentColor" stroke="none"/>"#,
+        // Settings gear.
+        "gear" => {
+            r#"<circle cx="12" cy="12" r="3.2"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>"#
+        }
+        // Outline circle (radio / indicator placeholder) + crosshair.
+        "circle" => r#"<circle cx="12" cy="12" r="8"/>"#,
+        "target" => r#"<circle cx="12" cy="12" r="8"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/>"#,
         _ => return None,
     })
 }
@@ -113,6 +131,17 @@ const NAMES: &[&str] = &[
     "imgx",
     "rename",
     "check",
+    "chevron-up",
+    "chevron-left",
+    "chevron-right",
+    "arrow-up",
+    "arrow-down",
+    "arrow-left",
+    "arrow-right",
+    "play",
+    "gear",
+    "circle",
+    "target",
 ];
 
 static HANDLES: Lazy<HashMap<&'static str, svg::Handle>> = Lazy::new(|| {

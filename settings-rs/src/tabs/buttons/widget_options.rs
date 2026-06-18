@@ -13,6 +13,7 @@ use iced::{Alignment, Background, Border, Element, Font, Length};
 use oxidemx_shared::widgets::{JsonBag, WidgetStore};
 use oxidemx_shared::{ActionKind, RadialPage, Slice, WidgetScope, WidgetSource};
 use oxidemx_widget_proto::{OptionSpec, WidgetManifest};
+use oxidemx_widgets::icons::icon;
 use oxidemx_widgets::{palette::Palette, style};
 use serde_json::Value;
 
@@ -407,10 +408,18 @@ fn header_row<'a>(
                 .into()
         })
         .unwrap_or_else(|| {
-            text(manifest.name.chars().next().unwrap_or('?').to_uppercase().to_string())
-                .size(14)
-                .style(style::text_accent(pal))
-                .into()
+            text(
+                manifest
+                    .name
+                    .chars()
+                    .next()
+                    .unwrap_or('?')
+                    .to_uppercase()
+                    .to_string(),
+            )
+            .size(14)
+            .style(style::text_accent(pal))
+            .into()
         });
 
     row![
@@ -423,12 +432,20 @@ fn header_row<'a>(
         ]
         .spacing(2),
         Space::new().width(Length::Fill),
-        container(text(format!("v{}", manifest.version)).size(9).style(style::text_dim(pal)))
-            .padding([2, 6])
-            .style(style::chip(pal)),
-        container(text(manifest.author.clone()).size(9).style(style::text_dim(pal)))
-            .padding([2, 6])
-            .style(style::chip(pal)),
+        container(
+            text(format!("v{}", manifest.version))
+                .size(9)
+                .style(style::text_dim(pal))
+        )
+        .padding([2, 6])
+        .style(style::chip(pal)),
+        container(
+            text(manifest.author.clone())
+                .size(9)
+                .style(style::text_dim(pal))
+        )
+        .padding([2, 6])
+        .style(style::chip(pal)),
     ]
     .align_y(Alignment::Center)
     .spacing(8)
@@ -636,7 +653,7 @@ fn reset_button<'a>(
 ) -> Element<'a, Message> {
     let pal = &state.palette;
     let overridden = has_override(&state.config.widgets, widget_id, instance_key, scope, key);
-    let mut btn = button(text("↺").size(11)).style(style::btn_secondary(pal));
+    let mut btn = button(icon("retry", 11.0, pal.text)).style(style::btn_secondary(pal));
     if overridden {
         btn = btn.on_press(Message::ResetWidgetOption {
             slice: idx,
@@ -863,14 +880,18 @@ fn color_control<'a>(
         let c = palette_color(pal, key_name);
         let key = spec.key.clone();
         r = r.push(
-            button(Space::new().width(Length::Fixed(16.0)).height(Length::Fixed(16.0)))
-                .padding(2)
-                .style(swatch_style(pal, c, selected))
-                .on_press(Message::SetWidgetOption {
-                    slice: idx,
-                    key,
-                    value: Value::String(key_name.to_string()),
-                }),
+            button(
+                Space::new()
+                    .width(Length::Fixed(16.0))
+                    .height(Length::Fixed(16.0)),
+            )
+            .padding(2)
+            .style(swatch_style(pal, c, selected))
+            .on_press(Message::SetWidgetOption {
+                slice: idx,
+                key,
+                value: Value::String(key_name.to_string()),
+            }),
         );
     }
     r.into()
@@ -906,12 +927,18 @@ fn location_control<'a>(
     }
 
     // Pinned chip: the currently-stored place.
-    let pinned: Element<Message> = match value.and_then(|v| v.get("name")).and_then(Value::as_str)
-    {
-        Some(name) => container(text(format!("📍 {name}")).size(10).style(style::text_accent(pal)))
-            .padding([2, 8])
-            .style(chip_accent(pal))
-            .into(),
+    let pinned: Element<Message> = match value.and_then(|v| v.get("name")).and_then(Value::as_str) {
+        Some(name) => container(
+            row![
+                icon("pin", 10.0, pal.accent),
+                text(name.to_string()).size(10)
+            ]
+            .spacing(5)
+            .align_y(Alignment::Center),
+        )
+        .padding([2, 8])
+        .style(chip_accent(pal))
+        .into(),
         None => text("No location set")
             .size(10)
             .style(style::text_faint(pal))
@@ -931,7 +958,9 @@ fn location_control<'a>(
     let key_for_submit = spec.key.clone();
     let key_for_btn = spec.key.clone();
     let search_input = text_input(
-        spec.placeholder.as_deref().unwrap_or("City name (e.g. Oslo)…"),
+        spec.placeholder
+            .as_deref()
+            .unwrap_or("City name (e.g. Oslo)…"),
         query,
     )
     .on_input(move |s| Message::WidgetLocQuery {
@@ -960,24 +989,22 @@ fn location_control<'a>(
             .into()
     };
 
-    let mut block = column![
-        row![
-            label_col,
-            container(
-                column![
-                    pinned,
-                    row![search_input, search_btn]
-                        .align_y(Alignment::Center)
-                        .spacing(6),
-                ]
-                .spacing(4)
-            )
-            .width(Length::FillPortion(3)),
-            reset_button(state, idx, widget_id, instance_key, scope, &spec.key),
-        ]
-        .align_y(Alignment::Center)
-        .spacing(8),
+    let mut block = column![row![
+        label_col,
+        container(
+            column![
+                pinned,
+                row![search_input, search_btn]
+                    .align_y(Alignment::Center)
+                    .spacing(6),
+            ]
+            .spacing(4)
+        )
+        .width(Length::FillPortion(3)),
+        reset_button(state, idx, widget_id, instance_key, scope, &spec.key),
     ]
+    .align_y(Alignment::Center)
+    .spacing(8),]
     .spacing(4);
 
     if is_target {
@@ -1051,7 +1078,11 @@ fn seg_style(
     move |_, status| {
         let hovered = matches!(status, iced::widget::button::Status::Hovered);
         iced::widget::button::Style {
-            background: Some(Background::Color(if hovered && !active { hover_bg } else { bg })),
+            background: Some(Background::Color(if hovered && !active {
+                hover_bg
+            } else {
+                bg
+            })),
             text_color,
             border: Border {
                 color: border,
@@ -1135,7 +1166,13 @@ mod tests {
         let mut s = spec("enum");
         s.values = Some(vec![json!("a"), json!("b"), json!("c"), json!("d")]);
         assert_eq!(control_kind(&s), ControlKind::Segmented);
-        s.values = Some(vec![json!("a"), json!("b"), json!("c"), json!("d"), json!("e")]);
+        s.values = Some(vec![
+            json!("a"),
+            json!("b"),
+            json!("c"),
+            json!("d"),
+            json!("e"),
+        ]);
         assert_eq!(control_kind(&s), ControlKind::Select);
     }
 
@@ -1190,7 +1227,14 @@ mod tests {
     #[test]
     fn write_option_targets_the_scoped_bag() {
         let mut store = WidgetStore::default();
-        write_option(&mut store, "weather", "apps.slot4", WidgetScope::Global, "units", json!("f"));
+        write_option(
+            &mut store,
+            "weather",
+            "apps.slot4",
+            WidgetScope::Global,
+            "units",
+            json!("f"),
+        );
         assert_eq!(store.global["weather"]["units"], json!("f"));
         assert!(store.instances.is_empty());
 
@@ -1202,7 +1246,10 @@ mod tests {
             "units",
             json!("c"),
         );
-        assert_eq!(store.instances["apps.slot4"]["weather"]["units"], json!("c"));
+        assert_eq!(
+            store.instances["apps.slot4"]["weather"]["units"],
+            json!("c")
+        );
         // global bag untouched by the instance write
         assert_eq!(store.global["weather"]["units"], json!("f"));
     }
@@ -1212,8 +1259,22 @@ mod tests {
     #[test]
     fn reset_option_removes_only_the_scoped_key() {
         let mut store = WidgetStore::default();
-        write_option(&mut store, "weather", "apps.slot4", WidgetScope::Global, "units", json!("f"));
-        write_option(&mut store, "weather", "apps.slot4", WidgetScope::Global, "refresh", json!(300));
+        write_option(
+            &mut store,
+            "weather",
+            "apps.slot4",
+            WidgetScope::Global,
+            "units",
+            json!("f"),
+        );
+        write_option(
+            &mut store,
+            "weather",
+            "apps.slot4",
+            WidgetScope::Global,
+            "refresh",
+            json!(300),
+        );
         write_option(
             &mut store,
             "weather",
@@ -1224,28 +1285,71 @@ mod tests {
         );
 
         // instance reset drops the override; global value survives
-        reset_option(&mut store, "weather", "apps.slot4", WidgetScope::Instance, "units");
+        reset_option(
+            &mut store,
+            "weather",
+            "apps.slot4",
+            WidgetScope::Instance,
+            "units",
+        );
         assert!(!store.instances.contains_key("apps.slot4")); // pruned empty
         assert_eq!(store.global["weather"]["units"], json!("f"));
 
         // global reset drops only that key
-        reset_option(&mut store, "weather", "apps.slot4", WidgetScope::Global, "units");
+        reset_option(
+            &mut store,
+            "weather",
+            "apps.slot4",
+            WidgetScope::Global,
+            "units",
+        );
         assert!(!store.global["weather"].contains_key("units"));
         assert_eq!(store.global["weather"]["refresh"], json!(300));
 
         // last key pruned → whole bag gone
-        reset_option(&mut store, "weather", "apps.slot4", WidgetScope::Global, "refresh");
+        reset_option(
+            &mut store,
+            "weather",
+            "apps.slot4",
+            WidgetScope::Global,
+            "refresh",
+        );
         assert!(store.global.is_empty());
     }
 
     #[test]
     fn has_override_tracks_the_scoped_bag() {
         let mut store = WidgetStore::default();
-        assert!(!has_override(&store, "weather", "apps.slot4", WidgetScope::Global, "units"));
-        write_option(&mut store, "weather", "apps.slot4", WidgetScope::Global, "units", json!("f"));
-        assert!(has_override(&store, "weather", "apps.slot4", WidgetScope::Global, "units"));
+        assert!(!has_override(
+            &store,
+            "weather",
+            "apps.slot4",
+            WidgetScope::Global,
+            "units"
+        ));
+        write_option(
+            &mut store,
+            "weather",
+            "apps.slot4",
+            WidgetScope::Global,
+            "units",
+            json!("f"),
+        );
+        assert!(has_override(
+            &store,
+            "weather",
+            "apps.slot4",
+            WidgetScope::Global,
+            "units"
+        ));
         // instance scope checks the instance bag, not global
-        assert!(!has_override(&store, "weather", "apps.slot4", WidgetScope::Instance, "units"));
+        assert!(!has_override(
+            &store,
+            "weather",
+            "apps.slot4",
+            WidgetScope::Instance,
+            "units"
+        ));
     }
 
     // --- affected-instances count ---
@@ -1309,13 +1413,19 @@ mod tests {
         let p2 = page("", vec![widget_slice("weather")]);
 
         let hits = affected_instances(&[p1, p2], "weather");
-        assert_eq!(hits, vec![("Apps".to_string(), 1), ("Page 2".to_string(), 0)]);
+        assert_eq!(
+            hits,
+            vec![("Apps".to_string(), 1), ("Page 2".to_string(), 0)]
+        );
         // built-in widget sources never count
-        let p3 = page("X", vec![{
-            let mut s = widget_slice("weather");
-            s.widget.as_mut().unwrap().source = WidgetSource::Cpu;
-            s
-        }]);
+        let p3 = page(
+            "X",
+            vec![{
+                let mut s = widget_slice("weather");
+                s.widget.as_mut().unwrap().source = WidgetSource::Cpu;
+                s
+            }],
+        );
         assert!(affected_instances(&[p3], "weather").is_empty());
     }
 
@@ -1323,9 +1433,15 @@ mod tests {
 
     #[test]
     fn effective_instance_key_prefers_stored() {
-        assert_eq!(effective_instance_key(Some("apps.slot4"), "Other", 9), "apps.slot4");
+        assert_eq!(
+            effective_instance_key(Some("apps.slot4"), "Other", 9),
+            "apps.slot4"
+        );
         assert_eq!(effective_instance_key(None, "My Page", 2), "my-page.slot2");
-        assert_eq!(effective_instance_key(Some(""), "My Page", 2), "my-page.slot2");
+        assert_eq!(
+            effective_instance_key(Some(""), "My Page", 2),
+            "my-page.slot2"
+        );
     }
 
     #[test]

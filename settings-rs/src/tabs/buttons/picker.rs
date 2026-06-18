@@ -377,15 +377,24 @@ pub fn action_kind_name(kind: ActionKind) -> &'static str {
 /// (one-line sub, freedesktop icon name) per action kind.
 fn action_tile_meta(kind: ActionKind) -> (&'static str, &'static str) {
     match kind {
-        ActionKind::Exec => ("Run once when the slice is clicked", "utilities-terminal-symbolic"),
+        ActionKind::Exec => (
+            "Run once when the slice is clicked",
+            "utilities-terminal-symbolic",
+        ),
         ActionKind::Submenu => ("Open a ring of sub-items", "view-app-grid-symbolic"),
         ActionKind::Macro => ("Replay a recorded input macro", "media-record-symbolic"),
         ActionKind::Shortcut => ("Send a keyboard chord", "input-keyboard-symbolic"),
         ActionKind::EasySwitch => ("Hop the mouse to another host", "computer-symbolic"),
         ActionKind::Settings => ("Open a settings surface", "preferences-system-symbolic"),
         ActionKind::Emoji => ("Open the emoji picker", "face-smile-symbolic"),
-        ActionKind::Dial => ("Scroll to adjust volume / brightness", "multimedia-volume-control-symbolic"),
-        ActionKind::Power => ("Lock, suspend, restart, shut down", "system-shutdown-symbolic"),
+        ActionKind::Dial => (
+            "Scroll to adjust volume / brightness",
+            "multimedia-volume-control-symbolic",
+        ),
+        ActionKind::Power => (
+            "Lock, suspend, restart, shut down",
+            "system-shutdown-symbolic",
+        ),
         ActionKind::NightLight => ("Toggle GNOME night light", "weather-clear-night-symbolic"),
         ActionKind::MouseSetting => ("DPI / SmartShift quick toggle", "input-mouse-symbolic"),
         ActionKind::Widget => ("Live data drawn inside the slice", "view-grid-symbolic"),
@@ -408,13 +417,48 @@ pub struct BuiltinTile {
 /// previews are an explicitly-deferred follow-up.
 pub fn builtin_tiles() -> Vec<BuiltinTile> {
     vec![
-        BuiltinTile { source: WidgetSource::Weather, name: "Weather", value: "14°", sub: "Clear · Oslo" },
-        BuiltinTile { source: WidgetSource::Cpu, name: "CPU usage", value: "23%", sub: "8 cores · 52°C" },
-        BuiltinTile { source: WidgetSource::Memory, name: "Memory", value: "11.2", sub: "of 32 GB" },
-        BuiltinTile { source: WidgetSource::Network, name: "Network rate", value: "84↓", sub: "12↑ Mb/s" },
-        BuiltinTile { source: WidgetSource::Disk, name: "Disk free", value: "412", sub: "GB free" },
-        BuiltinTile { source: WidgetSource::TasksDue, name: "Tasks due", value: "3", sub: "due in 24h" },
-        BuiltinTile { source: WidgetSource::MouseBattery, name: "Mouse battery", value: "78%", sub: "MX Master 4" },
+        BuiltinTile {
+            source: WidgetSource::Weather,
+            name: "Weather",
+            value: "14°",
+            sub: "Clear · Oslo",
+        },
+        BuiltinTile {
+            source: WidgetSource::Cpu,
+            name: "CPU usage",
+            value: "23%",
+            sub: "8 cores · 52°C",
+        },
+        BuiltinTile {
+            source: WidgetSource::Memory,
+            name: "Memory",
+            value: "11.2",
+            sub: "of 32 GB",
+        },
+        BuiltinTile {
+            source: WidgetSource::Network,
+            name: "Network rate",
+            value: "84↓",
+            sub: "12↑ Mb/s",
+        },
+        BuiltinTile {
+            source: WidgetSource::Disk,
+            name: "Disk free",
+            value: "412",
+            sub: "GB free",
+        },
+        BuiltinTile {
+            source: WidgetSource::TasksDue,
+            name: "Tasks due",
+            value: "3",
+            sub: "due in 24h",
+        },
+        BuiltinTile {
+            source: WidgetSource::MouseBattery,
+            name: "Mouse battery",
+            value: "78%",
+            sub: "MX Master 4",
+        },
     ]
 }
 
@@ -472,7 +516,11 @@ pub fn tiles_per_row(window_width: f32) -> usize {
 /// Chip + (when this slice's picker is open) the panel below it.
 /// This is the slice editor's replacement for the old kind
 /// pick_list — `buttons/mod.rs` renders it as its own row.
-pub fn behavior_section<'a>(state: &'a State, idx: usize, slice: &'a Slice) -> Element<'a, Message> {
+pub fn behavior_section<'a>(
+    state: &'a State,
+    idx: usize,
+    slice: &'a Slice,
+) -> Element<'a, Message> {
     let open = state.picker_open == Some(idx);
     let chip = behavior_chip(state, idx, slice, open);
     let convertible = convertible_plugin_id(slice, &state.widget_registry).is_some();
@@ -532,7 +580,9 @@ fn behavior_chip<'a>(
     };
     let summary = chip_summary(state, slice);
 
-    let mut title_row = row![text(title).size(13)].spacing(8).align_y(Alignment::Center);
+    let mut title_row = row![text(title).size(13)]
+        .spacing(8)
+        .align_y(Alignment::Center);
     if is_widget {
         title_row = title_row.push(
             container(text("WIDGET").size(8).style(style::text_accent(pal)))
@@ -600,7 +650,11 @@ fn chip_icon_tile<'a>(state: &'a State, slice: &'a Slice) -> Element<'a, Message
     );
     // 2) Custom widget's bundled icon, untinted (brand colours).
     if handle.is_none() {
-        if let Some(WidgetConfig { source: WidgetSource::Custom(id), .. }) = &slice.widget {
+        if let Some(WidgetConfig {
+            source: WidgetSource::Custom(id),
+            ..
+        }) = &slice.widget
+        {
             if let Some(path) = state
                 .widget_registry
                 .iter()
@@ -654,11 +708,10 @@ fn missing_widget_id<'a>(state: &State, slice: &'a Slice) -> Option<&'a str> {
         return None;
     }
     match &slice.widget {
-        Some(WidgetConfig { source: WidgetSource::Custom(id), .. })
-            if !state.widget_registry.iter().any(|w| w.id == *id) =>
-        {
-            Some(id)
-        }
+        Some(WidgetConfig {
+            source: WidgetSource::Custom(id),
+            ..
+        }) if !state.widget_registry.iter().any(|w| w.id == *id) => Some(id),
         _ => None,
     }
 }
@@ -681,7 +734,13 @@ pub fn chip_summary(state: &State, slice: &Slice) -> String {
                 .macros
                 .iter()
                 .find(|m| m.id == slice.command)
-                .map(|m| if m.name.trim().is_empty() { m.id.clone() } else { m.name.clone() });
+                .map(|m| {
+                    if m.name.trim().is_empty() {
+                        m.id.clone()
+                    } else {
+                        m.name.clone()
+                    }
+                });
             match name {
                 Some(n) => format!("Macro · {n}"),
                 None if cmd.is_empty() => "No macro picked".to_string(),
@@ -784,7 +843,10 @@ fn picker_panel<'a>(state: &'a State, idx: usize, slice: &'a Slice) -> Element<'
     // so it renders as a quiet outline tile), and it survives any
     // search query.
     let installed = visible_builtin_count + state.widget_registry.len();
-    panel = panel.push(group_header(pal, format!("Widgets · {installed} installed")));
+    panel = panel.push(group_header(
+        pal,
+        format!("Widgets · {installed} installed"),
+    ));
     if builtins.is_empty() && registry.is_empty() && !query.trim().is_empty() {
         panel = panel.push(
             text("No widgets match — clear the search to see everything.")
@@ -796,7 +858,11 @@ fn picker_panel<'a>(state: &'a State, idx: usize, slice: &'a Slice) -> Element<'
         .into_iter()
         .map(|t| builtin_tile_view(state, idx, slice, t))
         .collect();
-    tiles.extend(registry.into_iter().map(|w| registry_tile_view(state, idx, slice, w)));
+    tiles.extend(
+        registry
+            .into_iter()
+            .map(|w| registry_tile_view(state, idx, slice, w)),
+    );
     tiles.push(get_more_tile(pal));
     panel = panel.push(tile_grid(tiles, per_row));
 
@@ -862,9 +928,11 @@ fn action_tile_view<'a>(
             .into(),
     };
 
-    let mut name_row = row![text(tile.name).size(12)].spacing(4).align_y(Alignment::Center);
+    let mut name_row = row![text(tile.name).size(12)]
+        .spacing(4)
+        .align_y(Alignment::Center);
     if selected {
-        name_row = name_row.push(text("✓").size(11).style(style::text_accent(pal)));
+        name_row = name_row.push(oxidemx_widgets::icons::icon("check", 11.0, pal.accent));
     }
 
     let body = row![
@@ -901,9 +969,11 @@ fn builtin_tile_view<'a>(
     let pal = &state.palette;
     let selected = pick_matches_slice(slice, &PickChoice::Widget(tile.source.clone()));
 
-    let mut name_row = row![text(tile.name).size(11)].spacing(4).align_y(Alignment::Center);
+    let mut name_row = row![text(tile.name).size(11)]
+        .spacing(4)
+        .align_y(Alignment::Center);
     if selected {
-        name_row = name_row.push(text("✓").size(10).style(style::text_accent(pal)));
+        name_row = name_row.push(oxidemx_widgets::icons::icon("check", 10.0, pal.accent));
     }
 
     let body = column![
@@ -911,7 +981,9 @@ fn builtin_tile_view<'a>(
         text(tile.sub).size(9).style(style::text_faint(pal)),
         Space::new().height(Length::Fixed(4.0)),
         name_row,
-        text("OxideMX built-in").size(8).style(style::text_faint(pal)),
+        text("OxideMX built-in")
+            .size(8)
+            .style(style::text_faint(pal)),
     ]
     .spacing(2);
 
@@ -955,40 +1027,45 @@ fn registry_tile_view<'a>(
                 .into()
         })
         .unwrap_or_else(|| {
-            text(w.name.chars().next().unwrap_or('?').to_uppercase().to_string())
-                .size(14)
-                .style(style::text_accent(pal))
-                .into()
+            text(
+                w.name
+                    .chars()
+                    .next()
+                    .unwrap_or('?')
+                    .to_uppercase()
+                    .to_string(),
+            )
+            .size(14)
+            .style(style::text_accent(pal))
+            .into()
         });
 
     let mut name_row = row![text(w.name.as_str()).size(11)]
         .spacing(4)
         .align_y(Alignment::Center);
     if w.has_options {
-        name_row = name_row.push(text("⚙").size(10).style(style::text_dim(pal)));
+        name_row = name_row.push(oxidemx_widgets::icons::icon("gear", 10.0, pal.subtext0));
     }
     if selected {
-        name_row = name_row.push(text("✓").size(10).style(style::text_accent(pal)));
+        name_row = name_row.push(oxidemx_widgets::icons::icon("check", 10.0, pal.accent));
     }
 
-    let mut body = column![
-        row![
-            container(icon)
-                .width(Length::Fixed(28.0))
-                .height(Length::Fixed(28.0))
-                .center_x(Length::Fixed(28.0))
-                .center_y(Length::Fixed(28.0)),
-            column![
-                name_row,
-                text(format!("{} · v{}", w.author, w.version))
-                    .size(8)
-                    .style(style::text_faint(pal)),
-            ]
-            .spacing(2),
+    let mut body = column![row![
+        container(icon)
+            .width(Length::Fixed(28.0))
+            .height(Length::Fixed(28.0))
+            .center_x(Length::Fixed(28.0))
+            .center_y(Length::Fixed(28.0)),
+        column![
+            name_row,
+            text(format!("{} · v{}", w.author, w.version))
+                .size(8)
+                .style(style::text_faint(pal)),
         ]
-        .align_y(Alignment::Center)
-        .spacing(8),
+        .spacing(2),
     ]
+    .align_y(Alignment::Center)
+    .spacing(8),]
     .spacing(4);
 
     if !w.ready {
@@ -1047,7 +1124,11 @@ fn chip_container(
     is_widget: bool,
 ) -> impl Fn(&iced::Theme) -> iced::widget::container::Style + 'static {
     let bg = if is_widget { pal.accent_06 } else { pal.crust };
-    let border = if is_widget { pal.accent_40 } else { pal.hairline };
+    let border = if is_widget {
+        pal.accent_40
+    } else {
+        pal.hairline
+    };
     let text_color = pal.text;
     move |_| iced::widget::container::Style {
         background: Some(Background::Color(bg)),
@@ -1062,7 +1143,9 @@ fn chip_container(
 }
 
 /// The chip's 40 px icon square.
-fn icon_tile_style(pal: &Palette) -> impl Fn(&iced::Theme) -> iced::widget::container::Style + 'static {
+fn icon_tile_style(
+    pal: &Palette,
+) -> impl Fn(&iced::Theme) -> iced::widget::container::Style + 'static {
     let bg = pal.surface0;
     let border = pal.hairline_faint;
     move |_| iced::widget::container::Style {
@@ -1110,10 +1193,18 @@ fn tile_style(
     pal: &Palette,
     selected: bool,
 ) -> impl Fn(&iced::Theme, iced::widget::button::Status) -> iced::widget::button::Style + 'static {
-    let bg = if selected { pal.accent_06 } else { pal.surface0 };
+    let bg = if selected {
+        pal.accent_06
+    } else {
+        pal.surface0
+    };
     let hover_bg = pal.row_hover;
     let border = if selected { pal.accent } else { pal.hairline };
-    let border_hover = if selected { pal.accent } else { pal.hairline_strong };
+    let border_hover = if selected {
+        pal.accent
+    } else {
+        pal.hairline_strong
+    };
     let text_color = pal.text;
     let disabled_bg = pal.crust;
     let disabled_border = pal.hairline_faint;
@@ -1133,7 +1224,11 @@ fn tile_style(
         }
         let hovered = matches!(status, iced::widget::button::Status::Hovered);
         iced::widget::button::Style {
-            background: Some(Background::Color(if hovered && !selected { hover_bg } else { bg })),
+            background: Some(Background::Color(if hovered && !selected {
+                hover_bg
+            } else {
+                bg
+            })),
             text_color,
             border: Border {
                 color: if hovered { border_hover } else { border },
@@ -1256,7 +1351,13 @@ mod tests {
 
         // empty label → auto-label with the widget name
         let mut s = slice(ActionKind::Exec, "");
-        apply_widget_pick(&mut s, WidgetSource::Custom("clock".into()), "Apps", 4, &reg);
+        apply_widget_pick(
+            &mut s,
+            WidgetSource::Custom("clock".into()),
+            "Apps",
+            4,
+            &reg,
+        );
         assert_eq!(s.label, "Clock");
 
         // label equals the previous pick's auto-label → replaced
@@ -1292,7 +1393,13 @@ mod tests {
     #[test]
     fn apply_widget_pick_sets_kind_and_config() {
         let mut s = slice(ActionKind::Exec, "");
-        apply_widget_pick(&mut s, WidgetSource::Custom("clock".into()), "My Page", 2, &[]);
+        apply_widget_pick(
+            &mut s,
+            WidgetSource::Custom("clock".into()),
+            "My Page",
+            2,
+            &[],
+        );
         assert_eq!(s.kind, ActionKind::Widget);
         let w = s.widget.expect("widget config set");
         assert_eq!(w.source, WidgetSource::Custom("clock".into()));
@@ -1304,9 +1411,18 @@ mod tests {
     #[test]
     fn pick_matches_stored_slice_behavior() {
         let exec = slice(ActionKind::Exec, "x");
-        assert!(pick_matches_slice(&exec, &PickChoice::Action(ActionKind::Exec)));
-        assert!(!pick_matches_slice(&exec, &PickChoice::Action(ActionKind::Macro)));
-        assert!(!pick_matches_slice(&exec, &PickChoice::Widget(WidgetSource::Cpu)));
+        assert!(pick_matches_slice(
+            &exec,
+            &PickChoice::Action(ActionKind::Exec)
+        ));
+        assert!(!pick_matches_slice(
+            &exec,
+            &PickChoice::Action(ActionKind::Macro)
+        ));
+        assert!(!pick_matches_slice(
+            &exec,
+            &PickChoice::Widget(WidgetSource::Cpu)
+        ));
 
         let mut w = slice(ActionKind::Widget, "Weather");
         w.widget = Some(widget_config_for_pick(
@@ -1326,7 +1442,10 @@ mod tests {
         // widget kind never matches an action tile of kind Widget? —
         // action tiles exclude Widget, but the choice still compares
         // by kind for completeness.
-        assert!(pick_matches_slice(&w, &PickChoice::Action(ActionKind::Widget)));
+        assert!(pick_matches_slice(
+            &w,
+            &PickChoice::Action(ActionKind::Widget)
+        ));
     }
 
     // --- display names ---
@@ -1363,7 +1482,9 @@ mod tests {
         // MouseBattery never hides, even with a same-named plugin
         let reg = vec![lite("mouse-battery", "Mouse battery", "X", true)];
         let visible = visible_builtin_tiles(&reg);
-        assert!(visible.iter().any(|t| t.source == WidgetSource::MouseBattery));
+        assert!(visible
+            .iter()
+            .any(|t| t.source == WidgetSource::MouseBattery));
     }
 
     // --- convert-to-plugin (spec §16 back-compat affordance) ---

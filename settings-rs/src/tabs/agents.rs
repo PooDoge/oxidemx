@@ -11,8 +11,11 @@ use std::path::PathBuf;
 
 use iced::widget::{button, column, container, row, rule, text, text_editor, text_input, Space};
 use iced::{Alignment, Element, Length};
-use oxidemx_conductor::loader::{default_agents_root, default_flows_root, list_flows, load_flow, load_roster};
+use oxidemx_conductor::loader::{
+    default_agents_root, default_flows_root, list_flows, load_flow, load_roster,
+};
 use oxidemx_conductor::{validate, FlowDoc, KNOWN_TOOLS};
+use oxidemx_widgets::icons::icon;
 use oxidemx_widgets::style;
 use oxidemx_widgets::widgets::section_header;
 
@@ -100,7 +103,11 @@ impl AgentsData {
             .map(|def| AgentRow {
                 id: def.decl.id.clone(),
                 name: def.name().to_string(),
-                model: def.decl.model.clone().unwrap_or_else(|| "(flow default)".into()),
+                model: def
+                    .decl
+                    .model
+                    .clone()
+                    .unwrap_or_else(|| "(flow default)".into()),
                 tools: def.decl.tools.clone(),
                 capabilities: def.decl.capabilities.clone(),
             })
@@ -151,7 +158,9 @@ fn scan_last_runs() -> std::collections::HashMap<String, (bool, usize)> {
         let Ok(v) = serde_json::from_str::<serde_json::Value>(&s) else {
             continue;
         };
-        let Some(flow_id) = v["flow_id"].as_str() else { continue };
+        let Some(flow_id) = v["flow_id"].as_str() else {
+            continue;
+        };
         let success = v["success"].as_bool().unwrap_or(false);
         let arts = v["artifacts"].as_array().map(|a| a.len()).unwrap_or(0);
         let keep = latest
@@ -394,14 +403,24 @@ fn new_flow_bar(state: &State) -> Element<'_, Message> {
 fn editor_panel<'a>(state: &'a State, ed: &'a FlowEditor) -> Element<'a, Message> {
     let pal = &state.palette;
     let status: Element<Message> = if ed.valid {
-        text("✓ valid").size(11).style(text_color(pal.success)).into()
+        row![icon("check", 11.0, pal.success), text("valid").size(11)]
+            .spacing(5)
+            .align_y(Alignment::Center)
+            .into()
     } else {
-        let mut col = column![text(format!("✗ {} problem(s)", ed.errors.len()))
-            .size(11)
-            .style(text_color(pal.danger))]
+        let mut col = column![row![
+            icon("close", 11.0, pal.danger),
+            text(format!("{} problem(s)", ed.errors.len())).size(11)
+        ]
+        .spacing(5)
+        .align_y(Alignment::Center)]
         .spacing(2);
         for e in ed.errors.iter().take(6) {
-            col = col.push(text(format!("• {e}")).size(10).style(text_color(pal.danger)));
+            col = col.push(
+                text(format!("• {e}"))
+                    .size(10)
+                    .style(text_color(pal.danger)),
+            );
         }
         col.into()
     };
@@ -458,12 +477,19 @@ fn flows_card(state: &State) -> Element<'_, Message> {
         col = col.push(text("No flows.").size(11).style(style::text_faint(pal)));
     }
     for f in &state.agents.flows {
-        let badge = if f.valid {
-            text("✓ valid").size(11).style(text_color(pal.success))
+        let badge: Element<Message> = if f.valid {
+            row![icon("check", 11.0, pal.success), text("valid").size(11)]
+                .spacing(5)
+                .align_y(Alignment::Center)
+                .into()
         } else {
-            text(format!("✗ {} error(s)", f.errors.len()))
-                .size(11)
-                .style(text_color(pal.danger))
+            row![
+                icon("close", 11.0, pal.danger),
+                text(format!("{} error(s)", f.errors.len())).size(11)
+            ]
+            .spacing(5)
+            .align_y(Alignment::Center)
+            .into()
         };
         let head = row![
             text(f.name.clone()).size(13).style(style::text_accent(pal)),
@@ -484,7 +510,11 @@ fn flows_card(state: &State) -> Element<'_, Message> {
         let order = if f.step_order.is_empty() {
             "—".to_string()
         } else {
-            format!("{} steps:  {}", f.step_order.len(), f.step_order.join(" → "))
+            format!(
+                "{} steps:  {}",
+                f.step_order.len(),
+                f.step_order.join(" → ")
+            )
         };
         let mut block = column![head, text(order).size(11).style(style::text_dim(pal))].spacing(4);
         if let Some((ok, n)) = f.last_run {
@@ -496,7 +526,11 @@ fn flows_card(state: &State) -> Element<'_, Message> {
             block = block.push(text(label).size(10).style(text_color(color)));
         }
         for e in &f.errors {
-            block = block.push(text(format!("• {e}")).size(10).style(text_color(pal.danger)));
+            block = block.push(
+                text(format!("• {e}"))
+                    .size(10)
+                    .style(text_color(pal.danger)),
+            );
         }
         col = col.push(
             container(block)
@@ -512,7 +546,11 @@ fn roster_card(state: &State) -> Element<'_, Message> {
     let pal = &state.palette;
     let mut col = column![].spacing(10);
     if state.agents.agents.is_empty() {
-        col = col.push(text("No roster agents.").size(11).style(style::text_faint(pal)));
+        col = col.push(
+            text("No roster agents.")
+                .size(11)
+                .style(style::text_faint(pal)),
+        );
     }
     for ag in &state.agents.agents {
         let tools = if ag.tools.is_empty() {
@@ -527,12 +565,18 @@ fn roster_card(state: &State) -> Element<'_, Message> {
         };
         let block = column![
             row![
-                text(ag.name.clone()).size(13).style(style::text_accent(pal)),
+                text(ag.name.clone())
+                    .size(13)
+                    .style(style::text_accent(pal)),
                 Space::new().width(Length::Fill),
-                text(ag.model.clone()).size(10).style(style::text_faint(pal)),
+                text(ag.model.clone())
+                    .size(10)
+                    .style(style::text_faint(pal)),
             ]
             .align_y(Alignment::Center),
-            text(format!("tools: {tools}{caps}")).size(11).style(style::text_dim(pal)),
+            text(format!("tools: {tools}{caps}"))
+                .size(11)
+                .style(style::text_dim(pal)),
         ]
         .spacing(3);
         col = col.push(
@@ -581,10 +625,13 @@ fn mcp_card(state: &State) -> Element<'_, Message> {
         .map(|p| p.display().to_string())
         .unwrap_or_else(|| "~/.config/oxidemx/mcp.toml".into());
     let status: Element<Message> = if a.mcp_exists {
-        text(format!("{} server(s) configured in {path}", a.mcp_server_count))
-            .size(11)
-            .style(style::text_dim(pal))
-            .into()
+        text(format!(
+            "{} server(s) configured in {path}",
+            a.mcp_server_count
+        ))
+        .size(11)
+        .style(style::text_dim(pal))
+        .into()
     } else {
         column![
             text("No MCP config. Add servers to expose their tools to agents.")

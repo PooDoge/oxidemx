@@ -17,6 +17,7 @@ use crate::mouse_callouts::mouse_widget;
 use crate::{style, Message, State};
 use iced::widget::{column, container, pick_list, row, text, Space};
 use iced::{Alignment, Element, Length};
+use oxidemx_widgets::icons::icon;
 use oxidemx_widgets::widgets::section_header;
 use std::path::PathBuf;
 
@@ -96,7 +97,7 @@ fn button_assignment_row(state: &State, mb: oxidemx_shared::MouseButton) -> Elem
 
     container(
         row![
-            container(text("⌖").size(13).style(style::text_dim(pal)))
+            container(icon("target", 13.0, pal.subtext0))
                 .padding([4, 8])
                 .style(style::chip(pal)),
             text(mb.label()).size(13),

@@ -52,6 +52,7 @@ use oxidemx_shared::{
     AnimationConfig, AppConfig, ElementAnimation, HapticEventMode, HapticRedirectCurve,
     HapticRedirectMode, TransitionConfig, VisualSettings,
 };
+use oxidemx_widgets::icons::icon;
 use oxidemx_widgets::{palette, style};
 use std::sync::OnceLock;
 use std::time::{Duration, Instant};
@@ -2304,7 +2305,8 @@ fn update_inner(state: &mut State, message: Message) -> Task<Message> {
             match tabs::agents::scaffold_flow(&state.agents_new_flow_draft) {
                 Ok(id) => {
                     state.agents_new_flow_draft.clear();
-                    state.agents_new_flow_status = format!("created `{id}` — edit its flow.md to refine");
+                    state.agents_new_flow_status =
+                        format!("created `{id}` — edit its flow.md to refine");
                     state.agents = tabs::agents::AgentsData::load();
                     // Open the fresh flow in the editor right away.
                     state.agents_flow_editor = tabs::agents::FlowEditor::open(&id);
@@ -3216,11 +3218,7 @@ fn update_inner(state: &mut State, message: Message) -> Task<Message> {
             // reopen → re-pick round-trip can still restore the
             // original slice (incl. a widget's instance config).
             if state.picker_undo.as_ref().map(|(i, _)| *i) != Some(idx) {
-                state.picker_undo = state
-                    .active_slices()
-                    .get(idx)
-                    .cloned()
-                    .map(|s| (idx, s));
+                state.picker_undo = state.active_slices().get(idx).cloned().map(|s| (idx, s));
             }
             state.picker_open = Some(idx);
             state.picker_search.clear();
@@ -3351,7 +3349,10 @@ fn update_inner(state: &mut State, message: Message) -> Task<Message> {
             if let Some(store) = state.widget_store.as_mut() {
                 store.busy = true;
             }
-            Task::perform(widget_store::pick_and_install(), Message::StoreInstallResult)
+            Task::perform(
+                widget_store::pick_and_install(),
+                Message::StoreInstallResult,
+            )
         }
         Message::StoreInstallFromUrl => {
             let url = state
@@ -3764,8 +3765,7 @@ fn update_inner(state: &mut State, message: Message) -> Task<Message> {
                 // Mirror Message::OpenPicker — snapshot once for
                 // undo-by-reselect, open, clear the search.
                 if state.picker_undo.as_ref().map(|(u, _)| *u) != Some(i) {
-                    state.picker_undo =
-                        state.active_slices().get(i).cloned().map(|s| (i, s));
+                    state.picker_undo = state.active_slices().get(i).cloned().map(|s| (i, s));
                 }
                 state.picker_open = Some(i);
                 state.picker_search.clear();
@@ -5619,9 +5619,13 @@ fn full_panel<'a>(
     back_msg: Message,
 ) -> Element<'a, Message> {
     let pal = &state.palette;
-    let back_btn = iced::widget::button(text("← Back").size(12))
-        .style(style::btn_secondary(pal))
-        .on_press(back_msg);
+    let back_btn = iced::widget::button(
+        row![icon("arrow-left", 12.0, pal.text), text("Back").size(12)]
+            .spacing(5)
+            .align_y(iced::Alignment::Center),
+    )
+    .style(style::btn_secondary(pal))
+    .on_press(back_msg);
     let header = row![
         back_btn,
         Space::new().width(Length::Fixed(12.0)),
@@ -6291,13 +6295,18 @@ mod widget_flow_tests {
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_nanos())
             .unwrap_or(0);
-        let root =
-            std::env::temp_dir().join(format!("oxidemx-widget-flow-{}-{stamp}", std::process::id()));
+        let root = std::env::temp_dir().join(format!(
+            "oxidemx-widget-flow-{}-{stamp}",
+            std::process::id()
+        ));
         let widget_dir = root.join("oxidemx/widgets/weather");
         std::fs::create_dir_all(&widget_dir).expect("mkdir widget dir");
         std::fs::write(widget_dir.join("widget.json"), WEATHER_MANIFEST).unwrap();
-        std::fs::write(widget_dir.join("icon.svg"), "<svg xmlns='http://www.w3.org/2000/svg'/>")
-            .unwrap();
+        std::fs::write(
+            widget_dir.join("icon.svg"),
+            "<svg xmlns='http://www.w3.org/2000/svg'/>",
+        )
+        .unwrap();
         // Registry scan only checks the entry file *exists* — wasm is
         // never loaded by the settings app, so a stub byte suffices.
         std::fs::write(widget_dir.join("widget.wasm"), b"\0asm").unwrap();
@@ -6317,7 +6326,10 @@ mod widget_flow_tests {
 
         let mut state = State::default();
         assert!(
-            state.widget_registry.iter().any(|w| w.id == "weather" && w.ready),
+            state
+                .widget_registry
+                .iter()
+                .any(|w| w.id == "weather" && w.ready),
             "temp-home weather widget must scan as Ready (got {:?})",
             state.widget_registry
         );
@@ -6332,7 +6344,9 @@ mod widget_flow_tests {
         // Slot 4 starts as a plain exec slice with an auto-labelable
         // (empty) label so PickWidget's relabel rule applies.
         state.active_slices_mut()[4] = plain_slice("");
-        let page_name = state.config.radial_menu.pages[state.active_page].name.clone();
+        let page_name = state.config.radial_menu.pages[state.active_page]
+            .name
+            .clone();
         let expected_ikey = oxidemx_shared::widgets::instance_key(&page_name, 4);
 
         // --- picker: open + pick the installed weather widget ---
@@ -6413,13 +6427,18 @@ mod widget_flow_tests {
 
         // --- resolution through the two-bag merge ---
         let defaults = state.widget_manifests["weather"].defaults();
-        let global_view =
-            state
-                .config
-                .widgets
-                .resolve("weather", Some(&expected_ikey), WidgetScope::Global, &defaults);
+        let global_view = state.config.widgets.resolve(
+            "weather",
+            Some(&expected_ikey),
+            WidgetScope::Global,
+            &defaults,
+        );
         assert_eq!(global_view["units"], json!("c"));
-        assert_eq!(global_view["refresh"], json!(900), "manifest default survives");
+        assert_eq!(
+            global_view["refresh"],
+            json!(900),
+            "manifest default survives"
+        );
         assert!(
             !global_view.contains_key("location"),
             "instance-bag location is ignored under Global scope"
@@ -6561,8 +6580,15 @@ mod slice_editor_tests {
         let mut state = test_state();
         let _ = update(&mut state, Message::SelectSlice(0));
         assert_eq!(state.selected_slice, Some(0));
-        assert_eq!(state.picker_open, None, "configured slices keep the chip collapsed");
-        assert_eq!(state.active_slices().len(), 2, "no padding when the slot exists");
+        assert_eq!(
+            state.picker_open, None,
+            "configured slices keep the chip collapsed"
+        );
+        assert_eq!(
+            state.active_slices().len(),
+            2,
+            "no padding when the slot exists"
+        );
     }
 
     #[test]
@@ -6583,7 +6609,10 @@ mod slice_editor_tests {
         assert_eq!(state.picker_open, Some(4));
         let _ = update(&mut state, Message::SelectSlice(0)); // configured slot
         assert_eq!(state.selected_slice, Some(0));
-        assert_eq!(state.picker_open, None, "slot switch resets the stale picker");
+        assert_eq!(
+            state.picker_open, None,
+            "slot switch resets the stale picker"
+        );
     }
 
     #[test]
