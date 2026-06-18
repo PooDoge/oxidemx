@@ -217,7 +217,25 @@ pub(crate) fn introduces_new_specifics(input: &str, output: &str) -> Vec<String>
 
     let in_input = extract(input);
     let in_output = extract(output);
-    in_output.difference(&in_input).cloned().collect()
+    // Build a lowercased set of ALL word tokens present in the input (not just
+    // the capitalized/number/URL set) so that sentence-initial capitals in the
+    // output (e.g. "The" vs "the") are never counted as new specifics.
+    // Numbers and URLs extracted by `extract` are already present in
+    // `in_input`; the extra word scan covers plain lowercase words.
+    let input_words_lower: std::collections::HashSet<String> = input
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| !w.is_empty())
+        .map(|w| w.to_lowercase())
+        .collect();
+    // Merge extracted input tokens (already lowercased) into the word set.
+    let mut input_known: std::collections::HashSet<String> = input_words_lower;
+    for tok in &in_input {
+        input_known.insert(tok.to_lowercase());
+    }
+    in_output
+        .into_iter()
+        .filter(|tok| !input_known.contains(&tok.to_lowercase()))
+        .collect()
 }
 
 /// Returns `true` when any 3-gram appears more than 3 times.
@@ -417,6 +435,32 @@ mod tests {
         let k = SchemaKind::OneOf(vec!["SIMPLE".into(), "COMPLEX".into()]);
         assert!(matches_schema("SIMPLE", &k));
         assert!(!matches_schema("maybe", &k));
+    }
+
+    #[test]
+    fn no_new_facts_ignores_sentence_initial_capitals() {
+        // A Transform rephrasing "do the work" as "The work is done" must NOT
+        // flag "The" as a new specific — it is the same word, just capitalised
+        // at sentence start.
+        assert!(
+            introduces_new_specifics("do the work", "The work is done").is_empty(),
+            "sentence-initial capital should not be treated as a new specific"
+        );
+        // Genuinely new specifics (numbers, URLs) must still be caught.
+        let extra = introduces_new_specifics(
+            "summarize the build",
+            "It failed in 3.14s at http://x",
+        );
+        assert!(
+            extra.iter().any(|s| s == "3.14"),
+            "expected 3.14 in {:?}",
+            extra
+        );
+        assert!(
+            extra.iter().any(|s| s.contains("http://x")),
+            "expected http://x in {:?}",
+            extra
+        );
     }
 
     #[test]

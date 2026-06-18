@@ -67,14 +67,18 @@ impl Mode {
 
     /// Per-mode [`GuardConfig`].
     ///
-    /// | Mode       | Checks                                        | Action       |
-    /// |------------|-----------------------------------------------|--------------|
-    /// | Classify   | Schema(OneOf) + Grounding                     | Escalate     |
-    /// | Transform  | NoNewFacts + TermPreservation + LengthBounds  | Escalate     |
-    /// | Chat       | NonEmptyNonRefusal + Grounding                | PassFlagged  |
-    /// | ToolUse    | NonEmptyNonRefusal + Schema(Json)             | Escalate     |
-    /// | WebSearch  | NonEmptyNonRefusal + Grounding                | Escalate     |
-    /// | Vision     | NonEmptyNonRefusal                            | Escalate     |
+    /// | Mode       | Checks                                              | Action       |
+    /// |------------|-----------------------------------------------------|--------------|
+    /// | Classify   | Schema(Json) + Grounding (OneOf injected per-call)  | Escalate     |
+    /// | Transform  | NoNewFacts + TermPreservation + LengthBounds        | Escalate     |
+    /// | Chat       | NonEmptyNonRefusal + Grounding                      | PassFlagged  |
+    /// | ToolUse    | NonEmptyNonRefusal + Schema(Json)                   | Escalate     |
+    /// | WebSearch  | NonEmptyNonRefusal + Grounding                      | Escalate     |
+    /// | Vision     | NonEmptyNonRefusal                                  | Escalate     |
+    ///
+    /// **Note:** `Classify` returns `Schema(Json)` as a structural fallback.
+    /// The real `Schema(OneOf { … })` check is supplied by the request handler
+    /// at call-site, where the valid label list is known.
     pub fn guard_config(&self) -> GuardConfig {
         match self {
             Mode::Classify => GuardConfig {
