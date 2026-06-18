@@ -846,8 +846,7 @@ impl RadialMenuConfig {
 // ── Local-model configuration types ──────────────────────────────────────
 
 bitflags! {
-    /// Capabilities a local model declares. Serialised as a plain `u8` via
-    /// the `bitflags` serde feature (same wire value as `from_bits_truncate`).
+    /// Capabilities a local model declares. Serialised by the bitflags serde feature as a human-readable string, e.g. "TOOLS | WEB_SEARCH" (not an integer).
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
     pub struct Capabilities: u8 {
         const TOOLS             = 1;
@@ -1559,7 +1558,7 @@ mod tests {
         assert_eq!(cfg.overlay.chat_size, None);
         assert_eq!(
             cfg.overlay.ai.command_allowlist,
-            vec!["brightnessctl", "wpctl", "systemctl --user"]
+            vec!["brightnessctl", "wpctl", "systemctl --user", "uptime", "df", "free", "journalctl", "rpm-ostree status"]
         );
         // Populated section survives the round trip.
         let json = r#"{"overlay": {"chat_size": [560, 720],
