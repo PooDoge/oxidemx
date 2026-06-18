@@ -9,6 +9,7 @@ use crate::theme::ThemeName;
 use crate::widgets::WidgetStore;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
+use bitflags::bitflags;
 
 /// One radial slice. Position in the parent vec determines its angular
 /// placement (8 slices = 45° each, slot 0 = top, clockwise).
@@ -842,6 +843,125 @@ impl RadialMenuConfig {
     }
 }
 
+// ── Local-model configuration types ──────────────────────────────────────
+
+bitflags! {
+    /// Capabilities a local model declares. Serialised as a plain `u8` via
+    /// the `bitflags` serde feature (same wire value as `from_bits_truncate`).
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+    pub struct Capabilities: u8 {
+        const TOOLS             = 1;
+        const WEB_SEARCH        = 2;
+        const VISION            = 4;
+        const CODE_EXEC         = 8;
+        const STRUCTURED_OUTPUT = 16;
+    }
+}
+
+impl Default for Capabilities {
+    fn default() -> Self {
+        Capabilities::empty()
+    }
+}
+
+/// Where the model weights come from.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ModelSource {
+    /// Download from the Hugging Face hub.
+    Hf {
+        repo: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        revision: Option<String>,
+    },
+    /// Load GGUF file(s) from a local directory.
+    Gguf {
+        dir: String,
+        files: Vec<String>,
+    },
+}
+
+/// Inference sampling parameters. All fields are optional — absent means
+/// the backend's own default applies.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct SamplingConfig {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub temperature: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub top_p: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub top_k: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_tokens: Option<u32>,
+}
+
+/// One local-model registration entry.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModelSpec {
+    /// Short human-readable alias used in routing and the AI tab.
+    pub alias: String,
+    /// Where to obtain the weights.
+    pub source: ModelSource,
+    /// Feature flags advertised by this model.
+    #[serde(default)]
+    pub capabilities: Capabilities,
+    /// Inference sampling knobs (optional — unset = backend defaults).
+    #[serde(default)]
+    pub sampling: SamplingConfig,
+    /// In-situ quantisation string forwarded to mistral.rs, e.g. `"Q4K"`.
+    /// `None` = load the weights as-is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub isq: Option<String>,
+    /// When `true`, the model is not unloaded after `idle_timeout_secs`.
+    #[serde(default)]
+    pub keep_resident: bool,
+    /// Context-window override in tokens. `None` = model default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ctx_window: Option<u32>,
+}
+
+/// Top-level local-model pool configuration (stored in the `local_models`
+/// table of `config.json`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LocalModelConfig {
+    /// Directory where downloaded weights are cached.
+    #[serde(default = "default_models_dir")]
+    pub download_dir: PathBuf,
+    /// Seconds of inactivity before an idle model is unloaded (0 = never).
+    #[serde(default = "default_idle_timeout")]
+    pub idle_timeout_secs: u64,
+    /// Alias of the model that serves requests when no other model is chosen.
+    #[serde(default)]
+    pub default_model: String,
+    /// Registered local models.
+    #[serde(default)]
+    pub models: Vec<ModelSpec>,
+}
+
+fn default_models_dir() -> PathBuf {
+    dirs_config_dir()
+        .unwrap_or_else(|| PathBuf::from(".config"))
+        .join("oxidemx")
+        .join("models")
+}
+
+fn default_idle_timeout() -> u64 {
+    600
+}
+
+impl Default for LocalModelConfig {
+    fn default() -> Self {
+        LocalModelConfig {
+            download_dir: default_models_dir(),
+            idle_timeout_secs: default_idle_timeout(),
+            default_model: String::new(),
+            models: Vec::new(),
+        }
+    }
+}
+
+// ── End local-model configuration types ──────────────────────────────────
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct AppConfig {
     #[serde(default)]
@@ -935,6 +1055,10 @@ pub struct OverlayConfig {
     /// AI agent knobs.
     #[serde(default)]
     pub ai: AiConfig,
+
+    /// Local-model pool configuration.
+    #[serde(default)]
+    pub local_models: LocalModelConfig,
 }
 
 /// Which LLM provider the agent runtime uses. All ride AutoAgents'
@@ -1274,6 +1398,28 @@ impl std::error::Error for ConfigError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn capabilities_subset_and_serde() {
+        use super::Capabilities;
+        let model = Capabilities::TOOLS | Capabilities::WEB_SEARCH;
+        assert!(model.contains(Capabilities::empty()));   // non-mandatory default
+        assert!(model.contains(Capabilities::TOOLS));
+        assert!(!model.contains(Capabilities::VISION));
+        // bitflags 2.x with the `serde` feature serialises as a human-readable
+        // string (e.g. "TOOLS | WEB_SEARCH") in JSON, not a bare u8.
+        // Round-trip via the type itself (intent: serde is lossless).
+        let json = serde_json::to_string(&model).unwrap();
+        let back: Capabilities = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, model);
+    }
+
+    #[test]
+    fn local_model_config_defaults() {
+        let c: super::LocalModelConfig = serde_json::from_str("{\"default_model\":\"qwen\",\"models\":[]}").unwrap();
+        assert_eq!(c.idle_timeout_secs, 600);
+        assert!(c.download_dir.ends_with("oxidemx/models"));
+    }
 
     #[test]
     fn parses_minimal_config() {
