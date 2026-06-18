@@ -155,11 +155,23 @@ pub fn conversation<'a>(state: &'a RadialState, kit: &Kit) -> Element<'a, Messag
         layers.push(toast.into());
     }
 
-    if layers.len() == 1 {
-        layers.pop().unwrap()
-    } else {
-        iced::widget::Stack::with_children(layers).into()
-    }
+    // Always return a Stack, even with a single layer. Collapsing to
+    // the bare scrollable when no overlay is present would flip the
+    // root widget type (Scrollable <-> Stack) every time the "↓ Latest"
+    // pill or copy toast toggles. iced's tree diff keys state by widget
+    // tag at each tree position (core/widget/tree.rs): a root-tag change
+    // fails `tag_match`, triggers `*self = Self::new(..)`, and discards
+    // the whole subtree's state — resetting the scrollable's offset to
+    // the top. (The `.id(CHAT_SCROLL_ID)` restore only runs once the
+    // parent tag already matches, so it can't save a scrollable whose
+    // root ancestor changed type.) Keeping the root a Stack means the
+    // scrollable is matched by its id across sibling changes and its
+    // offset survives the pill/toast appearing and disappearing. This
+    // is what stops the chat from springing to the top — and the
+    // per-frame twitch near the bottom, which was the same reset firing
+    // every 16 ms tick while `ai_chat_at_bottom` flickered at the pill
+    // threshold.
+    iced::widget::Stack::with_children(layers).into()
 }
 
 /// The pending-question / command-approval prompt. Command approvals
