@@ -263,6 +263,21 @@ with a minimal read-only Mission Control riding along from SP1.
 - **SP7+** — trigger engine (schedule/D-Bus signals/idle-charging), heartbeat
   memory-consolidation, Tier-B flow wizard, MCP hub polish.
 
+**Roadmap additions (2026-06-18).** SP1 is now split: **SP1a** (extract
+`oxidemx-agent-core`, DONE) · **SP1b** (agentd — `docs/superpowers/specs/2026-06-18-agentd-design.md`,
+now **project-aware**: per-project skills/mcp/config/transcripts/logs/journal, like
+Claude Code) · **SP1c** (overlay → thin D-Bus client, delete in-proc path). And the
+embedded local LLM (`oxidemx-agent-local`, DONE) supersedes the mistral.rs-server
+path. Two new later SPs, seams reserved by SP1b:
+- **SP-Learn — self-improving loop:** learn the user's practices; journal + review
+  decisions; adapt/optimize flows over time (better with use). Consumes agentd's
+  per-project `journal.jsonl` + transcripts; writes `projects/<key>/learned/` read
+  back by the prompt-assembly + router; heavy local-model use for distillation
+  (signal, never a correctness gate).
+- **SP-Research — local-LLM web-grounded research offload:** the local model
+  researches small, verifiable best-practice/decision questions with web-search
+  grounding to spare the cloud (a `oxidemx-agent-local` consumer role).
+
 ## 9. SP1 migration steps (extract-core-first, single-path cutover)
 
 1. **Carve core**: create `oxidemx-agent-core`; move the §4.2 modules in; define

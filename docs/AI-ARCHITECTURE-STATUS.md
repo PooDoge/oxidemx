@@ -13,7 +13,8 @@ _Last updated: 2026-06-18 (branch `phase1-local-llm-gateway`)._
 | Doc | Scope | Status |
 |---|---|---|
 | `docs/superpowers/specs/2026-06-18-agent-framework-rearchitecture-design.md` | Umbrella: coding-first, **agentd** (single backend, overlay = thin D-Bus client), orchestration/multi-agent/federation, SP1–SP7 roadmap | CURRENT (one amendment — see below) |
-| `docs/superpowers/specs/2026-06-18-local-model-manager-design.md` | **Embedded** local LLM: `oxidemx-agent-local` crate (mistral.rs 0.8.1 in-process), capability scoping, `ResponseGuard` failsafe | CURRENT — canonical local-LLM approach |
+| `docs/superpowers/specs/2026-06-18-local-model-manager-design.md` | **Embedded** local LLM: `oxidemx-agent-local` crate (mistral.rs 0.8.1 in-process), capability scoping, `ResponseGuard` failsafe | CURRENT — canonical local-LLM approach (BUILT) |
+| `docs/superpowers/specs/2026-06-18-agentd-design.md` | **agentd** (SP1b): persistent project-aware process hosting core+conductor+local-model, `org.oxidemx.Agent` D-Bus; per-project skills/mcp/config/transcripts/journal (Claude-Code-style); reserves SP-Learn/SP-Research seams | CURRENT — next to build |
 | `docs/superpowers/plans/2026-06-18-sp1a-agent-core-extraction.md` | Extract `oxidemx-agent-core` from the overlay | **DONE** (commits b62924c..0baa856) |
 | `docs/superpowers/plans/2026-06-18-oxidemx-agent-local.md` | Build the embedded local-model crate | **NEXT / in progress** |
 | `docs/plans/phase2-session-manager.md` | Per-conversation `SessionManager` substrate | CURRENT (shipped; backend-swap doesn't affect it) |
@@ -47,5 +48,5 @@ Keep for history; don't treat as current design.
 - `oxidemx-agent-core` — agent brain (providers/turn loop/tools/memory/persona), UI-free, hosted by agentd later. **Exists** (SP1a).
 - `oxidemx-agent-local` — embedded local-LLM service (mistral.rs 0.8.1). **Being built.**
 - `oxidemx-conductor` — flow orchestration engine. Exists.
-- `agentd` — persistent process hosting core + conductor + local-model manager, `org.oxidemx.Agent` D-Bus. **Not built yet (SP1b).**
+- `agentd` — persistent **project-aware** process hosting core + conductor + local-model manager, `org.oxidemx.Agent` D-Bus; per-project (cwd) skills/mcp/config/transcripts/journal. **Specced (SP1b), not built yet.** Later: SP-Learn (self-improving loop off the per-project journal) + SP-Research (local web-grounded research offload) — seams reserved by SP1b.
 - overlay-rs / settings-rs / oxidemx-mission-control — clients (overlay shims to core today; become D-Bus clients in SP1c).
