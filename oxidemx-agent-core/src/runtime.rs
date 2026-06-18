@@ -1,4 +1,4 @@
-//! The overlay's agent loop, on AutoAgents.
+//! The agent turn loop (single-loop ReAct + hybrid router), hosted in-process today and by agentd later.
 //!
 //! Replaces the hand-rolled `ask_ai` ReAct loop. A `ReActAgent` runs
 //! against our `GeminiInteractionsProvider` (server-side sessions,

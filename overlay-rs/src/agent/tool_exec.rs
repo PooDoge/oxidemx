@@ -20,7 +20,7 @@ impl ToolExecutor for OverlayToolExecutor {
 /// Shared executor handle the overlay hands to core for every turn.
 pub fn executor() -> Arc<dyn ToolExecutor> {
     use once_cell::sync::Lazy;
-    static EXEC: Lazy<Arc<dyn ToolExecutor + Send + Sync>> =
+    static EXEC: Lazy<Arc<dyn ToolExecutor>> =
         Lazy::new(|| Arc::new(OverlayToolExecutor));
     EXEC.clone()
 }
