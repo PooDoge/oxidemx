@@ -11,6 +11,8 @@ pub mod provider;
 pub mod service;
 pub mod types;
 pub(crate) mod engine;
+#[cfg(feature = "mistral")]
+pub mod mistral;
 
 pub use error::LocalError;
 pub use guard::{Action, Check, GuardConfig, Reason, SchemaKind, Verdict};
