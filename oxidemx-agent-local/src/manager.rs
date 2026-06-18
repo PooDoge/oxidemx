@@ -187,6 +187,31 @@ impl LocalModelManager {
     }
 }
 
+// ── Public feature-gated constructors ────────────────────────────────────────
+
+#[cfg(feature = "mistral")]
+impl LocalModelManager {
+    /// Build a [`LocalModelManager`] backed by the real mistral.rs engine.
+    ///
+    /// This is the public entry-point for code outside the crate (e.g. the
+    /// `cli` example and `agentd`) that cannot name the `pub(crate)`
+    /// [`InferenceEngine`] trait directly.  All of the actual wiring is done
+    /// here; callers only need the public [`crate::mistral::MistralEngine`]
+    /// type.
+    ///
+    /// # Panics
+    ///
+    /// Does not panic; returns `LocalError` on engine-build failure.
+    pub fn with_mistral_engine(
+        models: Vec<oxidemx_shared::config::ModelSpec>,
+        default_model: String,
+        idle_timeout: Duration,
+        engine: crate::mistral::MistralEngine,
+    ) -> Self {
+        Self::new(models, default_model, idle_timeout, Arc::new(engine))
+    }
+}
+
 // ── idle sweep ────────────────────────────────────────────────────────────────
 
 impl LocalModelManager {
