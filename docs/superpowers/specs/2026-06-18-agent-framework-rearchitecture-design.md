@@ -32,6 +32,15 @@ Two product shapes, one substrate:
 5. **Extract a shared core lib first**, then host it in agentd.
 6. **Tools: native core + optional-WASM third-party** — core/built-in tools are
    native Rust; only untrusted third-party tools are WASM-sandboxed.
+7. **Multi-agent fleets are first-class** (coding-first *reverses* the old "no
+   fleets" anti-feature): in-process sub-agents — planner→coder→reviewer flows
+   AND ad-hoc `spawn_subagent` — with provenance envelopes + depth caps, built
+   near-term.
+8. **Federation is a priority, not an afterthought** — external workers (a Claude
+   Code session, a sandboxed builder/test-runner, another agent) register and act
+   as step backends. Built soon after in-process fleets, on one shared
+   step-backend abstraction. Transport stays in-process JoinSet for local flows;
+   the D-Bus bus is the process/federation transport (no actor Topics in-process).
 
 ## 3. Reassessment of the old plans (coding-first lens)
 
@@ -43,16 +52,23 @@ semantic memory, skills system (the evolved "recipes").
 **Build (researched, unbuilt, high value for coding):** agentd + `org.oxidemx.Agent`
 D-Bus; per-step/role **provider policy** (generalize the per-turn router); native
 **coding toolset** (file edit with diffs, run/test, repo context); **checkpoint/undo**;
-**approval-card actions** (edit-&-approve, reject-with-reason); **sub-agent
-provenance + depth caps**; **Mission Control wired live**.
+**approval-card actions** (edit-&-approve, reject-with-reason); **in-process
+multi-agent fleets** (`spawn_subagent` + provenance + depth caps + capability
+registry; planner→coder→reviewer); **federation / external workers**
+(`RegisterWorker` + `agent = "external:<cap>"` step backend); **Mission Control
+wired live** (renders the run DAG + provenance tree + readiness gate).
+
+**Anti-feature reversal:** the old roadmap listed "multi-agent fleets" as an
+anti-feature ("a parallel-coding problem we don't have"). **Coding-first reverses
+it** — planner→coder→reviewer and parallel edits are now in-scope.
 
 **Drop / defer:** WASM *core* tools → dropped (native core; WASM only for 3rd-party);
 SQLite-episodic + triple-graph memory → defer (JSON + vector cosine is adequate;
 revisit only if recall proves weak); guardrails crate → defer (single-user coding);
-actor/Topic transport for in-process flows → don't adopt (JoinSet is fine);
-external-worker federation (kowalski §15.2) → defer, but **reserve the D-Bus
-`RegisterWorker` seam** (that's where "multi-agent transport" extends later);
-visual flow wizard (Tier-B) → defer (`compose_flow` tool already exists).
+**actor/Topic transport for in-process flows → don't adopt** (JoinSet is the chosen
+transport; the bus handles process/federation); visual flow wizard (Tier-B) → defer
+(`compose_flow` tool already exists); cross-*machine* federation → out of scope
+(session bus + unix sockets only; peer-credential auth, no TCP).
 
 ## 4. Architecture (single backend)
 
@@ -113,7 +129,7 @@ This is the same pattern as the already-shipped `SessionStore` seam (Phase 2).
   `RunStatus(run_id)` · `ListRuns()` · `ListAgents()`
 - `OptimizePrompt(text) → text`
 - `GetTranscript(thread_id)` — big payloads pulled by method, never pushed
-- `Checkpoint(thread_id) → ckpt_id` · `Revert(ckpt_id)` (SP3; reserve now)
+- `Checkpoint(thread_id) → ckpt_id` · `Revert(ckpt_id)` (SP2; reserve now)
 
 **Signals (agentd → all clients):**
 - `Event(json)` — one unified stream; agentd stamps `ts` + `thread_id`/`run_id`
@@ -124,10 +140,11 @@ This is the same pattern as the already-shipped `SessionStore` seam (Phase 2).
 **Rules (from old learnings):** events carry summaries + artifact **paths**, capped
 ~48 KB; multiple clients subscribe (agentd is the single source of truth); session
 bus + unix sockets only (no TCP), identity from peer credentials; file-edit events
-carry **diffs**. This bus IS the process-level multi-agent transport; the deferred
-external-worker `RegisterWorker(id, capabilities)` is a later extension here.
+carry **diffs**. This bus IS the process-level + federation transport — the
+external-worker `RegisterWorker(id, capabilities)` method (§7.5) is an extension of
+this same surface, not a separate channel.
 
-## 6. Provider policy (SP2 — overview; own spec later)
+## 6. Provider policy (SP3 — overview; own spec later)
 
 Generalize the Phase-4 per-turn router into a **ProviderPolicy** that, given a task
 context (single-loop turn | flow step | agent role | classified complexity),
@@ -154,20 +171,95 @@ All mutating tools pass the `ApprovalGate` (allowlist fast-path + per-tool polic
 `always|allowlist|autonomous` + structured denial). Coding adds edit-&-approve /
 reject-with-reason / checkpoint.
 
+## 7.5 Orchestration, multi-agent & federation
+
+The conductor (BUILT: DAG supervisor with joins/retry/timeout/cancel/route/reflect)
+is THE orchestration engine, hosted in agentd. This section designs how it composes
+with the single-loop agent and how multi-agent + federation layer on — the
+best-researched part of the old brainstorm (Part II + §15), now coding-first.
+
+**Three orchestration entry points, one engine:**
+1. **Single-loop agent delegates** via tools: `run_flow(id, inputs)` (pre-authored
+   pipeline, built) and `spawn_subagent(role|capability, task)` (ad-hoc one-shot,
+   NEW). Both become sub-runs, rendered as chat cards + Mission Control rows.
+2. **Flows** — conductor DAG. Coding shape: planner→coder→reviewer; the reflect/
+   critic loop (built) is the reviewer.
+3. **NL `compose_flow`** (built) authors a flow from a description (DAG approval card).
+
+**Transport — three tiers (chosen; NOT actor Topics):**
+- **In-process (default):** conductor DirectAgent + JoinSet. The supervisor owns
+  ALL task publishing → one place enforces cancel, retry, timeout, depth caps.
+  Decision: do **not** adopt AutoAgents actor/Topic pub-sub in-process (audit + old
+  learnings §14.1 — JoinSet is simpler, identical semantics).
+- **Process boundary:** the `Event` D-Bus stream (§5) is agentd↔clients.
+- **Federation:** external processes register (`RegisterWorker(id, caps)`); the
+  scheduler treats `agent = "external:<cap>"` as a step backend with the SAME
+  contract as an in-process step. The **step-backend abstraction is built once**
+  (`enum StepBackend { InProcess(agent), External(cap) }`); in-process fleets ship
+  first, external workers reuse it.
+
+**Multi-agent safety (kowalski ACL — adopt):**
+- **Provenance envelope** on every spawned task: `run_id, parent_step,
+  delegation_depth (soft 3, hard 32), originator (user|flow|nl|trigger|external)`.
+- **Depth enforced at the publish seam** (supervisor owns publish) — agents can't
+  bypass it because they don't own the publish path.
+- **Capability registry**, ranked exact>substring (deterministic, explainable) —
+  used by `route` steps, `spawn_subagent`, and external-worker matching.
+- **Envelope-ID dedup** (FIFO-capped) at the agentd event bridge — required by the
+  bus↔multi-client↔external-worker echo topology.
+
+**Federation mechanics to adopt (kowalski §15.1):** a pre-flight **readiness gate**
+(X/Y READY with per-step reasons before a run starts; Mission Control disables Run
+until green), stale-registration sweep on restart, `last_exit` bookkeeping (the
+"why NOT ready" tooltip + post-mortems), heartbeat + stale-marking for external
+workers, and a `busy` flag in the registry from day one (skip occupied externals
+without a later schema change).
+
+**Anti-patterns to avoid (kowalski §15.3):** task timeouts live in the supervisor,
+never the UI (already true); any bridge (D-Bus reconnect, worker sockets) reconnects
+with backoff; UI event fanout uses `try_send` + drop-oldest (freshest state wins),
+only the supervisor's own consumption blocks; **no TCP** — session bus + unix
+sockets, peer-credential auth; warn on registration id-collision-with-different-
+capabilities (a crashed-and-restarted worker); the bus carries summaries + paths,
+never artifacts.
+
+**Provider-policy intersection (§6):** in-process steps resolve their provider via
+ProviderPolicy (per-step/role); external workers bring their OWN model (opaque) — the
+policy simply routes to the worker by capability.
+
 ## 8. Decomposition (each sub-project gets its own spec → plan)
+
+Ordering rationale: agentd hosts everything (SP1 first); the coder needs real
+tools + safety before fleets are worth orchestrating (SP2); cheap provider policy
+then lets each fleet role pick its model (SP3); then in-process fleets (SP4) and
+federation (SP5) — both on the one step-backend abstraction; rich UI last (SP6),
+with a minimal read-only Mission Control riding along from SP1.
 
 - **SP1 — agentd foundation (this spec's deep target).** Extract
   `oxidemx-agent-core` with the §4.1 seams; build `agentd` hosting it + the §5
   D-Bus surface; convert the overlay to a thin client and **delete** its in-proc
-  path. *Exit: chat + run_flow work end-to-end over D-Bus; agentd survives overlay
-  close; old in-proc path gone.*
-- **SP2 — Provider policy** (§6): per-step/role declaration unified with the router.
-- **SP3 — Coding toolset + checkpoint/undo + approval-card actions** (diffs,
-  run/test, repo context, edit-&-approve, reject-with-reason, Revert).
-- **SP4 — UI**: Mission Control wired to `Event`; radial agent presence; approval
-  surfacing across overlay/indicator (+ optional MX4 haptics).
-- **SP5+** — external-worker transport (`RegisterWorker`), trigger engine
-  (schedule/D-Bus), heartbeat memory-consolidation, Tier-B flow wizard.
+  path; repoint Mission Control + Agents tab at agentd (read-only). *Exit: chat +
+  run_flow work end-to-end over D-Bus; agentd survives overlay close; in-proc path
+  gone.*
+- **SP2 — Coding toolset + safety.** Native file read/edit/write with **diffs**,
+  run/test, repo context; **checkpoint/undo** (`Checkpoint`/`Revert`); approval-card
+  actions (edit-&-approve, reject-with-reason). *Exit: a single-loop coding turn
+  edits files with reviewable diffs + one-click revert.*
+- **SP3 — Provider policy** (§6): per-step/role declaration unified with the router;
+  coding-first role defaults. *Exit: a flow step / role resolves its own model.*
+- **SP4 — In-process multi-agent fleets.** The `StepBackend` abstraction +
+  `spawn_subagent` + provenance envelope + depth caps + capability registry;
+  planner→coder→reviewer shipped as a starter coding flow; provenance tree in
+  Mission Control. *Exit: a coding fleet runs with bounded delegation, visible.*
+- **SP5 — Federation / external workers.** `RegisterWorker` + `agent =
+  "external:<cap>"` backend + readiness gate + stale sweep + `busy`/`last_exit` +
+  reconnect-with-backoff. Starter: a Claude Code / sandboxed-builder worker.
+  *Exit: a flow step is satisfied by an external process.*
+- **SP6 — UI depth.** Full Mission Control (DAG/timeline, event console, artifacts,
+  token meters, pause/cancel/retry, readiness gate); radial agent-presence ring +
+  footer activity stack; approval surfacing across overlay/indicator (+ MX4 haptics).
+- **SP7+** — trigger engine (schedule/D-Bus signals/idle-charging), heartbeat
+  memory-consolidation, Tier-B flow wizard, MCP hub polish.
 
 ## 9. SP1 migration steps (extract-core-first, single-path cutover)
 
@@ -183,7 +275,7 @@ reject-with-reason / checkpoint.
 4. **Supervisor unit**: agentd joins the existing supervisor (like daemon/overlay)
    — autostart, restart, single-instance.
 5. Settings "Agents" tab + Mission Control repointed at agentd (read path) — minimal
-   in SP1, expanded in SP4.
+   in SP1, expanded in SP6.
 
 ## 10. Testing
 
@@ -204,6 +296,14 @@ reject-with-reason / checkpoint.
   own consumption.
 - **HostCapability when no overlay up** — structured "unavailable"; vision tools
   simply degrade.
+- **Multi-agent runaway** — depth caps (soft 3 / hard 32) enforced at the publish
+  seam, not in agents; envelope-ID dedup stops echo loops; fleet token cost is
+  visible via the per-run Usage meters.
+- **Federation lifecycle** — external workers can die mid-task or re-register
+  stale: supervisor-owned per-step timeout (not UI), reconnect-with-backoff on the
+  worker channel, stale sweep on restart, readiness gate before run, `busy` flag to
+  skip occupied workers. No TCP (session bus + unix sockets + peer creds).
 - **AutoAgents pre-1.0** — unchanged: vendored & pinned; our code touches trait
   surfaces only.
-- **Scope** — strictly SP1 here; SP2-SP5 are separate specs to avoid a mega-PR.
+- **Scope** — strictly SP1 implements here; SP2-SP7 are separate specs (each its
+  own plan) to avoid a mega-PR. This doc is the umbrella + SP1 deep design.
