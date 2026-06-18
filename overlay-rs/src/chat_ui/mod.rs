@@ -22,6 +22,7 @@ pub mod skills;
 pub mod tasks;
 pub mod threads;
 pub mod tokens;
+pub mod widgets;
 
 use iced::{Color, Element, Length};
 

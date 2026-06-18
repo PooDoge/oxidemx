@@ -14,6 +14,23 @@ use crate::radial::RadialState;
 pub fn view<'a>(state: &'a RadialState, kit: &Kit) -> Element<'a, Message> {
     let kit = *kit;
 
+    // Auto-sizing composer, like a standard chat input: the editor shows
+    // a 1-line minimum and grows to a 2-line cap, then scrolls
+    // internally; the footer height grows to fit the editor + an
+    // attachment chip (so attaching never squishes the text — the
+    // composer rises above the painted footer arc instead).
+    let lines = state.ai_editor.line_count().clamp(1, 2);
+    let editor_h: f32 = if lines >= 2 { 60.0 } else { 40.0 };
+    let has_attach = state.ai_attachment.is_some();
+    // Exact-fit footer height (input row + chip + activity + paddings),
+    // floored at the painted-arc base so the composer never shrinks
+    // below it and grows upward to fit a chip / a second line.
+    let activity_h = 18.0;
+    let chip_h = if has_attach { 40.0 } else { 0.0 };
+    let input_row_h = editor_h.max(40.0);
+    let content_h = activity_h + 6.0 + chip_h + input_row_h;
+    let footer_h = (content_h + 10.0 + (EDGE_PAD + 10.0)).max(EDGE_PAD + FOOTER_H);
+
     // Activity line — present while a turn is in flight.
     let activity: Element<'a, Message> = if state.ai_loading {
         row![
@@ -62,7 +79,7 @@ pub fn view<'a>(state: &'a RadialState, kit: &Kit) -> Element<'a, Message> {
         .placeholder("Ask, describe an automation, or type / for commands…")
         .size(13)
         .padding(10)
-        .height(Length::Fixed(44.0))
+        .height(Length::Fixed(editor_h))
         .on_action(Message::AiEditorAction)
         .key_binding(move |key_press| {
             use iced::keyboard::key::Named;
@@ -147,11 +164,14 @@ pub fn view<'a>(state: &'a RadialState, kit: &Kit) -> Element<'a, Message> {
     };
 
     // Attach button (opens the native picker; drag-drop also works).
-    let attach_btn = button(icon("attach", 16.0, kit.fade(kit.subtext0, 1.0)))
-        .height(Length::Fixed(40.0))
-        .padding([0, 8])
-        .style(|_, _| button::Style::default())
-        .on_press(Message::AiAttachPick);
+    let attach_btn = super::widgets::ghost_icon_button(
+        kit,
+        "attach",
+        16.0,
+        kit.fade(kit.subtext0, 1.0),
+        Message::AiAttachPick,
+    )
+    .height(Length::Fixed(40.0));
 
     let mut col = column![activity];
     // Staged-attachment chip (drag-drop or picker), with a clear ✕.
@@ -205,7 +225,7 @@ pub fn view<'a>(state: &'a RadialState, kit: &Kit) -> Element<'a, Message> {
 
     container(col.spacing(6))
         .width(Length::Fill)
-        .height(Length::Fixed(EDGE_PAD + FOOTER_H))
+        .height(Length::Fixed(footer_h))
         .padding(iced::Padding {
             top: 10.0,
             right: EDGE_PAD + 10.0,

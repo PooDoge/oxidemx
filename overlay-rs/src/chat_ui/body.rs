@@ -728,10 +728,13 @@ fn bubble_row<'a>(
     // fixed-width placeholder otherwise keeps the layout from shifting.
     let show_actions = state.ai_hover_msg == Some(i) || state.ai_context_menu == Some(i);
     let actions: Element<'a, Message> = if show_actions {
-        let copy = button(icon("copy", 14.0, kit.fade(kit.subtext0, 1.0)))
-            .padding([2, 4])
-            .style(|_, _| button::Style::default())
-            .on_press(Message::AiCopyText(msg.text.clone()));
+        let copy = super::widgets::ghost_icon_button(
+            kit,
+            "copy",
+            14.0,
+            kit.fade(kit.subtext0, 1.0),
+            Message::AiCopyText(msg.text.clone()),
+        );
         let (select_icon, select_color, select_msg) = if selecting {
             ("check", kit.fade(kit.accent, 1.0), Message::AiSelectExit)
         } else {
@@ -741,10 +744,8 @@ fn bubble_row<'a>(
                 Message::AiBubbleSelect(i),
             )
         };
-        let select = button(icon(select_icon, 14.0, select_color))
-            .padding([2, 4])
-            .style(|_, _| button::Style::default())
-            .on_press(select_msg);
+        let select =
+            super::widgets::ghost_icon_button(kit, select_icon, 14.0, select_color, select_msg);
         row![copy, select].spacing(2).into()
     } else {
         Space::new().width(Length::Fixed(48.0)).into()
