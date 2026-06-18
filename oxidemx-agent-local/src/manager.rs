@@ -86,9 +86,23 @@ impl LocalModelManager {
 
     // ── Internal helpers ─────────────────────────────────────────────────────
 
+    // ── Poison-safe RwLock accessors ─────────────────────────────────────────
+
+    /// Acquire a read guard on `states`, recovering from a poisoned lock
+    /// instead of panicking.
+    fn states_read(&self) -> std::sync::RwLockReadGuard<'_, HashMap<String, (ModelState, Option<u64>)>> {
+        self.states.read().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// Acquire a write guard on `states`, recovering from a poisoned lock
+    /// instead of panicking.
+    fn states_write(&self) -> std::sync::RwLockWriteGuard<'_, HashMap<String, (ModelState, Option<u64>)>> {
+        self.states.write().unwrap_or_else(|e| e.into_inner())
+    }
+
     /// Set the state of a model.  Cheap write-lock, never async.
     fn set_state(&self, alias: &str, state: ModelState) {
-        let mut map = self.states.write().expect("states RwLock poisoned");
+        let mut map = self.states_write();
         if let Some(entry) = map.get_mut(alias) {
             entry.0 = state;
         }
@@ -96,7 +110,7 @@ impl LocalModelManager {
 
     /// Set the last-used timestamp of a model.
     fn set_last_used(&self, alias: &str, ts: u64) {
-        let mut map = self.states.write().expect("states RwLock poisoned");
+        let mut map = self.states_write();
         if let Some(entry) = map.get_mut(alias) {
             entry.1 = Some(ts);
         }
@@ -104,9 +118,7 @@ impl LocalModelManager {
 
     /// Read the current state of a model (non-blocking).
     fn get_state(&self, alias: &str) -> Option<ModelState> {
-        self.states
-            .read()
-            .expect("states RwLock poisoned")
+        self.states_read()
             .get(alias)
             .map(|(s, _)| s.clone())
     }
@@ -183,36 +195,25 @@ impl LocalModelManager {
     /// Exposed for unit tests; production code uses [`spawn_idle_task`].
     /// `now` is taken as a parameter so tests can use `tokio::time::pause()` /
     /// explicit `Instant` values without needing real wall-clock time.
-    pub fn run_idle_sweep_once(&self, now: Instant) {
-        // Take a snapshot of the states map without holding the write lock
-        // during the (sync) eviction decision.
+    ///
+    /// This is `async` because it calls `engine.unload` to actually free VRAM.
+    pub async fn run_idle_sweep_once(&self, now: Instant) {
+        // Take a snapshot of the states map without holding the RwLock guard
+        // across any .await point.
         let snapshot: Vec<(String, ModelState, Option<u64>)> = {
-            let map = self.states.read().expect("states RwLock poisoned");
+            let map = self.states_read();
             map.iter()
                 .map(|(k, (s, lu))| (k.clone(), s.clone(), *lu))
                 .collect()
         };
 
         let timeout_secs = self.idle_timeout.as_secs();
-        // Convert the paused Instant to a UNIX-like reference point.
-        // We use Instant::now() as the reference; for the test we get
-        // a future-offset instant which lets us compare elapsed secs.
-        // Strategy: derive "now in secs" from the Instant by comparing
-        // to a fixed reference taken at construction.  Simpler: we just
-        // use the SystemTime wall clock for last_used and compare against
-        // the Instant offset.
-        //
         // For test compatibility with `start_paused`, we accept the
         // caller-supplied `now` and derive elapsed from it vs. Instant::now()
-        // baseline.  The simplest approach: compute the elapsed since the
-        // Instant that `now` represents and add that to Self::now_secs().
-        // Actually the test passes `Instant::now() + Duration::from_secs(601)`,
-        // so `now > Instant::now()` by ~601s.  We just check `last_used` + timeout
-        // against `now_as_unix_secs`.
-        //
-        // We approximate: now_as_unix = now.elapsed_since_some_anchor.
-        // The cleanest is: compare (Self::now_secs() + seconds_since_base) to last_used.
-        // We use the offset of `now` relative to the real Instant::now():
+        // baseline.  The test passes `Instant::now() + Duration::from_secs(601)`,
+        // so `now > Instant::now()` by ~601s.  We offset the SystemTime wall
+        // clock by the same delta so the comparison is correct even with
+        // paused tokio time.
         let wall_now = Self::now_secs();
         let real_now = Instant::now();
         let extra_secs = if now > real_now {
@@ -222,8 +223,16 @@ impl LocalModelManager {
         };
         let effective_now = wall_now.saturating_add(extra_secs);
 
+        // Determine which model to evict (we only evict the active model to
+        // avoid surprising multi-model scenarios).
+        let active_alias: Option<String> = self.active.lock().await.clone();
+
         for (alias, state, last_used) in snapshot {
             if state != ModelState::Ready {
+                continue;
+            }
+            // Only evict the currently-active model.
+            if active_alias.as_deref() != Some(alias.as_str()) {
                 continue;
             }
             // Respect keep_resident flag.
@@ -238,19 +247,35 @@ impl LocalModelManager {
                 None => u64::MAX,
             };
             if idle_secs >= timeout_secs {
-                // Best-effort synchronous state update; we can't .await here.
-                // Mark Unloaded in the states map.  The engine unload will
-                // happen the next time ensure_loaded runs (or is skipped since
-                // state is Unloaded and the engine is already clean from a
-                // previous call).  For test correctness the state change is
-                // what the test asserts on.
-                self.set_state(&alias, ModelState::Unloaded);
-                // Also clear the active pointer if it matches.
-                // We use try_lock to avoid blocking in the sync context.
-                if let Ok(mut guard) = self.active.try_lock() {
-                    if guard.as_deref() == Some(alias.as_str()) {
-                        *guard = None;
+                // Acquire load_lock so the eviction is serialised with
+                // load/unload/inference.
+                let _guard = self.load_lock.lock().await;
+
+                // Re-check state under the lock (it may have changed).
+                if self.get_state(&alias) != Some(ModelState::Ready) {
+                    continue;
+                }
+
+                // Call the engine to actually free VRAM.
+                match self.engine.unload(&alias).await {
+                    Ok(()) => {
+                        self.set_state(&alias, ModelState::Unloaded);
                     }
+                    Err(e) => {
+                        let reason = e.to_string();
+                        tracing::warn!(
+                            alias = %alias,
+                            error = %reason,
+                            "idle eviction: engine.unload failed; marking Failed"
+                        );
+                        self.set_state(&alias, ModelState::Failed { reason });
+                    }
+                }
+
+                // Clear the active pointer.
+                let mut active_guard = self.active.lock().await;
+                if active_guard.as_deref() == Some(alias.as_str()) {
+                    *active_guard = None;
                 }
             }
         }
@@ -266,7 +291,7 @@ impl LocalModelManager {
             let mut ticker = interval(period);
             loop {
                 ticker.tick().await;
-                self.run_idle_sweep_once(Instant::now());
+                self.run_idle_sweep_once(Instant::now()).await;
             }
         })
     }
@@ -427,7 +452,7 @@ impl LocalModelService for LocalModelManager {
     }
 
     fn status(&self) -> Vec<ModelStatusInfo> {
-        let map = self.states.read().expect("states RwLock poisoned");
+        let map = self.states_read();
         map.iter()
             .map(|(alias, (state, last_used))| ModelStatusInfo {
                 alias: alias.clone(),
@@ -481,8 +506,22 @@ mod tests {
             models,
             default.to_string(),
             Duration::from_secs(600),
-            engine,
+            engine as Arc<dyn InferenceEngine>,
         )
+    }
+
+    /// Like `mgr_with` but returns the `Arc<MockEngine>` so tests can inspect
+    /// recorded unloads.
+    fn mgr_with_engine(aliases: &[&str], default: &str) -> (LocalModelManager, Arc<MockEngine>) {
+        let models: Vec<ModelSpec> = aliases.iter().map(|a| make_spec(a)).collect();
+        let engine = Arc::new(MockEngine::new());
+        let mgr = LocalModelManager::new(
+            models,
+            default.to_string(),
+            Duration::from_secs(600),
+            Arc::clone(&engine) as Arc<dyn InferenceEngine>,
+        );
+        (mgr, engine)
     }
 
     fn mgr_with_caps(alias: &str, caps: Capabilities) -> LocalModelManager {
@@ -568,10 +607,16 @@ mod tests {
 
     #[tokio::test(start_paused = true)]
     async fn idle_unloads_after_timeout() {
-        let mgr = mgr_with(&["a"], "a");
+        let (mgr, engine) = mgr_with_engine(&["a"], "a");
         mgr.ensure_loaded("a").await.unwrap();
-        mgr.run_idle_sweep_once(Instant::now() + Duration::from_secs(601));
+        mgr.run_idle_sweep_once(Instant::now() + Duration::from_secs(601)).await;
+        // State must be Unloaded in the manager.
         assert_eq!(state(&mgr, "a"), ModelState::Unloaded);
+        // Engine must have been called — VRAM actually freed.
+        assert!(
+            engine.unloaded().contains(&"a".to_string()),
+            "engine.unload(\"a\") was never called — VRAM not freed"
+        );
     }
 
     #[tokio::test]
@@ -661,7 +706,7 @@ mod tests {
             engine,
         );
         mgr.ensure_loaded("resident").await.unwrap();
-        mgr.run_idle_sweep_once(Instant::now() + Duration::from_secs(9999));
+        mgr.run_idle_sweep_once(Instant::now() + Duration::from_secs(9999)).await;
         assert_eq!(state(&mgr, "resident"), ModelState::Ready);
     }
 }
