@@ -114,6 +114,16 @@ pub struct RadialState {
     /// new deltas is suppressed so reading earlier messages isn't
     /// yanked away.
     pub ai_chat_at_bottom: bool,
+    /// Eased auto-scroll for the "↓ Latest" button. Drives the chat
+    /// scrollable's relative offset y from the current position to 1.0
+    /// (bottom) over `advance_animations` ticks. `current` is kept in
+    /// sync with the live offset by `AiChatScrolled` while idle, so a
+    /// press eases from wherever the user actually is.
+    pub(crate) ai_scroll_tween: Tween,
+    /// True while the Latest-button scroll animation is in flight — the
+    /// Tick loop emits a `snap_to` per frame and the pill is hidden.
+    /// Cleared on settle, or when the user scrolls manually.
+    pub(crate) ai_scroll_active: bool,
     /// Transient confirmation toast (e.g. "Copied"): `(label, shown
     /// at)`. A timer clears it ~1.6 s after the most recent trigger.
     pub ai_toast: Option<(String, std::time::Instant)>,

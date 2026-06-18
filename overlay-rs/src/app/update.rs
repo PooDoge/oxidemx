@@ -4,7 +4,7 @@
 use iced::{Size, Task};
 use tracing::{debug, error, info, warn};
 
-use super::subscriptions::scroll_chat_to_end;
+use super::subscriptions::{scroll_chat_to, scroll_chat_to_end};
 use super::{Message, APP_ID};
 use crate::dbus::OverlayEvent;
 use crate::geometry::WINDOW_SIZE;
@@ -144,6 +144,20 @@ pub(super) fn update(state: &mut RadialState, message: Message) -> Task<Message>
                 state.chat_focus_pending = false;
                 info!("chat shell mounted — focusing text input");
                 return iced::widget::operation::focus_next();
+            }
+            // Drive the eased "↓ Latest" auto-scroll. advance_animations
+            // already stepped the tween this frame; emit a snap_to to the
+            // eased relative offset. We gate on the `active` flag rather
+            // than is_idle() so the settle frame — where `current` has
+            // just reached 1.0 and the tween became idle — still emits
+            // its final exact snap before we stop.
+            if state.ai_scroll_active {
+                let y = state.ai_scroll_tween.current;
+                if state.ai_scroll_tween.is_idle() {
+                    state.ai_scroll_active = false;
+                    state.ai_chat_at_bottom = true;
+                }
+                return scroll_chat_to(y);
             }
             Task::none()
         }
@@ -1206,13 +1220,37 @@ pub(super) fn update(state: &mut RadialState, message: Message) -> Task<Message>
             Task::none()
         }
         Message::AiScrollToBottom => {
-            state.ai_chat_at_bottom = true;
-            scroll_chat_to_end()
+            // Animate (ease-out) to the bottom instead of jumping. The
+            // tween's `current` mirrors the live offset (kept in sync by
+            // AiChatScrolled), so it eases from where the user actually
+            // is. The Tick loop drives the per-frame snap_to; on settle
+            // it flips `ai_chat_at_bottom` true. `kind` only needs to be
+            // non-None for the tween to interpolate — we read the raw
+            // `current` scalar, so the specific kind is irrelevant.
+            state.ai_scroll_tween.set_target(
+                1.0,
+                &oxidemx_shared::TransitionConfig {
+                    kind: oxidemx_shared::TransitionKind::Fade,
+                    duration_ms: 300,
+                    easing: oxidemx_shared::Easing::EaseOut,
+                    ..Default::default()
+                },
+            );
+            state.ai_scroll_active = true;
+            Task::none()
         }
         Message::AiChatScrolled(viewport) => {
+            let y = viewport.relative_offset().y;
             // y == 1.0 is the bottom; treat the last sliver as "at
             // bottom" so follow-along auto-scroll stays on.
-            state.ai_chat_at_bottom = viewport.relative_offset().y >= 0.985;
+            state.ai_chat_at_bottom = y >= 0.985;
+            // This fires only on genuine user scrolling — a programmatic
+            // snap_to mutates the offset directly and does NOT re-fire
+            // on_scroll. So reaching here means the user took control:
+            // cancel any in-flight "↓ Latest" animation and resync the
+            // tween to the real offset so the next press eases from here.
+            state.ai_scroll_active = false;
+            state.ai_scroll_tween = crate::anim::Tween::at(y);
             Task::none()
         }
         Message::AiModelToggled => {

@@ -88,6 +88,18 @@ pub(super) fn scroll_chat_to_end() -> Task<Message> {
     iced::widget::operation::snap_to_end(crate::chat_ui::body::CHAT_SCROLL_ID)
 }
 
+/// Snap the conversation scrollable to a specific relative offset
+/// (`y` in [0, 1]; 0 = top, 1 = bottom). Drives the eased "↓ Latest"
+/// scroll one frame at a time. Unlike a wheel scroll, this operation
+/// mutates the offset directly and does NOT re-fire `on_scroll`, so it
+/// never echoes back as a `Message::AiChatScrolled`.
+pub(super) fn scroll_chat_to(y: f32) -> Task<Message> {
+    iced::widget::operation::snap_to(
+        crate::chat_ui::body::CHAT_SCROLL_ID,
+        iced::widget::scrollable::RelativeOffset { x: 0.0, y },
+    )
+}
+
 /// "2h ago"-style label for the thread list + memories view.
 pub(crate) fn rel_time(ts: u64) -> String {
     if ts == 0 {

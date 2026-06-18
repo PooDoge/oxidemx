@@ -50,6 +50,8 @@ impl RadialState {
             ai_context_menu: None,
             ai_select: None,
             ai_chat_at_bottom: true,
+            ai_scroll_tween: Tween::at(1.0),
+            ai_scroll_active: false,
             ai_toast: None,
             ai_show_skills: false,
             ai_skills: Vec::new(),
@@ -977,6 +979,9 @@ impl RadialState {
         }
         self.menu.step(dt_ms);
         self.ai_morph.step(dt_ms);
+        // Eased "↓ Latest" auto-scroll; the Tick handler reads
+        // `ai_scroll_tween.current` and emits the per-frame snap_to.
+        self.ai_scroll_tween.step(dt_ms);
         // Page-transition tween advances independently of menu /
         // submenu / highlights. When it settles, drop the cached
         // outgoing slices so the renderer falls back to the

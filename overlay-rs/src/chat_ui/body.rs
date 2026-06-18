@@ -118,7 +118,7 @@ pub fn conversation<'a>(state: &'a RadialState, kit: &Kit) -> Element<'a, Messag
     // confirmation toast (top) e.g. after copying.
     let mut layers: Vec<Element<'a, Message>> = vec![scroller.into()];
 
-    if !state.ai_chat_at_bottom && !state.chat().history.is_empty() {
+    if !state.ai_chat_at_bottom && !state.ai_scroll_active && !state.chat().history.is_empty() {
         let pill = container(
             button(text("↓ Latest").size(12).color(kit.fade(kit.crust, 1.0)))
                 .padding([5, 12])
