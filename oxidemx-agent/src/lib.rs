@@ -9,6 +9,7 @@ pub mod claude_code;
 pub mod embed;
 pub mod factory;
 pub mod keys;
+pub mod session;
 pub mod toolkit;
 pub mod tools;
 

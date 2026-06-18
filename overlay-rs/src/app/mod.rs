@@ -167,6 +167,9 @@ pub enum Message {
     /// response landing after the user switched/created threads
     /// still files into the conversation that asked.
     AiResponseReceived(usize, Result<(String, Option<String>), String>),
+    /// `/optimize` finished: the rewritten prompt (or an error) to drop back
+    /// into the chat input for review.
+    AiPromptOptimized(Result<String, String>),
     AiChooseOption(String),
     AiQuestionReceived(crate::ai_client::PendingQuestion),
     /// Chat strip action icons (replace the old mode toggle): open

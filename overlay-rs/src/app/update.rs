@@ -746,6 +746,16 @@ pub(super) fn update(state: &mut RadialState, message: Message) -> Task<Message>
             let mode = state.chat().mode;
             let model = state.chat().model.clone();
             let thread_idx = state.ai_active;
+            // Each thread carries a stable session id (survives the thread
+            // list's index-shifting deletes). Mint one on first turn; the
+            // session manager keys the thread's reused provider on it.
+            let session_id = {
+                let chat = state.chat_mut();
+                if chat.session_id.is_none() {
+                    chat.session_id = Some(crate::agent_runtime::new_session_id());
+                }
+                chat.session_id.clone().unwrap()
+            };
             let sink = crate::ai_client::StreamSink::for_thread(thread_idx);
             // Prior turns shipped as context (providers are stateless;
             // history lives client-side). For long threads, ship the
@@ -768,7 +778,7 @@ pub(super) fn update(state: &mut RadialState, message: Message) -> Task<Message>
             };
             let (task, handle) = Task::perform(
                 async move {
-                    crate::ai_client::ask_ai(mode, &model, &prompt, sink, &history, image)
+                    crate::ai_client::ask_ai(mode, &model, &prompt, sink, &history, image, &session_id)
                         .await
                         .map_err(|e| e.to_string())
                 },
@@ -918,9 +928,30 @@ pub(super) fn update(state: &mut RadialState, message: Message) -> Task<Message>
                 }
             }
         },
+        Message::AiPromptOptimized(res) => {
+            state.ai_activity = None;
+            match res {
+                Ok(text) if !text.trim().is_empty() => {
+                    // Drop the rewrite into the input for the user to review,
+                    // edit, and submit (we don't auto-send).
+                    state.ai_editor =
+                        iced::widget::text_editor::Content::with_text(text.trim());
+                }
+                Ok(_) => state.ai_activity = Some("Optimizer returned nothing".to_string()),
+                Err(e) => state.ai_activity = Some(format!("Optimize failed: {e}")),
+            }
+            Task::none()
+        }
         Message::AiStopRequest => {
             if let Some(handle) = state.ai_abort.take() {
                 handle.abort();
+            }
+            // Canonical cancel path: fire the session's token so a turn parked
+            // on an approval await (which dropping the Task alone may not
+            // unblock) stops too.
+            if let Some(id) = state.chat().session_id.clone() {
+                use oxidemx_agent::session::SessionStore;
+                crate::agent_runtime::SESSIONS.cancel(&id);
             }
             state.ai_loading = false;
             state.ai_activity = None;
@@ -1222,6 +1253,16 @@ pub(super) fn update(state: &mut RadialState, message: Message) -> Task<Message>
             Task::none()
         }
         Message::AiDeleteThread(idx) => {
+            // Drop the deleted thread's session (cancels any in-flight turn
+            // and frees its cached provider) before the indices shift.
+            if let Some(id) = state
+                .ai_threads
+                .get(idx)
+                .and_then(|c| c.session_id.clone())
+            {
+                use oxidemx_agent::session::SessionStore;
+                crate::agent_runtime::SESSIONS.end(&id);
+            }
             state.ai_delete_thread(idx);
             crate::radial::save_chat_threads(&state.ai_threads);
             Task::none()
@@ -1550,6 +1591,25 @@ fn run_palette(state: &mut RadialState) -> Task<Message> {
         PaletteKind::Tasks => Task::done(Message::AiToggleTasks),
         PaletteKind::Skills => Task::done(Message::AiToggleSkills),
         PaletteKind::ModelToggle => Task::done(Message::AiModelToggled),
+        PaletteKind::OptimizePrompt(draft) => {
+            let draft = draft.trim().to_string();
+            if draft.is_empty() {
+                state.ai_activity = Some("Type the draft after /optimize".to_string());
+                return Task::none();
+            }
+            // Lean, no-tools rewrite via the configured model (ideal for the
+            // local SLM). Result lands in the input for review, not submitted.
+            let model = state.chat().model.clone();
+            state.ai_activity = Some("Optimizing prompt…".to_string());
+            Task::perform(
+                async move {
+                    crate::agent_runtime::optimize_prompt(&model, &draft)
+                        .await
+                        .map_err(|e| e.to_string())
+                },
+                Message::AiPromptOptimized,
+            )
+        }
         PaletteKind::Flow(name) => {
             state.ai_editor =
                 iced::widget::text_editor::Content::with_text(&format!("Run the {name} flow."));

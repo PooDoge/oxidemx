@@ -546,6 +546,7 @@ fn parse_provider(s: &str) -> Option<AiProvider> {
         "openai" => Some(AiProvider::OpenAi),
         "anthropic" => Some(AiProvider::Anthropic),
         "ollama" => Some(AiProvider::Ollama),
+        "mistral_rs" | "mistralrs" | "mistral-rs" => Some(AiProvider::MistralRs),
         "claude_code" | "claudecode" | "claude-code" => Some(AiProvider::ClaudeCode),
         _ => None,
     }

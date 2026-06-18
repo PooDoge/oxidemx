@@ -21,6 +21,10 @@ pub enum PaletteKind {
     Tasks,
     Skills,
     ModelToggle,
+    /// Rewrite a rough draft into a clearer prompt via the configured model
+    /// (lean, no-tools path — ideal for the local SLM). Carries the text
+    /// typed after `/optimize`; the result replaces the input for review.
+    OptimizePrompt(String),
     /// Run a flow — carries the flow's display name (the prompt is
     /// "Run the <name> flow").
     Flow(String),
@@ -108,6 +112,12 @@ pub fn build(
             "Toggle Flash / Pro",
             PaletteKind::ModelToggle,
         ),
+        PaletteItem::new(
+            "✎",
+            "Optimize prompt",
+            "/optimize <text> — rewrite your draft via the model",
+            PaletteKind::OptimizePrompt(args.clone()),
+        ),
     ];
     for (id, name) in flows {
         items.push(PaletteItem::new(
@@ -141,7 +151,7 @@ pub fn build(
         .into_iter()
         .filter(|it| match &it.kind {
             // Commands match on the first word (the rest is arguments).
-            PaletteKind::Command(..) => {
+            PaletteKind::Command(..) | PaletteKind::OptimizePrompt(..) => {
                 first.is_empty() || it.label.to_lowercase().contains(&first)
             }
             _ => {

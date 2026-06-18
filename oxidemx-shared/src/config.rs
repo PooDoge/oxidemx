@@ -955,6 +955,11 @@ pub enum AiProvider {
     Anthropic,
     /// Local models via Ollama (no API key).
     Ollama,
+    /// Local models via a mistral.rs server exposing the OpenAI-compatible
+    /// `/v1` API. Rides the OpenAI backend with a custom `base_url`
+    /// (`ai.local_endpoint`); no API key (the server ignores auth).
+    #[serde(rename = "mistral_rs", alias = "mistralrs")]
+    MistralRs,
     /// The `claude` CLI / Claude subscription (no API key; chat-only).
     ClaudeCode,
 }
@@ -967,6 +972,7 @@ impl AiProvider {
             AiProvider::OpenAi => "OpenAI",
             AiProvider::Anthropic => "Anthropic (Claude API)",
             AiProvider::Ollama => "Ollama (local)",
+            AiProvider::MistralRs => "mistral.rs (local server)",
             AiProvider::ClaudeCode => "Claude Code (CLI)",
         }
     }
@@ -979,6 +985,10 @@ impl AiProvider {
             AiProvider::OpenAi => "gpt-4o",
             AiProvider::Anthropic => "claude-sonnet-4-6",
             AiProvider::Ollama => "llama3.2",
+            // Sent in the request; a single-model mistral.rs server serves
+            // its loaded model regardless. Override to match a multi-model
+            // server's id.
+            AiProvider::MistralRs => "default",
             AiProvider::ClaudeCode => "", // CLI uses the subscription default
         }
     }
@@ -999,6 +1009,12 @@ impl AiProvider {
     /// runtime auto-detects this to enable streaming only where it
     /// actually works (non-streaming everywhere else).
     pub fn supports_streaming_tools(&self) -> bool {
+        // mistral.rs is intentionally NOT here: it emits valid OpenAI SSE, but
+        // the vendored OpenAI backend's stream parser chokes on its framing
+        // (verified live 2026-06-18 — "JSON Parse Error: expected value at
+        // line 1 column 1"). The blocking path works cleanly (test C in the
+        // Phase 2 doc), so MistralRs runs non-streaming like Ollama until a
+        // vendor-side SSE fix lands. Re-add it here to re-enable streaming.
         matches!(
             self,
             AiProvider::Gemini | AiProvider::OpenAi | AiProvider::Anthropic
@@ -1011,6 +1027,9 @@ impl AiProvider {
             AiProvider::Gemini => Some("GEMINI_API_KEY"),
             AiProvider::OpenAi => Some("OPENAI_API_KEY"),
             AiProvider::Anthropic => Some("ANTHROPIC_API_KEY"),
+            // mistral.rs servers MAY require a bearer token — optional
+            // (see needs_key), but supported when the server is authed.
+            AiProvider::MistralRs => Some("MISTRALRS_API_KEY"),
             AiProvider::Ollama | AiProvider::ClaudeCode => None,
         }
     }
@@ -1023,6 +1042,7 @@ impl AiProvider {
             AiProvider::Gemini => Some("gemini"),
             AiProvider::OpenAi => Some("openai"),
             AiProvider::Anthropic => Some("anthropic"),
+            AiProvider::MistralRs => Some("mistralrs"),
             AiProvider::Ollama | AiProvider::ClaudeCode => None,
         }
     }
@@ -1034,15 +1054,17 @@ impl AiProvider {
             AiProvider::OpenAi => &["gpt-4o", "gpt-4o-mini", "gpt-4.1"],
             AiProvider::Anthropic => &["claude-sonnet-4-6", "claude-opus-4-8", "claude-haiku-4-5-20251001"],
             AiProvider::Ollama => &["llama3.2", "qwen2.5", "mistral"],
+            AiProvider::MistralRs => &["default", "Qwen2.5-Coder-7B-Instruct", "Llama-3.2-3B-Instruct"],
             AiProvider::ClaudeCode => &["", "sonnet", "opus", "haiku"],
         }
     }
 
-    pub const ALL: [AiProvider; 5] = [
+    pub const ALL: [AiProvider; 6] = [
         AiProvider::Gemini,
         AiProvider::OpenAi,
         AiProvider::Anthropic,
         AiProvider::Ollama,
+        AiProvider::MistralRs,
         AiProvider::ClaudeCode,
     ];
 }
@@ -1072,6 +1094,16 @@ pub struct AiConfig {
     /// this to the provider's default when the provider changes.
     #[serde(default = "default_ai_model")]
     pub model: String,
+
+    /// Base URL of the local OpenAI-compatible server used by the
+    /// `MistralRs` provider (a `mistralrs-server --port …` instance).
+    /// MUST end with a trailing slash and the `/v1/` path segment — the
+    /// OpenAI backend joins `chat/completions` onto it via `Url::join`,
+    /// which drops the last segment when the slash is missing (the
+    /// factory normalizes a trailing slash defensively). Ignored by all
+    /// other providers.
+    #[serde(default = "default_local_endpoint")]
+    pub local_endpoint: String,
 }
 
 impl Default for AiConfig {
@@ -1080,12 +1112,17 @@ impl Default for AiConfig {
             command_allowlist: default_command_allowlist(),
             provider: AiProvider::default(),
             model: default_ai_model(),
+            local_endpoint: default_local_endpoint(),
         }
     }
 }
 
 fn default_ai_model() -> String {
     "gemini-2.5-flash".to_string()
+}
+
+fn default_local_endpoint() -> String {
+    "http://localhost:1234/v1/".to_string()
 }
 
 fn default_command_allowlist() -> Vec<String> {

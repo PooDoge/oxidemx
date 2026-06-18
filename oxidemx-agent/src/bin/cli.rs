@@ -33,6 +33,7 @@ fn parse_provider(s: &str) -> Result<AiProvider, String> {
         "openai" => AiProvider::OpenAi,
         "anthropic" => AiProvider::Anthropic,
         "ollama" => AiProvider::Ollama,
+        "mistral_rs" | "mistralrs" | "mistral-rs" => AiProvider::MistralRs,
         "claude_code" | "claude-code" => AiProvider::ClaudeCode,
         other => return Err(format!("unknown provider {other:?}")),
     })
@@ -80,7 +81,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             format!("no API key for {provider:?}; set the env var or ~/.config/oxidemx/<provider>.key")
         })?
     } else {
-        String::new()
+        // Optional key (e.g. an authed mistral.rs); empty otherwise.
+        provider_key(provider).unwrap_or_default()
     };
     eprintln!("[provider: {provider:?}, model: {model}]");
     let provider = provider_from_config(provider, &model, &key)?;

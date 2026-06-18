@@ -106,6 +106,7 @@ fn main() -> iced::Result {
                 None,
                 &[],
                 None,
+                "selftest",
             )
             .await
             {

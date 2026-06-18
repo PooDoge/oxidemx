@@ -361,6 +361,8 @@ pub enum Message {
     AiProviderChanged(oxidemx_shared::config::AiProvider),
     /// AI tab: agent model id edited/picked.
     AiModelChanged(String),
+    /// AI tab: local OpenAI-compatible endpoint edited (MistralRs provider).
+    AiLocalEndpointChanged(String),
     /// AI tab: allowlist add-form draft edited.
     AiAllowlistDraftChanged(String),
     /// AI tab: commit the allowlist draft as a new entry.
@@ -2678,6 +2680,11 @@ fn update_inner(state: &mut State, message: Message) -> Task<Message> {
         }
         Message::AiModelChanged(m) => {
             state.config.overlay.ai.model = m;
+            state.touch();
+            Task::none()
+        }
+        Message::AiLocalEndpointChanged(url) => {
+            state.config.overlay.ai.local_endpoint = url;
             state.touch();
             Task::none()
         }

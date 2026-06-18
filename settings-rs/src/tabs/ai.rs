@@ -16,7 +16,7 @@ use oxidemx_widgets::widgets::section_header;
 pub fn view(state: &State) -> Element<'_, Message> {
     let pal = &state.palette;
 
-    column![
+    let body = column![
         section_header("AI"),
         text(
             "The agent runtime behind the radial menu's AI page: which \
@@ -30,11 +30,20 @@ pub fn view(state: &State) -> Element<'_, Message> {
         rule::horizontal(1).style(style::rule_style(pal)),
         section_block(state, "Provider", provider_picker(state)),
         section_block(state, "Model", model_picker(state)),
-        section_block(state, "API key", key_panel(state)),
-        section_block(state, "Command allowlist", allowlist_editor(state)),
     ]
-    .spacing(16)
-    .into()
+    .spacing(16);
+
+    // The local-server endpoint only applies to the MistralRs provider, so
+    // it's shown contextually rather than cluttering every provider's view.
+    let body = if state.config.overlay.ai.provider == AiProvider::MistralRs {
+        body.push(section_block(state, "Local server endpoint", endpoint_panel(state)))
+    } else {
+        body
+    };
+
+    body.push(section_block(state, "API key", key_panel(state)))
+        .push(section_block(state, "Command allowlist", allowlist_editor(state)))
+        .into()
 }
 
 // ============================================================================
@@ -47,11 +56,13 @@ fn provider_picker(state: &State) -> Element<'_, Message> {
 
     let intro = text(
         "Which LLM serves the chat. Gemini, OpenAI and Anthropic use \
-         their API keys (below). Ollama runs local models (no key). \
-         Claude Code uses your `claude` CLI / subscription (no key) but \
-         is chat-only — the agent tools (run command, memory, …) don't \
-         apply on that path. Switching providers resets the model to \
-         that provider's default.",
+         their API keys (below). Ollama and mistral.rs run local models \
+         (no key) — pick mistral.rs to talk to a `mistralrs-server` over \
+         its OpenAI-compatible API and set its URL in the endpoint field \
+         that appears. Claude Code uses your `claude` CLI / subscription \
+         (no key) but is chat-only — the agent tools (run command, \
+         memory, …) don't apply on that path. Switching providers resets \
+         the model to that provider's default.",
     )
     .size(11)
     .style(style::text_dim(pal));
@@ -106,6 +117,46 @@ fn model_picker(state: &State) -> Element<'_, Message> {
 }
 
 // ============================================================================
+// Local server endpoint — MistralRs (OpenAI-compatible) only
+// ============================================================================
+
+fn endpoint_panel(state: &State) -> Element<'_, Message> {
+    let pal = &state.palette;
+    let current = &state.config.overlay.ai.local_endpoint;
+
+    let intro = text(
+        "Base URL of your mistral.rs server (a `mistralrs-server --port …` \
+         instance). Must include the `/v1/` path and end with a trailing \
+         slash — the OpenAI client joins `chat/completions` onto it. \
+         Default: http://localhost:1234/v1/ .",
+    )
+    .size(11)
+    .style(style::text_dim(pal));
+
+    let input = text_input("http://localhost:1234/v1/", current)
+        .on_input(Message::AiLocalEndpointChanged)
+        .padding(6)
+        .size(12)
+        .width(Length::Fill);
+
+    // Flag the trailing-slash trap inline so a bad URL fails loudly here
+    // rather than silently 404ing at request time.
+    let hint: Element<Message> = if current.ends_with('/') {
+        text("Endpoint looks well-formed ✓")
+            .size(11)
+            .style(style::text_accent(pal))
+            .into()
+    } else {
+        text("⚠ No trailing slash — the runtime appends one, but add it here to be explicit.")
+            .size(11)
+            .style(style::text_faint(pal))
+            .into()
+    };
+
+    column![intro, input, hint].spacing(8).into()
+}
+
+// ============================================================================
 // API key — per selected provider (write-only contract)
 // ============================================================================
 
@@ -125,11 +176,15 @@ fn key_panel(state: &State) -> Element<'_, Message> {
     };
 
     let env = provider.key_env().unwrap_or("");
+    // Some backends (mistral.rs) have a key slot but don't require one —
+    // a local server may or may not be authed.
+    let optional = !provider.needs_key();
     let intro = text(format!(
-        "API key for {}. Stored outside config.json at \
+        "API key for {}{}. Stored outside config.json at \
          ~/.config/oxidemx/{stem}.key (0600) — never included in config \
          exports. The {env} environment variable overrides it.",
-        provider.label()
+        provider.label(),
+        if optional { " (optional)" } else { "" },
     ))
     .size(11)
     .style(style::text_dim(pal));
@@ -138,6 +193,11 @@ fn key_panel(state: &State) -> Element<'_, Message> {
         text("Key configured ✓ — paste a new one below to replace it.")
             .size(11)
             .style(style::text_accent(pal))
+            .into()
+    } else if optional {
+        text("No key set — fine for an unauthenticated local server; add one if yours requires it.")
+            .size(11)
+            .style(style::text_faint(pal))
             .into()
     } else {
         text("No key configured — the AI page will answer with an error until one is set.")

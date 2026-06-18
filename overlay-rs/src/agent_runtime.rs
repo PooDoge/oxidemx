@@ -31,8 +31,26 @@ use oxidemx_shared::config::AiProvider;
 use serde_json::Value;
 
 use crate::ai_client::{AgentMode, StreamEvent, StreamSink};
+use oxidemx_agent::session::{ProviderFingerprint, SessionStore};
 
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
+
+/// Process-global session store (Phase 2). Each chat thread maps to one
+/// [`oxidemx_agent::session::Session`] keyed by its stable `session_id`, so a
+/// thread's provider instance is built once and reused across turns. Held as
+/// a static (matching the overlay's other UI↔backend bridges in `ai_client`)
+/// so the detached turn task and the STOP/delete handlers reach the same map.
+pub static SESSIONS: once_cell::sync::Lazy<oxidemx_agent::session::SessionManager> =
+    once_cell::sync::Lazy::new(oxidemx_agent::session::SessionManager::new);
+
+/// Mint a fresh, process-stable session id for a chat thread that doesn't yet
+/// have one. Monotonic within a run; stable once assigned (persisted on the
+/// thread). `Math.random`/uuid avoided — a counter is enough for a key.
+pub fn new_session_id() -> String {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static NEXT: AtomicU64 = AtomicU64::new(1);
+    format!("chat-{}", NEXT.fetch_add(1, Ordering::Relaxed))
+}
 
 /// One model-facing tool. Carries its declaration (name/description/
 /// JSON schema from `AgentMode::tools`) plus the stream sink, and
@@ -142,7 +160,7 @@ fn build_tools(mode: AgentMode, sink: &Option<StreamSink>) -> Vec<OverlayTool> {
 /// `model_hint` is the thread's model (the Gemini flash/pro toggle);
 /// honoured only for Gemini, where it's meaningful — other providers
 /// use their configured model.
-fn resolve_provider(model_hint: &str) -> Result<(AiProvider, String, String), BoxError> {
+fn resolve_provider(model_hint: &str) -> Result<(AiProvider, String, String, String), BoxError> {
     let ai = oxidemx_shared::config::default_config_path()
         .and_then(|p| oxidemx_shared::AppConfig::load_from(&p).ok())
         .map(|c| c.overlay.ai)
@@ -161,18 +179,26 @@ fn resolve_provider(model_hint: &str) -> Result<(AiProvider, String, String), Bo
             )
         })?
     } else {
-        String::new()
+        // Optional key: local servers like mistral.rs may run authed. Use a
+        // stored key if present; otherwise empty (the factory sends the
+        // keyless EMPTY placeholder).
+        oxidemx_agent::keys::provider_key(provider).unwrap_or_default()
     };
-    Ok((provider, model, key))
+    // Local OpenAI-compatible endpoint (used only by the MistralRs provider;
+    // ignored by the others in the factory).
+    let endpoint = ai.local_endpoint.clone();
+    Ok((provider, model, key, endpoint))
 }
 
-/// One agent turn. Returns `(reply_text, None)` — sessions are gone;
-/// every provider ships history via memory. The tuple shape is kept
-/// for call-site stability.
+/// One agent turn for `session_id` (Phase 2). Returns
+/// `(reply_text, Some(session_id))` — the id is threaded back so the caller
+/// persists it on the chat thread.
 ///
-/// `history` is the thread's prior turns as `(is_user, text)`, seeded
-/// into the executor's memory so the model has conversational context
-/// across turns (all providers are stateless now).
+/// The session owns the provider instance (built once, reused across turns —
+/// see [`oxidemx_agent::session`]) and a per-turn cancellation token. History
+/// still ships client-side: `history` is the thread's prior turns as
+/// `(is_user, text)`, seeded into the executor's memory each turn (all
+/// backends in use are stateless / history-shipping).
 pub async fn run(
     mode: AgentMode,
     model_hint: &str,
@@ -180,8 +206,24 @@ pub async fn run(
     sink: Option<StreamSink>,
     history: &[(bool, String)],
     image: Option<(String, Vec<u8>)>,
+    session_id: &str,
 ) -> Result<(String, Option<String>), BoxError> {
-    let (provider, model, key) = resolve_provider(model_hint)?;
+    let (provider, model, key, endpoint) = resolve_provider(model_hint)?;
+
+    // The session is the isolation unit: one provider instance per
+    // conversation, reused across turns. The fingerprint rebuilds it only
+    // when the resolved config changes (settings edit / per-thread model
+    // switch).
+    let session = SESSIONS.session(session_id);
+    let fingerprint = ProviderFingerprint {
+        provider,
+        model: model.clone(),
+        key: key.clone(),
+        endpoint: endpoint.clone(),
+    };
+    // One cancellation token for the whole turn (spans retries). STOP /
+    // thread-delete fire it; we `select!` the model round against it below.
+    let cancel = session.begin_turn();
 
     // Hybrid lexical+semantic memory recall (falls back to lexical
     // internally if embeddings are unavailable). Computed once; the
@@ -204,9 +246,10 @@ pub async fn run(
             tools: tools.clone(),
             sink: sink.clone(),
         };
-        let llm: Arc<dyn LLMProvider> =
-            oxidemx_agent::factory::provider_from_config(provider, &model, &key)
-                .map_err(|e| Box::new(e) as BoxError)?;
+        // Built once for the session, reused across turns and retries.
+        let llm: Arc<dyn LLMProvider> = session
+            .provider(fingerprint.clone())
+            .map_err(|e| Box::new(e) as BoxError)?;
 
         // Ship the thread transcript so the model has multi-turn context.
         let mut memory = SlidingWindowMemory::new(40);
@@ -266,8 +309,12 @@ pub async fn run(
             }
         };
 
-        // Either path returns Ok(reply) or Err(message) for this attempt.
-        let outcome: Result<String, String> = if streaming {
+        // Either path returns Ok(reply) or Err(message) for this attempt,
+        // raced against the session's cancel token (STOP / thread-delete).
+        // Dropping `turn` on cancel drops the in-flight request and unblocks
+        // a tool parked on an approval await.
+        let turn = async {
+            if streaming {
             use futures_util::StreamExt;
             forward_stream(handle.subscribe_events(), sink.clone());
             match handle.agent.run_stream(Task::new(prompt)).await {
@@ -299,17 +346,23 @@ pub async fn run(
                 }
                 Err(e) => Err(e.to_string()),
             }
-        } else {
-            drain_events(handle.subscribe_events());
-            handle
-                .agent
-                .run(Task::new(prompt))
-                .await
-                .map_err(|e| e.to_string())
+            } else {
+                drain_events(handle.subscribe_events());
+                handle
+                    .agent
+                    .run(Task::new(prompt))
+                    .await
+                    .map_err(|e| e.to_string())
+            }
+        };
+        let outcome: Result<String, String> = tokio::select! {
+            biased;
+            _ = cancel.cancelled() => Err("stopped".to_string()),
+            res = turn => res,
         };
 
         match outcome {
-            Ok(reply) => return Ok((reply, None)),
+            Ok(reply) => return Ok((reply, Some(session_id.to_string()))),
             Err(msg) => {
                 if attempt < MAX_ATTEMPTS && is_retryable(&msg) {
                     backoff(&sink, attempt, MAX_ATTEMPTS).await;
@@ -370,8 +423,11 @@ pub async fn summarize(model_hint: &str, prior: &str, msgs: &[(bool, String)]) -
     if msgs.is_empty() {
         return None;
     }
-    let (provider, model, key) = resolve_provider(model_hint).ok()?;
-    let llm = oxidemx_agent::factory::provider_from_config(provider, &model, &key).ok()?;
+    let (provider, model, key, endpoint) = resolve_provider(model_hint).ok()?;
+    let llm = oxidemx_agent::factory::provider_from_config_with_endpoint(
+        provider, &model, &key, Some(&endpoint),
+    )
+    .ok()?;
 
     let convo = msgs
         .iter()
@@ -401,6 +457,62 @@ pub async fn summarize(model_hint: &str, prior: &str, msgs: &[(bool, String)]) -
     resp.text()
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
+}
+
+/// A lean, single-shot chat — direct `provider.chat()` with no agent loop and
+/// no tools, with a caller-supplied system prompt. This is the capability
+/// surface for SIMPLE prompts and PROMPT OPTIMIZATION — the role a fast local
+/// SLM (mistral.rs) is best suited to. It keeps token cost minimal versus the
+/// full Agentic system prompt + toolset (which is heavy/OOM-prone on a small
+/// local model). Routes through the session so the provider instance is
+/// reused (warm connection pool); pass a dedicated lightweight `session_id`.
+pub async fn simple_chat(
+    model_hint: &str,
+    system: Option<&str>,
+    prompt: &str,
+    session_id: &str,
+) -> Result<String, BoxError> {
+    let (provider, model, key, endpoint) = resolve_provider(model_hint)?;
+    let session = SESSIONS.session(session_id);
+    let llm = session
+        .provider(ProviderFingerprint {
+            provider,
+            model,
+            key,
+            endpoint,
+        })
+        .map_err(|e| Box::new(e) as BoxError)?;
+
+    let mut msgs = Vec::new();
+    if let Some(sys) = system.map(str::trim).filter(|s| !s.is_empty()) {
+        msgs.push(ChatMessage {
+            role: ChatRole::System,
+            message_type: MessageType::Text,
+            content: sys.to_string(),
+        });
+    }
+    msgs.push(ChatMessage {
+        role: ChatRole::User,
+        message_type: MessageType::Text,
+        content: prompt.to_string(),
+    });
+
+    let resp = llm
+        .chat(&msgs, None)
+        .await
+        .map_err(|e| Box::new(e) as BoxError)?;
+    Ok(resp.text().map(|s| s.trim().to_string()).unwrap_or_default())
+}
+
+/// Prompt-optimization capability: rewrite a rough user prompt into a clear,
+/// specific, well-scoped one (intent preserved, no answer, no commentary).
+/// Built on [`simple_chat`] — suited to the local SLM. Uses a dedicated
+/// `prompt-optimizer` session so it never disturbs a chat thread's provider.
+pub async fn optimize_prompt(model_hint: &str, draft: &str) -> Result<String, BoxError> {
+    const SYS: &str = "You are a prompt optimizer. Rewrite the user's prompt to be clear, \
+        specific, and well-scoped for an AI assistant. Preserve their intent. Do NOT answer \
+        the prompt, ask questions, or add commentary — output ONLY the improved prompt.";
+    simple_chat(model_hint, Some(SYS), draft, "prompt-optimizer").await
 }
 
 /// Forward the executor's text-delta StreamChunks to the chat thread as
@@ -505,6 +617,7 @@ mod tests {
             None,
             &[],
             Some(("image/png".to_string(), png)),
+            "test-vision",
         )
         .await;
         eprintln!("VISION => {out:?}");
