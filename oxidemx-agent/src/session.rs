@@ -35,7 +35,7 @@ pub type SessionId = String;
 /// The configuration a cached provider was built from. Any change — provider
 /// swap, per-thread model switch, edited key, or a new local endpoint —
 /// changes the fingerprint and forces a one-time rebuild on the next turn.
-#[derive(Clone, PartialEq, Eq, Debug)]
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct ProviderFingerprint {
     pub provider: AiProvider,
     pub model: String,
@@ -43,15 +43,13 @@ pub struct ProviderFingerprint {
     pub endpoint: String,
 }
 
-struct Cached {
-    fp: ProviderFingerprint,
-    llm: Arc<dyn LLMProvider>,
-}
-
 /// One isolated conversation.
 pub struct Session {
     id: SessionId,
-    cached: Mutex<Option<Cached>>,
+    // Providers built for this conversation, keyed by fingerprint. Hybrid
+    // routing uses two (a fast local + a smart cloud), so we cache by
+    // fingerprint rather than a single slot — both stay warm across turns.
+    cached: Mutex<HashMap<ProviderFingerprint, Arc<dyn LLMProvider>>>,
     cancel: Mutex<CancellationToken>,
 }
 
@@ -59,7 +57,7 @@ impl Session {
     fn new(id: SessionId) -> Self {
         Self {
             id,
-            cached: Mutex::new(None),
+            cached: Mutex::new(HashMap::new()),
             cancel: Mutex::new(CancellationToken::new()),
         }
     }
@@ -68,14 +66,13 @@ impl Session {
         &self.id
     }
 
-    /// The provider for `fp`, built once and reused while the fingerprint
-    /// holds. Never shared across sessions.
+    /// The provider for `fp`, built once and reused for the life of the
+    /// session. Multiple fingerprints (fast + smart) coexist. Never shared
+    /// across sessions.
     pub fn provider(&self, fp: ProviderFingerprint) -> Result<Arc<dyn LLMProvider>, LLMError> {
-        let mut slot = self.cached.lock().unwrap();
-        if let Some(c) = slot.as_ref() {
-            if c.fp == fp {
-                return Ok(c.llm.clone());
-            }
+        let mut map = self.cached.lock().unwrap();
+        if let Some(llm) = map.get(&fp) {
+            return Ok(llm.clone());
         }
         let llm = factory::provider_from_config_with_endpoint(
             fp.provider,
@@ -83,7 +80,7 @@ impl Session {
             &fp.key,
             Some(&fp.endpoint),
         )?;
-        *slot = Some(Cached { fp, llm: llm.clone() });
+        map.insert(fp, llm.clone());
         Ok(llm)
     }
 
@@ -189,14 +186,19 @@ mod tests {
     }
 
     #[test]
-    fn provider_cached_until_fingerprint_changes() {
+    fn provider_cached_per_fingerprint() {
         let s = Session::new("t1".into());
         let p1 = s.provider(fp("default")).unwrap();
         let p2 = s.provider(fp("default")).unwrap();
         assert!(Arc::ptr_eq(&p1, &p2), "same fingerprint reuses the instance");
-        // A model switch invalidates the cache → a fresh instance.
+        // A different fingerprint (e.g. the smart vs fast model) is a
+        // distinct instance...
         let p3 = s.provider(fp("Qwen/Qwen3-4B")).unwrap();
-        assert!(!Arc::ptr_eq(&p1, &p3), "changed fingerprint rebuilds");
+        assert!(!Arc::ptr_eq(&p1, &p3), "distinct fingerprint = distinct instance");
+        // ...and BOTH stay warm (multi-provider cache — the router alternates
+        // fast/smart without rebuilding either).
+        let p1b = s.provider(fp("default")).unwrap();
+        assert!(Arc::ptr_eq(&p1, &p1b), "first fingerprint still cached after the second");
     }
 
     #[test]

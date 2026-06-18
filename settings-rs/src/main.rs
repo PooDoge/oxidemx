@@ -363,6 +363,12 @@ pub enum Message {
     AiModelChanged(String),
     /// AI tab: local OpenAI-compatible endpoint edited (MistralRs provider).
     AiLocalEndpointChanged(String),
+    /// AI tab: hybrid routing toggled.
+    AiRoutingToggled(bool),
+    /// AI tab: fast/local routing provider changed.
+    AiFastProviderChanged(oxidemx_shared::config::AiProvider),
+    /// AI tab: fast/local routing model edited/picked.
+    AiFastModelChanged(String),
     /// AI tab: allowlist add-form draft edited.
     AiAllowlistDraftChanged(String),
     /// AI tab: commit the allowlist draft as a new entry.
@@ -2685,6 +2691,23 @@ fn update_inner(state: &mut State, message: Message) -> Task<Message> {
         }
         Message::AiLocalEndpointChanged(url) => {
             state.config.overlay.ai.local_endpoint = url;
+            state.touch();
+            Task::none()
+        }
+        Message::AiRoutingToggled(on) => {
+            state.config.overlay.ai.routing_enabled = on;
+            state.touch();
+            Task::none()
+        }
+        Message::AiFastProviderChanged(p) => {
+            state.config.overlay.ai.fast_provider = p;
+            // Keep the fast model valid for the new fast provider.
+            state.config.overlay.ai.fast_model = p.default_model().to_string();
+            state.touch();
+            Task::none()
+        }
+        Message::AiFastModelChanged(m) => {
+            state.config.overlay.ai.fast_model = m;
             state.touch();
             Task::none()
         }

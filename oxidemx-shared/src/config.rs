@@ -943,7 +943,7 @@ pub struct OverlayConfig {
 ///
 /// Migration: the legacy `interactions` / `generate_content` values
 /// (the retired bespoke Gemini transport) deserialize to `Gemini`.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AiProvider {
     /// Gemini via the normal `generateContent` API (default).
@@ -1104,6 +1104,22 @@ pub struct AiConfig {
     /// other providers.
     #[serde(default = "default_local_endpoint")]
     pub local_endpoint: String,
+
+    /// Hybrid routing (Phase 4): when on, a fast local model classifies each
+    /// turn and answers the SIMPLE ones itself; COMPLEX / tool-using turns
+    /// escalate to the `provider`/`model` above. Off ⇒ every turn uses
+    /// `provider` as before.
+    #[serde(default)]
+    pub routing_enabled: bool,
+
+    /// The fast/local provider used for classification + simple answers.
+    /// Defaults to mistral.rs (reuses `local_endpoint`). Ollama also works.
+    #[serde(default = "default_fast_provider")]
+    pub fast_provider: AiProvider,
+
+    /// Model id for `fast_provider`.
+    #[serde(default = "default_fast_model")]
+    pub fast_model: String,
 }
 
 impl Default for AiConfig {
@@ -1113,6 +1129,9 @@ impl Default for AiConfig {
             provider: AiProvider::default(),
             model: default_ai_model(),
             local_endpoint: default_local_endpoint(),
+            routing_enabled: false,
+            fast_provider: default_fast_provider(),
+            fast_model: default_fast_model(),
         }
     }
 }
@@ -1123,6 +1142,14 @@ fn default_ai_model() -> String {
 
 fn default_local_endpoint() -> String {
     "http://localhost:1234/v1/".to_string()
+}
+
+fn default_fast_provider() -> AiProvider {
+    AiProvider::MistralRs
+}
+
+fn default_fast_model() -> String {
+    "default".to_string()
 }
 
 fn default_command_allowlist() -> Vec<String> {

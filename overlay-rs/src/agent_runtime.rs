@@ -515,6 +515,185 @@ pub async fn optimize_prompt(model_hint: &str, draft: &str) -> Result<String, Bo
     simple_chat(model_hint, Some(SYS), draft, "prompt-optimizer").await
 }
 
+// ============================================================================
+// Hybrid router (Phase 4)
+//
+// When `routing_enabled`, a fast LOCAL model classifies each turn: SIMPLE turns
+// it answers itself (chat-only, no tools — cheap, private, no cloud call);
+// COMPLEX or tool-using turns escalate to the SMART cloud provider via the full
+// agentic `run()`. Classification is hybrid: a cheap heuristic settles obvious
+// tool-intent / trivial cases; ambiguous ones cost one local-SLM classify call.
+// Fail-safe: any local error escalates to cloud — routing never degrades the
+// answer. `ask_ai` calls `route_turn`; `run()` remains the cloud path.
+// ============================================================================
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Route {
+    Local,
+    Cloud,
+}
+
+/// Tokens that signal a turn needs tools / fresh data / actions — always cloud
+/// (the local path is chat-only). Whole-substring match on the lowercased
+/// prompt; false positives just cost a cloud call (safe), false negatives are
+/// caught at runtime by the `NEEDS_TOOLS` escape.
+const TOOL_HINTS: &[&str] = &[
+    "run ", "execute", "command", "shell", "install", "sudo", "systemctl",
+    "search", "google", "look up", "web", "http://", "https://", "latest",
+    "today", "news", "weather", "file", "read ", "write ", "open ", "save ",
+    "delete", "folder", "directory", "screenshot", "schedule", "remind",
+    "every day", "flow", "configure", "set up", "brightness", "volume",
+    "remember", "note that", "my name is",
+];
+
+/// Cheap, no-model pre-classifier. `Some` = confident; `None` = ask the SLM.
+fn heuristic_route(prompt: &str) -> Option<Route> {
+    let p = prompt.trim().to_lowercase();
+    if TOOL_HINTS.iter().any(|h| p.contains(h)) {
+        return Some(Route::Cloud);
+    }
+    // Trivial chatter / tiny questions: local, skip the classify call.
+    if p.len() < 40 {
+        return Some(Route::Local);
+    }
+    None
+}
+
+/// The fast/local provider config (provider/model/key/endpoint).
+fn resolve_fast() -> Result<(AiProvider, String, String, String), BoxError> {
+    let ai = oxidemx_shared::config::default_config_path()
+        .and_then(|p| oxidemx_shared::AppConfig::load_from(&p).ok())
+        .map(|c| c.overlay.ai)
+        .unwrap_or_default();
+    let provider = ai.fast_provider;
+    // Optional key (local servers are usually unauthed).
+    let key = oxidemx_agent::keys::provider_key(provider).unwrap_or_default();
+    Ok((provider, ai.fast_model, key, ai.local_endpoint))
+}
+
+/// A single chat round on the FAST/local model (no tools, no agent loop),
+/// with an optional system prompt and prior turns for context. Provider is
+/// session-cached under the fast fingerprint.
+async fn fast_chat(
+    session_id: &str,
+    system: &str,
+    history: &[(bool, String)],
+    prompt: &str,
+) -> Result<String, BoxError> {
+    let (provider, model, key, endpoint) = resolve_fast()?;
+    let session = SESSIONS.session(session_id);
+    let llm = session
+        .provider(ProviderFingerprint { provider, model, key, endpoint })
+        .map_err(|e| Box::new(e) as BoxError)?;
+
+    let mut msgs = vec![ChatMessage {
+        role: ChatRole::System,
+        message_type: MessageType::Text,
+        content: system.to_string(),
+    }];
+    for (is_user, text) in history {
+        msgs.push(ChatMessage {
+            role: if *is_user { ChatRole::User } else { ChatRole::Assistant },
+            message_type: MessageType::Text,
+            content: text.clone(),
+        });
+    }
+    msgs.push(ChatMessage {
+        role: ChatRole::User,
+        message_type: MessageType::Text,
+        content: prompt.to_string(),
+    });
+
+    let resp = llm
+        .chat(&msgs, None)
+        .await
+        .map_err(|e| Box::new(e) as BoxError)?;
+    Ok(resp.text().map(|s| s.trim().to_string()).unwrap_or_default())
+}
+
+/// Decide where a turn goes. Heuristic first; ambiguous → one local-SLM
+/// classify call. Any classify failure ⇒ Cloud (fail-safe).
+async fn classify_route(session_id: &str, prompt: &str) -> Route {
+    if let Some(r) = heuristic_route(prompt) {
+        return r;
+    }
+    const SYS: &str = "Classify the user request as SIMPLE or COMPLEX. SIMPLE = a small \
+        model can answer directly from general knowledge (basic facts, definitions, short \
+        explanations, casual chat, simple math). COMPLEX = needs deep reasoning, multi-step \
+        work, niche expertise, or up-to-date information. Reply with exactly one word: \
+        SIMPLE or COMPLEX.";
+    match fast_chat(session_id, SYS, &[], prompt).await {
+        Ok(v) => {
+            let v = v.to_uppercase();
+            if v.contains("SIMPLE") && !v.contains("COMPLEX") {
+                Route::Local
+            } else {
+                Route::Cloud
+            }
+        }
+        // Local classifier unreachable → don't gamble, use the smart model.
+        Err(_) => Route::Cloud,
+    }
+}
+
+/// Entry point for a chat turn. Routes between the fast local model and the
+/// smart cloud agent when `routing_enabled`; otherwise just runs `run()`.
+pub async fn route_turn(
+    mode: AgentMode,
+    model_hint: &str,
+    prompt: &str,
+    sink: Option<StreamSink>,
+    history: &[(bool, String)],
+    image: Option<(String, Vec<u8>)>,
+    session_id: &str,
+) -> Result<(String, Option<String>), BoxError> {
+    let ai = oxidemx_shared::config::default_config_path()
+        .and_then(|p| oxidemx_shared::AppConfig::load_from(&p).ok())
+        .map(|c| c.overlay.ai)
+        .unwrap_or_default();
+
+    // Routing off, or an image attachment (vision → needs the capable cloud
+    // model): straight to the smart agentic path.
+    if !ai.routing_enabled || image.is_some() {
+        return run(mode, model_hint, prompt, sink, history, image, session_id).await;
+    }
+
+    let route = classify_route(session_id, prompt).await;
+    if route == Route::Cloud {
+        if let Some(s) = &sink {
+            s.send(StreamEvent::Activity("↳ complex — escalating to cloud".into()))
+                .await;
+        }
+        return run(mode, model_hint, prompt, None, history, image, session_id).await;
+    }
+
+    // SIMPLE → answer locally (chat-only). The system prompt gives the model a
+    // runtime escape hatch: if it realizes it needs tools, it says so and we
+    // escalate — a safety net beyond the upfront classifier.
+    const LOCAL_SYS: &str = "You are a fast local assistant for simple questions. Answer \
+        directly and concisely in markdown. If the request needs tools — running commands, \
+        searching the web or fetching current data, reading/writing files, scheduling, or \
+        configuring the app — do NOT guess; reply with exactly this token and nothing else: \
+        NEEDS_TOOLS";
+    if let Some(s) = &sink {
+        s.send(StreamEvent::Activity("↳ simple — answering locally".into()))
+            .await;
+    }
+    match fast_chat(session_id, LOCAL_SYS, history, prompt).await {
+        Ok(answer) if !answer.trim().is_empty() && !answer.contains("NEEDS_TOOLS") => {
+            Ok((answer, Some(session_id.to_string())))
+        }
+        // Empty, NEEDS_TOOLS, or an error → escalate to the cloud agent.
+        _ => {
+            if let Some(s) = &sink {
+                s.send(StreamEvent::Activity("↳ needs tools — escalating to cloud".into()))
+                    .await;
+            }
+            run(mode, model_hint, prompt, None, history, image, session_id).await
+        }
+    }
+}
+
 /// Forward the executor's text-delta StreamChunks to the chat thread as
 /// `StreamEvent::Delta` (live token rendering). Only used for providers
 /// that support streaming-with-tools.
@@ -598,6 +777,33 @@ where
 
 #[cfg(test)]
 mod tests {
+    use super::{heuristic_route, Route};
+
+    #[test]
+    fn heuristic_sends_tool_intent_to_cloud() {
+        for p in [
+            "run ls in my home dir",
+            "search the web for rust 1.80 release notes",
+            "what's the weather today",
+            "read the file /etc/hosts",
+            "schedule a reminder every day at 9am",
+        ] {
+            assert_eq!(heuristic_route(p), Some(Route::Cloud), "{p:?} should be Cloud");
+        }
+    }
+
+    #[test]
+    fn heuristic_keeps_trivial_local_and_defers_the_rest() {
+        // Trivial → Local without an SLM call.
+        assert_eq!(heuristic_route("hi there"), Some(Route::Local));
+        assert_eq!(heuristic_route("what is 2+2?"), Some(Route::Local));
+        // Substantive, no tool intent → ambiguous → defer to the SLM.
+        assert_eq!(
+            heuristic_route("explain the tradeoffs between optimistic and pessimistic locking"),
+            None
+        );
+    }
+
     /// Live summarization smoke (needs a Gemini key). Ignored by default
     /// so the normal test run stays offline; run with `--ignored`.
     /// Live vision smoke: a 1×1 PNG must round-trip through the image

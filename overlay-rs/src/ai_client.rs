@@ -667,5 +667,5 @@ pub async fn ask_ai(
     image: Option<(String, Vec<u8>)>,
     session_id: &str,
 ) -> Result<(String, Option<String>), Box<dyn std::error::Error + Send + Sync>> {
-    crate::agent_runtime::run(mode, model, prompt, sink, history, image, session_id).await
+    crate::agent_runtime::route_turn(mode, model, prompt, sink, history, image, session_id).await
 }

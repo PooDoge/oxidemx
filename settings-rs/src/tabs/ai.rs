@@ -7,7 +7,7 @@
 //! `~/.config/oxidemx/gemini.key` with 0600 perms.
 
 use crate::{Message, State};
-use iced::widget::{button, column, container, pick_list, row, rule, text, text_input};
+use iced::widget::{button, checkbox, column, container, pick_list, row, rule, text, text_input};
 use iced::{Alignment, Element, Length};
 use oxidemx_shared::config::AiProvider;
 use oxidemx_widgets::style;
@@ -42,6 +42,7 @@ pub fn view(state: &State) -> Element<'_, Message> {
     };
 
     body.push(section_block(state, "API key", key_panel(state)))
+        .push(section_block(state, "Hybrid routing", routing_panel(state)))
         .push(section_block(state, "Command allowlist", allowlist_editor(state)))
         .into()
 }
@@ -228,6 +229,81 @@ fn key_panel(state: &State) -> Element<'_, Message> {
     }
 
     column![intro, status_line, form].spacing(8).into()
+}
+
+// ============================================================================
+// Hybrid routing (Phase 4)
+// ============================================================================
+
+fn routing_panel(state: &State) -> Element<'_, Message> {
+    let pal = &state.palette;
+    let ai = &state.config.overlay.ai;
+
+    let intro = text(
+        "When on, a fast local model classifies each turn: simple questions it \
+         answers itself (no cloud call — private, fast, free); anything needing \
+         tools or deep reasoning escalates to the provider selected above. Off = \
+         every turn uses that provider.",
+    )
+    .size(11)
+    .style(style::text_dim(pal));
+
+    let toggle = checkbox(ai.routing_enabled)
+        .label("Enable hybrid routing")
+        .on_toggle(Message::AiRoutingToggled)
+        .size(16)
+        .text_size(12);
+
+    if !ai.routing_enabled {
+        return column![intro, toggle].spacing(8).into();
+    }
+
+    // Fast/local provider — local options only.
+    const LOCAL: [AiProvider; 2] = [AiProvider::MistralRs, AiProvider::Ollama];
+    let provider_pick = pick_list(LOCAL, Some(ai.fast_provider), Message::AiFastProviderChanged)
+        .text_size(12)
+        .padding(6)
+        .style(style::pick_list_style(pal));
+
+    let known: Vec<String> = ai
+        .fast_provider
+        .model_suggestions()
+        .iter()
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+        .collect();
+    let selected = known.iter().find(|m| **m == ai.fast_model).cloned();
+    let model_quick = pick_list(known, selected, Message::AiFastModelChanged)
+        .placeholder("custom…")
+        .text_size(12)
+        .padding(6)
+        .style(style::pick_list_style(pal));
+    let model_custom = text_input("model id", &ai.fast_model)
+        .on_input(Message::AiFastModelChanged)
+        .padding(6)
+        .size(12)
+        .width(Length::Fill);
+
+    let note = text(format!(
+        "Fast model talks to {} at the endpoint configured above.",
+        ai.fast_provider.label()
+    ))
+    .size(11)
+    .style(style::text_faint(pal));
+
+    column![
+        intro,
+        toggle,
+        row![text("Fast provider:").size(12), provider_pick]
+            .spacing(8)
+            .align_y(Alignment::Center),
+        row![model_quick, model_custom]
+            .spacing(8)
+            .align_y(Alignment::Center),
+        note,
+    ]
+    .spacing(8)
+    .into()
 }
 
 // ============================================================================
