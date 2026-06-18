@@ -7,6 +7,7 @@ pub mod events;
 pub mod heartbeat;
 pub mod memory;
 pub mod memory_semantic;
+pub mod mode;
 pub mod persona;
 pub mod skills;
 pub mod tasks;
