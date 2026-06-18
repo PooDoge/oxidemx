@@ -32,9 +32,10 @@ no-HTTP `ChatProvider` adapter. Hosted by the persistent **agentd** process
    resident, specialists evict it.
 5. **Hosted by agentd only** (SP1b). Built + live-tested now via an example/CLI
    bin; NOT wired into the overlay/GUI process.
-6. **Capability scoping is mandatory** (§6.1): every call declares a `Mode`; the
-   service rejects with `CapabilityUnmet` rather than run a prompt the model can't
-   serve — the caller escalates.
+6. **Capability-scoped calls** (§6.1): every call carries a `Mode` (default `Chat`
+   with NO required capabilities — non-mandatory). The service rejects with
+   `CapabilityUnmet` *only* when a Mode names a capability the model lacks; then the
+   caller escalates rather than silently degrading.
 7. **A `ResponseGuard` failsafe wraps every generation** (§6.2): lexical-first
    sanity checks with safe defaults (preprocessing/transform never silently passes
    a failed output). Both mechanisms ship in this crate.
@@ -78,26 +79,33 @@ no-HTTP `ChatProvider` adapter. Hosted by the persistent **agentd** process
 #[async_trait]
 pub trait LocalModelService: Send + Sync {
     /// Chat against the active model (auto-loads default if none ready).
-    async fn chat(&self, req: ChatRequest) -> Result<ChatReply, LocalError>;
+    async fn chat(&self, req: ChatRequest) -> Result<ChatResponse, LocalError>;
     /// Chat against a specific registered alias (loads/evicts as needed).
-    async fn chat_with_model(&self, alias: &str, req: ChatRequest) -> Result<ChatReply, LocalError>;
+    async fn chat_with_model(&self, alias: &str, req: ChatRequest) -> Result<ChatResponse, LocalError>;
     /// Ensure `alias` is Ready (evicting the current model if different).
     async fn ensure_loaded(&self, alias: &str) -> Result<(), LocalError>;
     /// Free VRAM for `alias` (keeps its registry config).
     async fn unload(&self, alias: &str) -> Result<(), LocalError>;
     /// Make `alias` the active/default target.
     async fn set_active(&self, alias: &str) -> Result<(), LocalError>;
-    /// Live status of every registered model.
+    /// Live status snapshot of every registered model (non-blocking — reads a
+    /// shared RwLock, never the inference mutex).
     fn status(&self) -> Vec<ModelStatusInfo>;
 }
 
 pub struct ModelStatusInfo { pub alias: String, pub state: ModelState, pub last_used: Option<u64> }
-pub enum ModelState { Unloaded, Loading, Ready, Busy, Error(String) }
+pub enum ModelState { Unloaded, Loading, Ready, Busy, Failed { reason: String } }
 ```
 
-`ChatRequest`/`ChatReply` are small crate-owned types — NOT AutoAgents types, so
+Object-safe `async` trait via `#[async_trait]` (native async-fn-in-trait can't yet
+be used behind `dyn`, and the service is consumed as `Arc<dyn LocalModelService>`).
+`status()` is synchronous and cheap: model states live in an `RwLock<HashMap<…>>`
+updated as the lifecycle progresses, separate from the async `Mutex` that
+serializes loads/inference — so a status poll never blocks behind a long generation.
+
+`ChatRequest`/`ChatResponse` are small crate-owned types — NOT AutoAgents types, so
 the crate stays framework-agnostic. `ChatRequest { messages, mode: Mode (§6.1),
-tools?, sampling_override?, system_template?, stream_sink? }`; `ChatReply { text,
+tools?, sampling_override?, system_template?, stream_sink? }`; `ChatResponse { text,
 usage, verdict: Verdict (§6.2) }` — the verdict always rides back so callers see
 confidence. `LocalChatProvider` translates between AutoAgents `ChatMessage`/tools
 and these, mapping the AutoAgents call onto a `Mode` (default `Chat`, or `ToolUse`
@@ -114,7 +122,7 @@ in core then run on the embedded model with no server.
 ## 5. Lifecycle & one-at-a-time policy
 
 - **Registry** (`LocalModelConfig.models`): each `ModelSpec { alias, source:
-  Hf{repo,rev}|Gguf{dir,files}, capabilities{web_search,tools,code_exec}, sampling,
+  Hf{repo,rev}|Gguf{dir,files}, capabilities: Capabilities (§6.1), sampling,
   isq, keep_resident }`. One entry is `default` (hot-path small model, e.g.
   Qwen3-4B q8_0).
 - **Serialized load path:** all loads/chats go through an async mutex so
@@ -129,7 +137,7 @@ in core then run on the embedded model with no server.
 - **Idle timeout:** a background task unloads the active model after
   `idle_timeout_secs` (default 600) of no requests; `keep_resident` models use a
   longer/never timeout (config). Next request reloads.
-- **Errors:** load/inference failures set `ModelState::Error(msg)` and return
+- **Errors:** load/inference failures set `ModelState::Failed { reason }` and return
   `LocalError`; the manager stays usable (next request retries the load).
 
 ## 6. Capabilities & sampling
@@ -161,9 +169,15 @@ never run, say, a tool-requiring prompt on a no-tools model.
   | `Transform` (compress/redact/optimize) | — | low temp | leak / no-new-facts / term-preservation |
   | `Vision` | vision | balanced | grounding |
 
+- **Capabilities is a `bitflags` set; required defaults to EMPTY (non-mandatory).**
+  `Mode::default()` is `Chat` with `required = Capabilities::empty()`. A request that
+  asks for nothing imposes no constraint — *any* loaded model serves it. Capability
+  scoping only engages when a Mode (or an explicit override) names a non-empty
+  requirement.
 - **Precheck:** before generating, the service resolves the target model and
-  verifies `model.capabilities ⊇ mode.required`. If unmet →
-  `LocalError::CapabilityUnmet { needs, have }`. The caller (router / provider
+  verifies `model.capabilities.contains(mode.required)` (empty ⊆ anything ⇒ always
+  passes). Only a non-empty, unmet requirement returns
+  `LocalError::CapabilityUnmet { needs, have }`; the caller (router / provider
   policy) then **escalates to cloud or selects a capable model** — the crate never
   silently degrades. `Mode` also selects the default `ResponseGuard` config and
   sampling, so callers get safe behavior without hand-configuring every call.
@@ -206,7 +220,7 @@ local embedder is available.
   only roles (cross-model review) get `PassFlagged`.
 - **Safe defaults:** preprocessing/transform Modes never silently pass a `Failed`
   output — retry once, then escalate/reject. `Chat` may `PassFlagged` for the UI to
-  show a low-confidence hint. Every `ChatReply` carries its `Verdict` so callers
+  show a low-confidence hint. Every `ChatResponse` carries its `Verdict` so callers
   always see confidence.
 
 `ResponseGuard` is a configurable struct (`checks: Vec<Check>`, thresholds, action
@@ -303,3 +317,30 @@ prompt-optimization, cross-model review) — they configure this crate's `Mode`s
 `ResponseGuard`, so they're additive. Permanently out of scope: multi-model
 *simultaneous* serving (we deliberately keep one-at-a-time) and cross-API
 speculative decoding (§8 "won't work").
+
+## 12. Rust + AI conventions (API hygiene the implementer follows)
+
+- **Errors:** `thiserror`-derived `#[non_exhaustive] LocalError` (no `anyhow` in the
+  public API). `LocalChatProvider` maps `LocalError` → AutoAgents `LLMError`.
+- **Naming (Rust API Guidelines + AI norms):** request/response not "reply"
+  (`ChatRequest`/`ChatResponse`); fields `messages` (role + content), `model`,
+  `tools`, `usage { prompt_tokens, completion_tokens }`, `stream`. `ModelState`
+  variants are *states*, so `Failed { reason }` not `Error`. Builders via
+  `MistralLocalService::builder()`. Conversions `to_*` / `from_*` / `TryFrom`.
+- **Capabilities:** `bitflags!` set (clean `contains`/subset semantics + serde);
+  `required` defaults `empty()` ⇒ non-mandatory.
+- **Async / object safety:** `#[async_trait]` for the `Arc<dyn LocalModelService>`
+  seam (native AFIT isn't `dyn`-safe yet); all public types `Send + Sync`; never
+  block an async task (mistral.rs is async-native).
+- **Concurrency:** one `tokio::sync::Mutex` serializes loads/inference (one model at
+  a time); model state lives in a separate `RwLock` so `status()` is non-blocking;
+  no lock is held across a generation `.await` except that deliberate load lock.
+- **Lib hygiene:** `#![forbid(unsafe_code)]` in our crate (mistral.rs owns the native
+  side), `#![warn(missing_docs)]` on the public API, no `unwrap`/`expect` outside
+  tests, accelerators feature-gated, `clippy -D warnings`.
+- **Modules (one responsibility each):** `service`, `manager`, `registry`, `mode`,
+  `capabilities`, `guard`, `provider`, `config`, `error`.
+- **Streaming:** token deltas via a sink/`Stream` mirroring the app's existing
+  `StreamSink` shape — no bespoke protocol.
+- **Versioning:** pin `mistralrs = "=0.8.1"`, isolated behind `MistralLocalService`
+  so a bump stays localized.
