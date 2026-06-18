@@ -54,7 +54,7 @@ Each builder takes a `Kit` + iced primitives and returns a styled widget:
 | `ghost_icon_button(kit, name, size, color, msg)` | inline icon actions (copy, attach, close) — subtle hover tint |
 | `pill(kit, icon?, label, active, msg)` | chips, the model pill, "New" — accent when active |
 | `action_button(kit, label, tone, primary, msg)` | semantic buttons (Run/Deny, primary fill vs. outline) |
-| `card(kit, content)` | the elevated mantle card (r-card, e1) |
+| `card(kit, content)` | the standard mantle card (r-card, flat — no shadow, per spec) |
 | `chip(kit, content)` | small bordered badge (doc/attachment chips) |
 | `status_rule(kit, tone)` | the 2.5px left status bar on agent/tool cards |
 
