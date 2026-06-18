@@ -15,3 +15,4 @@ pub mod memory_semantic;
 pub mod persona;
 pub mod skills;
 pub mod tasks;
+pub mod tool_exec;

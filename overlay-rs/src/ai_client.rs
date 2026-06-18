@@ -233,5 +233,15 @@ pub async fn ask_ai(
     image: Option<(String, Vec<u8>)>,
     session_id: &str,
 ) -> Result<(String, Option<String>), Box<dyn std::error::Error + Send + Sync>> {
-    crate::agent_runtime::route_turn(mode, model, prompt, sink, history, image, session_id).await
+    oxidemx_agent_core::runtime::route_turn(
+        mode,
+        model,
+        prompt,
+        sink,
+        history,
+        image,
+        session_id,
+        &crate::agent::tool_exec::executor(),
+    )
+    .await
 }
