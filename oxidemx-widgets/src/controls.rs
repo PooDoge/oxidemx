@@ -5,19 +5,20 @@
 //! the *same* way. Colors resolve through `Kit`; sizes/radii come from
 //! `tokens`. Keep new chrome here, not inlined per call-site.
 //!
-//! Cross-app note: these take a `Kit` + iced primitives only, so the
-//! module can be lifted into a shared crate (e.g. `oxidemx-widgets`) and
-//! reused by settings / popup / mission-control once those adopt the
-//! same `Kit` palette. See `docs/design/ui-design-language.md`.
+//! These take a `Kit` (the shared render context) + iced primitives
+//! only, so every iced surface builds the same control the same way.
+//! Build a `Kit` via `Kit::from_theme(theme)` (static) or
+//! `Kit::from_palette(p, alpha, pulse)` (animated). See
+//! `docs/design/ui-design-language.md`.
 
 #![allow(dead_code)]
 
 use iced::widget::{button, container, row, text, Button, Container};
 use iced::{Alignment, Background, Border, Color, Element, Length};
 
-use super::icons::icon;
-use super::tokens;
-use super::Kit;
+use crate::icons::icon;
+use crate::kit::Kit;
+use crate::tokens;
 
 /// A borderless ("ghost") icon button — the default for inline actions
 /// (copy, select, attach, close, …). Subtle hover tint.
