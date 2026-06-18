@@ -5,11 +5,15 @@
 
 pub mod error;
 pub mod guard;
+pub mod manager;
 pub mod mode;
+pub mod service;
 pub mod types;
 pub(crate) mod engine;
 
 pub use error::LocalError;
 pub use guard::{Action, Check, GuardConfig, Reason, SchemaKind, Verdict};
+pub use manager::LocalModelManager;
 pub use mode::Mode;
+pub use service::LocalModelService;
 pub use types::{ChatRequest, ChatResponse, Message, ModelState, ModelStatusInfo, Role, Usage};

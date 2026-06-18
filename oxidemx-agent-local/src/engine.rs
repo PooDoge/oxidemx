@@ -13,8 +13,9 @@ use crate::types::{Message, Usage};
 // ── Request / Reply ───────────────────────────────────────────────────────────
 
 /// Everything needed for a single inference call.
+// Fields are consumed by the real mistral.rs engine (Task 9); the mock reads
+// none of them, so rustc flags them as dead code until then.
 #[allow(dead_code)]
-/// consumed by LocalModelManager (next task); allow until then
 #[derive(Debug, Clone)]
 pub(crate) struct EngineRequest {
     /// Conversation history to pass to the model.
@@ -26,8 +27,6 @@ pub(crate) struct EngineRequest {
 }
 
 /// The inference result returned by an engine.
-#[allow(dead_code)]
-/// consumed by LocalModelManager (next task); allow until then
 #[derive(Debug, Clone)]
 pub(crate) struct EngineReply {
     /// Raw text produced by the model.
@@ -43,8 +42,6 @@ pub(crate) struct EngineReply {
 /// The session manager (Task 7) depends **only** on this trait, which means
 /// it is fully unit-testable via [`MockEngine`] without bringing in the
 /// mistral.rs native engine.
-#[allow(dead_code)]
-/// consumed by LocalModelManager (next task); allow until then
 #[async_trait]
 pub(crate) trait InferenceEngine: Send + Sync {
     /// Load (or verify already loaded) the model described by `spec`.
