@@ -281,23 +281,10 @@ pub fn view<'a>(
 
     // Left accent rule: a 2.5 px tone bar beside the card body
     // (iced borders are uniform, so the rule is its own element).
-    let rule = container(Space::new())
-        .width(Length::Fixed(2.5))
-        .height(Length::Fill)
-        .style(move |_| iced::widget::container::Style {
-            background: Some(iced::Background::Color(kit.fade(tone, 1.0))),
-            ..Default::default()
-        });
+    let rule = super::widgets::status_rule(kit, tone);
 
-    let framed = container(row![rule, inner]).style(move |_| iced::widget::container::Style {
-        background: Some(iced::Background::Color(kit.fade(kit.mantle, 0.96))),
-        border: iced::border::Border {
-            color: kit.fade(kit.surface1, 1.0),
-            width: 1.0,
-            radius: 12.0.into(),
-        },
-        ..Default::default()
-    });
+    let framed = container(row![rule, inner])
+        .style(super::catalog::surface_style(kit, super::Surface::Card));
 
     // 92% width, left-aligned like an assistant message.
     row![
@@ -322,15 +309,10 @@ fn io_block<'a>(kit: Kit, label: &'static str, body: &str) -> Element<'a, Messag
         )
         .width(Length::Fill)
         .padding([6, 9])
-        .style(move |_| iced::widget::container::Style {
-            background: Some(iced::Background::Color(kit.fade(kit.crust, 1.0))),
-            border: iced::border::Border {
-                color: kit.fade(kit.surface1, 1.0),
-                width: 1.0,
-                radius: 6.0.into(),
-            },
-            ..Default::default()
-        }),
+        .style(super::catalog::surface_style(
+            kit,
+            super::Surface::CrustWell
+        )),
     ]
     .spacing(5)
     .into()

@@ -13,6 +13,7 @@
 //! `popup-rs/` (and later `overlay-rs/`) could import the same
 //! primitives without copy-paste.
 
+pub mod catalog;
 pub mod controls;
 pub mod icons;
 pub mod kit;

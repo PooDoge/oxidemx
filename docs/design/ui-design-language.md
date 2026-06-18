@@ -92,15 +92,30 @@ joined; overlay now depends on it).
   `action_button` / `segment` / `round_icon_button` / `card` / `chip` /
   `status_rule`). Every iced surface can now build the same control the
   same way. chat_ui re-exports them so `super::*` paths are unchanged.
-- ◐ **Step 3 — kill inline styles via typed builders.** In progress: the
-  header (segmented switcher + close) now composes `segment` +
-  `round_icon_button` instead of hand-written `Style{…}` closures.
-  Migrate the remaining inline styles (footer send/stop, threads pill,
-  panels) as they're touched. The **full iced `Catalog`/custom-`Theme`
-  switch** (style enums resolved by one `Catalog` impl, zero per-site
-  closures, app-wide) is the deeper finish — deferred deliberately
-  because it touches every app's `iced::application(…).theme(…)` root and
-  the `markdown::view` theme; do it attended, not mid-session.
+- ✅ **Step 3 — kill inline styles via typed builders.** The header
+  (segmented switcher + close) composes `segment` + `round_icon_button`
+  instead of hand-written `Style{…}` closures.
+- ✅ **Step 3.5 — the style catalog (`oxidemx-widgets::catalog`).** The
+  realization of iced's `Catalog` pattern for *our* color model: a
+  **centralized, variant-keyed style catalog** rather than a custom
+  `Theme` type. Two enums + two resolver fns:
+  - `Surface::{Card, Panel, Chip, CrustWell, Bubble(is_user),
+    Tinted{tone,bg_k,border_k,radius}}` → `catalog::surface_style(kit, …)`
+  - `Btn::{Ghost, Plain, Fill(tone), Outline(tone), Tinted(tone,k)}` →
+    `catalog::button_style(kit, …)`
+
+  A custom `iced::Theme` type would buy nothing here (our colors flow
+  through `Kit`/`Palette`, not `iced::Theme`'s palette) and would cost a
+  `markdown::Catalog` + highlighter reimpl — so we centralize the style
+  *closures* instead. chat_ui call-sites migrated off inline `Style{…}`:
+  both message bubbles, the approval card (yellow Tinted), error bubble
+  (red Tinted), code preview + io_block (CrustWell), tool-call frame
+  (Card + `status_rule`), footer stop button + attachment chip, the
+  "↓ Latest" pill (Tinted). Genuinely one-off chrome (hairline, lightbox
+  scrim, context menu, the send-button accent glow, `text_input`/
+  `text_editor` default-derived styles, the pulsing activity dot) stays
+  inline by design — the catalog holds *recurring* variants, not
+  singletons.
 - ⏳ **Step 4 — per-surface adoption.** settings/popup/MC migrate their
   hand-rolled chrome + text glyphs to `icons::icon` + the builders.
 
@@ -115,13 +130,15 @@ iced design system. Patterns worth adopting, in priority order:
    `tone`/`primary`); extend to named variants
    (`button::primary/ghost/danger`) so call-sites never pass raw colors.
    *Evidence: libcosmic `widget/button/text.rs`.*
-2. **The iced `Catalog` / `Class` style-resolution pattern** — instead of
-   inline `move |_,_| Style{…}` closures per call-site, define a style
-   enum (`Button::{Primary,Ghost,Danger,…}`) and one `Catalog` impl that
-   computes appearance from tokens + widget state (hover/press/focus) at
-   render time. Decouples style from widget code, enables live theme
-   switching, kills the ~57 inline style blocks. *libcosmic
-   `theme/style/button.rs`.* **This is the highest-leverage refactor.**
+2. **The iced `Catalog` / `Class` style-resolution pattern** — ✅ **DONE
+   (as `oxidemx-widgets::catalog`, Step 3.5).** Instead of inline
+   `move |_,_| Style{…}` closures per call-site, `Surface`/`Btn` enums +
+   `surface_style`/`button_style` resolvers compute appearance from
+   `Kit` (tokens + roles) and widget state at render time. We chose a
+   centralized *style catalog* over a custom `iced::Theme` type
+   deliberately — our colors live in `Kit`/`Palette`, so a custom Theme
+   would add a `markdown::Catalog` + highlighter reimpl for zero color
+   benefit. *libcosmic `theme/style/button.rs` is the inspiration.*
 3. **Density / Roundness as orthogonal config** — enums that transform
    the *whole* spacing / radii table (Compact/Standard/Spacious ×
    Round/Square), independent of color theme. A future user setting.

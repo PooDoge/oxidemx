@@ -35,6 +35,7 @@ use crate::radial::RadialState;
 /// The shared render context + component builders now live in
 /// `oxidemx-widgets`; re-exported so `super::Kit` / `super::widgets`
 /// paths across chat_ui resolve unchanged.
+pub use oxidemx_widgets::catalog::{self, Btn, Surface};
 pub use oxidemx_widgets::controls as widgets;
 pub use oxidemx_widgets::kit::Kit;
 

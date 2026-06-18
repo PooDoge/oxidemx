@@ -121,23 +121,15 @@ pub fn view<'a>(state: &'a RadialState, kit: &Kit) -> Element<'a, Message> {
 
     // Send flips to Stop while a turn is in flight.
     let action_btn = if state.ai_loading {
-        button(iced::widget::center(icon(
+        super::widgets::round_icon_button(
             "stop",
             16.0,
+            40.0,
+            super::tokens::R_CARD,
+            kit.fade(kit.red, 1.0),
             kit.fade(kit.crust, 1.0),
-        )))
-        .width(Length::Fixed(40.0))
-        .height(Length::Fixed(40.0))
-        .padding(0)
-        .style(move |_, _status| button::Style {
-            background: Some(iced::Background::Color(kit.fade(kit.red, 1.0))),
-            border: iced::border::Border {
-                radius: 12.0.into(),
-                ..Default::default()
-            },
-            ..Default::default()
-        })
-        .on_press(Message::AiStopRequest)
+            Message::AiStopRequest,
+        )
     } else {
         button(iced::widget::center(icon(
             "send",
@@ -205,17 +197,11 @@ pub fn view<'a>(state: &'a RadialState, kit: &Kit) -> Element<'a, Message> {
                 .style(|_, _| button::Style::default())
                 .on_press(Message::AiAttachClear),
         );
-        col = col.push(container(chip).padding([3, 8]).style(move |_| {
-            iced::widget::container::Style {
-                background: Some(iced::Background::Color(kit.fade(kit.surface0, 0.9))),
-                border: iced::border::Border {
-                    color: kit.fade(kit.surface2, 1.0),
-                    width: 1.0,
-                    radius: 8.0.into(),
-                },
-                ..Default::default()
-            }
-        }));
+        col = col.push(
+            container(chip)
+                .padding([3, 8])
+                .style(super::catalog::surface_style(kit, super::Surface::Chip)),
+        );
     }
     col = col.push(
         row![editor, attach_btn, action_btn]

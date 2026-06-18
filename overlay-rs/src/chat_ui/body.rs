@@ -82,7 +82,10 @@ pub fn conversation<'a>(state: &'a RadialState, kit: &Kit) -> Element<'a, Messag
                             left: 13.0,
                         })
                         .max_width(bubble_max_width(state))
-                        .style(bubble_style(kit, false)),
+                        .style(super::catalog::surface_style(
+                            kit,
+                            super::Surface::Bubble(false)
+                        )),
                     Space::new().width(Length::Fill),
                 ]);
             }
@@ -119,12 +122,10 @@ pub fn conversation<'a>(state: &'a RadialState, kit: &Kit) -> Element<'a, Messag
         let pill = container(
             button(text("↓ Latest").size(12).color(kit.fade(kit.crust, 1.0)))
                 .padding([5, 12])
-                .style(move |_, _| button::Style {
-                    background: Some(iced::Background::Color(kit.fade(kit.accent, 0.95))),
-                    border: iced::border::Border::default().rounded(14.0),
-                    text_color: kit.fade(kit.crust, 1.0),
-                    ..Default::default()
-                })
+                .style(super::catalog::button_style(
+                    kit,
+                    super::Btn::Tinted(kit.accent, 0.95),
+                ))
                 .on_press(Message::AiScrollToBottom),
         )
         .width(Length::Fill)
@@ -213,15 +214,10 @@ fn approval_view<'a>(
         )
         .width(Length::Fill)
         .padding([7, 10])
-        .style(move |_| iced::widget::container::Style {
-            background: Some(iced::Background::Color(kit.fade(kit.crust, 1.0))),
-            border: iced::border::Border {
-                color: kit.fade(kit.surface1, 1.0),
-                width: 1.0,
-                radius: 8.0.into(),
-            },
-            ..Default::default()
-        });
+        .style(super::catalog::surface_style(
+            kit,
+            super::Surface::CrustWell,
+        ));
 
         let guard = row![
             icon("shield", 11.0, kit.fade(kit.green, 1.0)),
@@ -301,15 +297,15 @@ fn approval_view<'a>(
         let card = column![header, preview, guard, actions].spacing(8);
         return container(card)
             .padding(12)
-            .style(move |_| iced::widget::container::Style {
-                background: Some(iced::Background::Color(kit.fade(kit.yellow, 0.07))),
-                border: iced::border::Border {
-                    color: kit.fade(kit.yellow, 0.32),
-                    width: 1.0,
-                    radius: 12.0.into(),
+            .style(super::catalog::surface_style(
+                kit,
+                super::Surface::Tinted {
+                    tone: kit.yellow,
+                    bg_k: 0.07,
+                    border_k: 0.32,
+                    radius: 12.0,
                 },
-                ..Default::default()
-            })
+            ))
             .into();
     }
 
@@ -358,43 +354,6 @@ fn approval_view<'a>(
             ..Default::default()
         })
         .into()
-}
-
-fn bubble_style(
-    kit: Kit,
-    is_user: bool,
-) -> impl Fn(&iced::Theme) -> iced::widget::container::Style {
-    move |_| iced::widget::container::Style {
-        background: Some(iced::Background::Color(if is_user {
-            kit.fade(kit.accent, 0.11)
-        } else {
-            kit.fade(kit.surface0, 1.0)
-        })),
-        border: iced::border::Border {
-            color: if is_user {
-                kit.fade(kit.accent, 0.23)
-            } else {
-                kit.fade(kit.text, 0.05)
-            },
-            width: 1.0,
-            // Speech-tail asymmetry per the design: the corner
-            // nearest the sender is tight.
-            radius: if is_user {
-                iced::border::Radius::default()
-                    .top_left(14.0)
-                    .top_right(14.0)
-                    .bottom_left(14.0)
-                    .bottom_right(4.0)
-            } else {
-                iced::border::Radius::default()
-                    .top_left(14.0)
-                    .top_right(14.0)
-                    .bottom_left(4.0)
-                    .bottom_right(14.0)
-            },
-        },
-        ..Default::default()
-    }
 }
 
 /// Render AI markdown with a copy button on each code block. Non-code
@@ -658,15 +617,15 @@ fn bubble_row<'a>(
             left: 13.0,
         })
         .max_width(bubble_max_width(state))
-        .style(move |_| iced::widget::container::Style {
-            background: Some(iced::Background::Color(kit.fade(kit.red, 0.12))),
-            border: iced::border::Border {
-                color: kit.fade(kit.red, 0.6),
-                width: 1.0,
-                radius: 12.0.into(),
+        .style(super::catalog::surface_style(
+            kit,
+            super::Surface::Tinted {
+                tone: kit.red,
+                bg_k: 0.12,
+                border_k: 0.6,
+                radius: 12.0,
             },
-            ..Default::default()
-        });
+        ));
         return row![card, Space::new().width(Length::Fill)].into();
     }
 
@@ -722,7 +681,10 @@ fn bubble_row<'a>(
             left: 13.0,
         })
         .max_width(bubble_max_width(state))
-        .style(bubble_style(kit, msg.is_user));
+        .style(super::catalog::surface_style(
+            kit,
+            super::Surface::Bubble(msg.is_user),
+        ));
 
     // Hovering the row (or an open menu) reveals the action buttons; a
     // fixed-width placeholder otherwise keeps the layout from shifting.
