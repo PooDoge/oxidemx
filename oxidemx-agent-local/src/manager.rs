@@ -221,8 +221,16 @@ impl LocalModelManager {
     /// `now` is taken as a parameter so tests can use `tokio::time::pause()` /
     /// explicit `Instant` values without needing real wall-clock time.
     ///
+    /// If `idle_timeout` is zero, this returns immediately without evicting
+    /// anything — `idle_timeout=0` means "never unload on idle".
+    ///
     /// This is `async` because it calls `engine.unload` to actually free VRAM.
     pub async fn run_idle_sweep_once(&self, now: Instant) {
+        // idle_timeout=0 means "never unload on idle".
+        if self.idle_timeout.is_zero() {
+            return;
+        }
+
         // Take a snapshot of the states map without holding the RwLock guard
         // across any .await point.
         let snapshot: Vec<(String, ModelState, Option<u64>)> = {
@@ -309,9 +317,17 @@ impl LocalModelManager {
     /// Spawn a background task that runs idle sweeps on `idle_timeout / 2`
     /// interval.
     ///
+    /// If `idle_timeout` is zero ("never unload on idle"), this returns
+    /// immediately without spawning any background work.
+    ///
     /// The returned handle can be aborted to stop the sweep.
     pub fn spawn_idle_task(self: Arc<Self>) -> tokio::task::JoinHandle<()> {
-        let period = self.idle_timeout / 2;
+        if self.idle_timeout.is_zero() {
+            tracing::debug!("idle-unload disabled (idle_timeout=0); skipping idle sweep task");
+            return tokio::spawn(std::future::ready(()));
+        }
+        // Use at least 1 second to avoid a tokio panic on zero-period interval.
+        let period = (self.idle_timeout / 2).max(Duration::from_secs(1));
         tokio::spawn(async move {
             let mut ticker = interval(period);
             loop {
@@ -733,5 +749,41 @@ mod tests {
         mgr.ensure_loaded("resident").await.unwrap();
         mgr.run_idle_sweep_once(Instant::now() + Duration::from_secs(9999)).await;
         assert_eq!(state(&mgr, "resident"), ModelState::Ready);
+    }
+
+    /// idle_timeout=0 means "never unload on idle": the sweep must not evict
+    /// the model regardless of how much time has passed.
+    ///
+    /// This also covers the panic path: `tokio::time::interval(Duration::ZERO)`
+    /// would panic, and `run_idle_sweep_once` must return early before reaching
+    /// that code path.
+    #[tokio::test(start_paused = true)]
+    async fn idle_timeout_zero_never_unloads() {
+        let models = vec![make_spec("a")];
+        let engine = Arc::new(MockEngine::new());
+        let mgr = LocalModelManager::new(
+            models,
+            "a".to_string(),
+            Duration::ZERO, // idle_timeout=0 → never evict
+            Arc::clone(&engine) as Arc<dyn InferenceEngine>,
+        );
+
+        mgr.ensure_loaded("a").await.unwrap();
+        assert_eq!(state(&mgr, "a"), ModelState::Ready);
+
+        // Advance far into the future — would trigger eviction if timeout=0 were mishandled.
+        mgr.run_idle_sweep_once(Instant::now() + Duration::from_secs(u32::MAX as u64)).await;
+
+        // Model must still be Ready.
+        assert_eq!(
+            state(&mgr, "a"),
+            ModelState::Ready,
+            "idle_timeout=0 should never unload the model"
+        );
+        // Engine must NOT have been asked to unload.
+        assert!(
+            !engine.unloaded().contains(&"a".to_string()),
+            "engine.unload(\"a\") must not be called when idle_timeout=0"
+        );
     }
 }
