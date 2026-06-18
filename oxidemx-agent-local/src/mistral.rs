@@ -4,7 +4,7 @@
 //!
 //! ## API notes (0.8.1 verified 2026-06-18)
 //! - `TextModelBuilder::new(repo)` + `.with_isq(IsqType)` + `.build().await`
-//! - `GgufModelBuilder::new(dir, files)` + `.with_isq(IsqType)` + `.build().await`
+//! - `GgufModelBuilder::new(dir, files)` + `.build().await` (GGUF is pre-quantized; `isq` is ignored)
 //! - `MultimodalModelBuilder` (renamed from `VisionModelBuilder` in 0.7.x)
 //! - `MultiModelBuilder::new()
 //!       .add_model_with_alias(alias, AnyModelBuilder::Text(…))
@@ -72,8 +72,9 @@ fn to_mistral_role(role: &Role) -> TextMessageRole {
         Role::System => TextMessageRole::System,
         Role::User => TextMessageRole::User,
         Role::Assistant => TextMessageRole::Assistant,
-        // Tool results are delivered as user messages in the mistral.rs API.
-        Role::Tool => TextMessageRole::User,
+        // Tool results carry the Tool role in mistral.rs 0.8.1 TextMessageRole.
+        // Note: tool_call_id is not carried by add_message — that's a separate gap.
+        Role::Tool => TextMessageRole::Tool,
     }
 }
 
@@ -269,10 +270,10 @@ impl InferenceEngine for MistralEngine {
             .and_then(|c| c.message.content.clone())
             .unwrap_or_default();
 
-        // Map usage.
+        // Map usage — saturating cast so huge usize counts don't silently truncate.
         let usage = Usage {
-            prompt_tokens: response.usage.prompt_tokens as u32,
-            completion_tokens: response.usage.completion_tokens as u32,
+            prompt_tokens: u32::try_from(response.usage.prompt_tokens).unwrap_or(u32::MAX),
+            completion_tokens: u32::try_from(response.usage.completion_tokens).unwrap_or(u32::MAX),
         };
 
         Ok(EngineReply { text, usage })
@@ -316,11 +317,10 @@ mod tests {
             to_mistral_role(&Role::Assistant),
             TextMessageRole::Assistant
         ));
-        // Tool maps to User (mistral.rs doesn't have a separate Tool role on
-        // the TextMessageRole enum for plain text chat).
+        // Tool maps to TextMessageRole::Tool (mistral.rs 0.8.1 has the variant).
         assert!(matches!(
             to_mistral_role(&Role::Tool),
-            TextMessageRole::User
+            TextMessageRole::Tool
         ));
     }
 }
