@@ -1,4 +1,4 @@
-# Local Model Manager (`oxidemx-localmodel`) — design
+# Local Model Manager (`oxidemx-agent-local`) — design
 
 Date: 2026-06-18
 Status: design (brainstormed + approved in-chat; pending spec review → writing-plans)
@@ -19,7 +19,7 @@ no-HTTP `ChatProvider` adapter. Hosted by the persistent **agentd** process
 
 ## 2. Decisions (locked in brainstorm)
 
-1. **Crate `oxidemx-localmodel`**, depends on `mistralrs = "=0.8.1"` (exact pin;
+1. **Crate `oxidemx-agent-local`**, depends on `mistralrs = "=0.8.1"` (exact pin;
    `docs.rs` fails to build it — use local `cargo doc` + `mistralrs/examples/`).
    Native accelerators behind features (`cuda`/`metal`/`accelerate`). NO UI deps;
    does NOT link `autoagents-mistral-rs` (0.7.0) — two `mistralrs` versions cannot
@@ -32,6 +32,12 @@ no-HTTP `ChatProvider` adapter. Hosted by the persistent **agentd** process
    resident, specialists evict it.
 5. **Hosted by agentd only** (SP1b). Built + live-tested now via an example/CLI
    bin; NOT wired into the overlay/GUI process.
+6. **Capability scoping is mandatory** (§6.1): every call declares a `Mode`; the
+   service rejects with `CapabilityUnmet` rather than run a prompt the model can't
+   serve — the caller escalates.
+7. **A `ResponseGuard` failsafe wraps every generation** (§6.2): lexical-first
+   sanity checks with safe defaults (preprocessing/transform never silently passes
+   a failed output). Both mechanisms ship in this crate.
 
 ## 3. mistral.rs 0.8.1 API surface used (from SDK research; verify via local cargo doc)
 
@@ -52,7 +58,7 @@ no-HTTP `ChatProvider` adapter. Hosted by the persistent **agentd** process
 ## 4. Architecture
 
 ```
- oxidemx-localmodel  (lib, no UI)
+ oxidemx-agent-local  (lib, no UI)
    LocalModelManager  ── owns one mistralrs engine (MultiModelBuilder) +
                           registry + active-state + idle timer + status
    trait LocalModelService  ── model-agnostic seam (chat / lifecycle / status)
@@ -89,10 +95,13 @@ pub struct ModelStatusInfo { pub alias: String, pub state: ModelState, pub last_
 pub enum ModelState { Unloaded, Loading, Ready, Busy, Error(String) }
 ```
 
-`ChatRequest`/`ChatReply` are small crate-owned types (messages, optional tools,
-optional sampling/system-template override, stream sink) — NOT AutoAgents types,
-so the crate stays framework-agnostic. `LocalChatProvider` translates between
-AutoAgents `ChatMessage`/tools and these.
+`ChatRequest`/`ChatReply` are small crate-owned types — NOT AutoAgents types, so
+the crate stays framework-agnostic. `ChatRequest { messages, mode: Mode (§6.1),
+tools?, sampling_override?, system_template?, stream_sink? }`; `ChatReply { text,
+usage, verdict: Verdict (§6.2) }` — the verdict always rides back so callers see
+confidence. `LocalChatProvider` translates between AutoAgents `ChatMessage`/tools
+and these, mapping the AutoAgents call onto a `Mode` (default `Chat`, or `ToolUse`
+when tool declarations are present).
 
 ### 4.2 LocalChatProvider (no-HTTP adapter)
 
@@ -133,6 +142,77 @@ interpreter if 0.8.1 exposes one, else our `run_command` tool). Sampling via
 system prompts (coding vs general) are **request templates** against the loaded
 model — no reload to switch.
 
+### 6.1 Capability scoping & request modes
+
+Every call through the service is **scoped to the model's capabilities** so we
+never run, say, a tool-requiring prompt on a no-tools model.
+
+- `ModelSpec.capabilities: Capabilities { tools, web_search, vision, code_exec,
+  structured_output, ctx_window: u32 }` — what the model + its build support.
+- Each `ChatRequest` carries a **`Mode`** preset bundling *required capabilities +
+  default sampling + which sanity checks (§6.2) apply*:
+
+  | Mode | Requires | Sampling | Guard emphasis |
+  |---|---|---|---|
+  | `Classify` | structured_output | temp≈0, short | schema/enum + grounding |
+  | `Chat` | — | balanced | non-refusal + grounding |
+  | `ToolUse` | tools | balanced | tool-call validity |
+  | `WebSearch` | web_search | balanced | grounding + citation present |
+  | `Transform` (compress/redact/optimize) | — | low temp | leak / no-new-facts / term-preservation |
+  | `Vision` | vision | balanced | grounding |
+
+- **Precheck:** before generating, the service resolves the target model and
+  verifies `model.capabilities ⊇ mode.required`. If unmet →
+  `LocalError::CapabilityUnmet { needs, have }`. The caller (router / provider
+  policy) then **escalates to cloud or selects a capable model** — the crate never
+  silently degrades. `Mode` also selects the default `ResponseGuard` config and
+  sampling, so callers get safe behavior without hand-configuring every call.
+
+### 6.2 Sanity-check / failsafe pipeline (`ResponseGuard`)
+
+Small local models hallucinate, leak training/context data, and drift off-input.
+A `ResponseGuard` wraps the **entire** generation (input → generate → checks →
+verdict → action) so a bad local output is never silently trusted. Lexical-first
+(deterministic, no extra model load); embedding-based grounding is optional when a
+local embedder is available.
+
+**Pre-generation (input):**
+- *Ambiguity gate* (Transform/optimize): skip rewriting prompts that are already
+  clear/term-precise (rewriting good prompts measurably hurts — nDCG regression).
+- *PII/secret pre-scan* (rules-first): flag/redact before the text is used onward.
+- *Capability check* (§6.1).
+
+**Post-generation checks** (Mode selects the active set + thresholds):
+1. *Non-empty / non-refusal* — reject empty or refusal patterns when a substantive
+   answer was expected.
+2. *Input grounding / relevance* — output must relate to the input: lexical
+   overlap (key-term/Jaccard) ≥ threshold, optional local-embedding cosine ≥
+   threshold. Catches off-topic hallucination + context/training leaks.
+3. *Leak / no-new-facts* (Transform) — output introduces **no** entities, numbers,
+   or URLs absent from the input, and never echoes the system prompt or other
+   context verbatim. (This is the guard for the "Python-anchoring" class of bug —
+   the model injecting unsupported specifics.)
+4. *Repetition / degeneration* — n-gram loop / runaway-repeat detector.
+5. *Schema / format* (Classify, StructuredJson) — must parse to the expected
+   enum/shape; reject otherwise.
+6. *Length bounds* — within the Mode's expected envelope (a classifier returns one
+   token; an optimize-rewrite isn't 10× the input).
+7. *Term preservation* (optimize) — the input's key terms are retained.
+
+**Verdict → action** (per Mode, configurable):
+- Verdict: `Ok | Suspect(reasons) | Failed(reasons)`.
+- Action: `Retry { max, adjust }` (re-generate lower-temp / new seed) → then
+  `Escalate` (return a signal so the caller routes to cloud) or `Reject`. Signal-
+  only roles (cross-model review) get `PassFlagged`.
+- **Safe defaults:** preprocessing/transform Modes never silently pass a `Failed`
+  output — retry once, then escalate/reject. `Chat` may `PassFlagged` for the UI to
+  show a low-confidence hint. Every `ChatReply` carries its `Verdict` so callers
+  always see confidence.
+
+`ResponseGuard` is a configurable struct (`checks: Vec<Check>`, thresholds, action
+policy); each `Mode` ships a default config, and a caller may override per request.
+This is the shared mechanism the §8 roles configure differently.
+
 ## 7. Config + settings (in scope)
 
 - `oxidemx-shared`: `LocalModelConfig { download_dir: PathBuf (default
@@ -144,28 +224,35 @@ model — no reload to switch.
   sub-project — but the crate API is shaped (registry + status + per-model specs)
   so that UI is additive.
 
-## 8. Intended consumers (downstream roles — NOT in this crate)
+## 8. Consumer roles (fully documented; each its own later SP)
 
-The crate ships the service; the ROI-ranked roles live in core/agentd and reuse
-it (their own later sub-projects):
-- **High ROI:** between-turn context/log/diff **compression**; **routing /
-  pre-flight classification** (route easy → local, hard/code → cloud);
-  **PII/secret redaction** (rules-first, LLM edge-case fallback).
-- **Conditional:** **prompt optimization** — gate on an "is this ambiguous?"
-  check; never rewrite already-good/term-precise prompts (measurable retrieval
-  harm); ground every output against the input.
-- **Signal, never gate:** **cross-model output review** — a smoke detector
-  (refusals, malformed JSON, missing files, spec contradictions, leaked secrets);
-  correctness is decided by compiler + tests + CI, not the small model.
-- **Won't work:** token-level speculative decoding across cloud APIs (incompatible
-  tokenizers); only the task-level cascade (covered by routing) is real.
+The crate ships the *infrastructure* — the `LocalModelService`, `Mode` presets
+(§6.1), and `ResponseGuard` (§6.2). The ROI-ranked roles below are how core/agentd
+*use* that infrastructure; each is its own implementation plan after the crate +
+agentd land. Documenting them here fixes the Mode/guard/escalation contract so the
+crate's API doesn't churn when they arrive.
 
-Governing rule (carried into those SPs): route on difficulty, escalate generously,
-replace "the small model is confident" with objective verification.
+| Role | ROI | Mode | Req. caps | Guard checks | On guard-fail / objective gate |
+|---|---|---|---|---|---|
+| **Context/log/diff compression** (between turns — biggest token lever) | High | `Transform` | — | leak/no-new-facts, length-bounds, grounding | reject → send original to cloud (never a lossy/hallucinated compression) |
+| **Routing / pre-flight classification** (easy→local, hard/code→cloud) | High | `Classify` | structured_output | schema/enum, grounding | on `Suspect`/`Failed` → default to cloud (escalate generously); calibrate conservatively for code |
+| **PII / secret redaction** (before cloud calls) | High | `Transform` | — | leak, term-preservation | rules-first (Presidio-style) is the gate; LLM is edge-case fallback only — a missed entity is a leak |
+| **Prompt optimization** (use-case #1) | Conditional | `Transform` | — | ambiguity-gate (pre), term-preservation, grounding, no-new-facts | skip if not ambiguous; on fail keep the original prompt |
+| **Cross-model output review** (use-case #2) | Signal-only | `Chat` | — | refusal, schema, leak-detect | `PassFlagged` — a smoke detector (refusals, malformed JSON, missing files, spec contradictions, leaked secrets). **Correctness is decided by compiler + tests + CI, never the small model.** "Pick the best of N" needs an objective selector (tests pass, schema valid), not the 4B's opinion. |
+| **Simple Q&A / one-shot web search / comparisons** | — | `Chat` / `WebSearch` | (web_search) | non-refusal, grounding, citation-present | escalate to cloud on fail |
+
+**Won't work — not budgeted:** token-level speculative decoding across cloud APIs
+(incompatible tokenizers, no logit-verification API); only the *task-level* cascade
+(= routing) is real.
+
+**Governing rule** (binds every role): route on difficulty, escalate generously,
+and replace "the small model is confident" with objective verification (tests,
+compile, schema, lexical/embedding grounding) wherever a wrong accept is costly.
 
 For THIS sub-project we only **repoint the existing `optimize_prompt` /
-`simple_chat`** at the local service (via `LocalChatProvider`); the richer roles
-are separate features.
+`simple_chat`** (in `oxidemx-agent-core`) at the local service via
+`LocalChatProvider`, using `Transform`/`Chat` Modes + their guards. The five roles
+above are separate, sequenced SPs.
 
 ## 9. Testing
 
@@ -178,6 +265,13 @@ are separate features.
   reloads. Manual (needs a model file + VRAM); the 0.8.1 native build is heavy.
 - Keep the engine calls behind a thin internal trait so unit tests don't link the
   native engine.
+- **Capability scoping (no model):** `Mode::ToolUse` against a no-tools `ModelSpec`
+  → `CapabilityUnmet`; a capable spec → passes the precheck.
+- **`ResponseGuard` (no model):** table-driven over canned (input, output) pairs —
+  refusal/empty caught; off-topic output fails grounding; a `Transform` output that
+  injects an unseen number/URL fails no-new-facts; a degenerate repeat is caught; a
+  non-parsing `Classify` output fails schema; a good output passes. These are pure
+  string/heuristic functions — fully unit-testable without any model.
 
 ## 10. Risks
 
@@ -191,9 +285,21 @@ are separate features.
   document that an external mistral.rs server competing for VRAM will fail loads.
 - **Pre-1.0 mistral.rs churn** — the `LocalModelService` trait insulates consumers;
   a version bump is localized to `MistralLocalService`.
+- **Guard over-rejection (false positives)** — thresholds too strict block good
+  local output and over-escalate (cost) ; too loose lets hallucinations through.
+  Mitigate: per-Mode thresholds tuned against the table-driven fixtures, conservative
+  defaults (prefer escalate over wrong-accept), and `Verdict` always surfaced so the
+  behavior is observable/tunable rather than hidden.
+- **Grounding without a cloud call** — input-grounding is lexical-first so the
+  failsafe needs no network/extra model; embedding-cosine grounding is opt-in only
+  when a local embedder is loaded, so the guard never silently depends on the cloud.
 
-## 11. Out of scope (later sub-projects)
+## 11. Out of scope for THIS crate (sequenced later sub-projects)
 
-agentd hosting + D-Bus lifecycle/status methods (SP1b); model add/download/select
-UI; the compression/routing/redaction/review role features; multi-model
-*simultaneous* serving (we deliberately keep one-at-a-time).
+Documented here (§8) but implemented separately, after the crate + agentd:
+agentd hosting + D-Bus lifecycle/status methods (SP1b); the model
+add/download/select UI; each §8 role feature (compression, routing, redaction,
+prompt-optimization, cross-model review) — they configure this crate's `Mode`s +
+`ResponseGuard`, so they're additive. Permanently out of scope: multi-model
+*simultaneous* serving (we deliberately keep one-at-a-time) and cross-API
+speculative decoding (§8 "won't work").
