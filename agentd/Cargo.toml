@@ -19,6 +19,7 @@ oxidemx-agent-local = { path = "../oxidemx-agent-local" }
 oxidemx-agent-proxy = { path = "../oxidemx-agent-proxy" }
 zbus = "5"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "fs"] }
+tokio-util = "0.7"
 async-trait = "0.1"
 thiserror = "1"
 serde = { version = "1", features = ["derive"] }

@@ -20,18 +20,21 @@
 
 #![forbid(unsafe_code)]
 
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
 use serde_json::Value;
+use tokio_util::sync::CancellationToken;
 use zbus::{fdo, interface, object_server::SignalEmitter};
 
 use crate::error::AgentdError;
 use crate::journal::{Journal, JournalEntry};
 use crate::models::ModelControls;
 use crate::projects::{ProjectKey, ProjectPaths};
+use crate::run_bridge::RunEventBridge;
 use crate::seams::{AgentEvent, Approver, EventEmitter, HostCapability, Verdict};
 use crate::sessions::{Sessions, TranscriptTurn};
 
@@ -233,9 +236,11 @@ pub struct AgentService {
     pub emitter: Arc<dyn EventEmitter>,
     pub host: Arc<dyn HostCapability>,
     pub turn_runner: Arc<dyn TurnRunner>,
-    // SP1c: run_statuses removed (I3) — run_flow not yet wired so no runs
-    // are ever tracked. run_status returns an honest "not yet wired" error
-    // matching run_flow/cancel_run.
+    /// In-flight runs keyed by run_id. Values hold the handle (run_id + cancel token).
+    pub active_runs: Arc<Mutex<HashMap<String, oxidemx_conductor::RunHandle>>>,
+    /// Shared run-status table: `run_id → "running" | "finished" | "failed" | "cancelled"`.
+    /// Populated by `RunEventBridge` and read by `run_status`.
+    pub run_statuses: Arc<Mutex<HashMap<String, String>>>,
 }
 
 impl AgentService {
@@ -256,6 +261,8 @@ impl AgentService {
             emitter,
             host,
             turn_runner: Arc::new(CoreTurnRunner),
+            active_runs: Arc::new(Mutex::new(HashMap::new())),
+            run_statuses: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -376,12 +383,16 @@ impl AgentService {
         _project: &str,
         _thread: &str,
     ) -> Result<(), AgentdError> {
-        // The cancel token lives in the core runtime's SESSIONS static,
-        // accessible via `oxidemx_agent_core::runtime::SESSIONS`.
-        // We do not have a direct reference here without pulling in the full
-        // oxidemx-agent stack. This is noted as "not yet wired" — it needs
-        // SP1c's full tool-bridge task before it can be completed cleanly.
-        Err(AgentdError::NotFound("cancel_turn: not yet wired (SP1c)".into()))
+        // `cancel_turn` cancels a single conversation turn, not a full conductor
+        // run. Per-turn cancellation tokens are not yet tracked at the agentd
+        // seam (they live inside the core runtime's select! loop). Adding a
+        // per-(project, thread) token map here is the correct fix; deferred to
+        // a dedicated SP1c sub-task when the full tool-bridge lands, so the
+        // token is threaded end-to-end from `send_message` through `TurnRunner`
+        // rather than half-wired. Documented here rather than silently ignored.
+        Err(AgentdError::NotFound(
+            "cancel_turn: per-turn CancellationToken not yet tracked (SP1c follow-up)".into(),
+        ))
     }
 
     // ── get_transcript ────────────────────────────────────────────────────────
@@ -469,22 +480,145 @@ impl AgentService {
 
     /// Launch a conductor flow scoped to the project's `runs_dir`.
     ///
-    /// Requires the conductor's flows root and the flow id. This is a minimal
-    /// wiring: a full integration needs the flow-event bridge (emitting run
-    /// events back through the `EventEmitter`). That wiring is deferred to
-    /// SP1c so we avoid a large compilation-time dependency here.
+    /// 1. Resolves the project paths.
+    /// 2. Loads the flow doc + roster via the conductor's loader.
+    /// 3. Validates the plan.
+    /// 4. Merges provided inputs (JSON object → `BTreeMap<String,String>`) with
+    ///    flow defaults via `resolve_inputs`.
+    /// 5. Builds a `RunOptions` with a fresh `CancellationToken`.
+    /// 6. Registers the `RunHandle` in `active_runs`.
+    /// 7. Spawns a task to run the supervisor and emit events through
+    ///    `RunEventBridge`.
+    /// 8. Returns the `run_id` immediately (fire-and-forget start).
+    ///
+    /// The factory uses `FixedFactory(MockProvider::echoing())` when
+    /// `OXIDEMX_TEST_MOCK_FLOW=1` is set (lets tests drive without a key).
+    /// In production the `ConfigFactory` is built from `AiConfig::default()`.
     pub async fn run_flow(
         &self,
-        _project: &str,
-        _flow_id: &str,
-        _inputs_json: &str,
+        project: &str,
+        flow_id: &str,
+        inputs_json: &str,
     ) -> Result<String, AgentdError> {
-        // Not yet wired: conductor run_flow requires a full ProviderFactory
-        // (needs config + key) and an EventSink. The seam will be completed
-        // in SP1c when the D-Bus EventSink bridge (Task 8) is in place.
-        Err(AgentdError::NotFound(
-            "run_flow: not yet wired (SP1c + Task 8 EventSink bridge needed)".into(),
-        ))
+        let cwd = PathBuf::from(project);
+        let paths = self.projects.resolve(&cwd);
+
+        // ── 1. Load flow doc + roster ─────────────────────────────────────
+        let flows_root = oxidemx_conductor::loader::default_flows_root();
+        let agents_root = oxidemx_conductor::loader::default_agents_root();
+        let (doc, roster) =
+            oxidemx_conductor::loader::load_flow(&flows_root, &agents_root, flow_id)
+                .map_err(|e| AgentdError::NotFound(e.to_string()))?;
+
+        // ── 2. Validate plan ──────────────────────────────────────────────
+        let plan =
+            oxidemx_conductor::plan::validate(&doc, &roster, oxidemx_conductor::KNOWN_TOOLS)
+                .map_err(|errs| {
+                    let msgs: Vec<String> = errs.iter().map(|e| e.to_string()).collect();
+                    AgentdError::NotFound(format!("invalid flow: {}", msgs.join("; ")))
+                })?;
+
+        // ── 3. Parse inputs JSON → BTreeMap<String, String> ──────────────
+        let provided: BTreeMap<String, String> = if inputs_json.trim().is_empty()
+            || inputs_json.trim() == "{}"
+        {
+            BTreeMap::new()
+        } else {
+            let v: serde_json::Value = serde_json::from_str(inputs_json)
+                .map_err(|e| AgentdError::Io(format!("inputs_json parse: {e}")))?;
+            match v {
+                serde_json::Value::Object(map) => map
+                    .into_iter()
+                    .map(|(k, v)| (k, v.as_str().unwrap_or_default().to_string()))
+                    .collect(),
+                _ => BTreeMap::new(),
+            }
+        };
+
+        // ── 4. Resolve inputs (merge with defaults, check required) ───────
+        let inputs =
+            oxidemx_conductor::supervisor::resolve_inputs(&plan, &provided).map_err(|missing| {
+                AgentdError::NotFound(format!(
+                    "missing required inputs: {}",
+                    missing.join(", ")
+                ))
+            })?;
+
+        // ── 5. Build run_id + workdir ─────────────────────────────────────
+        let run_id = {
+            use std::sync::atomic::{AtomicU64, Ordering};
+            static NEXT: AtomicU64 = AtomicU64::new(1);
+            format!("run-{}", NEXT.fetch_add(1, Ordering::Relaxed))
+        };
+        let workdir = paths.runs_dir().join(&run_id);
+        std::fs::create_dir_all(&workdir).map_err(|e| AgentdError::Io(e.to_string()))?;
+
+        // ── 6. Build the provider factory ─────────────────────────────────
+        // In tests with OXIDEMX_TEST_MOCK_FLOW=1 we use the echoing mock so
+        // no API key is required. In production the config-based factory is used.
+        let factory: Arc<dyn oxidemx_conductor::supervisor::ProviderFactory> =
+            if std::env::var_os("OXIDEMX_TEST_MOCK_FLOW").is_some() {
+                Arc::new(oxidemx_conductor::supervisor::FixedFactory(
+                    oxidemx_conductor::mock::MockProvider::echoing(),
+                ))
+            } else {
+                // Build from the default AiConfig (honours env-var keys).
+                let ai_cfg = oxidemx_shared::config::AiConfig::default();
+                let api_key = ai_cfg
+                    .provider
+                    .key_env()
+                    .and_then(|env| std::env::var(env).ok())
+                    .unwrap_or_default();
+                Arc::new(oxidemx_conductor::supervisor::ConfigFactory {
+                    provider: ai_cfg.provider,
+                    api_key,
+                })
+            };
+
+        // ── 7. Build cancel token + RunOptions ────────────────────────────
+        let cancel = CancellationToken::new();
+        let opts = oxidemx_conductor::supervisor::RunOptions {
+            run_id: run_id.clone(),
+            inputs,
+            workdir,
+            roster,
+            factory,
+            cancel: cancel.clone(),
+            approval: oxidemx_conductor::approval::ApprovalPolicy::Autonomous,
+            allowlist: vec![],
+        };
+
+        // ── 8. Register handle ────────────────────────────────────────────
+        let handle = oxidemx_conductor::RunHandle {
+            run_id: run_id.clone(),
+            cancel: cancel.clone(),
+        };
+        {
+            let mut guard = self
+                .active_runs
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
+            guard.insert(run_id.clone(), handle);
+            // guard dropped here — NEVER held across .await
+        }
+
+        // ── 9. Spawn the supervisor ───────────────────────────────────────
+        let bridge = Arc::new(RunEventBridge::new(
+            project,
+            self.emitter.clone(),
+            self.run_statuses.clone(),
+        ));
+        let active_runs = self.active_runs.clone();
+        let rid = run_id.clone();
+
+        tokio::spawn(async move {
+            oxidemx_conductor::supervisor::run_flow(&plan, opts, bridge).await;
+            // Remove the handle once the run completes (success, fail, or cancel).
+            let mut guard = active_runs.lock().unwrap_or_else(|e| e.into_inner());
+            guard.remove(&rid);
+        });
+
+        Ok(run_id)
     }
 
     // ── list_flows ────────────────────────────────────────────────────────────
@@ -525,13 +659,18 @@ impl AgentService {
 
     // ── run_status ────────────────────────────────────────────────────────────
 
-    /// I3: run_flow is not yet wired (SP1c), so no runs are ever tracked.
-    /// Returns the same honest "not yet wired" error as run_flow and cancel_run
-    /// instead of a misleading NotFound for a specific run_id.
-    pub async fn run_status(&self, _run_id: &str) -> Result<String, AgentdError> {
-        Err(AgentdError::NotFound(
-            "run_status: not yet wired (SP1c + Task 8 EventSink bridge needed)".into(),
-        ))
+    /// Returns the current status of a run: `"running"`, `"finished"`,
+    /// `"failed"`, or `"cancelled"`. Returns `NotFound` if the run_id is
+    /// unknown (was never started or has been garbage-collected).
+    pub async fn run_status(&self, run_id: &str) -> Result<String, AgentdError> {
+        let guard = self
+            .run_statuses
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        guard
+            .get(run_id)
+            .cloned()
+            .ok_or_else(|| AgentdError::NotFound(format!("unknown run_id: {run_id}")))
     }
 
     // ── list_runs ─────────────────────────────────────────────────────────────
@@ -555,12 +694,30 @@ impl AgentService {
 
     // ── cancel_run ────────────────────────────────────────────────────────────
 
+    /// Cancel an in-flight run by firing its `CancellationToken`.
+    ///
+    /// Returns `Ok(())` if the run was found and the token fired (the run may
+    /// still be completing asynchronously). Returns `NotFound` if the run_id is
+    /// unknown (already finished, never started, or handle was never registered).
     pub async fn cancel_run(&self, run_id: &str) -> Result<(), AgentdError> {
-        // Not yet wired: conductor cancel requires the RunHandle's CancellationToken.
-        // RunHandle management will be in SP1c.
-        Err(AgentdError::NotFound(format!(
-            "cancel_run({run_id}): not yet wired (SP1c)"
-        )))
+        // Clone the handle OUT of the lock guard before any .await.
+        let handle = {
+            let guard = self
+                .active_runs
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
+            guard.get(run_id).cloned()
+            // guard dropped here — never held across .await
+        };
+        match handle {
+            Some(h) => {
+                h.cancel.cancel();
+                Ok(())
+            }
+            None => Err(AgentdError::NotFound(format!(
+                "cancel_run: unknown or already-finished run_id `{run_id}`"
+            ))),
+        }
     }
 
     // ── list_agents ───────────────────────────────────────────────────────────
@@ -936,6 +1093,8 @@ mod tests {
                 emitter: emitter.clone(),
                 host: Arc::new(UnavailableHost),
                 turn_runner: Arc::new(runner),
+                active_runs: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
+                run_statuses: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
             });
 
             TestEnv {
@@ -1069,5 +1228,126 @@ mod tests {
         // list_threads should return ["t1"].
         let threads = env.svc.list_threads(env.cwd_str()).await.unwrap();
         assert_eq!(threads, vec!["t1".to_string()]);
+    }
+
+    // ── Flow fixture helpers ──────────────────────────────────────────────────
+
+    /// A minimal 1-step flow fixture for run_flow tests.
+    const TEST_FLOW_ID: &str = "test-single-step";
+    const TEST_FLOW_MD: &str = r#"---
+[flow]
+id = "test-single-step"
+[[step]]
+id = "hello"
+agent = "echo-agent"
+task = "Say hello."
+output = "hello.txt"
+---
+"#;
+    const TEST_AGENT_MD: &str = r#"---
+id = "echo-agent"
+tools = []
+---
+You are an echo agent. Repeat the task back.
+"#;
+
+    /// Write a minimal flow fixture into `flows_dir` and `agents_dir`.
+    fn write_flow_fixture(flows_dir: &std::path::Path, agents_dir: &std::path::Path) {
+        let flow_dir = flows_dir.join(TEST_FLOW_ID);
+        std::fs::create_dir_all(&flow_dir).unwrap();
+        std::fs::write(flow_dir.join("flow.md"), TEST_FLOW_MD).unwrap();
+        std::fs::create_dir_all(agents_dir).unwrap();
+        std::fs::write(agents_dir.join("echo-agent.md"), TEST_AGENT_MD).unwrap();
+    }
+
+    fn ms(n: u64) -> std::time::Duration {
+        std::time::Duration::from_millis(n)
+    }
+
+    // ── Test 4a: run_flow streams run events and populates status table ────────
+    //
+    // Uses OXIDEMX_TEST_MOCK_FLOW=1 so no API key is needed.
+    // The test flow fixture is written to a temp dir and pointed to via
+    // OXIDEMX_FLOWS_DIR / OXIDEMX_AGENTS_DIR env vars.
+    //
+    // NOTE: env-var manipulation in async tests is process-global. The test is
+    // isolated enough here because we set a unique temp dir every run and the
+    // mock factory ignores model/key entirely.
+
+    #[tokio::test]
+    async fn run_flow_streams_run_events_and_status() {
+        let tmp = tempfile::tempdir().unwrap();
+        let flows_dir = tmp.path().join("flows");
+        let agents_dir = tmp.path().join("agents");
+        write_flow_fixture(&flows_dir, &agents_dir);
+
+        // Point the loader at our fixture dirs and enable the mock factory.
+        std::env::set_var("OXIDEMX_FLOWS_DIR", &flows_dir);
+        std::env::set_var("OXIDEMX_AGENTS_DIR", &agents_dir);
+        std::env::set_var("OXIDEMX_TEST_MOCK_FLOW", "1");
+
+        let env = TestEnv::new();
+        let run_id = env
+            .svc
+            .run_flow(env.cwd_str(), TEST_FLOW_ID, "{}")
+            .await
+            .unwrap();
+
+        // Poll until the status is populated (spawned task may not have started yet).
+        for _ in 0..50 {
+            if env.svc.run_status(&run_id).await.is_ok() {
+                break;
+            }
+            tokio::time::sleep(ms(20)).await;
+        }
+
+        // At minimum RunStarted was emitted → at least one "run" kind event.
+        assert!(
+            env.emitter.events().iter().any(|e| e.payload["kind"] == "run"),
+            "expected at least one 'run' kind AgentEvent"
+        );
+
+        // Status table is populated.
+        assert!(
+            env.svc.run_status(&run_id).await.is_ok(),
+            "run_status should be populated after run starts"
+        );
+
+        // Clean up env vars.
+        std::env::remove_var("OXIDEMX_FLOWS_DIR");
+        std::env::remove_var("OXIDEMX_AGENTS_DIR");
+        std::env::remove_var("OXIDEMX_TEST_MOCK_FLOW");
+    }
+
+    // ── Test 4b: cancel_run cancels the run token ─────────────────────────────
+
+    #[tokio::test]
+    async fn cancel_run_cancels_token() {
+        let tmp = tempfile::tempdir().unwrap();
+        let flows_dir = tmp.path().join("flows");
+        let agents_dir = tmp.path().join("agents");
+        write_flow_fixture(&flows_dir, &agents_dir);
+
+        std::env::set_var("OXIDEMX_FLOWS_DIR", &flows_dir);
+        std::env::set_var("OXIDEMX_AGENTS_DIR", &agents_dir);
+        std::env::set_var("OXIDEMX_TEST_MOCK_FLOW", "1");
+
+        let env = TestEnv::new();
+        let run_id = env
+            .svc
+            .run_flow(env.cwd_str(), TEST_FLOW_ID, "{}")
+            .await
+            .unwrap();
+
+        // cancel_run must succeed (handle is registered before spawn returns).
+        assert!(
+            env.svc.cancel_run(&run_id).await.is_ok(),
+            "cancel_run should succeed for a freshly started run"
+        );
+
+        // Clean up env vars.
+        std::env::remove_var("OXIDEMX_FLOWS_DIR");
+        std::env::remove_var("OXIDEMX_AGENTS_DIR");
+        std::env::remove_var("OXIDEMX_TEST_MOCK_FLOW");
     }
 }
