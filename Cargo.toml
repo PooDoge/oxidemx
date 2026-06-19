@@ -29,6 +29,8 @@ members = [
     "oxidemx-agent-local",
     "oxidemx-conductor",
     "oxidemx-mission-control",
+    "agentd",
+    "oxidemx-agent-proxy",
     "popup-rs",
     "settings-rs",
     "spike-iced", "iced_gtk_themer",

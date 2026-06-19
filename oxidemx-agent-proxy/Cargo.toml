@@ -1,0 +1,8 @@
+[package]
+name = "oxidemx-agent-proxy"
+version = "0.0.1"
+edition = "2021"
+
+[dependencies]
+zbus = "5"
+serde = { version = "1", features = ["derive"] }
