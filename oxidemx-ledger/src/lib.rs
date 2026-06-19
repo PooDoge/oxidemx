@@ -8,10 +8,12 @@
 
 pub mod error;
 pub mod event;
+pub mod graph;
 pub mod model;
 pub mod store;
 
 pub use error::LedgerError;
 pub use event::LedgerEvent;
+pub use graph::{GraphError, StepGraph};
 pub use model::{CompletionPromise, Step, StepStatus, TaskId, TaskManifest};
 pub use store::TaskLedger;
