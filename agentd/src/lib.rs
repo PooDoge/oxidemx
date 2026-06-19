@@ -2,7 +2,9 @@
 #![forbid(unsafe_code)]
 
 pub mod error;
+pub mod journal;
 pub mod projects;
+pub mod seams;
 pub mod sessions;
 
 #[cfg(test)]
