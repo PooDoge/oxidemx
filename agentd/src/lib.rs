@@ -2,6 +2,7 @@
 #![forbid(unsafe_code)]
 
 pub mod error;
+pub mod interface;
 pub mod journal;
 pub mod models;
 pub mod projects;
