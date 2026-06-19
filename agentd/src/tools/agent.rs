@@ -73,9 +73,10 @@ fn slugify_flow_id(id: &str) -> String {
     out
 }
 
-fn flows_dir() -> PathBuf {
-    let home = std::env::var("HOME").unwrap_or_else(|_| "/home/jim".to_string());
-    PathBuf::from(home).join(".config/oxidemx/flows")
+fn flows_dir() -> Result<PathBuf, String> {
+    let home = std::env::var("HOME")
+        .map_err(|_| "HOME environment variable not set".to_string())?;
+    Ok(PathBuf::from(home).join(".config/oxidemx/flows"))
 }
 
 // =============================================================================
@@ -142,7 +143,7 @@ pub(super) async fn compose_flow(args: &Value) -> Result<String, String> {
         .as_str()
         .ok_or_else(|| "compose_flow: missing 'flow_md' argument".to_string())?;
 
-    let dir = flows_dir().join(&id);
+    let dir = flows_dir()?.join(&id);
     std::fs::create_dir_all(&dir)
         .map_err(|e| format!("compose_flow: could not create flow dir: {e}"))?;
     std::fs::write(dir.join("flow.md"), flow_md)
@@ -421,6 +422,10 @@ pub(super) async fn ask_multiple_choice_question(
 // ── get_menu_config / set_menu_config (host-delegated) ────────────────────────
 
 /// Generic host-delegated tool for `get_menu_config` and `set_menu_config`.
+///
+/// For `set_menu_config` specifically: the host implementation (overlay, Task 6)
+/// must extract the `config_json` argument from `args` and apply the configuration.
+/// The agentd dispatcher passes the full arguments through unchanged.
 pub(super) async fn host_delegated(
     capability: &str,
     host: &Arc<dyn HostCapability>,
@@ -540,9 +545,12 @@ mod tests {
     // ── memory round-trip ────────────────────────────────────────────────────
 
     #[tokio::test]
+    #[ignore]
     async fn memory_save_then_list_round_trip() {
-        // memory uses the global store path — we exercise the tool dispatcher
-        // to verify wiring; the core memory tests already cover the store itself.
+        // Ignored: mutates the real global memory store until per-project memory
+        // scoping lands (SP1c followup). The core memory tests in oxidemx-agent-core
+        // already cover the store mechanics. This test dispatcher wiring is verified
+        // by the action-parsing tests below.
         let d = tempfile::tempdir().unwrap();
         let exec = test_executor_with_host(
             d.path(),

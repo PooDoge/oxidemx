@@ -339,3 +339,8 @@ priority order, with deferral reasons verified in-code:
   for widgets that will never render. Filter disabled instances in push_stats.
 - Preview worker MenuOpened one-shot: DONE inline (widget_preview.rs) — stats
   widgets now render live in the options-card preview.
+
+## T3 review fixes (2026-06-19)
+
+- **agentd compose_flow validates via subprocess** — agentd links the conductor crate in-process, but compose_flow shells out to `oxidemx-conductor validate`. Expose `oxidemx_conductor::validate(id)` as a lib fn and call in-process (systemd unit may lack the conductor binary on PATH). [SP1c T3]
+- **agentd memory/persona tools use global core paths** — both tools are backed by global `~/.local/share/oxidemx/memories.json` and `~/.config/oxidemx/{soul,user}.md`. Wire per-project memory/persona under the project's `.oxidemx/` store. [SP1c T3]
