@@ -28,6 +28,7 @@ members = [
     "oxidemx-agent",
     "oxidemx-agent-core",
     "oxidemx-agent-local",
+    "oxidemx-planner",
     "oxidemx-conductor",
     "oxidemx-mission-control",
     "agentd",
