@@ -165,7 +165,9 @@ async fn send_message_emits_event_signal_and_transcript_grows() {
     let svc = Arc::new(svc);
 
     // Unique bus name to avoid clashing with a running agentd instance.
-    let bus_name = format!("org.oxidemx.Agent.test.{}", now_ms());
+    // D-Bus well-known name elements may not start with a digit, so prefix
+    // the timestamp suffix with a letter.
+    let bus_name = format!("org.oxidemx.Agent.test.t{}", now_ms());
     let server_conn = zbus::connection::Builder::session()
         .unwrap()
         .name(bus_name.as_str())
