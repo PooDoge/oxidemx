@@ -46,13 +46,13 @@ impl ToolExecutor for AgentToolExecutor {
     ) -> Result<String, String> {
         let cwd = &self.paths.cwd;
         match name {
-            "read_file" => fs::read_file(cwd, &args),
-            "list_dir" => fs::list_dir(cwd, &args),
-            "search_file" => fs::search_file(cwd, &args),
-            "parse_document" => fs::parse_document(cwd, &args),
+            "read_file"       => fs::read_file(cwd, &args),
+            "list_dir"        => fs::list_dir(cwd, &args),
+            "search_file"     => fs::search_file(cwd, &args),
+            "parse_document"  => fs::parse_document(cwd, &args),
             "execute_command" => fs::execute_command(cwd, &args).await,
             "list_system_apps" => fs::list_system_apps(),
-            "google_search" => fs::google_search(&args).await,
+            "google_search"   => fs::google_search(&args).await,
             other => Err(format!("unknown tool: {other}")),
         }
     }
@@ -74,12 +74,15 @@ mod tests {
         )
     }
 
+    // ── read_file ─────────────────────────────────────────────────────────────
+
     #[tokio::test]
     async fn read_file_reads_within_cwd() {
         let d = tempfile::tempdir().unwrap();
         std::fs::write(d.path().join("a.txt"), "hello").unwrap();
         let exec = test_executor(d.path());
-        let out = exec.execute("read_file", serde_json::json!({"path":"a.txt"}), &None).await.unwrap();
+        // Declared key: file_path
+        let out = exec.execute("read_file", serde_json::json!({"file_path": "a.txt"}), &None).await.unwrap();
         assert!(out.contains("hello"));
     }
 
@@ -87,52 +90,90 @@ mod tests {
     async fn read_file_rejects_escape() {
         let d = tempfile::tempdir().unwrap();
         let exec = test_executor(d.path());
-        assert!(exec.execute("read_file", serde_json::json!({"path":"../../etc/passwd"}), &None).await.is_err());
+        assert!(exec.execute("read_file", serde_json::json!({"file_path": "../../etc/passwd"}), &None).await.is_err());
     }
 
     #[tokio::test]
-    async fn execute_command_runs_in_cwd() {
+    async fn read_file_missing_file_not_escapes_error() {
         let d = tempfile::tempdir().unwrap();
         let exec = test_executor(d.path());
-        let out = exec.execute("execute_command", serde_json::json!({"command":"pwd"}), &None).await.unwrap();
-        assert!(out.contains(d.path().file_name().unwrap().to_str().unwrap()));
+        // A missing but in-cwd file must error with something useful, NOT "escapes".
+        let err = exec.execute("read_file", serde_json::json!({"file_path": "missing.txt"}), &None).await.unwrap_err();
+        assert!(!err.contains("escapes"), "missing file error should not say 'escapes': {err}");
     }
+
+    // ── list_dir ─────────────────────────────────────────────────────────────
 
     #[tokio::test]
     async fn list_dir_lists_within_cwd() {
         let d = tempfile::tempdir().unwrap();
         std::fs::write(d.path().join("b.txt"), "x").unwrap();
         let exec = test_executor(d.path());
-        let out = exec.execute("list_dir", serde_json::json!({"path":"."}), &None).await.unwrap();
+        // Declared key: directory_path
+        let out = exec.execute("list_dir", serde_json::json!({"directory_path": "."}), &None).await.unwrap();
         assert!(out.contains("b.txt"));
+        // Output is JSON array of objects
+        let parsed: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert!(parsed.is_array());
+        let arr = parsed.as_array().unwrap();
+        assert!(!arr.is_empty());
+        assert!(arr[0].get("name").is_some());
+        assert!(arr[0].get("path").is_some());
+        assert!(arr[0].get("is_dir").is_some());
+        assert!(arr[0].get("size").is_some());
     }
 
     #[tokio::test]
     async fn list_dir_rejects_escape() {
         let d = tempfile::tempdir().unwrap();
         let exec = test_executor(d.path());
-        assert!(exec.execute("list_dir", serde_json::json!({"path":"../../etc"}), &None).await.is_err());
+        assert!(exec.execute("list_dir", serde_json::json!({"directory_path": "../../etc"}), &None).await.is_err());
     }
 
+    // ── search_file ───────────────────────────────────────────────────────────
+
     #[tokio::test]
-    async fn search_file_finds_match() {
+    async fn search_file_finds_match_with_glob() {
         let d = tempfile::tempdir().unwrap();
         std::fs::write(d.path().join("needle.rs"), "fn main(){}").unwrap();
         std::fs::write(d.path().join("hay.txt"), "nothing").unwrap();
         let exec = test_executor(d.path());
-        let out = exec.execute("search_file", serde_json::json!({"path":".","pattern":"needle"}), &None).await.unwrap();
-        assert!(out.contains("needle"));
-        assert!(!out.contains("hay.txt"));
+        // Declared keys: directory + pattern  (glob, not substring)
+        let out = exec.execute("search_file", serde_json::json!({"directory": ".", "pattern": "*.rs"}), &None).await.unwrap();
+        assert!(out.contains("needle"), "should find needle.rs via *.rs glob");
+        assert!(!out.contains("hay.txt"), "should not find hay.txt with *.rs glob");
+        // Output shape: JSON array of objects
+        let parsed: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert!(parsed.is_array());
+        let arr = parsed.as_array().unwrap();
+        assert!(!arr.is_empty());
+        assert!(arr[0].get("name").is_some());
+        assert!(arr[0].get("path").is_some());
     }
+
+    // ── execute_command ───────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn execute_command_runs_in_cwd() {
+        let d = tempfile::tempdir().unwrap();
+        let exec = test_executor(d.path());
+        let out = exec.execute("execute_command", serde_json::json!({"command": "pwd"}), &None).await.unwrap();
+        assert!(out.contains(d.path().file_name().unwrap().to_str().unwrap()));
+    }
+
+    // ── parse_document ────────────────────────────────────────────────────────
 
     #[tokio::test]
     async fn parse_document_reads_file() {
         let d = tempfile::tempdir().unwrap();
         std::fs::write(d.path().join("doc.txt"), "content here").unwrap();
         let exec = test_executor(d.path());
-        let out = exec.execute("parse_document", serde_json::json!({"path":"doc.txt"}), &None).await.unwrap();
+        // Declared key: source
+        let out = exec.execute("parse_document", serde_json::json!({"source": "doc.txt"}), &None).await.unwrap();
         assert!(out.contains("content here"));
     }
+
+    // ── unknown tool ─────────────────────────────────────────────────────────
 
     #[tokio::test]
     async fn unknown_tool_returns_err() {
