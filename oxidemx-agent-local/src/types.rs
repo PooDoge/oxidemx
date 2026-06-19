@@ -34,7 +34,7 @@ pub struct Message {
 // ── ChatRequest ───────────────────────────────────────────────────────────────
 
 /// A complete request sent to the local-LLM service.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChatRequest {
     /// Prior conversation turns (system + user + assistant history).
     pub messages: Vec<Message>,

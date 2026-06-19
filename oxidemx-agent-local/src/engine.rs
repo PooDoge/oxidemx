@@ -6,6 +6,7 @@
 use async_trait::async_trait;
 use oxidemx_shared::config::{ModelSpec, SamplingConfig};
 use serde_json::Value;
+use serde::{Deserialize, Serialize};
 
 use crate::error::LocalError;
 use crate::types::{Message, Usage};
@@ -19,7 +20,7 @@ use crate::types::{Message, Usage};
 /// and applies them via `RequestBuilder::set_constraint`.  On the default
 /// (mock/non-mistral) build they are recorded by [`MockEngine`] for testing.
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum SchemaConstraint {
     /// Force the model to emit a JSON value that validates against the given
     /// JSON Schema (a `serde_json::Value`).
