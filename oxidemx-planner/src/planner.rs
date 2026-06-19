@@ -223,9 +223,16 @@ mod tests {
                 .into(), // escalate also cyclic
         ]);
         let p = Planner::new(model, 1);
-        assert!(matches!(
-            p.plan("g").await,
-            Err(PlannerError::Unresolved { .. })
-        )); // graph gate caught it
+        match p.plan("g").await {
+            Err(PlannerError::Unresolved { reasons }) => {
+                // Assert the graph-validation gate (not schema gate) caught the cycle.
+                assert!(
+                    reasons.iter().any(|r| r.to_lowercase().contains("graph") || r.to_lowercase().contains("cycle")),
+                    "Expected graph/cycle error in reasons: {:#?}",
+                    reasons
+                );
+            }
+            _ => panic!("Expected Unresolved error with graph-validation reasons"),
+        }
     }
 }
