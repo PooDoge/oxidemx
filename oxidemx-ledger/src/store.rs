@@ -382,6 +382,103 @@ impl TaskLedger {
         self.save(manifest)?;
         Ok(())
     }
+
+    /// List all task IDs by scanning the tasks directory for manifest.json files.
+    ///
+    /// Returns a vector of task IDs found in `<base>/tasks/*/manifest.json`.
+    /// Returns an empty vector if the tasks directory does not exist.
+    ///
+    /// # Errors
+    ///
+    /// Returns `LedgerError` if directory listing fails.
+    pub fn list_tasks(&self) -> Result<Vec<TaskId>, LedgerError> {
+        let tasks_dir = self.base.join("tasks");
+
+        if !tasks_dir.exists() {
+            return Ok(Vec::new());
+        }
+
+        let mut task_ids = Vec::new();
+
+        for entry in fs::read_dir(&tasks_dir)? {
+            let entry = entry?;
+            let path = entry.path();
+
+            if path.is_dir() {
+                let manifest_path = path.join("manifest.json");
+                if manifest_path.exists() {
+                    if let Some(dir_name) = path.file_name().and_then(|n| n.to_str()) {
+                        task_ids.push(TaskId::from_raw(dir_name.to_string()));
+                    }
+                }
+            }
+        }
+
+        Ok(task_ids)
+    }
+
+    /// Find all in-flight tasks.
+    ///
+    /// Loads all task manifests and returns those with at least one step
+    /// that is not in a terminal state (i.e., any step is Pending, Running, or Blocked).
+    /// A task is considered finished (not in-flight) if all steps are Done, Failed, or Skipped.
+    ///
+    /// # Errors
+    ///
+    /// Returns `LedgerError` if listing or loading tasks fails.
+    pub fn in_flight(&self) -> Result<Vec<TaskManifest>, LedgerError> {
+        let task_ids = self.list_tasks()?;
+        let mut in_flight = Vec::new();
+
+        for task_id in task_ids {
+            let manifest = self.load(&task_id)?;
+
+            // Check if any step is in a non-terminal state
+            let has_non_terminal = manifest.steps.iter().any(|step| {
+                matches!(
+                    step.status,
+                    StepStatus::Pending | StepStatus::Running | StepStatus::Blocked
+                )
+            });
+
+            if has_non_terminal {
+                in_flight.push(manifest);
+            }
+        }
+
+        Ok(in_flight)
+    }
+
+    /// Resume a task after a crash or restart.
+    ///
+    /// Loads the task manifest and reconciles crash state:
+    /// - Any step left in `Running` state (due to a crash) is reset to `Pending`.
+    /// - A `Note` event is appended for each reset step.
+    /// - The manifest is saved.
+    ///
+    /// # Errors
+    ///
+    /// Returns `LedgerError` if loading, saving, or appending events fails.
+    pub fn resume(&self, task_id: &TaskId) -> Result<TaskManifest, LedgerError> {
+        let mut manifest = self.load(task_id)?;
+
+        for step in &mut manifest.steps {
+            if step.status == StepStatus::Running {
+                step.status = StepStatus::Pending;
+
+                // Append a Note event recording the reset
+                let note_event = LedgerEvent::Note {
+                    step: Some(step.id.clone()),
+                    text: "reset orphaned Running step to Pending on resume".to_string(),
+                    ts: 0,
+                };
+                self.append_event(task_id, &note_event)?;
+            }
+        }
+
+        self.save(&manifest)?;
+        Ok(manifest)
+    }
 }
 
 #[cfg(test)]
@@ -474,5 +571,32 @@ mod tests {
             ),
             Err(LedgerError::BadTransition { .. })
         ));
+    }
+
+    #[test]
+    fn resume_resets_crashed_running_steps() {
+        let d = tempfile::tempdir().unwrap();
+        let led = TaskLedger::new(d.path());
+        let mut m = TaskManifest::new(TaskId::from_raw("t".into()), "g".into());
+        m.steps.push(Step::new("a","first"));
+        led.create(&m).unwrap();
+        led.start_step(&mut m, "a", 1).unwrap();           // now Running, then "crash"
+        // a fresh ledger over the same dir (simulating restart)
+        let led2 = TaskLedger::new(d.path());
+        assert_eq!(led2.in_flight().unwrap().len(), 1);     // detected as in-flight
+        let resumed = led2.resume(&TaskId::from_raw("t".into())).unwrap();
+        assert_eq!(resumed.step("a").unwrap().status, StepStatus::Pending);  // Running reset to Pending
+        assert!(led2.read_events(&resumed.task_id).unwrap().iter().any(|e| matches!(e, LedgerEvent::Note{..})));
+    }
+
+    #[test]
+    fn list_tasks_finds_created_tasks() {
+        let d = tempfile::tempdir().unwrap();
+        let led = TaskLedger::new(d.path());
+        led.create(&TaskManifest::new(TaskId::from_raw("t1".into()), "g".into())).unwrap();
+        led.create(&TaskManifest::new(TaskId::from_raw("t2".into()), "g".into())).unwrap();
+        let mut ids: Vec<_> = led.list_tasks().unwrap().iter().map(|t| t.as_str().to_string()).collect();
+        ids.sort();
+        assert_eq!(ids, vec!["t1".to_string(), "t2".to_string()]);
     }
 }
