@@ -189,6 +189,26 @@ fn demux_event(thread_or_run: &str, payload_json: &str) -> Message {
                 inner: AgentdInner::Final(text),
             }
         }
+        "run" => {
+            // RunEventBridge emits "run" kind events for conductor flow
+            // progress (RunStarted / StepStarted / StepFinished / RunFinished
+            // etc.).  Map to an Activity-style message so flow progress is
+            // visible in the chat status area.
+            let variant = val
+                .get("variant")
+                .and_then(|v| v.as_str())
+                .unwrap_or("run")
+                .to_string();
+            let step = val
+                .get("step")
+                .and_then(|s| s.as_str())
+                .map(|s| format!(": {s}"))
+                .unwrap_or_default();
+            Message::AgentdEvent {
+                session_id: thread_or_run.to_string(),
+                inner: AgentdInner::Activity(format!("{variant}{step}")),
+            }
+        }
         other => {
             debug!("agentd event: unhandled kind '{other}' — ignoring");
             Message::Noop

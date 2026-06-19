@@ -96,6 +96,12 @@ pub fn conversation<'a>(state: &'a RadialState, kit: &Kit) -> Element<'a, Messag
         list = list.push(approval_view(pending, kit));
     }
 
+    // agentd approval card — shown when the agentd path has a pending tool
+    // approval.  The Allow/Deny buttons emit AgentdRespondApproval.
+    if let Some((request_id, card_json)) = &state.ai_agentd_approval {
+        list = list.push(agentd_approval_view(request_id, card_json, kit));
+    }
+
     // While the puck is armed the chat is render-only: a scrollable
     // here would capture wheel events before the caps canvas could
     // route them to page cycling ("wheel anywhere cycles" contract).
@@ -365,6 +371,166 @@ fn approval_view<'a>(
             },
             ..Default::default()
         })
+        .into()
+}
+
+/// Render a pending agentd approval card with Allow / Deny buttons.
+///
+/// The card shows the tool name + args (parsed from  if
+/// possible, otherwise shown raw) and two action buttons that emit
+///  with .
+fn agentd_approval_view<'a>(
+    request_id: &'a str,
+    card_json: &'a str,
+    kit: Kit,
+) -> Element<'a, Message> {
+    // Parse card JSON for a readable tool name + description.
+    let (tool_label, args_preview) = serde_json::from_str::<serde_json::Value>(card_json)
+        .ok()
+        .map(|v| {
+            let tool = v
+                .get("tool")
+                .and_then(|t| t.as_str())
+                .unwrap_or("tool call")
+                .to_string();
+            let args = v
+                .get("args")
+                .map(|a| {
+                    let s = a.to_string();
+                    if s.len() > 80 { format!("{}…", &s[..80]) } else { s }
+                })
+                .unwrap_or_default();
+            (tool, args)
+        })
+        .unwrap_or_else(|| {
+            let raw = if card_json.len() > 80 {
+                format!("{}…", &card_json[..80])
+            } else {
+                card_json.to_string()
+            };
+            ("tool call".to_string(), raw)
+        });
+
+    let bang = container(
+        text("!")
+            .size(11)
+            .font(iced::Font {
+                weight: iced::font::Weight::Bold,
+                ..Default::default()
+            })
+            .color(kit.fade(kit.crust, 1.0)),
+    )
+    .width(Length::Fixed(17.0))
+    .height(Length::Fixed(17.0))
+    .align_x(Alignment::Center)
+    .align_y(Alignment::Center)
+    .style(move |_| iced::widget::container::Style {
+        background: Some(iced::Background::Color(kit.fade(kit.yellow, 1.0))),
+        border: iced::border::Border::default().rounded(9.0),
+        ..Default::default()
+    });
+
+    let header = row![
+        bang,
+        text(format!("Approve: {tool_label}"))
+            .size(12.0)
+            .font(iced::Font {
+                weight: iced::font::Weight::Semibold,
+                ..Default::default()
+            })
+            .color(kit.fade(kit.text, 1.0)),
+    ]
+    .spacing(8)
+    .align_y(Alignment::Center);
+
+    let preview_widget: Element<'_, Message> = if args_preview.is_empty() {
+        Space::new().into()
+    } else {
+        container(
+            text(args_preview)
+                .size(11.0)
+                .font(iced::Font::MONOSPACE)
+                .color(kit.fade(kit.text, 1.0)),
+        )
+        .width(Length::Fill)
+        .padding([7, 10])
+        .style(super::catalog::surface_style(kit, super::Surface::CrustWell))
+        .into()
+    };
+
+    let req_id_allow = request_id.to_string();
+    let req_id_deny = request_id.to_string();
+
+    let allow_btn = button(
+        text("Allow")
+            .size(10.5)
+            .font(iced::Font {
+                weight: iced::font::Weight::Bold,
+                ..Default::default()
+            })
+            .color(kit.fade(kit.crust, 1.0)),
+    )
+    .padding([4, 11])
+    .style(move |_, _| button::Style {
+        background: Some(iced::Background::Color(kit.fade(kit.yellow, 1.0))),
+        border: iced::border::Border::default().rounded(6.0),
+        text_color: kit.fade(kit.crust, 1.0),
+        ..Default::default()
+    })
+    .on_press(Message::AgentdRespondApproval {
+        request_id: req_id_allow,
+        allow: true,
+    });
+
+    let deny_btn = button(
+        text("Deny").size(10.5).color(kit.fade(kit.subtext1, 1.0)),
+    )
+    .padding([4, 11])
+    .style(move |_, status| {
+        let hov = matches!(status, button::Status::Hovered);
+        button::Style {
+            border: iced::border::Border {
+                color: if hov {
+                    kit.fade(kit.red, 0.5)
+                } else {
+                    kit.fade(kit.surface2, 1.0)
+                },
+                width: 1.0,
+                radius: 6.0.into(),
+            },
+            text_color: if hov {
+                kit.fade(kit.red, 1.0)
+            } else {
+                kit.fade(kit.subtext1, 1.0)
+            },
+            ..Default::default()
+        }
+    })
+    .on_press(Message::AgentdRespondApproval {
+        request_id: req_id_deny,
+        allow: false,
+    });
+
+    let actions = row![
+        deny_btn,
+        Space::new().width(Length::Fill),
+        allow_btn,
+    ]
+    .spacing(6)
+    .align_y(Alignment::Center);
+
+    let card = column![header, preview_widget, actions].spacing(8);
+    container(card)
+        .padding(12)
+        .style(super::catalog::surface_style(
+            kit,
+            super::Surface::Tinted {
+                tone: kit.yellow,
+                bg_k: 0.07,
+                border_k: 0.32,
+                radius: 12.0,
+            },
+        ))
         .into()
 }
 

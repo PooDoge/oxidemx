@@ -369,7 +369,7 @@ impl AgentService {
             })
             .ok();
 
-        // Emit an agent event.
+        // Emit a "Turn" summary event (for internal bookkeeping).
         let turn_id = new_turn_id();
         let preview = reply.chars().take(120).collect::<String>();
         self.emitter.emit(AgentEvent {
@@ -381,6 +381,21 @@ impl AgentService {
                 "turn_id": turn_id,
                 "thread": thread,
                 "reply_preview": preview,
+            }),
+        });
+
+        // Emit the "final" event so D-Bus subscribers (the overlay) can commit
+        // the full reply text and clear their loading state.  This must be
+        // emitted AFTER the "Turn" event and never while holding a lock.
+        self.emitter.emit(AgentEvent {
+            project: paths.key.as_str().to_string(),
+            thread_or_run: thread.into(),
+            ts: now_ms(),
+            payload: serde_json::json!({
+                "kind": "final",
+                "turn_id": turn_id,
+                "thread": thread,
+                "text": reply,
             }),
         });
 
@@ -1244,9 +1259,22 @@ mod tests {
         assert_eq!(turns[0].role, "user");
         assert_eq!(turns[1].role, "assistant");
 
+        // A "final" kind event was emitted carrying the reply text.
+        let events = env.emitter.events();
+        let final_ev = events.iter().find(|e| e.payload["kind"] == "final");
+        assert!(
+            final_ev.is_some(),
+            "expected a 'final' kind event after send_message; got: {events:#?}"
+        );
+        assert_eq!(
+            final_ev.unwrap().payload["text"].as_str().unwrap_or(""),
+            "mock assistant reply",
+            "final event should carry the complete reply text"
+        );
+
         // An event was emitted.
         assert!(
-            !env.emitter.events().is_empty(),
+            !events.is_empty(),
             "expected at least one emitted event"
         );
 

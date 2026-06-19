@@ -49,8 +49,16 @@ pub use oxidemx_agent_core::mode::list_flows;
 // =============================================================================
 
 fn get_config_path() -> std::path::PathBuf {
-    let home = std::env::var("HOME").unwrap_or_else(|_| "/home/jim".to_string());
-    std::path::Path::new(&home).join(".config/oxidemx/config.json")
+    // Same XDG-aware resolution as agentd_project() — no hardcoded user.
+    let base = if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME") {
+        if !xdg.is_empty() {
+            return std::path::PathBuf::from(xdg).join("oxidemx/config.json");
+        }
+        std::env::var("HOME").unwrap_or_else(|_| "/tmp/oxidemx-home".to_string())
+    } else {
+        std::env::var("HOME").unwrap_or_else(|_| "/tmp/oxidemx-home".to_string())
+    };
+    std::path::Path::new(&base).join(".config/oxidemx/config.json")
 }
 
 pub fn load_api_key() -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
@@ -258,8 +266,15 @@ pub async fn ask_ai(
 /// This is consistent across restarts and unique to the user's identity (no
 /// collision with real code projects that happen to share a cwd).
 pub fn agentd_project() -> String {
-    let home = std::env::var("HOME").unwrap_or_else(|_| "/home/jim".to_string());
-    format!("{home}/.config/oxidemx")
+    // Prefer XDG_CONFIG_HOME, fall back to $HOME/.config, last resort /tmp/oxidemx.
+    // Never hardcode a specific user path.
+    if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME") {
+        if !xdg.is_empty() {
+            return format!("{xdg}/oxidemx");
+        }
+    }
+    let base = std::env::var("HOME").unwrap_or_else(|_| "/tmp/oxidemx-home".to_string());
+    format!("{base}/.config/oxidemx")
 }
 
 /// Send a prompt to agentd over D-Bus and return immediately.
