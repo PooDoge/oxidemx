@@ -8,6 +8,7 @@ pub mod models;
 pub mod projects;
 pub mod seams;
 pub mod sessions;
+pub mod stream_bridge;
 
 #[cfg(test)]
 mod tests {
