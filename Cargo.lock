@@ -7004,6 +7004,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "oxidemx-ledger"
+version = "0.0.1"
+dependencies = [
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "oxidemx-mission-control"
 version = "0.1.0"
 dependencies = [

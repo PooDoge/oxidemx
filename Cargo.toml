@@ -16,6 +16,7 @@ resolver = "2"
 members = [
     "daemon",
     "oxidemx-icons",
+    "oxidemx-ledger",
     "oxidemx-scene-render",
     "oxidemx-shared",
     "oxidemx-widget-api",
