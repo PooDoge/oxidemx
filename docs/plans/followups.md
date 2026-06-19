@@ -340,6 +340,11 @@ priority order, with deferral reasons verified in-code:
 - Preview worker MenuOpened one-shot: DONE inline (widget_preview.rs) — stats
   widgets now render live in the options-card preview.
 
+## SP2a → SP2c deferred (oxidemx-ledger, 2026-06-19)
+
+- **oxidemx-ledger: add `record_tool_call`** — bump `Step.tool_calls` + append a `ToolCall` event; also emit `TaskCreated` on `create`. [SP2a→SP2c]
+- **oxidemx-ledger: add per-step budget field + StepGraph validate()/cycle-check** for the Planner. [SP2a→SP2b/c]
+
 ## T3 review fixes (2026-06-19)
 
 - **agentd compose_flow validates via subprocess** — agentd links the conductor crate in-process, but compose_flow shells out to `oxidemx-conductor validate`. Expose `oxidemx_conductor::validate(id)` as a lib fn and call in-process (systemd unit may lack the conductor binary on PATH). [SP1c T3]

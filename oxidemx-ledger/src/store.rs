@@ -2,6 +2,16 @@
 //!
 //! Persists `TaskManifest` to JSON files with crash-safe atomic writes
 //! using write-to-temp + rename semantics.
+//!
+//! ## Durability guarantee
+//!
+//! Events are appended to `events.jsonl` BEFORE the manifest is saved.
+//! On a process crash between the two writes, `events.jsonl` may record
+//! one transition that the manifest does not reflect.  The event log is
+//! authoritative; `resume` reconciles any orphaned `Running` steps.
+//!
+//! Atomicity is provided by write-temp + rename (process-crash-safe).
+//! Writes are NOT fsync'd, so power-loss durability is not guaranteed.
 
 use std::fs::{self, OpenOptions};
 use std::path::{Path, PathBuf};
@@ -41,6 +51,8 @@ impl TaskLedger {
 
     /// Create a new task, atomically writing its manifest and creating the artifacts directory.
     ///
+    /// Stamps `manifest.created_ts` and `manifest.updated_ts` with `now` before writing.
+    ///
     /// The manifest is written to `<task_dir>/manifest.json`.
     /// The `<task_dir>/artifacts` directory is created (empty).
     ///
@@ -50,7 +62,10 @@ impl TaskLedger {
     /// - Directory creation fails.
     /// - JSON serialization fails.
     /// - File write/rename fails.
-    pub fn create(&self, manifest: &TaskManifest) -> Result<(), LedgerError> {
+    pub fn create(&self, manifest: &mut TaskManifest, now: u64) -> Result<(), LedgerError> {
+        manifest.created_ts = now;
+        manifest.updated_ts = now;
+
         let task_dir = self.task_dir(&manifest.task_id);
 
         // Ensure task directory exists
@@ -216,6 +231,7 @@ impl TaskLedger {
         };
 
         self.append_event(&manifest.task_id, &event)?;
+        manifest.updated_ts = now;
         self.save(manifest)?;
         Ok(())
     }
@@ -265,6 +281,7 @@ impl TaskLedger {
         };
 
         self.append_event(&manifest.task_id, &event)?;
+        manifest.updated_ts = now;
         self.save(manifest)?;
         Ok(())
     }
@@ -305,6 +322,7 @@ impl TaskLedger {
         };
 
         self.append_event(&manifest.task_id, &event)?;
+        manifest.updated_ts = now;
         self.save(manifest)?;
         Ok(())
     }
@@ -315,7 +333,8 @@ impl TaskLedger {
     ///
     /// # Errors
     ///
-    /// Returns `BadTransition` if the step is already Done.
+    /// Returns `BadTransition` if the step is already in any terminal state
+    /// (Done, Failed, or Skipped). A step already terminal cannot be re-blocked.
     pub fn block_step(
         &self,
         manifest: &mut TaskManifest,
@@ -327,11 +346,14 @@ impl TaskLedger {
             .step_mut(step_id)
             .ok_or_else(|| LedgerError::NotFound(format!("step not found: {}", step_id)))?;
 
-        if step.status == StepStatus::Done {
-            return Err(LedgerError::BadTransition {
-                from: step.status,
-                to: StepStatus::Blocked,
-            });
+        match step.status {
+            StepStatus::Done | StepStatus::Failed | StepStatus::Skipped => {
+                return Err(LedgerError::BadTransition {
+                    from: step.status,
+                    to: StepStatus::Blocked,
+                });
+            }
+            _ => {}
         }
 
         step.status = StepStatus::Blocked;
@@ -342,6 +364,7 @@ impl TaskLedger {
         };
 
         self.append_event(&manifest.task_id, &event)?;
+        manifest.updated_ts = now;
         self.save(manifest)?;
         Ok(())
     }
@@ -352,7 +375,8 @@ impl TaskLedger {
     ///
     /// # Errors
     ///
-    /// Returns `BadTransition` if the step is already Done.
+    /// Returns `BadTransition` if the step is already in any terminal state
+    /// (Done, Failed, or Skipped). A step already terminal cannot be re-skipped.
     pub fn skip_step(
         &self,
         manifest: &mut TaskManifest,
@@ -364,11 +388,14 @@ impl TaskLedger {
             .step_mut(step_id)
             .ok_or_else(|| LedgerError::NotFound(format!("step not found: {}", step_id)))?;
 
-        if step.status == StepStatus::Done {
-            return Err(LedgerError::BadTransition {
-                from: step.status,
-                to: StepStatus::Skipped,
-            });
+        match step.status {
+            StepStatus::Done | StepStatus::Failed | StepStatus::Skipped => {
+                return Err(LedgerError::BadTransition {
+                    from: step.status,
+                    to: StepStatus::Skipped,
+                });
+            }
+            _ => {}
         }
 
         step.status = StepStatus::Skipped;
@@ -379,6 +406,7 @@ impl TaskLedger {
         };
 
         self.append_event(&manifest.task_id, &event)?;
+        manifest.updated_ts = now;
         self.save(manifest)?;
         Ok(())
     }
@@ -453,27 +481,39 @@ impl TaskLedger {
     ///
     /// Loads the task manifest and reconciles crash state:
     /// - Any step left in `Running` state (due to a crash) is reset to `Pending`.
-    /// - A `Note` event is appended for each reset step.
+    /// - A `Note` event is appended for each reset step, timestamped with `now`.
+    /// - `manifest.updated_ts` is set to `now` if any step was reset.
     /// - The manifest is saved.
+    ///
+    /// Events are appended BEFORE the manifest is saved; on a process crash
+    /// between the two, `events.jsonl` may record one transition the manifest
+    /// doesn't reflect — the event log is authoritative, and `resume` reconciles
+    /// orphaned `Running` steps.
     ///
     /// # Errors
     ///
     /// Returns `LedgerError` if loading, saving, or appending events fails.
-    pub fn resume(&self, task_id: &TaskId) -> Result<TaskManifest, LedgerError> {
+    pub fn resume(&self, task_id: &TaskId, now: u64) -> Result<TaskManifest, LedgerError> {
         let mut manifest = self.load(task_id)?;
+        let mut any_reset = false;
 
         for step in &mut manifest.steps {
             if step.status == StepStatus::Running {
                 step.status = StepStatus::Pending;
+                any_reset = true;
 
                 // Append a Note event recording the reset
                 let note_event = LedgerEvent::Note {
                     step: Some(step.id.clone()),
                     text: "reset orphaned Running step to Pending on resume".to_string(),
-                    ts: 0,
+                    ts: now,
                 };
                 self.append_event(task_id, &note_event)?;
             }
+        }
+
+        if any_reset {
+            manifest.updated_ts = now;
         }
 
         self.save(&manifest)?;
@@ -492,11 +532,14 @@ mod tests {
         let led = TaskLedger::new(d.path());
         let mut m = TaskManifest::new(TaskId::from_raw("t-1".into()), "g".into());
         m.steps.push(Step::new("a", "first"));
-        led.create(&m).unwrap();
+        led.create(&mut m, 100).unwrap();
+        assert_eq!(m.created_ts, 100);
+        assert_eq!(m.updated_ts, 100);
         assert!(d.path().join("tasks/t-1/manifest.json").exists());
         assert!(d.path().join("tasks/t-1/artifacts").is_dir());
         let mut loaded = led.load(&TaskId::from_raw("t-1".into())).unwrap();
         assert_eq!(loaded.steps.len(), 1);
+        assert_eq!(loaded.created_ts, 100);
         loaded.steps[0].status = StepStatus::Running;
         led.save(&loaded).unwrap();
         // no .tmp left behind
@@ -510,7 +553,7 @@ mod tests {
         let led = TaskLedger::new(d.path());
         let mut m = TaskManifest::new(TaskId::from_raw("t".into()), "g".into());
         m.steps.push(Step::new("a", "first"));
-        led.create(&m).unwrap();
+        led.create(&mut m, 1).unwrap();
         led.start_step(&mut m, "a", 1).unwrap();
         // empty token rejected
         assert!(matches!(
@@ -555,7 +598,7 @@ mod tests {
         let led = TaskLedger::new(d.path());
         let mut m = TaskManifest::new(TaskId::from_raw("t".into()), "g".into());
         m.steps.push(Step::new("a", "first"));
-        led.create(&m).unwrap();
+        led.create(&mut m, 1).unwrap();
         // completing a Pending (not Running) step is illegal
         assert!(matches!(
             led.complete_step(
@@ -579,13 +622,14 @@ mod tests {
         let led = TaskLedger::new(d.path());
         let mut m = TaskManifest::new(TaskId::from_raw("t".into()), "g".into());
         m.steps.push(Step::new("a","first"));
-        led.create(&m).unwrap();
-        led.start_step(&mut m, "a", 1).unwrap();           // now Running, then "crash"
+        led.create(&mut m, 1).unwrap();
+        led.start_step(&mut m, "a", 2).unwrap();           // now Running, then "crash"
         // a fresh ledger over the same dir (simulating restart)
         let led2 = TaskLedger::new(d.path());
         assert_eq!(led2.in_flight().unwrap().len(), 1);     // detected as in-flight
-        let resumed = led2.resume(&TaskId::from_raw("t".into())).unwrap();
+        let resumed = led2.resume(&TaskId::from_raw("t".into()), 3).unwrap();
         assert_eq!(resumed.step("a").unwrap().status, StepStatus::Pending);  // Running reset to Pending
+        assert_eq!(resumed.updated_ts, 3);                  // updated_ts stamped on resume
         assert!(led2.read_events(&resumed.task_id).unwrap().iter().any(|e| matches!(e, LedgerEvent::Note{..})));
     }
 
@@ -593,8 +637,8 @@ mod tests {
     fn list_tasks_finds_created_tasks() {
         let d = tempfile::tempdir().unwrap();
         let led = TaskLedger::new(d.path());
-        led.create(&TaskManifest::new(TaskId::from_raw("t1".into()), "g".into())).unwrap();
-        led.create(&TaskManifest::new(TaskId::from_raw("t2".into()), "g".into())).unwrap();
+        led.create(&mut TaskManifest::new(TaskId::from_raw("t1".into()), "g".into()), 1).unwrap();
+        led.create(&mut TaskManifest::new(TaskId::from_raw("t2".into()), "g".into()), 1).unwrap();
         let mut ids: Vec<_> = led.list_tasks().unwrap().iter().map(|t| t.as_str().to_string()).collect();
         ids.sort();
         assert_eq!(ids, vec!["t1".to_string(), "t2".to_string()]);

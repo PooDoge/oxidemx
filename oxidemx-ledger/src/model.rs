@@ -187,7 +187,11 @@ impl TaskManifest {
     }
 
     /// Look up a step by ID mutably.
-    pub fn step_mut(&mut self, id: &str) -> Option<&mut Step> {
+    ///
+    /// `pub(crate)` intentionally: external crates must not hold `&mut Step` directly,
+    /// as that would bypass the ledger's guarded transitions and break the ground-truth
+    /// invariant on `status` and `verifier_token`.
+    pub(crate) fn step_mut(&mut self, id: &str) -> Option<&mut Step> {
         self.steps.iter_mut().find(|s| s.id == id)
     }
 }
