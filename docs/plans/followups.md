@@ -344,3 +344,4 @@ priority order, with deferral reasons verified in-code:
 
 - **agentd compose_flow validates via subprocess** — agentd links the conductor crate in-process, but compose_flow shells out to `oxidemx-conductor validate`. Expose `oxidemx_conductor::validate(id)` as a lib fn and call in-process (systemd unit may lack the conductor binary on PATH). [SP1c T3]
 - **agentd memory/persona tools use global core paths** — both tools are backed by global `~/.local/share/oxidemx/memories.json` and `~/.config/oxidemx/{soul,user}.md`. Wire per-project memory/persona under the project's `.oxidemx/` store. [SP1c T3]
+- oxidemx-agent-core hardcodes `/home/jim` HOME fallback in persona.rs, memory_semantic.rs, heartbeat.rs, api_key.rs, tasks.rs, memory.rs — sweep to a shared home_dir() helper that errors/uses XDG instead. [SP1c T8a]
