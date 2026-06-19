@@ -1,11 +1,15 @@
 //! Native tool executor for agentd.
 //!
 //! [`AgentToolExecutor`] implements [`ToolExecutor`] by dispatching to the
-//! seven native tool bodies in [`fs`].  All filesystem tools are
+//! native tool bodies in [`fs`] and [`agent`].  All filesystem tools are
 //! cwd-scoped and escape-guarded; `list_system_apps` and `google_search`
-//! operate at host scope.
+//! operate at host scope.  Agent tools (`memory`, `persona`, `use_skill`,
+//! `compose_flow`, `run_flow`, `schedule_task`) and host-delegated tools
+//! (`ask_multiple_choice_question`, `get_menu_config`, `set_menu_config`)
+//! are in [`agent`].
 #![forbid(unsafe_code)]
 
+mod agent;
 mod fs;
 
 use std::sync::Arc;
@@ -22,12 +26,10 @@ use crate::seams::HostCapability;
 /// Concrete [`ToolExecutor`] for agentd.
 ///
 /// Stores the project paths (used for cwd-scoped tools) and a
-/// [`HostCapability`] seam (needed for Task 3 features; stored now so the
-/// constructor signature is stable).
+/// [`HostCapability`] seam (for host-delegated tools).
 pub struct AgentToolExecutor {
-    paths: ProjectPaths,
-    #[allow(dead_code)]
-    host: Arc<dyn HostCapability>,
+    pub(crate) paths: ProjectPaths,
+    pub(crate) host: Arc<dyn HostCapability>,
 }
 
 impl AgentToolExecutor {
@@ -46,6 +48,7 @@ impl ToolExecutor for AgentToolExecutor {
     ) -> Result<String, String> {
         let cwd = &self.paths.cwd;
         match name {
+            // ── Filesystem tools ─────────────────────────────────────────
             "read_file"       => fs::read_file(cwd, &args),
             "list_dir"        => fs::list_dir(cwd, &args),
             "search_file"     => fs::search_file(cwd, &args),
@@ -53,6 +56,26 @@ impl ToolExecutor for AgentToolExecutor {
             "execute_command" => fs::execute_command(cwd, &args).await,
             "list_system_apps" => fs::list_system_apps(),
             "google_search"   => fs::google_search(&args).await,
+
+            // ── Agent tools (Task 3) ─────────────────────────────────────
+            "use_skill"    => agent::use_skill(&self.paths, &args),
+            "memory"       => agent::memory(&args),
+            "persona"      => agent::persona(&args),
+            "schedule_task" => agent::schedule_task(&args).await,
+            "compose_flow" => agent::compose_flow(&args).await,
+            "run_flow"     => agent::run_flow(&args).await,
+
+            // ── Host-delegated tools (Task 3) ────────────────────────────
+            "ask_multiple_choice_question" => {
+                agent::ask_multiple_choice_question(&self.host, &args).await
+            }
+            "get_menu_config" => {
+                agent::host_delegated("get_menu_config", &self.host, &args).await
+            }
+            "set_menu_config" => {
+                agent::host_delegated("set_menu_config", &self.host, &args).await
+            }
+
             other => Err(format!("unknown tool: {other}")),
         }
     }
@@ -72,6 +95,21 @@ mod tests {
             ProjectPaths::resolve(cwd),
             Arc::new(UnavailableHost),
         )
+    }
+
+    // Re-export the verbatim brief test for visibility at the mod level.
+    // The full test suite lives in `agent::tests`; replicate the brief's
+    // exact test here so it passes in `cargo test -p agentd`.
+    #[tokio::test]
+    async fn ask_multiple_choice_delegates_to_host() {
+        use oxidemx_agent_core::tool::ToolExecutor;
+        use crate::tools::agent::test_support::{RecordingHost, test_executor_with_host};
+        let host = Arc::new(RecordingHost::with_reply(serde_json::json!({"choice":"B"})));
+        let exec = test_executor_with_host(tempfile::tempdir().unwrap().path(), host.clone());
+        let out = exec.execute("ask_multiple_choice_question",
+            serde_json::json!({"question":"x","options":["A","B"]}), &None).await.unwrap();
+        assert!(host.calls().iter().any(|c| c == "ask_multiple_choice_question"));
+        assert!(out.contains("B"));
     }
 
     // ── read_file ─────────────────────────────────────────────────────────────
