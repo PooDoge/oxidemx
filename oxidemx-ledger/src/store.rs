@@ -3,11 +3,12 @@
 //! Persists `TaskManifest` to JSON files with crash-safe atomic writes
 //! using write-to-temp + rename semantics.
 
-use std::fs;
+use std::fs::{self, OpenOptions};
 use std::path::{Path, PathBuf};
 
 use crate::error::LedgerError;
-use crate::model::TaskId;
+use crate::event::LedgerEvent;
+use crate::model::{CompletionPromise, StepStatus, TaskId};
 use crate::TaskManifest;
 
 /// Atomic on-disk store for task manifests.
@@ -126,6 +127,261 @@ impl TaskLedger {
 
         Ok(())
     }
+
+    /// Append a single event to the event log.
+    ///
+    /// Events are appended as JSON lines to `<task_dir>/events.jsonl`.
+    /// One JSON object per line, with no commas between entries.
+    ///
+    /// # Errors
+    ///
+    /// Returns `LedgerError` if file operations or JSON serialization fail.
+    pub fn append_event(&self, task_id: &TaskId, event: &LedgerEvent) -> Result<(), LedgerError> {
+        let task_dir = self.task_dir(task_id);
+        fs::create_dir_all(&task_dir)?;
+
+        let events_path = task_dir.join("events.jsonl");
+        let mut file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&events_path)?;
+
+        let json = serde_json::to_string(event)?;
+        use std::io::Write;
+        writeln!(file, "{}", json)?;
+
+        Ok(())
+    }
+
+    /// Read all events from the event log.
+    ///
+    /// Parses the `events.jsonl` file, one JSON object per line.
+    ///
+    /// # Errors
+    ///
+    /// Returns `LedgerError` if:
+    /// - The file cannot be read.
+    /// - JSON parsing fails for any line.
+    pub fn read_events(&self, task_id: &TaskId) -> Result<Vec<LedgerEvent>, LedgerError> {
+        let task_dir = self.task_dir(task_id);
+        let events_path = task_dir.join("events.jsonl");
+
+        if !events_path.exists() {
+            return Ok(Vec::new());
+        }
+
+        let content = fs::read_to_string(&events_path)?;
+        let mut events = Vec::new();
+
+        for line in content.lines() {
+            if line.trim().is_empty() {
+                continue;
+            }
+            let event = serde_json::from_str::<LedgerEvent>(line)?;
+            events.push(event);
+        }
+
+        Ok(events)
+    }
+
+    /// Start a step: transition from Pending → Running.
+    ///
+    /// Validates the current status, mutates the manifest, appends the event,
+    /// and saves the manifest.
+    ///
+    /// # Errors
+    ///
+    /// Returns `BadTransition` if the step is not Pending.
+    pub fn start_step(
+        &self,
+        manifest: &mut TaskManifest,
+        step_id: &str,
+        now: u64,
+    ) -> Result<(), LedgerError> {
+        let step = manifest
+            .step_mut(step_id)
+            .ok_or_else(|| LedgerError::NotFound(format!("step not found: {}", step_id)))?;
+
+        if step.status != StepStatus::Pending {
+            return Err(LedgerError::BadTransition {
+                from: step.status,
+                to: StepStatus::Running,
+            });
+        }
+
+        step.status = StepStatus::Running;
+        let event = LedgerEvent::StepStarted {
+            step: step_id.to_string(),
+            ts: now,
+        };
+
+        self.append_event(&manifest.task_id, &event)?;
+        self.save(manifest)?;
+        Ok(())
+    }
+
+    /// Complete a step: transition from Running → Done.
+    ///
+    /// Validates the current status is Running, records the verifier token,
+    /// appends the event, and saves the manifest.
+    ///
+    /// # Errors
+    ///
+    /// Returns:
+    /// - `BadTransition` if the step is not Running.
+    /// - `MissingPromise` if the promise token is empty.
+    pub fn complete_step(
+        &self,
+        manifest: &mut TaskManifest,
+        step_id: &str,
+        promise: CompletionPromise,
+        now: u64,
+    ) -> Result<(), LedgerError> {
+        if promise.token.is_empty() {
+            return Err(LedgerError::MissingPromise(format!(
+                "completion promise requires non-empty token for step {}",
+                step_id
+            )));
+        }
+
+        let step = manifest
+            .step_mut(step_id)
+            .ok_or_else(|| LedgerError::NotFound(format!("step not found: {}", step_id)))?;
+
+        if step.status != StepStatus::Running {
+            return Err(LedgerError::BadTransition {
+                from: step.status,
+                to: StepStatus::Done,
+            });
+        }
+
+        step.status = StepStatus::Done;
+        step.verifier_token = Some(promise.token.clone());
+
+        let event = LedgerEvent::StepDone {
+            step: step_id.to_string(),
+            token: promise.token,
+            ts: now,
+        };
+
+        self.append_event(&manifest.task_id, &event)?;
+        self.save(manifest)?;
+        Ok(())
+    }
+
+    /// Fail a step: transition from Pending or Running → Failed.
+    ///
+    /// Validates the current status, appends the event, and saves the manifest.
+    ///
+    /// # Errors
+    ///
+    /// Returns `BadTransition` if the step is already Done, Failed, Skipped, or Blocked.
+    pub fn fail_step(
+        &self,
+        manifest: &mut TaskManifest,
+        step_id: &str,
+        error: &str,
+        now: u64,
+    ) -> Result<(), LedgerError> {
+        let step = manifest
+            .step_mut(step_id)
+            .ok_or_else(|| LedgerError::NotFound(format!("step not found: {}", step_id)))?;
+
+        match step.status {
+            StepStatus::Pending | StepStatus::Running => {}
+            _ => {
+                return Err(LedgerError::BadTransition {
+                    from: step.status,
+                    to: StepStatus::Failed,
+                });
+            }
+        }
+
+        step.status = StepStatus::Failed;
+        let event = LedgerEvent::StepFailed {
+            step: step_id.to_string(),
+            error: error.to_string(),
+            ts: now,
+        };
+
+        self.append_event(&manifest.task_id, &event)?;
+        self.save(manifest)?;
+        Ok(())
+    }
+
+    /// Block a step: transition to Blocked.
+    ///
+    /// Appends the event and saves the manifest.
+    ///
+    /// # Errors
+    ///
+    /// Returns `BadTransition` if the step is already Done.
+    pub fn block_step(
+        &self,
+        manifest: &mut TaskManifest,
+        step_id: &str,
+        reason: &str,
+        now: u64,
+    ) -> Result<(), LedgerError> {
+        let step = manifest
+            .step_mut(step_id)
+            .ok_or_else(|| LedgerError::NotFound(format!("step not found: {}", step_id)))?;
+
+        if step.status == StepStatus::Done {
+            return Err(LedgerError::BadTransition {
+                from: step.status,
+                to: StepStatus::Blocked,
+            });
+        }
+
+        step.status = StepStatus::Blocked;
+        let event = LedgerEvent::StepBlocked {
+            step: step_id.to_string(),
+            reason: reason.to_string(),
+            ts: now,
+        };
+
+        self.append_event(&manifest.task_id, &event)?;
+        self.save(manifest)?;
+        Ok(())
+    }
+
+    /// Skip a step: transition to Skipped.
+    ///
+    /// Appends the event and saves the manifest.
+    ///
+    /// # Errors
+    ///
+    /// Returns `BadTransition` if the step is already Done.
+    pub fn skip_step(
+        &self,
+        manifest: &mut TaskManifest,
+        step_id: &str,
+        reason: &str,
+        now: u64,
+    ) -> Result<(), LedgerError> {
+        let step = manifest
+            .step_mut(step_id)
+            .ok_or_else(|| LedgerError::NotFound(format!("step not found: {}", step_id)))?;
+
+        if step.status == StepStatus::Done {
+            return Err(LedgerError::BadTransition {
+                from: step.status,
+                to: StepStatus::Skipped,
+            });
+        }
+
+        step.status = StepStatus::Skipped;
+        let event = LedgerEvent::StepSkipped {
+            step: step_id.to_string(),
+            reason: reason.to_string(),
+            ts: now,
+        };
+
+        self.append_event(&manifest.task_id, &event)?;
+        self.save(manifest)?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -149,5 +405,74 @@ mod tests {
         // no .tmp left behind
         assert!(!d.path().join("tasks/t-1/manifest.json.tmp").exists());
         assert_eq!(led.load(&TaskId::from_raw("t-1".into())).unwrap().steps[0].status, StepStatus::Running);
+    }
+
+    #[test]
+    fn complete_requires_promise_and_records_token() {
+        let d = tempfile::tempdir().unwrap();
+        let led = TaskLedger::new(d.path());
+        let mut m = TaskManifest::new(TaskId::from_raw("t".into()), "g".into());
+        m.steps.push(Step::new("a", "first"));
+        led.create(&m).unwrap();
+        led.start_step(&mut m, "a", 1).unwrap();
+        // empty token rejected
+        assert!(matches!(
+            led.complete_step(
+                &mut m,
+                "a",
+                CompletionPromise {
+                    step_id: "a".into(),
+                    verifier: "cargo".into(),
+                    token: "".into(),
+                    ts: 2
+                },
+                2
+            ),
+            Err(LedgerError::MissingPromise(_))
+        ));
+        // valid token → Done + token recorded + event logged
+        led.complete_step(
+            &mut m,
+            "a",
+            CompletionPromise {
+                step_id: "a".into(),
+                verifier: "cargo".into(),
+                token: "PASS".into(),
+                ts: 2,
+            },
+            2,
+        )
+        .unwrap();
+        assert_eq!(m.step("a").unwrap().status, StepStatus::Done);
+        assert_eq!(m.step("a").unwrap().verifier_token.as_deref(), Some("PASS"));
+        assert!(led
+            .read_events(&m.task_id)
+            .unwrap()
+            .iter()
+            .any(|e| matches!(e, LedgerEvent::StepDone { .. })));
+    }
+
+    #[test]
+    fn illegal_transition_rejected() {
+        let d = tempfile::tempdir().unwrap();
+        let led = TaskLedger::new(d.path());
+        let mut m = TaskManifest::new(TaskId::from_raw("t".into()), "g".into());
+        m.steps.push(Step::new("a", "first"));
+        led.create(&m).unwrap();
+        // completing a Pending (not Running) step is illegal
+        assert!(matches!(
+            led.complete_step(
+                &mut m,
+                "a",
+                CompletionPromise {
+                    step_id: "a".into(),
+                    verifier: "v".into(),
+                    token: "PASS".into(),
+                    ts: 1
+                },
+                1
+            ),
+            Err(LedgerError::BadTransition { .. })
+        ));
     }
 }

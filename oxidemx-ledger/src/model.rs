@@ -170,6 +170,11 @@ impl TaskManifest {
     pub fn step(&self, id: &str) -> Option<&Step> {
         self.steps.iter().find(|s| s.id == id)
     }
+
+    /// Look up a step by ID mutably.
+    pub fn step_mut(&mut self, id: &str) -> Option<&mut Step> {
+        self.steps.iter_mut().find(|s| s.id == id)
+    }
 }
 
 #[cfg(test)]
