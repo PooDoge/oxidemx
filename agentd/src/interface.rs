@@ -145,8 +145,9 @@ impl TurnRunner for CoreTurnRunner {
         .map_err(|e| AgentdError::Io(e.to_string()))?;
 
         // ── 4. Collect usage — sink must be dropped before finish() ───────
-        // route_turn takes ownership of the sink, so it is already dropped
-        // when it returns. We can call finish() safely.
+        // route_turn moved its local sink in; any internal tasks holding sink
+        // clones (e.g. the event-forwarder) drain and drop before route_turn
+        // returns, so the bridge channel closes and finish() completes.
         let usage = bridge.finish().await;
 
         Ok((reply, usage))
@@ -363,7 +364,7 @@ impl AgentService {
                 thread: thread.into(),
                 prompt: text.into(),
                 reply: reply.clone(),
-                usage: (usage.0 as u32, usage.1 as u32),
+                usage: (usage.0.min(u32::MAX as u64) as u32, usage.1.min(u32::MAX as u64) as u32),
                 ts: now_ms(),
             })
             .ok();
