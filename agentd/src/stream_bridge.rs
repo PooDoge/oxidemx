@@ -25,6 +25,7 @@ use oxidemx_agent_core::events::{StreamEvent, StreamSink};
 use serde_json::json;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
+use tracing::warn;
 
 use crate::seams::{AgentEvent, EventEmitter};
 
@@ -79,18 +80,22 @@ impl StreamBridge {
                     }
                     StreamEvent::Card(card_data) => {
                         // Serialize the card; serde uses the #[serde(tag="kind")] layout.
-                        let payload = serde_json::to_value(&card_data).unwrap_or_else(|_| {
-                            json!({ "kind": "card", "error": "serialize_failed" })
+                        let card_val = serde_json::to_value(&card_data).unwrap_or_else(|_| {
+                            json!({ "kind": "command", "error": "serialize_failed" })
                         });
-                        emitter.emit(build_event(&project, &thread, {
-                            let mut p = json!({ "kind": "card" });
-                            if let (Some(obj), serde_json::Value::Object(card_obj)) =
-                                (p.as_object_mut(), payload)
-                            {
-                                obj.extend(card_obj);
-                            }
-                            p
-                        }));
+                        // Extract the inner kind ("command", "task", "memory", "flow").
+                        let inner_kind = card_val
+                            .get("kind")
+                            .and_then(|k| k.as_str())
+                            .unwrap_or("command");
+                        // Map inner kind to outer kind: "flow" → "flow", anything else → "tool".
+                        let outer_kind = if inner_kind == "flow" { "flow" } else { "tool" };
+                        // Build payload with outer kind and nested card data (no stomp).
+                        let payload = json!({
+                            "kind": outer_kind,
+                            "card": card_val,
+                        });
+                        emitter.emit(build_event(&project, &thread, payload));
                     }
                     StreamEvent::Usage { prompt, completion } => {
                         // Accumulate — do NOT emit as an event.
@@ -116,7 +121,13 @@ impl StreamBridge {
     pub async fn finish(self) -> (u64, u64) {
         // The channel is already closed (caller dropped the sink). The drain
         // task will exit its recv loop and return the accumulated counts.
-        self.drain.await.unwrap_or((0, 0))
+        match self.drain.await {
+            Ok(counts) => counts,
+            Err(e) => {
+                warn!("drain task panicked: {}", e);
+                (0, 0)
+            }
+        }
     }
 }
 
@@ -160,5 +171,66 @@ mod tests {
         assert_eq!(deltas.len(), 2);
         assert_eq!(deltas[0].payload["text"], "Hel"); // ordered
         assert!(evs.iter().all(|e| e.payload["kind"] != "usage")); // usage not an event
+    }
+
+    #[tokio::test]
+    async fn bridge_forwards_activity() {
+        use oxidemx_agent_core::events::StreamEvent;
+        let em = std::sync::Arc::new(crate::seams::RecordingEmitter::default());
+        let (bridge, sink) = StreamBridge::new("proj".into(), "t1".into(), em.clone());
+        sink.send(StreamEvent::Activity("working".into())).await;
+        drop(sink);
+        bridge.finish().await;
+        let evs = em.events();
+        assert_eq!(evs.len(), 1);
+        assert_eq!(evs[0].payload["kind"], "activity");
+        assert_eq!(evs[0].payload["text"], "working");
+    }
+
+    #[tokio::test]
+    async fn bridge_maps_card_by_inner_kind() {
+        use oxidemx_agent_core::events::{StreamEvent, AgentCardData};
+        let em = std::sync::Arc::new(crate::seams::RecordingEmitter::default());
+        let (bridge, sink) = StreamBridge::new("proj".into(), "t1".into(), em.clone());
+        // Test with a Flow card (inner kind "flow" → outer kind "flow").
+        let card = AgentCardData::Flow {
+            flow_id: "f1".into(),
+            run_id: "r1".into(),
+            success: true,
+            steps: vec![],
+            artifacts: vec![],
+        };
+        sink.send(StreamEvent::Card(card)).await;
+        drop(sink);
+        bridge.finish().await;
+        let evs = em.events();
+        assert_eq!(evs.len(), 1);
+        let outer_kind = &evs[0].payload["kind"];
+        assert_eq!(outer_kind, "flow", "Flow card should map to outer kind 'flow'");
+        assert!(evs[0].payload["card"].is_object(), "Card data should be nested under 'card' key");
+        assert_eq!(evs[0].payload["card"]["kind"], "flow", "Inner card kind should be preserved");
+    }
+
+    #[tokio::test]
+    async fn bridge_maps_command_card_to_tool() {
+        use oxidemx_agent_core::events::{StreamEvent, AgentCardData};
+        let em = std::sync::Arc::new(crate::seams::RecordingEmitter::default());
+        let (bridge, sink) = StreamBridge::new("proj".into(), "t1".into(), em.clone());
+        // Test with a Command card (inner kind "command" → outer kind "tool").
+        let card = AgentCardData::Command {
+            command: "echo hello".into(),
+            stdout: "hello".into(),
+            exit_code: 0,
+        };
+        sink.send(StreamEvent::Card(card)).await;
+        drop(sink);
+        bridge.finish().await;
+        let evs = em.events();
+        assert_eq!(evs.len(), 1);
+        let outer_kind = &evs[0].payload["kind"];
+        assert_eq!(outer_kind, "tool", "Command card should map to outer kind 'tool'");
+        assert!(evs[0].payload["card"].is_object(), "Card data should be nested under 'card' key");
+        assert_eq!(evs[0].payload["card"]["kind"], "command", "Inner card kind should be preserved");
+        assert_eq!(evs[0].payload["card"]["command"], "echo hello", "Card data should not be stomped");
     }
 }
