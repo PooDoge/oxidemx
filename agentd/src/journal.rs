@@ -31,7 +31,7 @@ pub enum JournalEntry {
         reply: String,
         /// `(prompt_tokens, completion_tokens)`.
         usage: (u32, u32),
-        /// Unix timestamp (seconds).
+        /// Unix timestamp (milliseconds).
         ts: u64,
     },
     /// A tool call result.
@@ -112,7 +112,7 @@ mod tests {
             prompt: "p".into(),
             reply: "r".into(),
             usage: (1, 2),
-            ts: 1,
+            ts: 1000,
         })
         .unwrap();
         j.record(&JournalEntry::Approval {
@@ -120,7 +120,7 @@ mod tests {
             tool: "run".into(),
             verdict: "deny".into(),
             reason: Some("nope".into()),
-            ts: 2,
+            ts: 2000,
         })
         .unwrap();
         let lines =

@@ -13,7 +13,7 @@
 //!
 //! ## Timestamp units
 //!
-//! - `JournalEntry.ts` — **seconds** (as documented in journal.rs)
+//! - `JournalEntry.ts` — **milliseconds** (as documented in journal.rs)
 //! - `AgentEvent.ts` — **milliseconds** (as documented in seams.rs)
 //!
 //! Both are stamped with `SystemTime::now()`.
@@ -38,15 +38,7 @@ use crate::sessions::{Sessions, TranscriptTurn};
 
 // ── Timestamp helpers ─────────────────────────────────────────────────────────
 
-/// Current time in seconds since Unix epoch (for JournalEntry).
-fn now_secs() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
-}
-
-/// Current time in milliseconds since Unix epoch (for AgentEvent).
+/// Current time in milliseconds since Unix epoch (for JournalEntry and AgentEvent).
 fn now_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -299,13 +291,13 @@ impl AgentService {
             .transcripts(&paths.key, paths.transcripts_dir());
 
         // Append user turn.
-        let ts_secs = now_secs();
+        let ts_ms = now_ms();
         ts.append(
             thread,
             &TranscriptTurn {
                 role: "user".into(),
                 text: text.into(),
-                ts: ts_secs,
+                ts: ts_ms,
             },
         )?;
 
@@ -327,7 +319,7 @@ impl AgentService {
             &TranscriptTurn {
                 role: "assistant".into(),
                 text: reply.clone(),
-                ts: now_secs(),
+                ts: now_ms(),
             },
         )?;
 
@@ -339,12 +331,13 @@ impl AgentService {
                 prompt: text.into(),
                 reply: reply.clone(),
                 usage: (0, 0), // usage not tracked at this seam
-                ts: now_secs(),
+                ts: now_ms(),
             })
             .ok();
 
         // Emit an agent event.
         let turn_id = new_turn_id();
+        let preview = reply.chars().take(120).collect::<String>();
         self.emitter.emit(AgentEvent {
             project: paths.key.as_str().to_string(),
             thread_or_run: thread.into(),
@@ -353,7 +346,7 @@ impl AgentService {
                 "kind": "Turn",
                 "turn_id": turn_id,
                 "thread": thread,
-                "reply_preview": &reply[..reply.len().min(120)],
+                "reply_preview": preview,
             }),
         });
 
@@ -441,7 +434,7 @@ impl AgentService {
                 tool: String::new(), // tool name not available at this seam
                 verdict: if allow { "allow".into() } else { "deny".into() },
                 reason: reason.map(str::to_string),
-                ts: now_secs(),
+                ts: now_ms(),
             })
             .ok();
 

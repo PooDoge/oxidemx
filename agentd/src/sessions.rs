@@ -34,7 +34,7 @@ pub struct TranscriptTurn {
     pub role: String,
     /// The turn's text content.
     pub text: String,
-    /// Unix timestamp (seconds since epoch) when the turn was appended.
+    /// Unix timestamp (milliseconds since epoch) when the turn was appended.
     pub ts: u64,
 }
 
