@@ -69,15 +69,20 @@ pub enum StepStatus {
 }
 
 /// A single step within a task workflow.
+///
+/// **Invariant:** `status` and `verifier_token` are ground-truth fields settable only
+/// through the ledger's guarded transitions (e.g., `complete_step`). This enforces
+/// that external code cannot bypass the verified-completion promise. Access these
+/// fields via the public `status()` and `verifier_token()` getter methods.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Step {
     /// Unique identifier for this step.
     pub id: String,
     /// Human-readable title.
     pub title: String,
-    /// Current status.
+    /// Current status. Set only via ledger's guarded transitions.
     #[serde(default)]
-    pub status: StepStatus,
+    pub(crate) status: StepStatus,
     /// IDs of steps that must complete before this one can run.
     #[serde(default)]
     pub needs: Vec<String>,
@@ -87,9 +92,9 @@ pub struct Step {
     /// Number of tool calls made during execution.
     #[serde(default)]
     pub tool_calls: u32,
-    /// Optional verification token.
+    /// Optional verification token. Set only via ledger's guarded transitions.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub verifier_token: Option<String>,
+    pub(crate) verifier_token: Option<String>,
 }
 
 impl Step {
@@ -104,6 +109,16 @@ impl Step {
             tool_calls: 0,
             verifier_token: None,
         }
+    }
+
+    /// The step's current status (set only via the ledger's guarded transitions).
+    pub fn status(&self) -> StepStatus {
+        self.status
+    }
+
+    /// The recorded verifier completion token, if the step is Done.
+    pub fn verifier_token(&self) -> Option<&str> {
+        self.verifier_token.as_deref()
     }
 }
 
