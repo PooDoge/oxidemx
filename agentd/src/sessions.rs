@@ -147,6 +147,7 @@ pub struct SessionManager {
 
 /// Lightweight per-conversation entry (no LLM provider here — that stays in
 /// the real `oxidemx-agent::session::Session`).
+#[allow(dead_code)]
 pub struct SessionEntry {
     pub id: String,
 }
@@ -161,7 +162,7 @@ impl SessionManager {
         let id = compose_session_id(project_key, thread_id);
         self.sessions
             .lock()
-            .unwrap()
+            .unwrap_or_else(|e| e.into_inner())
             .entry(id.clone())
             .or_insert_with(|| Arc::new(SessionEntry { id }))
             .clone()
@@ -171,12 +172,18 @@ impl SessionManager {
     /// deleted.
     pub fn end(&self, project_key: &ProjectKey, thread_id: &str) {
         let id = compose_session_id(project_key, thread_id);
-        self.sessions.lock().unwrap().remove(&id);
+        self.sessions
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&id);
     }
 
     /// Number of live session entries (diagnostics).
     pub fn len(&self) -> usize {
-        self.sessions.lock().unwrap().len()
+        self.sessions
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .len()
     }
 
     pub fn is_empty(&self) -> bool {
@@ -220,7 +227,7 @@ impl Sessions {
     ) -> Arc<TranscriptStore> {
         self.transcripts_by_project
             .lock()
-            .unwrap()
+            .unwrap_or_else(|e| e.into_inner())
             .entry(project_key.as_str().to_string())
             .or_insert_with(|| Arc::new(TranscriptStore::new(transcripts_root)))
             .clone()
