@@ -33,6 +33,27 @@ fn home() -> Option<PathBuf> {
     std::env::var_os("HOME").map(PathBuf::from)
 }
 
+/// The global skill-scan roots (home-relative Claude + Antigravity directories
+/// plus any extras from `skills.json`) — WITHOUT the project-local
+/// `.claude/skills` entry that `roots()` appends as a relative path.
+///
+/// `agentd`'s project model calls this to build its merged skill root list
+/// (global roots first, then project-local roots last so project wins on name
+/// collision). Returning `PathBuf` values instead of `(PathBuf, label)` pairs
+/// keeps the public API minimal — callers that need labels can reconstruct
+/// them.
+pub fn global_skill_roots() -> Vec<PathBuf> {
+    let mut v = Vec::new();
+    if let Some(h) = home() {
+        v.push(h.join(".claude/skills"));
+        v.push(h.join(".gemini/antigravity/skills"));
+    }
+    for r in load_config().roots {
+        v.push(PathBuf::from(r));
+    }
+    v
+}
+
 /// Default scan roots (Claude + Antigravity + project CWD) plus any
 /// extra roots configured in `skills.json`.
 fn roots() -> Vec<(PathBuf, &'static str)> {

@@ -144,6 +144,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "agentd"
+version = "0.0.1"
+dependencies = [
+ "async-trait",
+ "oxidemx-agent-core",
+ "oxidemx-agent-local",
+ "oxidemx-agent-proxy",
+ "oxidemx-conductor",
+ "oxidemx-shared",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 1.0.69",
+ "tokio",
+ "toml 0.8.23",
+ "tracing",
+ "tracing-subscriber",
+ "zbus",
+]
+
+[[package]]
 name = "ahash"
 version = "0.8.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6921,6 +6942,14 @@ dependencies = [
  "thiserror 1.0.69",
  "tokio",
  "tracing",
+]
+
+[[package]]
+name = "oxidemx-agent-proxy"
+version = "0.0.1"
+dependencies = [
+ "serde",
+ "zbus",
 ]
 
 [[package]]

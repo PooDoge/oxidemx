@@ -156,12 +156,10 @@ impl LocalModelManager {
             self.active.lock().await.clone()
         };
         if let Some(ref current) = currently_active {
-            if current.as_str() != alias {
-                if self.get_state(current) == Some(ModelState::Ready) {
-                    // Best-effort unload; log but don't propagate.
-                    let _ = self.engine.unload(current).await;
-                    self.set_state(current, ModelState::Unloaded);
-                }
+            if current.as_str() != alias && self.get_state(current) == Some(ModelState::Ready) {
+                // Best-effort unload; log but don't propagate.
+                let _ = self.engine.unload(current).await;
+                self.set_state(current, ModelState::Unloaded);
             }
         }
 

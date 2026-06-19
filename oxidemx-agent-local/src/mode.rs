@@ -9,11 +9,12 @@ use serde::{Deserialize, Serialize};
 /// Each variant maps to a required capability set and a sensible default
 /// [`SamplingConfig`]. The [`Mode::guard_config`] method returns the
 /// appropriate [`crate::guard::GuardConfig`] for post-inference checks.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum Mode {
     /// Classify input into a discrete category; requires structured output.
     Classify,
     /// General conversational turn; no special capabilities required.
+    #[default]
     Chat,
     /// Tool/function-calling turn.
     ToolUse,
@@ -23,12 +24,6 @@ pub enum Mode {
     Transform,
     /// Vision (image-grounded) generation.
     Vision,
-}
-
-impl Default for Mode {
-    fn default() -> Self {
-        Mode::Chat
-    }
 }
 
 impl Mode {

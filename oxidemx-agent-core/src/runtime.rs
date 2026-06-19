@@ -223,6 +223,7 @@ fn resolve_provider(model_hint: &str) -> Result<(AiProvider, String, String, Str
 /// still ships client-side: `history` is the thread's prior turns as
 /// `(is_user, text)`, seeded into the executor's memory each turn (all
 /// backends in use are stateless / history-shipping).
+#[allow(clippy::too_many_arguments)]
 pub async fn run(
     mode: AgentMode,
     model_hint: &str,
@@ -663,6 +664,7 @@ async fn classify_route(session_id: &str, prompt: &str) -> Route {
 
 /// Entry point for a chat turn. Routes between the fast local model and the
 /// smart cloud agent when `routing_enabled`; otherwise just runs `run()`.
+#[allow(clippy::too_many_arguments)]
 pub async fn route_turn(
     mode: AgentMode,
     model_hint: &str,
