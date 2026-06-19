@@ -195,6 +195,34 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     tracing::warn!("drain: model_status_changed signal failed: {e}");
                 }
             }
+
+            // C1: ApprovalRequest events also emit the dedicated approval_requested signal
+            // so the overlay can pop the approval UI without parsing the generic event.
+            // Payload fields set by Approver::request: "kind", "request_id", "card".
+            if ev.payload.get("kind").and_then(|k| k.as_str()) == Some("ApprovalRequest") {
+                let request_id = ev
+                    .payload
+                    .get("request_id")
+                    .and_then(|r| r.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let card = ev
+                    .payload
+                    .get("card")
+                    .map(|c| c.to_string())
+                    .unwrap_or_else(|| "{}".to_string());
+                if let Err(e) = AgentInterface::approval_requested(
+                    &se,
+                    ev.project.clone(),
+                    ev.thread_or_run.clone(),
+                    request_id,
+                    card,
+                )
+                .await
+                {
+                    tracing::warn!("drain: approval_requested signal failed: {e}");
+                }
+            }
         }
     });
 

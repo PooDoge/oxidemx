@@ -103,6 +103,7 @@ impl TurnRunner for LiveMock {
         _project: &ProjectKey,
         _thread: &str,
         _text: &str,
+        _history: &[(bool, String)],
         _approver: &Arc<Approver>,
         _emitter: &Arc<dyn EventEmitter>,
     ) -> Result<String, AgentdError> {

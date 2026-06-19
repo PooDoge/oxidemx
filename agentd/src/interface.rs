@@ -20,7 +20,6 @@
 
 #![forbid(unsafe_code)]
 
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -65,6 +64,7 @@ pub trait TurnRunner: Send + Sync {
     /// - `project` — identifies the project (for scoping sessions, tools, etc.)
     /// - `thread` — the conversation thread id
     /// - `text` — the user's message text
+    /// - `history` — prior turns for this thread as `(is_user, text)` pairs
     /// - `approver` — gate for tool-call approvals (may be awaited inside)
     /// - `emitter` — side-channel for streaming events
     ///
@@ -74,6 +74,7 @@ pub trait TurnRunner: Send + Sync {
         project: &ProjectKey,
         thread: &str,
         text: &str,
+        history: &[(bool, String)],
         approver: &Arc<Approver>,
         emitter: &Arc<dyn EventEmitter>,
     ) -> Result<String, AgentdError>;
@@ -96,6 +97,7 @@ impl TurnRunner for CoreTurnRunner {
         _project: &ProjectKey,
         thread: &str,
         text: &str,
+        history: &[(bool, String)],
         _approver: &Arc<Approver>,
         _emitter: &Arc<dyn EventEmitter>,
     ) -> Result<String, AgentdError> {
@@ -125,9 +127,9 @@ impl TurnRunner for CoreTurnRunner {
             AgentMode::Agentic,
             "", // model_hint: use config default
             text,
-            None,   // no stream sink
-            &[],    // no prior history (transcripts handled separately)
-            None,   // no image
+            None,        // no stream sink
+            history,     // C2: feed prior transcript history to the model
+            None,        // no image
             &session_id,
             &exec,
         )
@@ -231,9 +233,9 @@ pub struct AgentService {
     pub emitter: Arc<dyn EventEmitter>,
     pub host: Arc<dyn HostCapability>,
     pub turn_runner: Arc<dyn TurnRunner>,
-    /// In-memory run status table (run_id -> status string).
-    /// A future task will replace this with a proper run store.
-    run_statuses: Arc<std::sync::Mutex<HashMap<String, String>>>,
+    // SP1c: run_statuses removed (I3) — run_flow not yet wired so no runs
+    // are ever tracked. run_status returns an honest "not yet wired" error
+    // matching run_flow/cancel_run.
 }
 
 impl AgentService {
@@ -254,7 +256,6 @@ impl AgentService {
             emitter,
             host,
             turn_runner: Arc::new(CoreTurnRunner),
-            run_statuses: Arc::new(std::sync::Mutex::new(HashMap::new())),
         }
     }
 
@@ -265,11 +266,13 @@ impl AgentService {
     /// Flow:
     /// 1. Resolve project paths.
     /// 2. Ensure session exists.
-    /// 3. Run the turn through `TurnRunner`.
-    /// 4. Append user + assistant turns to the transcript.
-    /// 5. Record a `JournalEntry::Turn`.
-    /// 6. Emit an `AgentEvent`.
-    /// 7. Return a new turn id.
+    /// 3. Read prior transcript history (before appending the new user turn).
+    /// 4. Append user turn to the transcript.
+    /// 5. Run the turn through `TurnRunner` with history for context.
+    /// 6. Append assistant turn to the transcript.
+    /// 7. Record a `JournalEntry::Turn`.
+    /// 8. Emit an `AgentEvent`.
+    /// 9. Return a new turn id.
     pub async fn send_message(
         &self,
         project: &str,
@@ -290,6 +293,14 @@ impl AgentService {
             .sessions
             .transcripts(&paths.key, paths.transcripts_dir());
 
+        // C2: Read prior transcript history BEFORE appending the new user turn,
+        // so history contains only prior context (not the current message).
+        let prior_turns = ts.read(thread)?;
+        let history: Vec<(bool, String)> = prior_turns
+            .iter()
+            .map(|t| (t.role == "user", t.text.clone()))
+            .collect();
+
         // Append user turn.
         let ts_ms = now_ms();
         ts.append(
@@ -301,13 +312,14 @@ impl AgentService {
             },
         )?;
 
-        // Run the turn.
+        // Run the turn, passing prior history for multi-turn context.
         let reply = self
             .turn_runner
             .run_turn(
                 &paths.key,
                 thread,
                 text,
+                &history,
                 &self.approver,
                 &self.emitter,
             )
@@ -513,15 +525,13 @@ impl AgentService {
 
     // ── run_status ────────────────────────────────────────────────────────────
 
-    pub async fn run_status(&self, run_id: &str) -> Result<String, AgentdError> {
-        let guard = self
-            .run_statuses
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
-        match guard.get(run_id) {
-            Some(s) => Ok(s.clone()),
-            None => Err(AgentdError::NotFound(format!("run {run_id} not found"))),
-        }
+    /// I3: run_flow is not yet wired (SP1c), so no runs are ever tracked.
+    /// Returns the same honest "not yet wired" error as run_flow and cancel_run
+    /// instead of a misleading NotFound for a specific run_id.
+    pub async fn run_status(&self, _run_id: &str) -> Result<String, AgentdError> {
+        Err(AgentdError::NotFound(
+            "run_status: not yet wired (SP1c + Task 8 EventSink bridge needed)".into(),
+        ))
     }
 
     // ── list_runs ─────────────────────────────────────────────────────────────
@@ -868,6 +878,7 @@ mod tests {
             _project: &ProjectKey,
             thread: &str,
             _text: &str,
+            _history: &[(bool, String)],
             approver: &Arc<Approver>,
             _emitter: &Arc<dyn EventEmitter>,
         ) -> Result<String, AgentdError> {
@@ -925,7 +936,6 @@ mod tests {
                 emitter: emitter.clone(),
                 host: Arc::new(UnavailableHost),
                 turn_runner: Arc::new(runner),
-                run_statuses: Arc::new(std::sync::Mutex::new(HashMap::new())),
             });
 
             TestEnv {
