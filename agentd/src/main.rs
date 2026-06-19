@@ -12,7 +12,8 @@ use tokio::sync::mpsc;
 
 use agentd::interface::{AgentInterface, AgentService, ProjectRegistry};
 use agentd::models::ModelControls;
-use agentd::seams::{AgentEvent, Approver, EventEmitter, UnavailableHost};
+use agentd::host_proxy::HostCapabilityProxy;
+use agentd::seams::{AgentEvent, Approver, EventEmitter};
 use agentd::sessions::Sessions;
 use oxidemx_agent_local::LocalModelService;
 
@@ -128,7 +129,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         models,
         approver,
         emitter.clone(),
-        Arc::new(UnavailableHost),
+        Arc::new(HostCapabilityProxy),
     );
     let svc = Arc::new(svc);
 

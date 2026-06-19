@@ -2,6 +2,7 @@
 #![forbid(unsafe_code)]
 
 pub mod error;
+pub mod host_proxy;
 pub mod interface;
 pub mod journal;
 pub mod models;

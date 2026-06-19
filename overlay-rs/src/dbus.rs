@@ -91,6 +91,16 @@ async fn run_listener(tx: async_channel::Sender<OverlayEvent>) -> zbus::Result<(
             Err(e) => return Err(e),
         }
     }
+    // Serve AgentHost only when we own the overlay name (not vision-shot instances).
+    if std::env::var_os("OXIDEMX_VISION_SHOT").is_none() {
+        conn.object_server()
+            .at(
+                "/org/oxidemx/AgentHost",
+                crate::agent::host::AgentHostService,
+            )
+            .await?;
+        info!("org.oxidemx.AgentHost registered at /org/oxidemx/AgentHost");
+    }
     let proxy = DaemonProxy::new(&conn).await?;
     info!(
         "Subscribing to org.oxidemx.Daemon signals on {}",

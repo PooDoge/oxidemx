@@ -10,6 +10,7 @@
 
 pub mod commands;
 pub mod heartbeat;
+pub mod host;
 pub mod memory;
 pub mod memory_semantic;
 pub mod persona;
