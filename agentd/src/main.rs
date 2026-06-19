@@ -166,6 +166,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             };
             let se = iface.signal_emitter().clone();
             let payload_str = ev.payload.to_string();
+            drop(iface); // Release object-server guard before awaiting signal emissions
 
             // All events go through the general `event` signal.
             if let Err(e) = AgentInterface::event(
