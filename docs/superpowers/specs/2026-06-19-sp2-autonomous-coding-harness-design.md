@@ -3,7 +3,7 @@
 Date: 2026-06-19
 Status: design (research-grounded proposal; authored autonomously while the user is away — **for review on return**; foundational, design-stable pieces may begin building per the user's "continue building out everything we can" directive).
 Part of the agent re-architecture (`docs/superpowers/specs/2026-06-18-agent-framework-rearchitecture-design.md`). Builds on SP1a–SP1c (agentd backend complete + headless-tested).
-Grounded in `docs/research/{autoagents-capabilities,autoagents-patterns,agent-harness-best-practices}.md`. Read `docs/AI-ARCHITECTURE-STATUS.md` first.
+Grounded in `docs/research/{autoagents-capabilities,autoagents-patterns,agent-harness-best-practices,approval-guards}.md`. Read `docs/AI-ARCHITECTURE-STATUS.md` first.
 
 ## 1. Goal
 
@@ -72,8 +72,37 @@ From `docs/research/agent-harness-best-practices.md`:
 4. `AgentHooks::on_tool_call/on_tool_result` → enforce the hard caps + structured tool logging.
 5. `autoagents-telemetry` OTLP over the existing `Event` stream → spans + turn/token metrics.
 
+### 4.7 Schema-gated DAG (cross-cutting — the harness's structural backbone)
+The harness separates **flexible planning** (the LLM proposes a step DAG) from **rigid execution** (every step + every data edge is bound by a strict type contract; a malformed payload halts that branch rather than propagating). A workflow has **four gate boundaries**; we gate all four:
+1. **Plan boundary** (spec → DAG) — the Planner's output is a typed `StepGraph`, JSON-schema-validated before it can run (§4.2).
+2. **Graph structure** — `StepGraph::validate()` rejects cycles (Kahn/DFS topo-sort failure), `needs` referencing missing step IDs (orphans), and unreachable nodes, BEFORE any step runs.
+3. **Edge boundary** (node A out → node B in) — each `Step` declares an `output_schema` and `input_schema`; a finished step's structured output is validated against its `output_schema`, and a consuming step's inbound payload against its `input_schema`. A mismatch → `Blocked{schema-violation}` (a clean halt recorded in the ledger), never silent propagation. This is the piece the conductor lacks today (steps exchange free-form `artifact`/`handoff_markdown`); SP2c adds it.
+4. **Completion boundary** (step → Done) — the `TaskLedger` ground-truth gate: `Done` only via a verified `CompletionPromise` (§2.3, built in SP2a).
+
+**Two enforcement layers (use both):**
+- **Generate-time (token-level alignment):** constrain the model *while* it generates so output is structurally valid by construction — mistral.rs grammar/regex/JSON-schema `Constraint` for the local model; provider strict-structured-output / tool-calling for cloud. Minimizes validation failures (critical for the small local model). *New capability for `oxidemx-agent-local` — SP2b.*
+- **Validate-time (compiled validators):** the `jsonschema` crate as the runtime "halt if invalid" backstop at the plan + edge boundaries. Schemas are derived from Rust types via `schemars` where possible (single source of truth).
+
+**Violation → recovery loop** (the reflection/escalation pattern, §4.4): a schema violation feeds the validator's error back to the model as the critique input — retry once locally → escalate to cloud once → `Blocked{needs-human}`. Never an unbounded retry loop.
+
 ## 5. Autonomous-operation safety
-- **Hard caps in code** (§2.5) at the conductor/JoinSet + via AgentHooks. **Approval policy** per tool (SP1b `Approver`): destructive/host tools gated unless `Autonomous` policy is explicitly set for unattended runs. **Budget** (token/turn/wall-clock) tracked in the ledger; stop + escalate on exhaustion. **Ground-truth gating** (§2.3). **Resumability** (§4.1) so unattended crashes recover.
+- **Hard caps in code** (§2.5) at the conductor/JoinSet + via AgentHooks. **Budget** (token/turn/wall-clock) tracked in the ledger; stop + escalate on exhaustion. **Ground-truth gating** (§2.3). **Schema gating** (§4.7). **Resumability** (§4.1) so unattended crashes recover. **Approval policy** — §5.1.
+
+### 5.1 Approval policy — risk-tiered, reversibility-aware, non-blocking (from `docs/research/approval-guards.md`)
+The user's choice (Q1=gated-but-autonomous-opt-in) is refined into a **rule-based classifier** so approvals don't constantly block background work — only genuinely risky, irreversible actions ask. Every tool call is classified into one of four **safety tiers**:
+
+| Tier | Meaning | Example |
+|---|---|---|
+| `AutoAllow` | pure read / no state change — always runs | `read_file`, `git diff HEAD`, `cargo check` |
+| `AutoAllowIfReversible` | mutation that VCS can recover — runs if the reversibility check passes | edit/delete a git-tracked file inside cwd |
+| `Ask` → **non-blocking** | risky but legitimate — recorded as a `Blocked{needs-approval}` ledger step; **the agent continues other ready steps** and the human batch-reviews later | `git commit`, install a dep, write an untracked file |
+| `AutoDeny` | irreversible / out-of-scope — refused immediately with an explanation logged | `sudo`, `git push --force`, `git clean`, `rm -rf` outside cwd, `curl`/`nc` |
+
+**Reversibility classifier** (the headline rule the user asked for): a file edit/delete is `AutoAllowIfReversible` iff — path resolves UNDER `cwd` (no `..` escape) **AND** the file is git-tracked in HEAD (`git2::Repository::head()?.peel_to_tree()?.get_path(rel).is_ok()` — pure in-process, no subprocess) **AND** the path is not `.git/…`, `~/.ssh/…`, or a global config. Tracked-in-repo ⇒ `git restore`/`git revert` recovers it ⇒ safe to auto-run.
+
+**Shell-command safety (avoids the prefix-allowlist trap):** never allowlist by raw-string prefix (`git` would permit `git push --force`; `;`/`&&`/`|`/backticks/`$()` chain a denied command behind an allowed one). Instead: (1) if the command contains shell metacharacters or a leading `FOO=bar`, **downgrade to `Ask`** (don't auto-deny — compound commands are often legitimate); (2) parse argv with `shell-words::split`; (3) classify on `argv[0]` + `argv[1]` (binary + subcommand), against per-binary rules; (4) a hard `AutoDeny` denylist on `argv[0]`/subcommand; (5) where the agent controls argv, execute **without a shell** (`Command::new("git").arg("diff")`) so metachar injection is structurally impossible.
+
+**Config + autonomy:** the tier rules live in `project-config` (`<cwd>/.oxidemx/config.toml`) so a repo can widen/narrow them; a session-scoped "always allow this exact command" grant reduces repeat asks. In **attended** mode `Ask` surfaces the SP1b `ApprovalRequested` card live; in **autonomous** mode `Ask` becomes the non-blocking `Blocked` ledger entry. `AutoAllow`/`AutoAllowIfReversible`/`AutoDeny` behave identically in both modes. Implemented as an `ApprovalClassifier` (Rust; `git2` + `shell-words`) the conductor consults before dispatching a tool, replacing the current flat `allowlist`.
 
 ## 6. Rust / AI conventions (from `docs/research/agent-harness-best-practices.md`)
 - Async: tokio structured concurrency, `JoinSet` for fan-out, `CancellationToken` for cancel (already used by the conductor). No lock across `.await` (project rule).
@@ -84,15 +113,16 @@ From `docs/research/agent-harness-best-practices.md`:
 
 ## 7. Decomposition (sub-projects; each its own plan → SDD)
 - **SP2a — TaskLedger** (the foundation): atomic manifest + event log + resume-on-startup + conductor integration. Headless-testable. **Build first** (research consensus; design-stable; low-risk).
-- **SP2b — Local-model Planner**: schema-gated `spec→StepGraph` + routing/compaction roles. Headless-testable with mock + the local engine behind `mistral`.
-- **SP2c — Orchestrator-worker execution + verifier + patterns** (planning/reflection/parallel/routing) over the ledger+conductor, thin workers, hard caps via AgentHooks.
-- **SP2d — SDD flow template** (§4.5) + autonomous run mode (budget/approval/resume) exposed over the `org.oxidemx.Agent` D-Bus surface (RunTask/TaskStatus/ResumeTask).
+- **SP2b — Local-model Planner + schema-gating primitives**: schema-gated `spec→StepGraph` (typed `StepGraph` distinct from `Vec<Step>`); **`StepGraph::validate()`** (cycles + orphans + reachability, §4.7 boundary 2 — *moved here from a followup*); **grammar-constrained decoding** in `oxidemx-agent-local` (§4.7 generate-time layer — *moved here from a followup*) backed by `jsonschema` validate-time; routing/compaction roles. Headless-testable with mock + the local engine behind `mistral`.
+- **SP2c — Orchestrator-worker execution + verifier + edges + approval**: run the StepGraph over ledger+conductor with thin workers; the **verifier tool** (`cargo`-as-ground-truth); the patterns (planning/reflection/parallel/routing); **per-step edge schema validation** (§4.7 boundary 3) → `Blocked{schema-violation}`; the **`ApprovalClassifier`** (§5.1 — tiers + reversibility + shell-safety, `git2`+`shell-words`) replacing the flat allowlist; hard caps via AgentHooks; `record_tool_call` + per-step budget primitives the ledger needs (*from SP2a followups*).
+- **SP2d — SDD flow template** (§4.5) + autonomous run mode (budget/approval/resume) exposed over the `org.oxidemx.Agent` D-Bus surface (RunTask/TaskStatus/ResumeTask/ReviewApprovals).
 - **SP2e — AutoAgents adoptions** (§4.6) — pipeline/guardrails/telemetry; can land incrementally alongside.
 
-## 8. Open questions for the user (resolved provisionally; confirm on return)
-1. **Autonomous default approval policy** — provisional: gated-by-default (destructive/host tools need approval); an explicit `--autonomous`/config opt-in flips to autonomous with hard caps. (Safer default.)
-2. **Ledger vs FlowDoc relationship** — provisional: the ledger is the persistent source of truth; a `FlowPlan` is derived from it for execution (not a second store). Confirm we don't want the ledger to BE a FlowDoc extension instead.
-3. **How much to build autonomously now** — provisional: build SP2a (TaskLedger) + SP2e adoptions (low-risk, design-stable) while away; hold SP2b–d (planner + execution semantics) for review since they encode more contested judgment.
+## 8. Decisions (resolved with the user 2026-06-19)
+1. **Approval policy → risk-tiered + reversibility-aware + non-blocking (§5.1).** Gated-but-autonomous-opt-in, refined into the 4-tier `ApprovalClassifier` so reversible/safe actions auto-run and only genuinely risky ones `Ask` (non-blocking — they become `Blocked` ledger steps the agent works around). The git-tracked reversibility rule + the shell-argv-safety rule are the core. (Research: `docs/research/approval-guards.md`.)
+2. **Ledger is the source of truth; the conductor is a stateless executor over a derived `FlowPlan`.** One store. Data edges between steps are schema-validated (§4.7 boundary 3).
+3. **Autonomy aggressiveness → full task-graph run, bounded by coded caps + the verification gate + single-escalation.** No per-step check-ins; unresolved work lands as `Blocked` steps for batch review. Hard caps in code, never prompts.
+4. **Schema-gated DAG (§4.7) is a first-class structural pattern** — all four gate boundaries, generate-time + validate-time enforcement, violation→self-correct→escalate recovery.
 
 ## 9. Out of scope
 SP1c T8b (overlay flip+delete — gated on the user's GUI walkthrough). SP-Learn (the self-improving loop consumes this harness's ledger/journal later). Federation/external workers (later SP). GUI for task/step visualization (after the backend harness works).
