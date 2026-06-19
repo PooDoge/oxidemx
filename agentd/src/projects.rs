@@ -110,6 +110,7 @@ fn sanitize_slug(s: &str) -> String {
 ///   facts here.
 /// - `local` is the project-local `.oxidemx/` directory inside `cwd` — users
 ///   can drop project-scoped skills, MCP config, or a `config.toml` here.
+#[derive(Clone)]
 pub struct ProjectPaths {
     pub key: ProjectKey,
     pub cwd: PathBuf,
@@ -389,6 +390,6 @@ mod tests {
         // Verify the skills roots are in the expected order, with both Claude-compatible
         // and oxidemx-local roots present, and .oxidemx/skills last.
         assert!(roots.iter().any(|r| r.ends_with(".claude/skills")));
-        assert!(roots.last().map_or(false, |r| r.ends_with(".oxidemx/skills")));
+        assert!(roots.last().is_some_and(|r| r.ends_with(".oxidemx/skills")));
     }
 }

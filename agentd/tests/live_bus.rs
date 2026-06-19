@@ -106,8 +106,10 @@ impl TurnRunner for LiveMock {
         _history: &[(bool, String)],
         _approver: &Arc<Approver>,
         _emitter: &Arc<dyn EventEmitter>,
-    ) -> Result<String, AgentdError> {
-        Ok("live-bus-reply".to_string())
+        _paths: &agentd::projects::ProjectPaths,
+        _host: &Arc<dyn agentd::seams::HostCapability>,
+    ) -> Result<(String, (u64, u64)), AgentdError> {
+        Ok(("live-bus-reply".to_string(), (0, 0)))
     }
 }
 

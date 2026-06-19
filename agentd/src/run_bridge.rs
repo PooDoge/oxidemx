@@ -181,6 +181,7 @@ mod tests {
     use super::*;
     use crate::seams::RecordingEmitter;
 
+    #[allow(clippy::type_complexity)]
     fn make_bridge() -> (RunEventBridge, Arc<RecordingEmitter>, Arc<Mutex<HashMap<String, String>>>) {
         let emitter = Arc::new(RecordingEmitter::default());
         let statuses: Arc<Mutex<HashMap<String, String>>> = Arc::new(Mutex::new(HashMap::new()));

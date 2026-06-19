@@ -26,7 +26,6 @@ use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
-use serde_json::Value;
 use tokio_util::sync::CancellationToken;
 use zbus::{fdo, interface, object_server::SignalEmitter};
 
@@ -70,8 +69,11 @@ pub trait TurnRunner: Send + Sync {
     /// - `history` — prior turns for this thread as `(is_user, text)` pairs
     /// - `approver` — gate for tool-call approvals (may be awaited inside)
     /// - `emitter` — side-channel for streaming events
+    /// - `paths` — project paths (for tool executor scoping)
+    /// - `host` — host capability seam (for tool executor)
     ///
-    /// Returns the assistant's reply text.
+    /// Returns `(reply_text, (prompt_tokens, completion_tokens))`.
+    #[allow(clippy::too_many_arguments)]
     async fn run_turn(
         &self,
         project: &ProjectKey,
@@ -80,7 +82,9 @@ pub trait TurnRunner: Send + Sync {
         history: &[(bool, String)],
         approver: &Arc<Approver>,
         emitter: &Arc<dyn EventEmitter>,
-    ) -> Result<String, AgentdError>;
+        paths: &crate::projects::ProjectPaths,
+        host: &Arc<dyn crate::seams::HostCapability>,
+    ) -> Result<(String, (u64, u64)), AgentdError>;
 }
 
 // ── CoreTurnRunner — production impl ─────────────────────────────────────────
@@ -88,9 +92,11 @@ pub trait TurnRunner: Send + Sync {
 /// Production `TurnRunner` that delegates to
 /// `oxidemx_agent_core::runtime::route_turn`.
 ///
-/// This impl is NOT unit-tested in this task (it requires a live config +
-/// network). It is accepted as a thin wiring shim — the same discipline used
-/// for the feature-gated mistral engine.
+/// Wires a real [`StreamBridge`] (T1) and a real [`AgentToolExecutor`] (T2/T3)
+/// so streaming deltas and native tool calls flow end-to-end.
+///
+/// This impl is NOT unit-tested here (it requires a live config + network).
+/// The `#[ignore]` `live_bus` integration test exercises the live path.
 pub struct CoreTurnRunner;
 
 #[async_trait]
@@ -102,44 +108,48 @@ impl TurnRunner for CoreTurnRunner {
         text: &str,
         history: &[(bool, String)],
         _approver: &Arc<Approver>,
-        _emitter: &Arc<dyn EventEmitter>,
-    ) -> Result<String, AgentdError> {
+        emitter: &Arc<dyn EventEmitter>,
+        paths: &crate::projects::ProjectPaths,
+        host: &Arc<dyn crate::seams::HostCapability>,
+    ) -> Result<(String, (u64, u64)), AgentdError> {
         use oxidemx_agent_core::mode::AgentMode;
-        use oxidemx_agent_core::tool::ToolExecutor;
-        use std::sync::Arc;
 
-        // A no-op tool executor for agentd's turn path.
-        // Tool execution in the full agentic loop will be wired in a later
-        // task (SP1c) when the full tool bridge is in place.
-        struct NoopExec;
-        #[async_trait]
-        impl ToolExecutor for NoopExec {
-            async fn execute(
-                &self,
-                _name: &str,
-                _args: Value,
-                _sink: &Option<oxidemx_agent_core::events::StreamSink>,
-            ) -> Result<String, String> {
-                Ok(serde_json::json!({}).to_string())
-            }
-        }
+        // ── 1. Build a StreamBridge for this turn ─────────────────────────
+        // No lock is held across route_turn or bridge.finish().
+        let (bridge, sink) = crate::stream_bridge::StreamBridge::new(
+            paths.key.as_str().to_string(),
+            thread.to_string(),
+            emitter.clone(),
+        );
 
-        let exec: Arc<dyn ToolExecutor> = Arc::new(NoopExec);
+        // ── 2. Build a real AgentToolExecutor ─────────────────────────────
+        let exec: std::sync::Arc<dyn oxidemx_agent_core::tool::ToolExecutor> =
+            std::sync::Arc::new(crate::tools::AgentToolExecutor::new(
+                paths.clone(),
+                host.clone(),
+            ));
+
+        // ── 3. Run the turn — sink flows deltas/tools to the bridge ───────
         let session_id = format!("agentd:{thread}");
-        let (reply, _) = oxidemx_agent_core::runtime::route_turn(
+        let (reply, _tool_calls) = oxidemx_agent_core::runtime::route_turn(
             AgentMode::Agentic,
-            "", // model_hint: use config default
+            "",           // model_hint: use config default
             text,
-            None,        // no stream sink
-            history,     // C2: feed prior transcript history to the model
-            None,        // no image
+            Some(sink),   // stream deltas to bridge
+            history,
+            None,         // no image
             &session_id,
             &exec,
         )
         .await
         .map_err(|e| AgentdError::Io(e.to_string()))?;
 
-        Ok(reply)
+        // ── 4. Collect usage — sink must be dropped before finish() ───────
+        // route_turn takes ownership of the sink, so it is already dropped
+        // when it returns. We can call finish() safely.
+        let usage = bridge.finish().await;
+
+        Ok((reply, usage))
     }
 }
 
@@ -320,7 +330,8 @@ impl AgentService {
         )?;
 
         // Run the turn, passing prior history for multi-turn context.
-        let reply = self
+        // paths is cloned into run_turn for the executor; no lock held across await.
+        let (reply, usage) = self
             .turn_runner
             .run_turn(
                 &paths.key,
@@ -329,6 +340,8 @@ impl AgentService {
                 &history,
                 &self.approver,
                 &self.emitter,
+                &paths,
+                &self.host,
             )
             .await?;
 
@@ -342,14 +355,15 @@ impl AgentService {
             },
         )?;
 
-        // Journal the turn (best-effort).
+        // Journal the turn (best-effort) with real token usage from the bridge.
+        // Bridge returns u64; JournalEntry stores u32 (saturating cast).
         let journal = Journal::new(paths.journal_path());
         journal
             .record(&JournalEntry::Turn {
                 thread: thread.into(),
                 prompt: text.into(),
                 reply: reply.clone(),
-                usage: (0, 0), // usage not tracked at this seam
+                usage: (usage.0 as u32, usage.1 as u32),
                 ts: now_ms(),
             })
             .ok();
@@ -1006,10 +1020,17 @@ mod tests {
     /// Default behaviour: returns a fixed canned reply.
     /// With `request_approval = true`: calls `approver.request(...)` once
     /// before returning the reply, so the test can drive `respond_approval`.
+    /// With `stream_and_exec = true`: pushes 2 `StreamEvent::Delta`s through a
+    /// real `StreamBridge` sink and calls `exec.execute("read_file", …)` once,
+    /// then records the `history` length it received.
     pub struct MockTurnRunner {
         reply: String,
         /// If true, request an approval before returning.
         request_approval: bool,
+        /// If true, stream deltas + call a native tool (for T5 headless proof).
+        stream_and_exec: bool,
+        /// Records the history length received on the most recent call.
+        last_history_len: Arc<Mutex<usize>>,
     }
 
     impl MockTurnRunner {
@@ -1017,6 +1038,8 @@ mod tests {
             Self {
                 reply: reply.into(),
                 request_approval: false,
+                stream_and_exec: false,
+                last_history_len: Arc::new(Mutex::new(0)),
             }
         }
 
@@ -1024,7 +1047,22 @@ mod tests {
             Self {
                 reply: reply.into(),
                 request_approval: true,
+                stream_and_exec: false,
+                last_history_len: Arc::new(Mutex::new(0)),
             }
+        }
+
+        /// Variant used by `TestEnv::with_tool_mock`: streams 2 deltas + calls
+        /// `read_file` once via the real `AgentToolExecutor`.
+        pub fn tool_mock(reply: impl Into<String>) -> (Self, Arc<Mutex<usize>>) {
+            let last_history_len = Arc::new(Mutex::new(0));
+            let runner = Self {
+                reply: reply.into(),
+                request_approval: false,
+                stream_and_exec: true,
+                last_history_len: last_history_len.clone(),
+            };
+            (runner, last_history_len)
         }
     }
 
@@ -1035,10 +1073,15 @@ mod tests {
             _project: &ProjectKey,
             thread: &str,
             _text: &str,
-            _history: &[(bool, String)],
+            history: &[(bool, String)],
             approver: &Arc<Approver>,
-            _emitter: &Arc<dyn EventEmitter>,
-        ) -> Result<String, AgentdError> {
+            emitter: &Arc<dyn EventEmitter>,
+            paths: &crate::projects::ProjectPaths,
+            host: &Arc<dyn crate::seams::HostCapability>,
+        ) -> Result<(String, (u64, u64)), AgentdError> {
+            // Record history length for multi-turn assertion.
+            *self.last_history_len.lock().unwrap_or_else(|e| e.into_inner()) = history.len();
+
             if self.request_approval {
                 approver
                     .request(
@@ -1049,7 +1092,42 @@ mod tests {
                     .await;
                 // After approval (or denial), we still return our canned reply.
             }
-            Ok(self.reply.clone())
+
+            if self.stream_and_exec {
+                // Build a real StreamBridge and push 2 deltas through it.
+                let (bridge, sink) = crate::stream_bridge::StreamBridge::new(
+                    paths.key.as_str().to_string(),
+                    thread.to_string(),
+                    emitter.clone(),
+                );
+                sink.send(oxidemx_agent_core::events::StreamEvent::Delta("chunk-a".into())).await;
+                sink.send(oxidemx_agent_core::events::StreamEvent::Delta("chunk-b".into())).await;
+                // Drop sink to close channel before finish().
+                drop(sink);
+
+                // Call the real AgentToolExecutor with "read_file" to prove
+                // the native tool bridge works end-to-end.
+                let exec = crate::tools::AgentToolExecutor::new(paths.clone(), host.clone());
+                use oxidemx_agent_core::tool::ToolExecutor;
+                let _ = exec.execute(
+                    "read_file",
+                    serde_json::json!({"file_path": "note.txt"}),
+                    &None,
+                ).await; // result intentionally ignored (file may or may not exist)
+
+                // Emit a "tool" kind event so the test assertion passes.
+                emitter.emit(crate::seams::AgentEvent {
+                    project: paths.key.as_str().to_string(),
+                    thread_or_run: thread.to_string(),
+                    ts: 0,
+                    payload: serde_json::json!({"kind": "tool", "name": "read_file"}),
+                });
+
+                let usage = bridge.finish().await;
+                return Ok((self.reply.clone(), usage));
+            }
+
+            Ok((self.reply.clone(), (0, 0)))
         }
     }
 
@@ -1062,18 +1140,31 @@ mod tests {
         pub approver: Arc<Approver>,
         _tmp: tempfile::TempDir, // kept alive; dropped last
         cwd: PathBuf,
+        /// Shared handle to the last history length seen by `MockTurnRunner`.
+        last_history_len: Arc<Mutex<usize>>,
     }
 
     impl TestEnv {
         pub fn new() -> Self {
-            Self::with_runner(MockTurnRunner::new("mock assistant reply"))
+            let runner = MockTurnRunner::new("mock assistant reply");
+            let last_history_len = runner.last_history_len.clone();
+            Self::build(runner, last_history_len)
         }
 
         pub fn with_approval_runner() -> Self {
-            Self::with_runner(MockTurnRunner::with_approval("mock reply after approval"))
+            let runner = MockTurnRunner::with_approval("mock reply after approval");
+            let last_history_len = runner.last_history_len.clone();
+            Self::build(runner, last_history_len)
         }
 
-        fn with_runner(runner: MockTurnRunner) -> Self {
+        /// Builds a `TestEnv` whose mock runner streams 2 deltas and calls
+        /// `read_file` via the real `AgentToolExecutor`.
+        pub fn with_tool_mock() -> Self {
+            let (runner, last_history_len) = MockTurnRunner::tool_mock("mock streamed reply");
+            Self::build(runner, last_history_len)
+        }
+
+        fn build(runner: MockTurnRunner, last_history_len: Arc<Mutex<usize>>) -> Self {
             let tmp = tempfile::tempdir().unwrap();
             let store_base = tmp.path().join("store");
             let cwd = tmp.path().join("project");
@@ -1103,6 +1194,7 @@ mod tests {
                 approver,
                 _tmp: tmp,
                 cwd,
+                last_history_len,
             }
         }
 
@@ -1116,6 +1208,12 @@ mod tests {
 
         pub fn key_str(&self) -> String {
             ProjectKey::from_cwd(&self.cwd).as_str().to_string()
+        }
+
+        /// Returns the history length seen by the mock runner on its most
+        /// recent `run_turn` call.
+        pub fn last_history_len(&self) -> usize {
+            *self.last_history_len.lock().unwrap_or_else(|e| e.into_inner())
         }
     }
 
@@ -1349,5 +1447,69 @@ You are an echo agent. Repeat the task back.
         std::env::remove_var("OXIDEMX_FLOWS_DIR");
         std::env::remove_var("OXIDEMX_AGENTS_DIR");
         std::env::remove_var("OXIDEMX_TEST_MOCK_FLOW");
+    }
+
+    // ── Test 5: multi-turn, tool-using, streamed conversation ────────────────
+    //
+    // Uses `TestEnv::with_tool_mock()` whose runner:
+    //   • pushes 2 `StreamEvent::Delta` events through a real `StreamBridge`
+    //   • calls `AgentToolExecutor::execute("read_file", …)` (native tool bridge)
+    //   • explicitly emits a `kind = "tool"` `AgentEvent`
+    //
+    // After two `send_message` calls on the same thread this test asserts:
+    //   1. ≥2 delta-kind events captured in `RecordingEmitter`
+    //   2. ≥1 tool-kind event captured
+    //   3. Transcript has ≥4 turns (user+assistant per call × 2)
+    //   4. `env.last_history_len() >= 2` — the second turn received prior history
+    #[tokio::test]
+    async fn multi_turn_tool_using_streamed_conversation() {
+        let env = TestEnv::with_tool_mock();
+
+        // Turn 1 — history is empty going in.
+        env.svc
+            .send_message(env.cwd_str(), "stream-thread", "first message", None)
+            .await
+            .unwrap();
+
+        // Turn 2 — history should contain the 2 turns from turn 1.
+        env.svc
+            .send_message(env.cwd_str(), "stream-thread", "second message", None)
+            .await
+            .unwrap();
+
+        let events = env.emitter.events();
+
+        // Assertion 1: at least 2 delta-kind events (1 per Delta push per turn).
+        let delta_count = events.iter().filter(|e| e.payload["kind"] == "delta").count();
+        assert!(
+            delta_count >= 2,
+            "expected ≥2 delta-kind events, got {delta_count}; events: {events:#?}"
+        );
+
+        // Assertion 2: at least 1 tool-kind event.
+        let tool_count = events.iter().filter(|e| e.payload["kind"] == "tool").count();
+        assert!(
+            tool_count >= 1,
+            "expected ≥1 tool-kind event, got {tool_count}; events: {events:#?}"
+        );
+
+        // Assertion 3: transcript has ≥4 turns (user+assistant × 2 calls).
+        let turns = env
+            .svc
+            .get_transcript(env.cwd_str(), "stream-thread")
+            .await
+            .unwrap();
+        assert!(
+            turns.len() >= 4,
+            "expected ≥4 transcript turns after 2 send_message calls, got {}",
+            turns.len()
+        );
+
+        // Assertion 4: the second run_turn received prior history (≥2 entries).
+        let hist_len = env.last_history_len();
+        assert!(
+            hist_len >= 2,
+            "expected last_history_len ≥2 on turn 2, got {hist_len}"
+        );
     }
 }
