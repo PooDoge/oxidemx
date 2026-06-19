@@ -3,6 +3,7 @@
 
 pub mod error;
 pub mod journal;
+pub mod models;
 pub mod projects;
 pub mod seams;
 pub mod sessions;
