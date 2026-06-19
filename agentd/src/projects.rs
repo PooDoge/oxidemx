@@ -13,8 +13,6 @@
 //!   config, so the project-local version wins on name collision (the same
 //!   pattern Claude Code uses with `.claude/`).
 
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 
 // ── ProjectKey ────────────────────────────────────────────────────────────────
@@ -22,10 +20,21 @@ use std::path::{Path, PathBuf};
 /// A stable, filesystem-safe identifier for a project.
 ///
 /// Shape: `<dir-name-sanitized>-<8 hex digits of path hash>`.
-/// The hash is computed over the canonicalized path string so that two
-/// different paths pointing to the same directory collapse to the same key.
+/// The hash is computed over the canonicalized path string using FNV-1a so that two
+/// different paths pointing to the same directory collapse to the same key, and the
+/// hash remains stable across Rust toolchain versions.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct ProjectKey(String);
+
+/// Compute FNV-1a 64-bit hash over the given bytes (version-stable).
+fn fnv1a64(bytes: &[u8]) -> u64 {
+    let mut h: u64 = 0xcbf29ce484222325;
+    for &b in bytes {
+        h ^= b as u64;
+        h = h.wrapping_mul(0x00000100000001b3);
+    }
+    h
+}
 
 impl ProjectKey {
     /// Derive a [`ProjectKey`] from a working-directory path.
@@ -37,10 +46,8 @@ impl ProjectKey {
         let canonical = std::fs::canonicalize(cwd).unwrap_or_else(|_| cwd.to_path_buf());
         let path_str = canonical.to_string_lossy();
 
-        // Stable hash of the full canonical path.
-        let mut h = DefaultHasher::new();
-        path_str.hash(&mut h);
-        let hash = h.finish();
+        // Stable hash of the full canonical path using FNV-1a.
+        let hash = fnv1a64(path_str.as_bytes());
 
         // Slug: the last path component, sanitized to alphanumeric + hyphen.
         let dir_name = canonical
@@ -372,5 +379,16 @@ mod tests {
         assert_eq!(merged["a"], 1);
         assert_eq!(merged["b"], 99); // project wins
         assert_eq!(merged["c"], 3);
+    }
+
+    #[test]
+    fn merge_prefers_project_local() {
+        let d = tempfile::tempdir().unwrap();
+        let p = ProjectPaths::resolve(d.path());
+        let roots = p.merged_skill_roots();
+        // Verify the skills roots are in the expected order, with both Claude-compatible
+        // and oxidemx-local roots present, and .oxidemx/skills last.
+        assert!(roots.iter().any(|r| r.ends_with(".claude/skills")));
+        assert!(roots.last().map_or(false, |r| r.ends_with(".oxidemx/skills")));
     }
 }
