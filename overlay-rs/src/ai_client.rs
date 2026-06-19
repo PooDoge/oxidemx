@@ -245,3 +245,129 @@ pub async fn ask_ai(
     )
     .await
 }
+
+// =============================================================================
+// AGENTD REMOTE SEND PATH
+// =============================================================================
+
+/// The stable project identifier used when the overlay talks to agentd.
+///
+/// The overlay is a personal-assistant shell, not a coding project — there is
+/// no meaningful "cwd". We use `~/.config/oxidemx` as the project root so
+/// agentd stores the overlay's transcript alongside its other config artefacts.
+/// This is consistent across restarts and unique to the user's identity (no
+/// collision with real code projects that happen to share a cwd).
+pub fn agentd_project() -> String {
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/home/jim".to_string());
+    format!("{home}/.config/oxidemx")
+}
+
+/// Send a prompt to agentd over D-Bus and return immediately.
+///
+/// The reply arrives asynchronously via the `event` D-Bus signal, which the
+/// `agent_events` subscription (see `overlay-rs/src/app/agent_events.rs`)
+/// demuxes into the overlay's existing iced `Message`s.  The function itself
+/// returns `Ok(turn_id)` once agentd acknowledges the send — it does NOT wait
+/// for the full reply.
+///
+/// `thread` is the overlay thread's session id (same string the in-proc path
+/// calls `session_id`).  `model_hint` is forwarded as-is; agentd may ignore
+/// it if the active model is already pinned.
+pub async fn ask_ai_remote(
+    thread: &str,
+    text: &str,
+    model_hint: &str,
+) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+    use oxidemx_agent_proxy::AgentProxy;
+
+    let conn = zbus::connection::Builder::session()?.build().await?;
+    let proxy = AgentProxy::new(&conn).await?;
+    let project = agentd_project();
+    let turn_id = proxy
+        .send_message(&project, thread, text, model_hint)
+        .await?;
+    Ok(turn_id)
+}
+
+/// Attempt to cancel the in-flight agentd turn for `thread`.
+///
+/// `cancel_turn` is not yet wired in agentd (Task 6 placeholder only).
+/// We handle the error gracefully: return an `Err` whose message the caller
+/// can surface in the UI as an activity label.  No crash, no panic.
+pub async fn cancel_agentd_turn(
+    thread: &str,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    use oxidemx_agent_proxy::AgentProxy;
+
+    let conn = zbus::connection::Builder::session()?.build().await?;
+    let proxy = AgentProxy::new(&conn).await?;
+    let project = agentd_project();
+    proxy.cancel_turn(&project, thread).await?;
+    Ok(())
+}
+
+/// Fetch the transcript for `thread` from agentd and return it as a list of
+/// `(is_user, text)` pairs suitable for the overlay's `ChatMessage` history.
+///
+/// Returns an empty vec on any error (agentd down, thread not found, parse
+/// failure) — callers treat an empty result as "no remote history yet".
+pub async fn fetch_agentd_transcript(thread: &str) -> Vec<(bool, String)> {
+    use oxidemx_agent_proxy::AgentProxy;
+
+    let conn = match zbus::connection::Builder::session().map(|b| b.build()) {
+        Ok(f) => match f.await {
+            Ok(c) => c,
+            Err(_) => return vec![],
+        },
+        Err(_) => return vec![],
+    };
+    let proxy = match AgentProxy::new(&conn).await {
+        Ok(p) => p,
+        Err(_) => return vec![],
+    };
+    let project = agentd_project();
+    let json = match proxy.get_transcript(&project, thread).await {
+        Ok(j) => j,
+        Err(_) => return vec![],
+    };
+    // agentd returns JSON-encoded Vec<TranscriptTurn> where each turn has
+    // {"role":"user"|"assistant", "text":"...", "ts": <u64>}.
+    let turns: Vec<serde_json::Value> = match serde_json::from_str(&json) {
+        Ok(v) => v,
+        Err(_) => return vec![],
+    };
+    turns
+        .into_iter()
+        .filter_map(|t| {
+            let role = t.get("role")?.as_str()?;
+            let text = t.get("text")?.as_str()?.to_string();
+            let is_user = role == "user";
+            Some((is_user, text))
+        })
+        .collect()
+}
+
+/// List thread ids known to agentd for the overlay project.
+///
+/// Returns an empty vec on any error.
+/// Unused now; will be consumed by a thread-picker UI in Task 8.
+#[allow(dead_code)]
+pub async fn list_agentd_threads() -> Vec<String> {
+    use oxidemx_agent_proxy::AgentProxy;
+
+    let conn = match zbus::connection::Builder::session()
+        .map(|b| b.build())
+    {
+        Ok(f) => match f.await {
+            Ok(c) => c,
+            Err(_) => return vec![],
+        },
+        Err(_) => return vec![],
+    };
+    let proxy = match AgentProxy::new(&conn).await {
+        Ok(p) => p,
+        Err(_) => return vec![],
+    };
+    let project = agentd_project();
+    proxy.list_threads(&project).await.unwrap_or_default()
+}

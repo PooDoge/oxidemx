@@ -21,6 +21,7 @@ use oxidemx_shared::AppConfig;
 use crate::dbus::OverlayEvent;
 use crate::radial::RadialState;
 
+pub mod agent_events;
 mod subscriptions;
 mod update;
 mod view;
@@ -258,8 +259,54 @@ pub enum Message {
     WindowUnfocused,
     /// The overlay window gained keyboard focus. Diagnostic only —
     /// confirms the extension's RaiseOverlay activation actually
-    /// landed (a Wayland client can't observe this any other way).
+    /// landed (a Wayland client can't overcome this any other way).
     WindowFocused,
+
+    // ── agentd (use_agentd = true) path ────────────────────────────────────
+
+    /// A D-Bus event from agentd matched to an overlay chat thread.
+    ///
+    /// `session_id` is the raw thread id from D-Bus (`thread_or_run`).
+    /// `update.rs` resolves it to an `ai_threads` index and then fans out
+    /// to the appropriate `AiStream` or `AgentdFinal` logic.
+    AgentdEvent {
+        session_id: String,
+        inner: crate::app::agent_events::AgentdInner,
+    },
+
+    /// agentd signals that the turn is complete; the full reply text is
+    /// carried here.  Parallel to `AiResponseReceived` for the in-proc path.
+    AgentdFinal {
+        thread_idx: usize,
+        text: String,
+    },
+
+    /// agentd is waiting for user approval of a tool call.
+    ///
+    /// The overlay shows an approval card; the user clicks Allow/Deny
+    /// which fires `AgentdRespondApproval`.
+    AgentdApprovalRequested {
+        thread: String,
+        request_id: String,
+        card_json: String,
+    },
+
+    /// User responded to an agentd approval card.
+    /// Constructed from the approval card view (Task 8 wires the button).
+    #[allow(dead_code)]
+    AgentdRespondApproval {
+        request_id: String,
+        allow: bool,
+    },
+
+    /// Agentd model lifecycle change (load / unload / set-active).
+    AgentdModelStatus(String, String),
+
+    /// History loaded from agentd for the given thread index.
+    AgentdHistoryLoaded {
+        thread_idx: usize,
+        turns: Vec<(bool, String)>,
+    },
 }
 
 pub fn run() -> iced::Result {

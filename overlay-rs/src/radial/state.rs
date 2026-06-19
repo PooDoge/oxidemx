@@ -111,6 +111,8 @@ impl RadialState {
             widget_registry: std::collections::HashMap::new(),
             previous_page_name: None,
             vision_shot_taken: false,
+            use_agentd: config.overlay.ai.use_agentd,
+            ai_agentd_approval: None,
         }
     }
 
@@ -1065,5 +1067,6 @@ impl RadialState {
         self.target_slice = None;
         self.target_slice_since = None;
         self.submenu = None;
+        self.use_agentd = config.overlay.ai.use_agentd;
     }
 }

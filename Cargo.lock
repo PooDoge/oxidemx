@@ -7036,6 +7036,7 @@ dependencies = [
  "once_cell",
  "oxidemx-agent",
  "oxidemx-agent-core",
+ "oxidemx-agent-proxy",
  "oxidemx-icons",
  "oxidemx-scene-render",
  "oxidemx-shared",

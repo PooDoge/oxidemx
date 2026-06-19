@@ -13,6 +13,8 @@ path = "src/main.rs"
 [dependencies]
 oxidemx-shared = { path = "../oxidemx-shared" }
 oxidemx-agent-core = { path = "../oxidemx-agent-core" }
+# D-Bus proxy for agentd (org.oxidemx.Agent) — used by the use_agentd chat path.
+oxidemx-agent-proxy = { path = "../oxidemx-agent-proxy" }
 # Shared design system: Palette + the token/icon layers (moved here so
 # every iced surface shares them). See docs/design/ui-design-language.md.
 oxidemx-widgets = { path = "../oxidemx-widgets" }

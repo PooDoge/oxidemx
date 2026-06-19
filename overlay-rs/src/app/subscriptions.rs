@@ -8,7 +8,7 @@ use super::Message;
 use crate::radial::RadialState;
 
 pub(super) fn subscription(state: &RadialState) -> Subscription<Message> {
-    // Three streams merged into the same Message channel:
+    // Streams merged into the same Message channel:
     //   * D-Bus listener — translates the daemon's three signal
     //     streams into OverlayEvent values.
     //   * Inotify config watcher — yields a fresh AppConfig each
@@ -39,6 +39,12 @@ pub(super) fn subscription(state: &RadialState) -> Subscription<Message> {
             _ => Message::Noop,
         }),
     ];
+    // agentd event subscriber — active only when the use_agentd flag is on.
+    // The D-Bus connection is only opened when agentd routing is actually
+    // enabled, keeping the default in-proc path free of any agentd D-Bus churn.
+    if state.use_agentd {
+        subs.push(Subscription::run(crate::app::agent_events::stream));
+    }
     // Live-data sampling only while something is on screen — a
     // closed overlay spawns no sampling processes. The subscription
     // identity restarting on open is fine: the first tick re-seeds

@@ -790,15 +790,41 @@ pub(super) fn update(state: &mut RadialState, message: Message) -> Task<Message>
                 v.extend(h[start..end].iter().map(|m| (m.is_user, m.text.clone())));
                 v
             };
-            let (task, handle) = Task::perform(
-                async move {
-                    crate::ai_client::ask_ai(mode, &model, &prompt, sink, &history, image, &session_id)
+            let (task, handle) = if state.use_agentd {
+                // ── agentd path ──────────────────────────────────────────────
+                // send_message returns the turn-id; the reply arrives via the
+                // `event` D-Bus signal handled in `Message::AgentdEvent` below.
+                // We keep ai_loading = true until `AgentdFinal` arrives.
+                let session_id_remote = session_id.clone();
+                Task::perform(
+                    async move {
+                        crate::ai_client::ask_ai_remote(&session_id_remote, &prompt, &model)
+                            .await
+                            .map_err(|e| e.to_string())
+                    },
+                    move |res| match res {
+                        Ok(_turn_id) => Message::Noop,
+                        Err(e) => Message::AiResponseReceived(
+                            thread_idx,
+                            Err(format!("agentd send failed: {e}")),
+                        ),
+                    },
+                )
+                .abortable()
+            } else {
+                // ── in-proc path (default) ───────────────────────────────────
+                Task::perform(
+                    async move {
+                        crate::ai_client::ask_ai(
+                            mode, &model, &prompt, sink, &history, image, &session_id,
+                        )
                         .await
                         .map_err(|e| e.to_string())
-                },
-                move |res| Message::AiResponseReceived(thread_idx, res),
-            )
-            .abortable();
+                    },
+                    move |res| Message::AiResponseReceived(thread_idx, res),
+                )
+                .abortable()
+            };
             state.ai_abort = Some(handle);
             Task::batch([task, scroll_chat_to_end()])
         }
@@ -960,27 +986,58 @@ pub(super) fn update(state: &mut RadialState, message: Message) -> Task<Message>
             if let Some(handle) = state.ai_abort.take() {
                 handle.abort();
             }
-            // Canonical cancel path: fire the session's token so a turn parked
-            // on an approval await (which dropping the Task alone may not
-            // unblock) stops too.
-            if let Some(id) = state.chat().session_id.clone() {
-                use oxidemx_agent::session::SessionStore;
-                crate::agent_runtime::SESSIONS.cancel(&id);
-            }
-            state.ai_loading = false;
-            state.ai_activity = None;
-            state.ai_stream_md = Vec::new();
-            if let Some((idx, partial)) = state.ai_stream.take() {
-                if !partial.trim().is_empty() {
-                    if let Some(chat) = state.ai_threads.get_mut(idx) {
-                        chat.history
-                            .push(ChatMessage::assistant(format!("{partial}\n\n*(stopped)*")));
-                        chat.updated_at = crate::radial::now_secs();
+            if state.use_agentd {
+                // agentd cancel: cancel_turn is not yet wired on the daemon side
+                // (Task 6 placeholder only). Attempt it and surface a graceful
+                // "not available yet" label rather than crashing.
+                let session_id = state.chat().session_id.clone().unwrap_or_default();
+                let task = Task::perform(
+                    async move { crate::ai_client::cancel_agentd_turn(&session_id).await },
+                    |result| match result {
+                        Ok(()) => Message::Noop,
+                        Err(_) => {
+                            // Cancellation not yet wired — silently ignore.
+                            Message::Noop
+                        }
+                    },
+                );
+                state.ai_loading = false;
+                state.ai_activity = Some("Stop requested (cancellation not yet available)".to_string());
+                state.ai_stream_md = Vec::new();
+                if let Some((idx, partial)) = state.ai_stream.take() {
+                    if !partial.trim().is_empty() {
+                        if let Some(chat) = state.ai_threads.get_mut(idx) {
+                            chat.history
+                                .push(ChatMessage::assistant(format!("{partial}\n\n*(stopped)*")));
+                            chat.updated_at = crate::radial::now_secs();
+                        }
+                        crate::radial::save_chat_threads(&state.ai_threads);
                     }
-                    crate::radial::save_chat_threads(&state.ai_threads);
                 }
+                task
+            } else {
+                // Canonical cancel path: fire the session's token so a turn parked
+                // on an approval await (which dropping the Task alone may not
+                // unblock) stops too.
+                if let Some(id) = state.chat().session_id.clone() {
+                    use oxidemx_agent::session::SessionStore;
+                    crate::agent_runtime::SESSIONS.cancel(&id);
+                }
+                state.ai_loading = false;
+                state.ai_activity = None;
+                state.ai_stream_md = Vec::new();
+                if let Some((idx, partial)) = state.ai_stream.take() {
+                    if !partial.trim().is_empty() {
+                        if let Some(chat) = state.ai_threads.get_mut(idx) {
+                            chat.history
+                                .push(ChatMessage::assistant(format!("{partial}\n\n*(stopped)*")));
+                            chat.updated_at = crate::radial::now_secs();
+                        }
+                        crate::radial::save_chat_threads(&state.ai_threads);
+                    }
+                }
+                Task::none()
             }
-            Task::none()
         }
         Message::AiLinkClicked(url) => {
             // Only open real web links — markdown can contain
@@ -1318,7 +1375,12 @@ pub(super) fn update(state: &mut RadialState, message: Message) -> Task<Message>
         }
         Message::AiNewChat => {
             state.ai_new_chat();
-            Task::none()
+            if state.use_agentd {
+                let thread_idx = state.ai_active;
+                Task::batch([Task::none(), load_agentd_history(state, thread_idx)])
+            } else {
+                Task::none()
+            }
         }
         Message::AiToggleThreads => {
             state.ai_show_threads = !state.ai_show_threads;
@@ -1326,7 +1388,11 @@ pub(super) fn update(state: &mut RadialState, message: Message) -> Task<Message>
         }
         Message::AiSelectThread(idx) => {
             state.ai_select_chat(idx);
-            Task::none()
+            if state.use_agentd {
+                load_agentd_history(state, idx)
+            } else {
+                Task::none()
+            }
         }
         Message::AiChooseOption(choice) => {
             if let Some(pending) = state.ai_pending_question.take() {
@@ -1439,7 +1505,168 @@ pub(super) fn update(state: &mut RadialState, message: Message) -> Task<Message>
             state.ai_show_memories = false;
             Task::none()
         }
+
+        // ── agentd event path (use_agentd = true) ────────────────────────────
+
+        // Raw D-Bus event from agentd: resolve the session_id to a thread index
+        // and fan out to the appropriate iced StreamEvent or Final.
+        Message::AgentdEvent { session_id, inner } => {
+            use crate::app::agent_events::{session_to_thread_idx, Inner};
+            let thread_idx = session_to_thread_idx(&state.ai_threads, &session_id)
+                .unwrap_or(state.ai_active);
+
+            match inner {
+                Inner::Delta(text) => {
+                    // Route through the same AiStream handler.
+                    update(
+                        state,
+                        Message::AiStream((
+                            thread_idx,
+                            crate::ai_client::StreamEvent::Delta(text),
+                        )),
+                    )
+                }
+                Inner::Activity(text) => update(
+                    state,
+                    Message::AiStream((
+                        thread_idx,
+                        crate::ai_client::StreamEvent::Activity(text),
+                    )),
+                ),
+                Inner::Card(Some(card)) => update(
+                    state,
+                    Message::AiStream((thread_idx, crate::ai_client::StreamEvent::Card(card))),
+                ),
+                Inner::Card(None) => {
+                    // Card deserialization failed — surface as a generic activity note.
+                    update(
+                        state,
+                        Message::AiStream((
+                            thread_idx,
+                            crate::ai_client::StreamEvent::Activity(
+                                "Agent tool completed".to_string(),
+                            ),
+                        )),
+                    )
+                }
+                Inner::Final(text) => update(
+                    state,
+                    Message::AgentdFinal { thread_idx, text },
+                ),
+            }
+        }
+
+        // agentd turn complete — commit the final reply text.
+        Message::AgentdFinal { thread_idx, text } => {
+            state.ai_loading = false;
+            state.ai_activity = None;
+            state.ai_stream = None;
+            state.ai_stream_md = Vec::new();
+            state.ai_abort = None;
+            let Some(chat) = state.ai_threads.get_mut(thread_idx) else {
+                return Task::none();
+            };
+            chat.history.push(ChatMessage::assistant(text));
+            chat.updated_at = crate::radial::now_secs();
+            crate::radial::save_chat_threads(&state.ai_threads);
+            state.trigger_ripple();
+            scroll_chat_to_end()
+        }
+
+        // agentd is waiting for approval — store the card and surface the UI.
+        Message::AgentdApprovalRequested {
+            thread,
+            request_id,
+            card_json,
+        } => {
+            state.ai_agentd_approval = Some((request_id, card_json));
+            // Mark as not loading so the user can see the approval card.
+            state.ai_loading = false;
+            state.ai_activity = Some(format!("Waiting for approval (thread {thread})"));
+            Task::none()
+        }
+
+        // User responded to an agentd approval card.
+        Message::AgentdRespondApproval { request_id, allow } => {
+            state.ai_agentd_approval = None;
+            state.ai_loading = true;
+            state.ai_activity = Some("Continuing…".to_string());
+            let project = crate::ai_client::agentd_project();
+            Task::perform(
+                async move {
+                    use oxidemx_agent_proxy::AgentProxy;
+                    let conn = zbus::connection::Builder::session()?.build().await?;
+                    let proxy = AgentProxy::new(&conn).await?;
+                    proxy
+                        .respond_approval(&project, &request_id, allow, "")
+                        .await?;
+                    Ok::<(), zbus::Error>(())
+                },
+                |res| match res {
+                    Ok(()) => Message::Noop,
+                    Err(e) => Message::AiResponseReceived(
+                        0,
+                        Err(format!("respond_approval failed: {e}")),
+                    ),
+                },
+            )
+        }
+
+        // agentd model lifecycle change — update the status label.
+        Message::AgentdModelStatus(alias, status_json) => {
+            // Parse the status string for a simple "loading" / "ready" / "error" label.
+            let label = serde_json::from_str::<serde_json::Value>(&status_json)
+                .ok()
+                .and_then(|v| v.get("state").and_then(|s| s.as_str()).map(String::from))
+                .unwrap_or_else(|| status_json.clone());
+            info!("agentd model status: {alias} → {label}");
+            // Only surface non-ready states as activity text (keep idle UI quiet).
+            if label != "ready" && label != "loaded" {
+                state.ai_activity = Some(format!("Model {alias}: {label}"));
+            }
+            Task::none()
+        }
+
+        // History loaded from agentd on chat open / thread switch.
+        Message::AgentdHistoryLoaded { thread_idx, turns } => {
+            let Some(chat) = state.ai_threads.get_mut(thread_idx) else {
+                return Task::none();
+            };
+            // Only populate if the thread's local history is empty — avoid
+            // double-appending if the user already typed in the thread.
+            if chat.history.is_empty() {
+                for (is_user, text) in turns {
+                    let msg = if is_user {
+                        ChatMessage::user(text)
+                    } else {
+                        ChatMessage::assistant(text)
+                    };
+                    chat.history.push(msg);
+                }
+                crate::radial::save_chat_threads(&state.ai_threads);
+            }
+            scroll_chat_to_end()
+        }
     }
+}
+
+/// Kick off a history load from agentd for the given thread index.
+///
+/// Only fires if the thread has a session_id (i.e. it has been used at least
+/// once and agentd can look it up).  If the thread is brand-new (no session_id)
+/// there's nothing to load — the send will mint the id on first turn.
+fn load_agentd_history(state: &RadialState, thread_idx: usize) -> Task<Message> {
+    let session_id = state
+        .ai_threads
+        .get(thread_idx)
+        .and_then(|t| t.session_id.clone());
+    let Some(session_id) = session_id else {
+        return Task::none();
+    };
+    Task::perform(
+        async move { crate::ai_client::fetch_agentd_transcript(&session_id).await },
+        move |turns| Message::AgentdHistoryLoaded { thread_idx, turns },
+    )
 }
 
 /// Reload the scheduled-task list off the render path (systemctl

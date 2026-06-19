@@ -359,6 +359,15 @@ pub struct RadialState {
     /// Vision-loop dev hook: set once the OXIDEMX_VISION_SHOT
     /// capture has been scheduled so it fires exactly once.
     pub vision_shot_taken: bool,
+
+    /// Mirror of `AiConfig::use_agentd`.  When `true`, the overlay routes
+    /// chat send/receive through agentd over D-Bus.  Updated on every config
+    /// reload so a live edit of `config.json` activates without restart.
+    pub use_agentd: bool,
+
+    /// Pending agentd approval card: `(request_id, card_json)`.
+    /// `None` when no approval is outstanding on the agentd path.
+    pub ai_agentd_approval: Option<(String, String)>,
 }
 
 /// Live widget data for the Splice Widgets page. Sparkline ring

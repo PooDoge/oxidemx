@@ -1243,6 +1243,14 @@ pub struct AiConfig {
     /// Model id for `fast_provider`.
     #[serde(default = "default_fast_model")]
     pub fast_model: String,
+
+    /// Route overlay chat through `agentd` over D-Bus (`AgentProxy`) instead
+    /// of the built-in in-process provider.  Default **false** — the in-proc
+    /// path is used until Task 8 flips this default and removes in-proc code.
+    /// Set `true` in `~/.config/oxidemx/config.json` under `"ai": {}` to test
+    /// the agentd path while agentd is running.
+    #[serde(default)]
+    pub use_agentd: bool,
 }
 
 impl Default for AiConfig {
@@ -1255,6 +1263,7 @@ impl Default for AiConfig {
             routing_enabled: false,
             fast_provider: default_fast_provider(),
             fast_model: default_fast_model(),
+            use_agentd: false,
         }
     }
 }
