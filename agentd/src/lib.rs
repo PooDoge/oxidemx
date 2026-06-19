@@ -3,10 +3,24 @@
 
 pub mod error;
 pub mod projects;
+pub mod sessions;
 
 #[cfg(test)]
 mod tests {
     use crate::projects::{ProjectKey, ProjectPaths};
+    use crate::sessions::{TranscriptStore, TranscriptTurn};
+
+    #[test]
+    fn transcript_round_trips_per_thread() {
+        let d = tempfile::tempdir().unwrap();
+        let s = TranscriptStore::new(d.path().join("transcripts"));
+        s.append("t1", &TranscriptTurn{role:"user".into(), text:"hi".into(), ts:1}).unwrap();
+        s.append("t1", &TranscriptTurn{role:"assistant".into(), text:"yo".into(), ts:2}).unwrap();
+        s.append("t2", &TranscriptTurn{role:"user".into(), text:"other".into(), ts:3}).unwrap();
+        assert_eq!(s.read("t1").unwrap().len(), 2);
+        let mut threads = s.list_threads().unwrap(); threads.sort();
+        assert_eq!(threads, vec!["t1".to_string(), "t2".to_string()]);
+    }
 
     #[test]
     fn project_key_is_stable_and_distinct() {
