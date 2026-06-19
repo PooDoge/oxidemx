@@ -1,5 +1,6 @@
 //! Core request / response / state types for the local-LLM service.
 
+use crate::engine::SchemaConstraint;
 use crate::guard::Verdict;
 use crate::mode::Mode;
 use oxidemx_shared::config::SamplingConfig;
@@ -33,7 +34,7 @@ pub struct Message {
 // ── ChatRequest ───────────────────────────────────────────────────────────────
 
 /// A complete request sent to the local-LLM service.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct ChatRequest {
     /// Prior conversation turns (system + user + assistant history).
     pub messages: Vec<Message>,
@@ -45,6 +46,11 @@ pub struct ChatRequest {
     pub sampling_override: Option<SamplingConfig>,
     /// Optional system-prompt template injected before the messages.
     pub system_template: Option<String>,
+    /// Optional generate-time output constraint (JSON Schema or regex).
+    ///
+    /// When `Some`, the constraint is forwarded to the inference engine.
+    /// `None` means unconstrained decoding (the default).
+    pub constraint: Option<SchemaConstraint>,
 }
 
 // ── Usage ─────────────────────────────────────────────────────────────────────

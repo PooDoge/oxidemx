@@ -381,6 +381,7 @@ impl LocalModelService for LocalModelManager {
             messages: req.messages.clone(),
             sampling,
             tools: req.tools.clone(),
+            constraint: req.constraint.clone(),
         };
 
         // Extract the last user message text for guard evaluation.
@@ -595,6 +596,7 @@ mod tests {
             tools: vec![],
             sampling_override: None,
             system_template: None,
+            constraint: None,
         }
     }
 

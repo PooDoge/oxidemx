@@ -24,6 +24,7 @@ use autoagents::llm::error::LLMError;
 use autoagents::llm::models::ModelsProvider;
 use autoagents::llm::{LLMProvider, ToolCall};
 
+use crate::engine::SchemaConstraint;
 use crate::error::LocalError;
 use crate::mode::Mode;
 use crate::service::LocalModelService;
@@ -92,7 +93,7 @@ impl ChatProvider for LocalChatProvider {
         &self,
         messages: &[ChatMessage],
         tools: Option<&[Tool]>,
-        _json_schema: Option<StructuredOutputFormat>,
+        json_schema: Option<StructuredOutputFormat>,
     ) -> Result<Box<dyn AutoChatResponse>, LLMError> {
         let mode = match tools {
             Some(t) if !t.is_empty() => Mode::ToolUse,
@@ -107,12 +108,23 @@ impl ChatProvider for LocalChatProvider {
             })
             .collect();
 
+        // Thread the JSON-schema structured-output request into a
+        // SchemaConstraint so the engine applies constrained decoding.
+        // When both tools AND a schema are present, tools take precedence
+        // and the schema is silently ignored (matching provider semantics).
+        let constraint = if tools.map(|t| !t.is_empty()).unwrap_or(false) {
+            None
+        } else {
+            json_schema.and_then(|s| s.schema).map(SchemaConstraint::JsonSchema)
+        };
+
         let req = ChatRequest {
             messages: msgs,
             mode,
             tools: vec![],
             sampling_override: None,
             system_template: None,
+            constraint,
         };
 
         let resp = self

@@ -21,14 +21,14 @@
 
 use async_trait::async_trait;
 use mistralrs::{
-    AnyModelBuilder, GgufModelBuilder, IsqType, Model, MultiModelBuilder, MultimodalModelBuilder,
-    RequestBuilder, TextMessageRole, TextModelBuilder, WebSearchOptions,
+    AnyModelBuilder, Constraint, GgufModelBuilder, IsqType, Model, MultiModelBuilder,
+    MultimodalModelBuilder, RequestBuilder, TextMessageRole, TextModelBuilder, WebSearchOptions,
 };
 use oxidemx_shared::config::{Capabilities, ModelSource, ModelSpec};
 use std::{collections::HashSet, path::PathBuf, sync::Arc};
 use tokio::sync::Mutex;
 
-use crate::engine::{EngineReply, EngineRequest, InferenceEngine};
+use crate::engine::{EngineReply, EngineRequest, InferenceEngine, SchemaConstraint};
 use crate::error::LocalError;
 use crate::types::{Role, Usage};
 
@@ -254,6 +254,17 @@ impl InferenceEngine for MistralEngine {
         // Inject web-search options when the model advertises WEB_SEARCH.
         if self.web_search_aliases.contains(alias) {
             rb = rb.with_web_search_options(WebSearchOptions::default());
+        }
+
+        // Apply constrained decoding when the request carries a SchemaConstraint.
+        // Mapping: SchemaConstraint::JsonSchema(v) → Constraint::JsonSchema(v)
+        //          SchemaConstraint::Regex(r)      → Constraint::Regex(r)
+        if let Some(sc) = &req.constraint {
+            let c = match sc {
+                SchemaConstraint::JsonSchema(schema) => Constraint::JsonSchema(schema.clone()),
+                SchemaConstraint::Regex(pattern) => Constraint::Regex(pattern.clone()),
+            };
+            rb = rb.set_constraint(c);
         }
 
         // Dispatch to the named model.

@@ -10,6 +10,24 @@ use serde_json::Value;
 use crate::error::LocalError;
 use crate::types::{Message, Usage};
 
+// ── SchemaConstraint ──────────────────────────────────────────────────────────
+
+/// A generate-time output constraint carried as plain data on **all** builds.
+///
+/// When the `mistral` feature is enabled, [`crate::mistral::MistralEngine`]
+/// maps these variants to the corresponding `mistralrs::Constraint` variants
+/// and applies them via `RequestBuilder::set_constraint`.  On the default
+/// (mock/non-mistral) build they are recorded by [`MockEngine`] for testing.
+#[allow(dead_code)]
+#[derive(Debug, Clone)]
+pub enum SchemaConstraint {
+    /// Force the model to emit a JSON value that validates against the given
+    /// JSON Schema (a `serde_json::Value`).
+    JsonSchema(serde_json::Value),
+    /// Force the model to emit text matching the given ECMAScript regex.
+    Regex(String),
+}
+
 // ── Request / Reply ───────────────────────────────────────────────────────────
 
 /// Everything needed for a single inference call.
@@ -24,7 +42,27 @@ pub(crate) struct EngineRequest {
     pub sampling: SamplingConfig,
     /// Tool definitions forwarded to the model (empty when not in tool-use mode).
     pub tools: Vec<Value>,
+    /// Optional generate-time output constraint (JSON Schema or regex).
+    ///
+    /// `None` means unconstrained decoding (the default).
+    pub constraint: Option<SchemaConstraint>,
 }
+
+impl EngineRequest {
+    /// Attach an output constraint to this request.
+    ///
+    /// Consumes and returns `self` so it can be chained with struct-update
+    /// literal construction.
+    ///
+    /// Note: on the default (non-mistral) build this method is only exercised
+    /// by tests; the `#[allow(dead_code)]` suppresses the spurious lint.
+    #[allow(dead_code)]
+    pub(crate) fn with_constraint(mut self, constraint: SchemaConstraint) -> Self {
+        self.constraint = Some(constraint);
+        self
+    }
+}
+
 
 /// The inference result returned by an engine.
 #[derive(Debug, Clone)]
@@ -69,11 +107,14 @@ pub(crate) mod mock {
     /// * `unloaded()` — returns every alias passed to `unload` in call order.
     /// * `with_reply(text)` — sets the text returned by the next `generate` call.
     /// * `fail_next_load()` — makes the next `load` call return `LoadFailed`.
+    /// * `last_constraint()` — returns a clone of the constraint from the last
+    ///   `generate` call, or `None` if no constraint was set.
     pub(crate) struct MockEngine {
         loaded_log: Mutex<Vec<String>>,
         unloaded_log: Mutex<Vec<String>>,
         scripted_reply: Mutex<String>,
         fail_next_load: Mutex<bool>,
+        last_constraint: Mutex<Option<SchemaConstraint>>,
     }
 
     impl MockEngine {
@@ -84,7 +125,14 @@ pub(crate) mod mock {
                 unloaded_log: Mutex::new(Vec::new()),
                 scripted_reply: Mutex::new(String::new()),
                 fail_next_load: Mutex::new(false),
+                last_constraint: Mutex::new(None),
             }
+        }
+
+        /// Return a clone of the [`SchemaConstraint`] from the last `generate`
+        /// call, or `None` if the last request had no constraint.
+        pub(crate) fn last_constraint(&self) -> Option<SchemaConstraint> {
+            self.last_constraint.lock().unwrap_or_else(|e| e.into_inner()).clone()
         }
 
         /// Set the text that the mock will return from the next `generate` call.
@@ -138,8 +186,12 @@ pub(crate) mod mock {
         async fn generate(
             &self,
             _alias: &str,
-            _req: &EngineRequest,
+            req: &EngineRequest,
         ) -> Result<EngineReply, LocalError> {
+            // Record the constraint carried by this request.
+            *self.last_constraint.lock().unwrap_or_else(|e| e.into_inner()) =
+                req.constraint.clone();
+
             let text = self.scripted_reply.lock().unwrap().clone();
             Ok(EngineReply {
                 text,
@@ -183,12 +235,36 @@ pub(crate) mod mock {
                         messages: vec![],
                         sampling: Default::default(),
                         tools: vec![],
+                        constraint: None,
                     },
                 )
                 .await
                 .unwrap();
             assert_eq!(r.text, "pong");
             assert_eq!(m.loaded(), vec!["q".to_string()]);
+        }
+
+        /// A request built with `with_constraint(JsonSchema(…))` must arrive at
+        /// the engine with that constraint intact, and `last_constraint()` must
+        /// reflect it.
+        #[tokio::test]
+        async fn engine_request_carries_constraint_to_engine() {
+            let eng = MockEngine::new().with_reply("{}");
+            let req = EngineRequest {
+                messages: vec![],
+                sampling: Default::default(),
+                tools: vec![],
+                constraint: None,
+            }
+            .with_constraint(SchemaConstraint::JsonSchema(
+                serde_json::json!({"type": "object"}),
+            ));
+            let _ = eng.generate("m", &req).await.unwrap();
+            assert!(
+                matches!(eng.last_constraint(), Some(SchemaConstraint::JsonSchema(_))),
+                "expected Some(JsonSchema(_)), got {:?}",
+                eng.last_constraint()
+            );
         }
 
         #[tokio::test]
