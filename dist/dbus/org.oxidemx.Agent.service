@@ -1,0 +1,4 @@
+[D-BUS Service]
+Name=org.oxidemx.Agent
+Exec=/bin/false
+SystemdService=oxidemx-agentd.service

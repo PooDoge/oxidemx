@@ -1,0 +1,11 @@
+[Unit]
+Description=OxideMX agent host (org.oxidemx.Agent)
+
+[Service]
+Type=dbus
+BusName=org.oxidemx.Agent
+ExecStart=%h/.local/bin/oxidemx-agentd
+Restart=on-failure
+
+[Install]
+WantedBy=default.target

@@ -3,6 +3,10 @@ name = "agentd"
 version = "0.0.1"
 edition = "2021"
 
+[[bin]]
+name = "oxidemx-agentd"
+path = "src/main.rs"
+
 [features]
 default = []
 mistral = ["oxidemx-agent-local/mistral"]
@@ -25,3 +29,4 @@ tracing-subscriber = "0.3"
 
 [dev-dependencies]
 tempfile = "3"
+futures-util = { version = "0.3", default-features = false, features = ["std"] }

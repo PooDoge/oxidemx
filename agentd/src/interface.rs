@@ -730,7 +730,7 @@ impl AgentInterface {
     /// Fired whenever an agent event (turn started, turn done, tool call, etc.)
     /// occurs. `payload` is a JSON string.
     #[zbus(signal)]
-    async fn event(
+    pub async fn event(
         emitter: &SignalEmitter<'_>,
         project: String,
         thread_or_run: String,
@@ -741,7 +741,7 @@ impl AgentInterface {
     /// Fired when the agent runtime is waiting for human approval of a tool
     /// call. `card` is a JSON string describing the tool and its args.
     #[zbus(signal)]
-    async fn approval_requested(
+    pub async fn approval_requested(
         emitter: &SignalEmitter<'_>,
         project: String,
         thread: String,
@@ -752,7 +752,7 @@ impl AgentInterface {
     /// Fired after every model lifecycle change (load / unload / set_active).
     /// `status` is a JSON string (alias + state).
     #[zbus(signal)]
-    async fn model_status_changed(
+    pub async fn model_status_changed(
         emitter: &SignalEmitter<'_>,
         alias: String,
         status: String,
