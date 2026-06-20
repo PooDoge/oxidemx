@@ -120,6 +120,13 @@ impl<M: PlannerModel> Planner<M> {
     /// Perform a single model call + validate-time gate + graph validation.
     ///
     /// Returns `Ok(StepGraph)` on success, `Err(reason_string)` on any failure.
+    ///
+    /// **Error-carrying design note:** Per-attempt schema/graph failures (JSON parse errors,
+    /// schema validation errors, graph validation failures like cycles or missing deps) are
+    /// carried as advisory `String` reasons, fed back to the model as a corrective system note,
+    /// and accumulated into the final `Unresolved{reasons}`. The typed `SchemaInvalid` and
+    /// `GraphInvalid` variants in `PlannerError` are reserved for up-front schema-derivation
+    /// errors during the initial `schemars::schema_for!` step, not per-attempt failures.
     async fn attempt_once(
         &self,
         goal: &str,

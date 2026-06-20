@@ -94,6 +94,73 @@ impl StepGraph {
         Ok(())
     }
 
+    /// Non-fatal advisories about the graph — currently, step ids that are
+    /// unreachable from any root (never dequeued during the topological pass).
+    /// Unreachable nodes are inert, not an error.
+    pub fn warnings(&self) -> Vec<String> {
+        // Build in-degree map and adjacency list using Kahn's algorithm,
+        // identical to check_acyclic. Collect ids that are never dequeued.
+        let mut in_degree: HashMap<&str, usize> = HashMap::new();
+        let mut adjacency: HashMap<&str, Vec<&str>> = HashMap::new();
+
+        // Initialize all steps with 0 in-degree and empty adjacency list
+        for step in &self.steps {
+            in_degree.insert(&step.id, 0);
+            adjacency.insert(&step.id, Vec::new());
+        }
+
+        // Build edges: if B needs A, add edge A → B
+        for step in &self.steps {
+            for dep_id in &step.needs {
+                // Increment B's in-degree (one more prerequisite)
+                if let Some(d) = in_degree.get_mut(step.id.as_str()) {
+                    *d += 1;
+                }
+                // Add B to A's adjacency list
+                if let Some(adj) = adjacency.get_mut(dep_id.as_str()) {
+                    adj.push(&step.id);
+                }
+            }
+        }
+
+        // Find all nodes with in-degree 0 and add to queue
+        let mut queue: VecDeque<&str> = VecDeque::new();
+        for (id, &degree) in &in_degree {
+            if degree == 0 {
+                queue.push_back(id);
+            }
+        }
+
+        // Process queue, removing zero-in-degree nodes
+        let mut processed_ids = HashSet::new();
+        while let Some(node) = queue.pop_front() {
+            processed_ids.insert(node.to_string());
+
+            // For each node that depends on this one, decrement its in-degree
+            if let Some(dependents) = adjacency.get(node) {
+                for &dependent in dependents {
+                    if let Some(degree) = in_degree.get_mut(dependent) {
+                        *degree -= 1;
+                        if *degree == 0 {
+                            queue.push_back(dependent);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Unreachable nodes are those never processed (never dequeued)
+        let mut unreachable: Vec<String> = self
+            .steps
+            .iter()
+            .map(|s| &s.id)
+            .filter(|id| !processed_ids.contains(id.as_str()))
+            .cloned()
+            .collect();
+        unreachable.sort();
+        unreachable
+    }
+
     /// Check if the graph is acyclic using Kahn's topological sort algorithm.
     fn check_acyclic(&self) -> Result<(), GraphError> {
         // Build in-degree map and adjacency list
@@ -111,12 +178,13 @@ impl StepGraph {
         for step in &self.steps {
             for dep_id in &step.needs {
                 // Increment B's in-degree (one more prerequisite)
-                *in_degree.get_mut(step.id.as_str()).unwrap() += 1;
+                if let Some(d) = in_degree.get_mut(step.id.as_str()) {
+                    *d += 1;
+                }
                 // Add B to A's adjacency list
-                adjacency
-                    .get_mut(dep_id.as_str())
-                    .unwrap()
-                    .push(&step.id);
+                if let Some(adj) = adjacency.get_mut(dep_id.as_str()) {
+                    adj.push(&step.id);
+                }
             }
         }
 
@@ -207,5 +275,40 @@ mod tests {
 
         let g2 = StepGraph::new(vec![Step::new("a", "A"), Step::new("a", "dup")]);
         assert!(matches!(g2.validate(), Err(GraphError::DuplicateId(_))));
+    }
+
+    #[test]
+    fn warnings_reports_unreachable_nodes() {
+        let g = StepGraph::new(vec![
+            {
+                let mut a = Step::new("a", "A");
+                a.needs = vec!["b".into()];
+                a
+            },
+            {
+                let mut b = Step::new("b", "B");
+                b.needs = vec!["a".into()];
+                b
+            },
+            Step::new("c", "C"), // independent, reachable
+        ]);
+        let w = g.warnings();
+        // a and b are in a cycle, so unreachable; c is reachable.
+        assert!(w.contains(&"a".to_string()));
+        assert!(w.contains(&"b".to_string()));
+        assert!(!w.contains(&"c".to_string()));
+    }
+
+    #[test]
+    fn warnings_empty_for_acyclic_fully_connected() {
+        let g = StepGraph::new(vec![
+            Step::new("a", "first"),
+            {
+                let mut s = Step::new("b", "second");
+                s.needs = vec!["a".into()];
+                s
+            },
+        ]);
+        assert_eq!(g.warnings(), Vec::<String>::new());
     }
 }

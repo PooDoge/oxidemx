@@ -345,6 +345,10 @@ priority order, with deferral reasons verified in-code:
 - **oxidemx-ledger: add `record_tool_call`** — bump `Step.tool_calls` + append a `ToolCall` event; also emit `TaskCreated` on `create`. [SP2a→SP2c]
 - **oxidemx-ledger: add per-step budget field + StepGraph validate()/cycle-check** for the Planner. [SP2a→SP2b/c]
 
+## SP2b final-review fixes (2026-06-19)
+
+- **SP2c: before trusting GENERATE-TIME constraint on PlanOutput, smoke-test mistralrs 0.8.1 `Constraint::JsonSchema` acceptance of schemars' draft-07 `$ref`/`definitions` schema (nested PlanStep).** If the llguidance grammar backend chokes on `$ref`, inline PlanStep (flat schema) or convert to draft-2020-12 `$defs`. Validate-time jsonschema is the backstop, so a generate-time failure degrades to unconstrained-decode+validator-catch, not a correctness hole. [SP2b final review]
+
 ## T3 review fixes (2026-06-19)
 
 - **agentd compose_flow validates via subprocess** — agentd links the conductor crate in-process, but compose_flow shells out to `oxidemx-conductor validate`. Expose `oxidemx_conductor::validate(id)` as a lib fn and call in-process (systemd unit may lack the conductor binary on PATH). [SP1c T3]
