@@ -103,16 +103,19 @@ pub struct CoreTurnRunner;
 impl TurnRunner for CoreTurnRunner {
     async fn run_turn(
         &self,
-        _project: &ProjectKey,
+        project: &ProjectKey,
         thread: &str,
         text: &str,
         history: &[(bool, String)],
-        _approver: &Arc<Approver>,
+        approver: &Arc<Approver>,
         emitter: &Arc<dyn EventEmitter>,
         paths: &crate::projects::ProjectPaths,
         host: &Arc<dyn crate::seams::HostCapability>,
     ) -> Result<(String, (u64, u64)), AgentdError> {
         use oxidemx_agent_core::mode::AgentMode;
+        use oxidemx_approval::ApprovalClassifier;
+        use crate::agent::approver_prompt::ApproverPrompt;
+        use crate::tools::gated::{GateMode, GatedToolExecutor};
 
         // ── 1. Build a StreamBridge for this turn ─────────────────────────
         // No lock is held across route_turn or bridge.finish().
@@ -122,11 +125,28 @@ impl TurnRunner for CoreTurnRunner {
             emitter.clone(),
         );
 
-        // ── 2. Build a real AgentToolExecutor ─────────────────────────────
-        let exec: std::sync::Arc<dyn oxidemx_agent_core::tool::ToolExecutor> =
+        // ── 2. Build a GatedToolExecutor (Attended) over AgentToolExecutor ──
+        // Chat path uses Attended mode + ApproverPrompt: Ask-tier tools surface
+        // an approval card to the user rather than returning NEEDS_APPROVAL.
+        // No GateLog is passed (chat does not need the blocking audit log).
+        let inner: std::sync::Arc<dyn oxidemx_agent_core::tool::ToolExecutor> =
             std::sync::Arc::new(crate::tools::AgentToolExecutor::new(
                 paths.clone(),
                 host.clone(),
+            ));
+        let prompt_adapter = std::sync::Arc::new(ApproverPrompt::new(
+            approver.clone(),
+            project.as_str(),
+            thread,
+        ));
+        let exec: std::sync::Arc<dyn oxidemx_agent_core::tool::ToolExecutor> =
+            std::sync::Arc::new(GatedToolExecutor::new(
+                inner,
+                ApprovalClassifier::default(),
+                Some(prompt_adapter),   // surfaces approval card to the user
+                GateMode::Attended,     // Ask-tier tools prompt rather than block
+                paths.cwd.clone(),
+                None,                   // no GateLog needed in the chat path
             ));
 
         // ── 3. Run the turn — sink flows deltas/tools to the bridge ───────

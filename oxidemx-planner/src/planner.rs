@@ -23,6 +23,12 @@ pub struct PlanStep {
     /// IDs of steps that must complete before this one can start.
     #[serde(default)]
     pub needs: Vec<String>,
+    /// Optional verification command: `(program, args)`.
+    ///
+    /// When present, the executor runs this command after the step completes
+    /// and requires it to exit 0 before marking the step Done.
+    #[serde(default)]
+    pub verify: Option<(String, Vec<String>)>,
 }
 
 /// Top-level wire shape the model must emit.
@@ -173,6 +179,7 @@ impl<M: PlannerModel> Planner<M> {
             .map(|ps| {
                 let mut s = Step::new(&ps.id, &ps.title);
                 s.needs = ps.needs;
+                s.verify = ps.verify;
                 s
             })
             .collect();
@@ -195,6 +202,13 @@ mod tests {
     use super::*;
     use crate::error::PlannerError;
     use crate::model::MockPlannerModel;
+
+    #[test]
+    fn plan_step_verify_round_trips() {
+        let j = r#"{"steps":[{"id":"a","title":"code","needs":[],"verify":["cargo",["check"]]}]}"#;
+        let p: PlanOutput = serde_json::from_str(j).unwrap();
+        assert_eq!(p.steps[0].verify, Some(("cargo".into(), vec!["check".into()])));
+    }
 
     #[tokio::test]
     async fn plan_returns_valid_stepgraph() {

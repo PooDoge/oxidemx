@@ -21,6 +21,12 @@ pub struct WorkerBrief {
     pub goal: String,
     /// JSON object mapping each `needs` step-id to its stored output value.
     pub inputs: Value,
+    /// Optional shell verification command: `(program, args)`.
+    ///
+    /// Copied from [`oxidemx_ledger::Step::verify`] when the brief is built
+    /// by the executor, and forwarded into [`StepOutput::verify_cmd`] by the
+    /// worker so the executor can run the verifier after the step completes.
+    pub verify: Option<(String, Vec<String>)>,
 }
 
 /// A single tool invocation recorded during step execution.

@@ -114,6 +114,11 @@ pub struct Step {
     /// Output schema for this step (JSON Schema).
     #[serde(default)]
     pub output_schema: Option<serde_json::Value>,
+    /// Optional shell verification command emitted by the planner: `(program, args)`.
+    ///
+    /// `None` means the step has no associated verify command.
+    #[serde(default)]
+    pub verify: Option<(String, Vec<String>)>,
 }
 
 impl Step {
@@ -130,6 +135,7 @@ impl Step {
             budget: StepBudget::default(),
             input_schema: None,
             output_schema: None,
+            verify: None,
         }
     }
 

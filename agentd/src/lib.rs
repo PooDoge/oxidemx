@@ -3,6 +3,7 @@
 
 pub mod agent;
 pub mod error;
+pub mod harness;
 pub mod host_proxy;
 pub mod interface;
 pub mod journal;

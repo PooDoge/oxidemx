@@ -83,6 +83,8 @@ struct StepBrief {
     /// The step's per-step tool-call budget limit, if any.
     #[allow(dead_code)]
     budget_max_tool_calls: Option<u32>,
+    /// Optional verification command copied from the ledger step.
+    verify: Option<(String, Vec<String>)>,
 }
 
 /// Result of running a single step's worker.
@@ -168,6 +170,7 @@ impl<W: Worker, R: CommandRunner> Executor<W, R> {
                         input_schema: s.input_schema.clone(),
                         budget_exceeded: s.budget_exceeded(),
                         budget_max_tool_calls: s.budget.max_tool_calls,
+                        verify: s.verify.clone(),
                     }
                 })
                 .collect();
@@ -218,6 +221,7 @@ impl<W: Worker, R: CommandRunner> Executor<W, R> {
                         title: brief.title,
                         goal: brief.goal,
                         inputs: brief.inputs,
+                        verify: brief.verify,
                     },
                 ));
             }
