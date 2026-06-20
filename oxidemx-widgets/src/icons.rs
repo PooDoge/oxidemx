@@ -65,6 +65,10 @@ fn paths(name: &str) -> Option<&'static str> {
         "sparkle" => {
             r#"<path d="M12 3l1.9 5.6L19.5 10.5l-5.6 1.9L12 18l-1.9-5.6L4.5 10.5l5.6-1.9z" fill="currentColor" stroke="none"/>"#
         }
+        "pencil" => r#"<path d="M14.5 4.5l5 5M4 20l1-4L16.5 4.5a2.1 2.1 0 0 1 3 3L8 19z"/>"#,
+        "clipboard" => r#"<rect x="5" y="4.5" width="14" height="16.5" rx="2.5"/><path d="M9 4.5a3 3 0 0 1 6 0M9 11h6M9 15h4"/>"#,
+        "globe" => r#"<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.6 2.5 2.6 15.5 0 18M12 3c-2.6 2.5-2.6 15.5 0 18"/>"#,
+        "bolt" => r#"<path d="M13 2L5 13h6l-1 9 8-12h-6l1-8z" fill="currentColor" stroke="none"/>"#,
         "terminal" => {
             r#"<rect x="2" y="4" width="20" height="16" rx="2"/><path d="M6 9l3 3-3 3M12 15h5"/>"#
         }
@@ -142,6 +146,10 @@ const NAMES: &[&str] = &[
     "gear",
     "circle",
     "target",
+    "pencil",
+    "clipboard",
+    "globe",
+    "bolt",
 ];
 
 static HANDLES: Lazy<HashMap<&'static str, svg::Handle>> = Lazy::new(|| {

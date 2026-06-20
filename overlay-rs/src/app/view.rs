@@ -859,6 +859,30 @@ fn chat_window_view(state: &RadialState) -> Element<'_, Message> {
     }
 
     children.push(crate::chat_ui::view(state, 1.0));
+
+    // Activity dock — overlaid bottom-right when there are active runs.
+    let kit = oxidemx_widgets::kit::Kit::from_palette(
+        &oxidemx_widgets::palette::Palette::from_theme(&state.theme.theme),
+        1.0,
+        pulse,
+    );
+    if let Some(dock) = crate::activity::dock::dock_view(&state.activity, &kit) {
+        children.push(
+            iced::widget::container(dock)
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .align_x(iced::Alignment::End)
+                .align_y(iced::Alignment::End)
+                .padding(iced::Padding {
+                    top: 0.0,
+                    right: 18.0,
+                    bottom: 96.0,
+                    left: 0.0,
+                })
+                .into(),
+        );
+    }
+
     iced::widget::Stack::with_children(children)
         .width(Length::Fill)
         .height(Length::Fill)
