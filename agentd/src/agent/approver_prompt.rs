@@ -117,5 +117,19 @@ mod tests {
             approver.respond(&ids[0], Verdict::Always);
             assert!(h.await.unwrap(), "Always should map to true");
         }
+
+        // ── Edit → false ───────────────────────────────────────────────────
+        {
+            let ap2 = approver.clone();
+            let prompt = ApproverPrompt::new(ap2, "proj", "thread-4");
+            let h = tokio::spawn(async move {
+                prompt.confirm("execute_command", "some command for editing").await
+            });
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            let ids = approver.pending_ids();
+            assert_eq!(ids.len(), 1);
+            approver.respond(&ids[0], Verdict::Edit(serde_json::json!({})));
+            assert!(!h.await.unwrap(), "Edit should map to false");
+        }
     }
 }

@@ -371,4 +371,24 @@ mod tests {
         assert!(rec.calls().is_empty());                         // gate held
         assert_eq!(log.lock().unwrap_or_else(|e| e.into_inner()).len(), 1);  // recorded
     }
+
+    #[tokio::test]
+    async fn attended_denied_records_block_in_log() {
+        let log: GateLog = Arc::new(Mutex::new(Vec::new()));
+        let rec = Arc::new(RecordingExecutor::default());
+        let g = GatedToolExecutor::new(
+            rec.clone(),
+            ApprovalClassifier::default(),
+            Some(Arc::new(DenyPrompt)),
+            GateMode::Attended,
+            tempfile::tempdir().unwrap().path().into(),
+            Some(log.clone()),
+        );
+        let r = g
+            .execute("execute_command", serde_json::json!({"command":"git commit -m x"}), &None)
+            .await;
+        assert!(r.is_err());                                  // blocked
+        assert!(rec.calls().is_empty());                      // inner never ran
+        assert_eq!(log.lock().unwrap_or_else(|e| e.into_inner()).len(), 1);  // recorded
+    }
 }
