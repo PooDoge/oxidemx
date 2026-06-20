@@ -14,6 +14,8 @@ pub mod error;
 pub mod executor;
 pub mod verify;
 pub mod worker;
+#[cfg(feature = "process")]
+pub mod run;
 
 pub use edge::validate_edge;
 pub use error::HarnessError;
