@@ -290,4 +290,25 @@ mod tests {
         assert!(r.is_err());
         assert!(rec.calls().is_empty());
     }
+
+    #[tokio::test]
+    async fn ask_attended_no_prompt_returns_needs_approval_no_delegate() {
+        let rec = Arc::new(RecordingExecutor::default());
+        let g = GatedToolExecutor::new(
+            rec.clone(),
+            ApprovalClassifier::default(),
+            None,                       // Attended mode but NO prompt wired
+            GateMode::Attended,
+            tempfile::tempdir().unwrap().path().into(),
+        );
+        let r = g
+            .execute(
+                "execute_command",
+                serde_json::json!({"command":"git commit -m x"}),
+                &None,
+            )
+            .await;
+        assert!(r.unwrap_err().contains("NEEDS_APPROVAL")); // fails closed
+        assert!(rec.calls().is_empty());                     // inner NEVER ran
+    }
 }
