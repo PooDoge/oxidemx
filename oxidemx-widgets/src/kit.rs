@@ -42,6 +42,12 @@ pub struct Kit {
     pub red: Color,
     /// Semantic danger (== red; named for intent at call-sites).
     pub danger: Color,
+    pub peach: Color,
+    pub teal: Color,
+    pub blue: Color,
+    pub sapphire: Color,
+    pub pink: Color,
+    pub lavender: Color,
     /// CSS-derived 1px borders (theme-tinted): faint < default < strong.
     pub hairline: Color,
     pub hairline_strong: Color,
@@ -75,6 +81,12 @@ impl Kit {
             mauve: p.mauve,
             red: p.red,
             danger: p.danger,
+            peach: p.peach,
+            teal: p.teal,
+            blue: p.blue,
+            sapphire: p.sapphire,
+            pink: p.pink,
+            lavender: p.lavender,
             hairline: p.hairline,
             hairline_strong: p.hairline_strong,
             hairline_faint: p.hairline_faint,
@@ -143,5 +155,23 @@ impl From<&Palette> for Kit {
 impl From<Palette> for Kit {
     fn from(p: Palette) -> Self {
         Kit::from_palette(&p, 1.0, 0.0)
+    }
+}
+
+#[cfg(test)]
+mod kit_slice_tests {
+    use super::*;
+    use crate::palette::Palette;
+
+    #[test]
+    fn kit_carries_slice_colors() {
+        let p = Palette::resolve_named("catppuccin-mocha");
+        let kit = Kit::from_palette(&p, 1.0, 0.0);
+        assert_eq!(kit.peach, p.peach);
+        assert_eq!(kit.teal, p.teal);
+        assert_eq!(kit.blue, p.blue);
+        assert_eq!(kit.sapphire, p.sapphire);
+        assert_eq!(kit.pink, p.pink);
+        assert_eq!(kit.lavender, p.lavender);
     }
 }
