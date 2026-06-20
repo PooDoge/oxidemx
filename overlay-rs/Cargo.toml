@@ -14,6 +14,10 @@ path = "src/lib.rs"
 name = "oxidemx-overlay"
 path = "src/main.rs"
 
+[[bin]]
+name = "oxidemx-chat"
+path = "src/bin/oxidemx-chat.rs"
+
 [dependencies]
 oxidemx-shared = { path = "../oxidemx-shared" }
 oxidemx-agent-core = { path = "../oxidemx-agent-core" }
