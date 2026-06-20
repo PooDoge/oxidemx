@@ -10,7 +10,7 @@ pub mod mode;
 pub mod provider;
 pub mod service;
 pub mod types;
-pub(crate) mod engine;
+pub mod engine;
 #[cfg(feature = "mistral")]
 pub mod mistral;
 

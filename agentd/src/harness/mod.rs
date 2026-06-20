@@ -5,4 +5,5 @@
 //! `oxidemx_agent_core::runtime::route_turn`.
 #![forbid(unsafe_code)]
 
+pub mod planner;
 pub mod worker;

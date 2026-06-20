@@ -155,6 +155,7 @@ dependencies = [
  "oxidemx-approval",
  "oxidemx-conductor",
  "oxidemx-harness",
+ "oxidemx-planner",
  "oxidemx-shared",
  "reqwest 0.12.28",
  "serde",
