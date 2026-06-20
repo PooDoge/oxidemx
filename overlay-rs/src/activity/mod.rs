@@ -96,8 +96,7 @@ impl ActivityState {
                 let open = self.peek_is(&ev.run_id, &ev.step);
                 if let Some(c) = self.cluster_mut(&ev.run_id) {
                     if let Some(b) = c.bubble_mut(&ev.step) {
-                        b.logs.push(ev.message.clone());
-                        if b.logs.len() > 40 { b.logs.remove(0); }
+                        b.push_log(ev.message.clone());
                         if !open { b.unread = b.unread.saturating_add(1); }
                     }
                 }
@@ -115,7 +114,7 @@ impl ActivityState {
                 if let Some(c) = self.cluster_mut(&ev.run_id) {
                     if let Some(b) = c.bubble_mut(&ev.step) {
                         b.state = BubbleState::Failed;
-                        b.logs.push(format!("error: {}", ev.message));
+                        b.push_log(format!("error: {}", ev.message));
                     }
                 }
             }
@@ -123,7 +122,7 @@ impl ActivityState {
                 if let Some(c) = self.cluster_mut(&ev.run_id) {
                     if let Some(b) = c.bubble_mut(&ev.step) {
                         b.state = BubbleState::Working;
-                        b.logs.push("retrying\u{2026}".into());
+                        b.push_log("retrying\u{2026}".into());
                     }
                 }
             }

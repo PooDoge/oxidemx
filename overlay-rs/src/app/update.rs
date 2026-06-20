@@ -1751,7 +1751,7 @@ pub(super) fn update(state: &mut RadialState, message: Message) -> Task<Message>
                 async move { crate::ai_client::cancel_agentd_run(&run_id).await },
                 |result| match result {
                     Ok(()) => Message::Noop,
-                    Err(_) => Message::Noop,
+                    Err(e) => { warn!("run cancel/retry failed: {e}"); Message::Noop }
                 },
             )
         }
@@ -1763,7 +1763,7 @@ pub(super) fn update(state: &mut RadialState, message: Message) -> Task<Message>
                 async move { crate::ai_client::run_agentd_flow(&flow_id).await },
                 |result| match result {
                     Ok(_) => Message::Noop,
-                    Err(_) => Message::Noop,
+                    Err(e) => { warn!("run cancel/retry failed: {e}"); Message::Noop }
                 },
             )
         }

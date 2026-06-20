@@ -211,7 +211,7 @@ fn demux_event(thread_or_run: &str, payload_json: &str) -> Message {
                 steps: strs(&d, "steps"),
                 step: s(&d, "step"),
                 agent: s(&d, "agent"),
-                message: s(&d, "message"),
+                message: { let m = s(&d, "message"); if m.is_empty() { s(&d, "error") } else { m } },
                 success: d.get("success").and_then(|x| x.as_bool()).unwrap_or(false),
                 artifact: d.get("artifact").and_then(|x| x.as_str()).map(String::from),
                 summary: s(&d, "summary"),
@@ -242,6 +242,15 @@ mod run_parse_tests {
                 assert_eq!(v.flow_id, "research");
                 assert_eq!(v.steps, vec!["a".to_string(), "b".to_string()]);
             }
+            other => panic!("expected RunEvent, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn task_error_maps_error_into_message() {
+        let payload = r#"{"kind":"run","variant":"TaskError","run_id":"run-9","details":{"step":"a","error":"boom"}}"#;
+        match demux_event("run-9", payload) {
+            Message::RunEvent(v) => { assert_eq!(v.variant, "TaskError"); assert_eq!(v.message, "boom"); }
             other => panic!("expected RunEvent, got {other:?}"),
         }
     }

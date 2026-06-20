@@ -91,6 +91,13 @@ impl AgentBubble {
     pub fn is_terminal(&self) -> bool {
         matches!(self.state, BubbleState::Done | BubbleState::Failed | BubbleState::Skipped)
     }
+
+    /// Append a log line, keeping the tail bounded (the peek shows the last ~6;
+    /// 40 retained). Used by every event that writes to the log.
+    pub fn push_log(&mut self, line: String) {
+        self.logs.push(line);
+        if self.logs.len() > 40 { self.logs.remove(0); }
+    }
 }
 
 #[derive(Debug, Clone)]
