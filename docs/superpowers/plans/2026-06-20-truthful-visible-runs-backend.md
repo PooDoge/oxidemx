@@ -12,8 +12,8 @@
 
 ## Global Constraints
 
-- Follow repo `CLAUDE.md` (binding): Rule 0 field-standard naming; Rule 1 grounded narration; Rule 2 `cargo fmt`/`clippy` clean, seam traits for mockable units, no gold-plating; Rule 3 build in the `claude_development` distrobox.
-- Build/test commands run inside the distrobox: `distrobox enter claude_development -- bash -lc '<cmd>'` from the repo root `oxidemx-phase1/`. (If already in the box, run the bare command.)
+- Follow repo `CLAUDE.md` (binding): Rule 0 field-standard naming; Rule 1 grounded narration; Rule 2 `cargo fmt`/`clippy` clean, seam traits for mockable units, no gold-plating.
+- **Build host-side** from repo root `oxidemx-phase1/` with a dedicated target dir so it never clobbers the distrobox/overlay `target/`: every `cargo` command below is prefixed `CARGO_TARGET_DIR=/tmp/oxidemx-host-target`. agentd + oxidemx-agent-core build + test on the host with no `-devel` libs (verified: clean build 29s, 83 tests pass). distrobox is only needed for the GTK overlay (the separate activity-UI plan).
 - Naming (locked, spec + `docs/research/`): `agentd` = Gateway; the seam is **`RunLauncher`** (not "Manager"/"Service"). Truthfulness is **structural** (a tool returns ground truth), never exhortation.
 - The `run_statuses` map stores `String` values: `"running" | "finished" | "failed" | "cancelled"`. Do not invent new status strings.
 - Never hold a `Mutex` guard across an `.await` (existing invariant in `interface.rs`).
@@ -131,7 +131,7 @@ mod tests {
 
 - [ ] **Step 2: Run the test to verify it fails (module not declared yet)**
 
-Run: `distrobox enter claude_development -- bash -lc 'cd oxidemx-phase1 && cargo test -p agentd run_launcher 2>&1 | tail -20'`
+Run: `CARGO_TARGET_DIR=/tmp/oxidemx-host-target cargo test -p agentd run_launcher 2>&1 | tail -20`
 Expected: FAIL — `cargo` can't find the module / `run_launcher` tests not compiled (module not registered).
 
 - [ ] **Step 3: Register the module**
@@ -144,7 +144,7 @@ mod run_launcher;
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
-Run: `distrobox enter claude_development -- bash -lc 'cd oxidemx-phase1 && cargo test -p agentd run_launcher 2>&1 | tail -20'`
+Run: `CARGO_TARGET_DIR=/tmp/oxidemx-host-target cargo test -p agentd run_launcher 2>&1 | tail -20`
 Expected: PASS — `run_status_str_roundtrips` + `noop_launcher_fails_honestly_and_queries_empty` ok.
 
 - [ ] **Step 5: Commit**
@@ -211,7 +211,7 @@ git commit -m "feat(agentd): RunLauncher seam + RunStatus enum + NoopRunLauncher
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `distrobox enter claude_development -- bash -lc 'cd oxidemx-phase1 && cargo test -p agentd run_launcher 2>&1 | tail -20'`
+Run: `CARGO_TARGET_DIR=/tmp/oxidemx-host-target cargo test -p agentd run_launcher 2>&1 | tail -20`
 Expected: FAIL — `ConductorRunLauncher` not found.
 
 - [ ] **Step 3: Implement `ConductorRunLauncher`** (add to `agentd/src/run_launcher.rs`, above the tests)
@@ -378,7 +378,7 @@ impl RunLauncher for ConductorRunLauncher {
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
-Run: `distrobox enter claude_development -- bash -lc 'cd oxidemx-phase1 && cargo test -p agentd run_launcher 2>&1 | tail -20'`
+Run: `CARGO_TARGET_DIR=/tmp/oxidemx-host-target cargo test -p agentd run_launcher 2>&1 | tail -20`
 Expected: PASS — `status_reads_ground_truth_from_table`, `launch_unknown_flow_errors`, plus Task 1's tests.
 
 - [ ] **Step 5: Commit**
@@ -401,7 +401,7 @@ git commit -m "feat(agentd): ConductorRunLauncher (real RunLauncher over the con
 
 - [ ] **Step 1: Run the existing run_flow/status tests to capture the green baseline**
 
-Run: `distrobox enter claude_development -- bash -lc 'cd oxidemx-phase1 && cargo test -p agentd run_flow 2>&1 | tail -20; cargo test -p agentd run_status 2>&1 | tail -10'`
+Run: `CARGO_TARGET_DIR=/tmp/oxidemx-host-target cargo test -p agentd run_flow 2>&1 | tail -20; cargo test -p agentd run_status 2>&1 | tail -10`
 Expected: PASS (records the baseline these delegators must preserve). Note the test names that exercise these methods.
 
 - [ ] **Step 2: Add the `run_launcher` field + build it in `new`**
@@ -480,7 +480,7 @@ Delete the now-moved imports if they became unused (`BTreeMap`, `CancellationTok
 
 - [ ] **Step 4: Verify the baseline tests still pass (regression gate)**
 
-Run: `distrobox enter claude_development -- bash -lc 'cd oxidemx-phase1 && cargo test -p agentd run_flow 2>&1 | tail -20; cargo test -p agentd run_status 2>&1 | tail -10'`
+Run: `CARGO_TARGET_DIR=/tmp/oxidemx-host-target cargo test -p agentd run_flow 2>&1 | tail -20; cargo test -p agentd run_status 2>&1 | tail -10`
 Expected: PASS — same tests as Step 1, now exercising the delegators. (The `run_flow` mock-launch test uses `OXIDEMX_TEST_MOCK_FLOW`.)
 
 - [ ] **Step 5: Commit**
@@ -568,7 +568,7 @@ Update the test helper `test_executor` (`tools/mod.rs` ≈ line 94) to pass `Arc
     }
 ```
 
-Run: `distrobox enter claude_development -- bash -lc 'cd oxidemx-phase1 && cargo test -p agentd run_status_tool_reports_ground_truth 2>&1 | tail -20'`
+Run: `CARGO_TARGET_DIR=/tmp/oxidemx-host-target cargo test -p agentd run_status_tool_reports_ground_truth 2>&1 | tail -20`
 Expected: FAIL — `unknown tool: run_status` (the tool is added in Task 5). This test stays red until Task 5; that is expected. (Do not delete it — Task 5 turns it green.)
 
 > Right-sizing note: this test belongs to Task 5's behaviour but is placed here so Task 4's constructor wiring is exercised. If your reviewer prefers, move it into Task 5 Step 1. Either way it must be green by end of Task 5.
@@ -603,7 +603,7 @@ Expected: FAIL — `unknown tool: run_status` (the tool is added in Task 5). Thi
 
 - [ ] **Step 4: Build (expect Task-5 test still red, everything else green)**
 
-Run: `distrobox enter claude_development -- bash -lc 'cd oxidemx-phase1 && cargo build -p agentd 2>&1 | tail -20 && cargo test -p agentd 2>&1 | grep -E "test result|error\[|run_status_tool" | tail -20'`
+Run: `CARGO_TARGET_DIR=/tmp/oxidemx-host-target cargo build -p agentd 2>&1 | tail -20 && cargo test -p agentd 2>&1 | grep -E "test result|error\[|run_status_tool" | tail -20`
 Expected: `cargo build` clean; full suite green EXCEPT `run_status_tool_reports_ground_truth` (still failing on `unknown tool: run_status` — Task 5 fixes it).
 
 - [ ] **Step 5: Commit**
@@ -628,7 +628,7 @@ git commit -m "feat(agentd): thread RunLauncher into AgentToolExecutor via run_t
 
 - [ ] **Step 1: The dispatch test from Task 4 is the failing test** — confirm it's red
 
-Run: `distrobox enter claude_development -- bash -lc 'cd oxidemx-phase1 && cargo test -p agentd run_status_tool_reports_ground_truth 2>&1 | tail -10'`
+Run: `CARGO_TARGET_DIR=/tmp/oxidemx-host-target cargo test -p agentd run_status_tool_reports_ground_truth 2>&1 | tail -10`
 Expected: FAIL — `unknown tool: run_status`.
 
 - [ ] **Step 2: Replace the `run_flow` stub + add the two query tools** (`agentd/src/tools/agent.rs`)
@@ -737,7 +737,7 @@ Replace the `"run_flow"` arm and add two arms:
 
 - [ ] **Step 5: Run the tool tests to verify they pass**
 
-Run: `distrobox enter claude_development -- bash -lc 'cd oxidemx-phase1 && cargo test -p agentd run_status_tool_reports_ground_truth 2>&1 | tail -10 && cargo test -p agentd 2>&1 | grep -E "test result|error\[" | tail -10'`
+Run: `CARGO_TARGET_DIR=/tmp/oxidemx-host-target cargo test -p agentd run_status_tool_reports_ground_truth 2>&1 | tail -10 && cargo test -p agentd 2>&1 | grep -E "test result|error\[" | tail -10`
 Expected: PASS — `run_status_tool_reports_ground_truth` green; full suite green.
 
 - [ ] **Step 6: Commit**
@@ -777,7 +777,7 @@ git commit -m "feat(agentd): real run_flow tool + run_status/list_runs tools (gr
 
 - [ ] **Step 2: Run the test to verify it fails**
 
-Run: `distrobox enter claude_development -- bash -lc 'cd oxidemx-phase1 && cargo test -p oxidemx-agent-core system_prompt_states_grounded_narration_rule 2>&1 | tail -20'`
+Run: `CARGO_TARGET_DIR=/tmp/oxidemx-host-target cargo test -p oxidemx-agent-core system_prompt_states_grounded_narration_rule 2>&1 | tail -20`
 Expected: FAIL — the phrases are absent.
 
 - [ ] **Step 3: Add the TRUTHFULNESS section to `system_instruction_base`**
@@ -796,12 +796,12 @@ Inside `system_instruction_base` (`oxidemx-agent-core/src/mode.rs` ≈ line 350)
 
 - [ ] **Step 4: Run the test to verify it passes**
 
-Run: `distrobox enter claude_development -- bash -lc 'cd oxidemx-phase1 && cargo test -p oxidemx-agent-core system_prompt_states_grounded_narration_rule 2>&1 | tail -20'`
+Run: `CARGO_TARGET_DIR=/tmp/oxidemx-host-target cargo test -p oxidemx-agent-core system_prompt_states_grounded_narration_rule 2>&1 | tail -20`
 Expected: PASS.
 
 - [ ] **Step 5: Full build + suite + clippy, then commit**
 
-Run: `distrobox enter claude_development -- bash -lc 'cd oxidemx-phase1 && cargo build -p agentd 2>&1 | tail -5 && cargo test -p agentd 2>&1 | grep "test result" && cargo test -p oxidemx-agent-core 2>&1 | grep "test result" && cargo clippy -p agentd -p oxidemx-agent-core 2>&1 | tail -5'`
+Run: `CARGO_TARGET_DIR=/tmp/oxidemx-host-target cargo build -p agentd 2>&1 | tail -5 && cargo test -p agentd 2>&1 | grep "test result" && cargo test -p oxidemx-agent-core 2>&1 | grep "test result" && cargo clippy -p agentd -p oxidemx-agent-core 2>&1 | tail -5`
 Expected: build clean, all suites green, clippy clean.
 
 ```bash
@@ -816,8 +816,8 @@ git commit -m "feat(agent-core): grounded-narration truthfulness rule in system 
 Rebuild + restart agentd, then in the overlay chat: ask it to run a flow → it returns a real `run-N`; ask "status?" → it calls `run_status` and reports the real status (running/finished/failed), no confabulation; ask about an unknown run → it says it can't find it rather than inventing. Commands:
 
 ```bash
-distrobox enter claude_development -- bash -lc 'cd oxidemx-phase1 && cargo build -p agentd --release'
-pkill -x oxidemx-agentd; RUST_LOG=info,oxidemx_agent_core=debug nohup ./oxidemx-phase1/target/release/oxidemx-agentd > /tmp/oxidemx-agentd.log 2>&1 &
+CARGO_TARGET_DIR=/tmp/oxidemx-host-target cargo build -p agentd --release
+pkill -x oxidemx-agentd; RUST_LOG=info,oxidemx_agent_core=debug nohup /tmp/oxidemx-host-target/release/oxidemx-agentd > /tmp/oxidemx-agentd.log 2>&1 &
 ```
 
 ---

@@ -46,8 +46,12 @@ has one; back it with a guard. (Full design: `docs/superpowers/specs/2026-06-20-
 ## Rule 3 — Process
 
 - Brainstorm → spec → plan → subagent-driven build for any non-trivial slice (superpowers).
-- Atomic-Fedora host: build in the `claude_development` distrobox; **never** `rpm-ostree
-  install`. Isolate parallel implementation in git worktrees (the user edits the main
-  checkout concurrently).
+- Atomic-Fedora host; **never** `rpm-ostree install`. Builds: **agentd + oxidemx-agent-core
+  + oxidemx-conductor build host-side** with the rustup toolchain (no `-devel` libs needed)
+  — use a dedicated `CARGO_TARGET_DIR=/tmp/oxidemx-host-target` so host builds never clobber
+  the distrobox-built `target/`. **Only the overlay** (GTK4/glib/libadwaita `-devel`) needs
+  the `claude_development` distrobox. Never mix host + distrobox cargo over the *same*
+  `target/` (toolchain mismatch → full recompile churn). Isolate parallel implementation in
+  git worktrees (the user edits the main checkout concurrently).
 - Keep slices focused + connector-agnostic in the core; only the connector layer is
   channel-specific.
