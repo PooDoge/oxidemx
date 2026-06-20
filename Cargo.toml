@@ -17,6 +17,7 @@ members = [
     "daemon",
     "oxidemx-icons",
     "oxidemx-ledger",
+    "oxidemx-harness",
     "oxidemx-scene-render",
     "oxidemx-shared",
     "oxidemx-widget-api",

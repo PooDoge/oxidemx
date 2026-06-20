@@ -1,0 +1,15 @@
+[package]
+name = "oxidemx-harness"
+version = "0.0.1"
+edition = "2021"
+
+[dependencies]
+oxidemx-ledger = { path = "../oxidemx-ledger" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "1"
+async-trait = "0.1"
+tokio = { version = "1", features = ["rt", "macros", "process"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt", "macros"] }
