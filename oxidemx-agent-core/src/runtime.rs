@@ -190,7 +190,11 @@ fn resolve_provider(model_hint: &str) -> Result<(AiProvider, String, String, Str
         .map(|c| c.overlay.ai)
         .unwrap_or_default();
     let provider = ai.provider;
-    let model = if provider == AiProvider::Gemini {
+    // Gemini honours the per-turn model hint (the router picks fast vs smart),
+    // but an empty hint means "use the configured default" — never an empty
+    // model name (which makes the Gemini URL 404). agentd's CoreTurnRunner
+    // passes "" to mean default.
+    let model = if provider == AiProvider::Gemini && !model_hint.is_empty() {
         model_hint.to_string()
     } else {
         ai.model.clone()
