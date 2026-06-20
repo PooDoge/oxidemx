@@ -192,26 +192,72 @@ fn demux_event(thread_or_run: &str, payload_json: &str) -> Message {
         "run" => {
             // RunEventBridge emits "run" kind events for conductor flow
             // progress (RunStarted / StepStarted / StepFinished / RunFinished
-            // etc.).  Map to an Activity-style message so flow progress is
-            // visible in the chat status area.
-            let variant = val
-                .get("variant")
-                .and_then(|v| v.as_str())
-                .unwrap_or("run")
-                .to_string();
-            let step = val
-                .get("step")
-                .and_then(|s| s.as_str())
-                .map(|s| format!(": {s}"))
-                .unwrap_or_default();
-            Message::AgentdEvent {
-                session_id: thread_or_run.to_string(),
-                inner: AgentdInner::Activity(format!("{variant}{step}")),
-            }
+            // etc.).  Parse the full payload into a RunEventView for the
+            // activity dock (Task 5 handles it in update.rs).
+            let d = val.get("details").cloned().unwrap_or(serde_json::Value::Null);
+            let s = |v: &serde_json::Value, k: &str| {
+                v.get(k).and_then(|x| x.as_str()).unwrap_or_default().to_string()
+            };
+            let strs = |v: &serde_json::Value, k: &str| {
+                v.get(k)
+                    .and_then(|x| x.as_array())
+                    .map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect())
+                    .unwrap_or_default()
+            };
+            let view = crate::activity::RunEventView {
+                run_id: val.get("run_id").and_then(|x| x.as_str()).unwrap_or(thread_or_run).to_string(),
+                variant: val.get("variant").and_then(|x| x.as_str()).unwrap_or("run").to_string(),
+                flow_id: s(&d, "flow_id"),
+                steps: strs(&d, "steps"),
+                step: s(&d, "step"),
+                agent: s(&d, "agent"),
+                message: s(&d, "message"),
+                success: d.get("success").and_then(|x| x.as_bool()).unwrap_or(false),
+                artifact: d.get("artifact").and_then(|x| x.as_str()).map(String::from),
+                summary: s(&d, "summary"),
+                artifacts: strs(&d, "artifacts"),
+                handoff: s(&d, "handoff_markdown"),
+            };
+            Message::RunEvent(view)
         }
         other => {
             debug!("agentd event: unhandled kind '{other}' — ignoring");
             Message::Noop
+        }
+    }
+}
+
+#[cfg(test)]
+mod run_parse_tests {
+    use super::*;
+
+    #[test]
+    fn parses_run_started_into_view() {
+        let payload = r#"{"kind":"run","variant":"RunStarted","run_id":"run-9",
+            "details":{"flow_id":"research","steps":["a","b"]}}"#;
+        match demux_event("run-9", payload) {
+            Message::RunEvent(v) => {
+                assert_eq!(v.run_id, "run-9");
+                assert_eq!(v.variant, "RunStarted");
+                assert_eq!(v.flow_id, "research");
+                assert_eq!(v.steps, vec!["a".to_string(), "b".to_string()]);
+            }
+            other => panic!("expected RunEvent, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_task_finished_details() {
+        let payload = r#"{"kind":"run","variant":"TaskFinished","run_id":"run-9",
+            "details":{"step":"a","success":true,"artifact":"/tmp/o.md","summary":"ok"}}"#;
+        match demux_event("run-9", payload) {
+            Message::RunEvent(v) => {
+                assert_eq!(v.step, "a");
+                assert!(v.success);
+                assert_eq!(v.artifact.as_deref(), Some("/tmp/o.md"));
+                assert_eq!(v.summary, "ok");
+            }
+            other => panic!("expected RunEvent, got {other:?}"),
         }
     }
 }

@@ -1680,6 +1680,9 @@ pub(super) fn update(state: &mut RadialState, message: Message) -> Task<Message>
             }
             scroll_chat_to_end()
         }
+
+        // handled in Task 5
+        Message::RunEvent(_) => Task::none()
     }
 }
 

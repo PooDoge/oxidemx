@@ -269,6 +269,9 @@ pub enum Message {
 
     // ── agentd (use_agentd = true) path ────────────────────────────────────
 
+    /// A conductor run-kind event, parsed into a flat view for the activity dock.
+    RunEvent(crate::activity::RunEventView),
+
     /// A D-Bus event from agentd matched to an overlay chat thread.
     ///
     /// `session_id` is the raw thread id from D-Bus (`thread_or_run`).
