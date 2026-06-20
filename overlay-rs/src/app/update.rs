@@ -15,11 +15,21 @@ pub(super) fn update(state: &mut RadialState, message: Message) -> Task<Message>
     // ignore the daemon's radial show/hide and the puck/handoff geometry.
     if state.chat_window_mode {
         match &message {
+            // Daemon radial show/hide + puck/handoff geometry + chat-shell drag.
             Message::Overlay(_)
             | Message::HandoffPointer { .. }
             | Message::HandoffClick { .. }
             | Message::ChatHeaderPressed
-            | Message::ChatResizeStart => return Task::none(),
+            | Message::ChatResizeStart
+            // Radial-only triggers (daemon/keyboard driven) — inert here.
+            | Message::CyclePage(_)
+            | Message::ToggleCursor { .. }
+            | Message::ToggleClickSelect
+            | Message::ToggleDismiss
+            // CRITICAL: a normal window loses focus routinely; the overlay's
+            // arm calls state.dismiss() (morph<0.5 here), which is precisely the
+            // dismiss-on-unfocus behavior this window exists to avoid.
+            | Message::WindowUnfocused => return Task::none(),
             _ => {}
         }
     }
