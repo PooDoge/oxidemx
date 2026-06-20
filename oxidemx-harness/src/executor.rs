@@ -42,6 +42,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
+use futures::future::join_all;
 use oxidemx_approval::{ApprovalClassifier, Tier};
 use oxidemx_ledger::{CompletionPromise, TaskLedger, TaskManifest};
 use serde_json::Value;
@@ -232,39 +233,26 @@ impl<W: Worker, R: CommandRunner> Executor<W, R> {
             }
 
             // ── Step 3: Concurrent worker dispatch ───────────────────────────
-            // Drive all worker futures concurrently.  We collect results into a
-            // Vec, then apply them to the manifest sequentially in step 4.
+            // All worker futures for the ready batch are polled concurrently via
+            // `futures::future::join_all`.  This overlaps I/O waits (LLM calls,
+            // network) so N independent steps take ~max(latencies) rather than
+            // ~sum(latencies).  It is concurrent on one task — not multi-core
+            // parallelism — which is exactly what I/O-bound LLM calls need.
             //
-            // No manifest borrow is held during this phase.
+            // No manifest borrow is held here: all data was snapshotted into
+            // owned `WorkerBrief` values before this point (step 1 + step 2).
+            // `&self.worker` is borrowed immutably for the duration of the
+            // single `join_all(...).await` call; no `tokio::spawn`, no `Arc`,
+            // no `'static` bound required.
             //
-            // Implementation note: `tokio::task::JoinSet` requires `'static`
-            // futures, which would need `Arc<W>`.  We use a `Vec<BoxFuture>` +
-            // a manual polling approach instead — this satisfies the "dispatch
-            // all ready steps concurrently" requirement and avoids unsafe code.
-            // The futures are driven via `tokio::select!` macros or equivalently
-            // by collecting them into a `FuturesUnordered`-style structure.
-            //
-            // Since we don't depend on `futures`, we use the simplest correct
-            // approach: collect owned futures and drive them with
-            // `tokio::task::JoinSet` by boxing and wrapping in a
-            // `tokio::spawn`-compatible closure using `async move` + value
-            // capture.  The `&self.worker` lifetime issue is resolved by
-            // running all futures through a sequential-but-non-manifest-holding
-            // loop (parallel in the sense that no ledger writes occur between
-            // dispatches).
-            //
-            // For true OS-thread parallelism with `tokio::spawn`, the Worker
-            // trait would need to be `Arc<dyn Worker>`.  The current impl runs
-            // the worker futures in batched sequence which satisfies the spec's
-            // "dispatch all ready steps" without unsafe or extra deps.
+            // Ledger writes happen exclusively in step 4, after `join_all`
+            // returns, keeping the manifest race-free.
 
-            let mut results: Vec<WorkerResult> = Vec::with_capacity(worker_briefs.len());
-            for (step_id, wb) in worker_briefs {
-                // `self.worker` is `&W` and lives for the `'_ run` lifetime.
-                // Each await here does NOT hold any manifest borrow — safe.
-                let outcome = self.worker.run_step(wb).await;
-                results.push(WorkerResult { step_id, outcome });
-            }
+            let worker = &self.worker;
+            let futs = worker_briefs.into_iter().map(|(step_id, wb)| async move {
+                WorkerResult { step_id, outcome: worker.run_step(wb).await }
+            });
+            let results: Vec<WorkerResult> = join_all(futs).await;
 
             // ── Step 4: Sequential result application ────────────────────────
             // All manifest mutations happen here, after all workers returned.

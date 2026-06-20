@@ -56,14 +56,15 @@ The executor loop:
 2. **Pre-flight phase**: edge validation, budget check, `ledger.start_step` — all sequential,
    no awaits.
 
-3. **Concurrent worker dispatch**: all `(step_id, WorkerBrief)` pairs are iterated and
-   each `self.worker.run_step(wb).await` is called _without any manifest borrow held_.
-   Results collected into `Vec<WorkerResult>` before any ledger mutation.
+3. **Concurrent worker dispatch**: all `(step_id, WorkerBrief)` pairs are dispatched
+   **concurrently** via `futures::future::join_all`.  All worker futures are polled together,
+   overlapping I/O waits so N independent steps take `~max(latencies)` rather than
+   `~sum(latencies)`.  `&self.worker` is borrowed immutably for the single
+   `join_all(...).await` call — no `tokio::spawn`, no `Arc`, no `'static` bound required.
+   Results are collected into `Vec<WorkerResult>` before any ledger mutation.
 
-   Note: `tokio::task::JoinSet::spawn` requires `'static` futures; `&self.worker` is tied to
-   the `run` lifetime, not `'static`, so JoinSet is not used directly.  True OS-thread
-   parallelism requires `Arc<dyn Worker>` — a SP2d follow-up.  The current approach satisfies
-   the borrow discipline: no manifest touch during worker futures.
+   No manifest borrow is held across the await: all data was snapshotted into owned values
+   in Steps 1+2 before this phase begins.
 
 4. **Sequential apply phase**: iterate `results` → approval gating → caps → verify → ledger
    mutations.  No manifest races possible.
@@ -110,7 +111,7 @@ test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
 - `oxidemx-harness/src/edge.rs` — created
 - `oxidemx-harness/src/executor.rs` — rewritten with full T5 logic
 - `oxidemx-harness/src/lib.rs` — added `pub mod edge`, re-exported approval types from oxidemx-approval
-- `oxidemx-harness/Cargo.toml` — added `oxidemx-approval` (path), `jsonschema 0.46 default-features=false`, `tokio rt-multi-thread`
+- `oxidemx-harness/Cargo.toml` — added `oxidemx-approval` (path), `jsonschema 0.46 default-features=false`, `tokio rt-multi-thread`, `futures 0.3`
 
 ## Note on T4 test update
 
@@ -122,5 +123,7 @@ is exercising executor flow, not approval gating.
 
 ## Concerns / follow-up
 
-- **True OS-thread parallelism**: requires `Arc<dyn Worker + Send + Sync>` so `JoinSet::spawn`
-  can accept `'static` futures.  Straightforward SP2d follow-up once the real Worker impl exists.
+- **True OS-thread parallelism**: `join_all` gives concurrent I/O overlap on one task.  For
+  CPU-bound work or strict multi-core isolation, `Arc<dyn Worker + Send + Sync>` +
+  `JoinSet::spawn` would be needed.  For I/O-bound LLM calls this is unnecessary.
+  Straightforward SP2d follow-up if ever required.
