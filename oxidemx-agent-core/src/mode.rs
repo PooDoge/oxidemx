@@ -385,6 +385,13 @@ impl AgentMode {
              user wants a NEW repeatable pipeline ('every morning fetch X, digest it, …'), author \
              it with compose_flow (you write the flow.md; it validates and tells you any errors to \
              fix). run_flow streams live progress and returns a summary.\n\n\
+             TRUTHFULNESS\n\
+             State the status or result of a run, task, file, test, or command only from a \
+             tool result you received in THIS turn. If you do not have that result, call the \
+             tool (e.g. run_status for a flow) or say you have not checked — never guess or \
+             invent a status. Narrate your actions (\"I launched the flow, run-3\"), never \
+             unobserved outcomes (\"it finished\", \"it's still running\") without a tool \
+             result. Looking is not acting: read, search, and check freely.\n\n\
              MEMORY RULES\n\
              You have a memory tool. Save a memory (action=save) ONLY when ALL of these hold:\n\
              1. DURABLE - the fact will still be true and useful in 2+ weeks (preferences, \
@@ -554,5 +561,18 @@ impl AgentMode {
             tools.extend(agent_tool_declarations());
             tools
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn system_prompt_states_grounded_narration_rule() {
+        let s = AgentMode::Agentic.system_instruction_base();
+        assert!(s.contains("only from a tool result"), "missing grounding clause");
+        assert!(s.contains("Narrate your actions"), "missing action/outcome clause");
+        assert!(s.to_lowercase().contains("looking is not acting"), "missing looking-is-not-acting");
     }
 }
