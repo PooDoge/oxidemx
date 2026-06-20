@@ -20,6 +20,15 @@ already flowing `conductor RunEvent → agentd RunEventBridge → "event" D-Bus 
 overlay agent_events`. Honors Rule 1 (truthfulness): every bubble's state comes from a real
 event / `run_statuses`, never a model claim.
 
+> **Prerequisite (verified 2026-06-20):** the dock is fed by the agentd **bus** `event` signal,
+> and that subscriber is gated on `overlay.ai.use_agentd` (subscriptions.rs). The feature shows
+> bubbles only when the chat runs in **agentd mode** (`config.json` → `overlay.ai.use_agentd:
+> true`), which also routes the agent's own `run_flow` tool through the daemon's bus-emitting
+> `ConductorRunLauncher`. In the default in-proc path (`use_agentd: false`) there is no bus
+> subscription and the agent's runs never emit run-kind events, so no bubbles appear. This
+> matches the agentd-as-Gateway direction (CLAUDE.md Rule 0). Confirmed end-to-end: RunStarted/
+> TaskAssigned/TaskStarted → `dock_view` renders the cluster.
+
 ## Non-goals (deferred — explicitly OUT of v1)
 
 - **Inline per-step approval** (the design's Deny / Always / Run-it chips). Conductor flows
