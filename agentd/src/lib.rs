@@ -10,6 +10,7 @@ pub mod journal;
 pub mod models;
 pub mod projects;
 pub mod run_bridge;
+pub mod run_launcher;
 pub mod seams;
 pub mod sessions;
 pub mod stream_bridge;
