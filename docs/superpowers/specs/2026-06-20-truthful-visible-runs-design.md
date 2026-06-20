@@ -2,9 +2,10 @@
 
 Date: 2026-06-20
 Status: design (brainstormed + approved in-chat; pending spec review → writing-plans).
-Naming is provisional pending the connector/Hermes research
-(`docs/research/{hermes-agent-architecture,connector-architecture}.md`, in flight) — a
-naming pass reconciles terms before/at implementation.
+Naming reconciled with the connector/Hermes research
+(`docs/research/{hermes-agent-architecture,connector-architecture}.md`): the run-* terms
+(`RunLauncher`/`run_status`/`RunStatus`) stand; connector framing now uses the locked
+`Connector` seam + agentd-as-Gateway (see `docs/design/connector-modularization.md`).
 Triggered by the SP1c GUI walkthrough: the agent claimed a flow was "running" when it
 never launched (the `run_flow` tool is a stub) and *confabulated* a status (no
 `run_status` tool). This slice makes background runs **real, queryable, and visible** —
@@ -71,11 +72,12 @@ self-report) and the ledger `CompletionPromise`. Three layers, applied here:
 
 ## 6. Connector-agnostic backend (per `docs/design/connector-modularization.md`)
 
-§3–§4 live in agentd's core/tool layer — **connector-neutral**: any future connector
-(Telegram/Discord/HTTP) gets the same real `run_flow`/`run_status` tools + the same
-ground-truth `run_statuses`. Only §5's bubble UI is overlay-specific (= the overlay
-connector's presentation of the run data). So this slice is connector-ready by
-construction; the connector seam itself is a separate slice.
+§3–§4 live in agentd's core/tool layer — **connector-neutral**: any future `Connector`
+(`TelegramConnector`/`HttpConnector`/…) gets the same real `run_flow`/`run_status` tools
++ the same ground-truth `run_statuses` (agentd is the Gateway hosting them). Only §5's
+bubble UI is the `OverlayConnector`'s presentation of the run data. So this slice is
+connector-ready by construction; the `Connector` seam itself is a separate slice
+(SP-Connectors).
 
 ## 7. Testing
 
