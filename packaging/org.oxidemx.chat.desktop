@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=OxideMX Chat
+Comment=AI chat window for OxideMX
+Exec=/usr/local/bin/oxidemx-chat
+Icon=oxidemx
+Terminal=false
+Categories=Utility;GTK;
+Keywords=ai;chat;assistant;oxidemx;
+StartupWMClass=org.oxidemx.Chat
