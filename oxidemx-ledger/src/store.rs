@@ -52,6 +52,7 @@ impl TaskLedger {
     /// Create a new task, atomically writing its manifest and creating the artifacts directory.
     ///
     /// Stamps `manifest.created_ts` and `manifest.updated_ts` with `now` before writing.
+    /// Appends a `TaskCreated` event to the event log.
     ///
     /// The manifest is written to `<task_dir>/manifest.json`.
     /// The `<task_dir>/artifacts` directory is created (empty).
@@ -76,6 +77,14 @@ impl TaskLedger {
 
         // Atomically write manifest
         self._write_manifest(&task_dir, manifest)?;
+
+        // Append TaskCreated event
+        let event = LedgerEvent::TaskCreated {
+            task_id: manifest.task_id.as_str().to_string(),
+            goal: manifest.goal.clone(),
+            ts: now,
+        };
+        self.append_event(&manifest.task_id, &event)?;
 
         Ok(())
     }
@@ -411,6 +420,50 @@ impl TaskLedger {
         Ok(())
     }
 
+    /// Record a tool call during step execution.
+    ///
+    /// Increments the step's `tool_calls` counter, appends a `ToolCall` event,
+    /// and saves the manifest.
+    ///
+    /// # Errors
+    ///
+    /// Returns:
+    /// - `NotFound` if the step does not exist.
+    /// - `BadTransition` if the step is not in `Running` state.
+    pub fn record_tool_call(
+        &self,
+        manifest: &mut TaskManifest,
+        step_id: &str,
+        tool_name: &str,
+        ok: bool,
+        now: u64,
+    ) -> Result<(), LedgerError> {
+        let step = manifest
+            .step_mut(step_id)
+            .ok_or_else(|| LedgerError::NotFound(format!("step not found: {}", step_id)))?;
+
+        if step.status != StepStatus::Running {
+            return Err(LedgerError::BadTransition {
+                from: step.status,
+                to: StepStatus::Running,
+            });
+        }
+
+        step.tool_calls += 1;
+
+        let event = LedgerEvent::ToolCall {
+            step: step_id.to_string(),
+            name: tool_name.to_string(),
+            ok,
+            ts: now,
+        };
+
+        self.append_event(&manifest.task_id, &event)?;
+        manifest.updated_ts = now;
+        self.save(manifest)?;
+        Ok(())
+    }
+
     /// List all task IDs by scanning the tasks directory for manifest.json files.
     ///
     /// Returns a vector of task IDs found in `<base>/tasks/*/manifest.json`.
@@ -642,5 +695,31 @@ mod tests {
         let mut ids: Vec<_> = led.list_tasks().unwrap().iter().map(|t| t.as_str().to_string()).collect();
         ids.sort();
         assert_eq!(ids, vec!["t1".to_string(), "t2".to_string()]);
+    }
+
+    #[test]
+    fn record_tool_call_bumps_count_and_logs() {
+        let d = tempfile::tempdir().unwrap();
+        let led = TaskLedger::new(d.path());
+        let mut m = TaskManifest::new(TaskId::from_raw("t".into()), "g".into());
+        m.steps.push(Step::new("a","first"));
+        led.create(&mut m, 0).unwrap();
+        led.start_step(&mut m, "a", 1).unwrap();
+        led.record_tool_call(&mut m, "a", "read_file", true, 2).unwrap();
+        led.record_tool_call(&mut m, "a", "execute_command", false, 3).unwrap();
+        assert_eq!(m.step("a").unwrap().tool_calls, 2);
+        let evs = led.read_events(&m.task_id).unwrap();
+        assert!(evs.iter().any(|e| matches!(e, LedgerEvent::TaskCreated{..})));
+        assert_eq!(evs.iter().filter(|e| matches!(e, LedgerEvent::ToolCall{..})).count(), 2);
+    }
+
+    #[test]
+    fn budget_exceeded_at_cap() {
+        let mut s = Step::new("a","x");
+        s.budget = crate::model::StepBudget { max_tool_calls: Some(2) };
+        s.tool_calls = 2;
+        assert!(s.budget_exceeded());
+        s.tool_calls = 1;
+        assert!(!s.budget_exceeded());
     }
 }

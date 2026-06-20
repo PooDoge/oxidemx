@@ -2,6 +2,16 @@
 
 use serde::{Deserialize, Serialize};
 
+/// Resource budget for step execution.
+///
+/// Limits the number of tool calls that may be made during a single step.
+/// `None` means unlimited.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct StepBudget {
+    /// Maximum number of tool calls allowed. `None` = unlimited.
+    pub max_tool_calls: Option<u32>,
+}
+
 /// Computes FNV-1a 64-bit hash over the given bytes (version-stable).
 fn fnv1a64(bytes: &[u8]) -> u64 {
     let mut h: u64 = 0xcbf29ce484222325;
@@ -95,6 +105,15 @@ pub struct Step {
     /// Optional verification token. Set only via ledger's guarded transitions.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) verifier_token: Option<String>,
+    /// Resource budget for this step.
+    #[serde(default)]
+    pub budget: StepBudget,
+    /// Input schema for this step (JSON Schema).
+    #[serde(default)]
+    pub input_schema: Option<serde_json::Value>,
+    /// Output schema for this step (JSON Schema).
+    #[serde(default)]
+    pub output_schema: Option<serde_json::Value>,
 }
 
 impl Step {
@@ -108,6 +127,9 @@ impl Step {
             artifacts: Vec::new(),
             tool_calls: 0,
             verifier_token: None,
+            budget: StepBudget::default(),
+            input_schema: None,
+            output_schema: None,
         }
     }
 
@@ -119,6 +141,16 @@ impl Step {
     /// The recorded verifier completion token, if the step is Done.
     pub fn verifier_token(&self) -> Option<&str> {
         self.verifier_token.as_deref()
+    }
+
+    /// Check if the step's tool call budget has been exceeded.
+    ///
+    /// Returns `true` if a `max_tool_calls` limit is set and the current
+    /// `tool_calls` count is at or above that limit.
+    pub fn budget_exceeded(&self) -> bool {
+        self.budget
+            .max_tool_calls
+            .is_some_and(|m| self.tool_calls >= m)
     }
 }
 
