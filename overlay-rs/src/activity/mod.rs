@@ -4,3 +4,219 @@
 pub mod model;
 
 pub use model::{AgentBubble, AgentTone, BubbleState, ClusterStatus, RunCluster, ToneKey};
+
+use std::time::Instant;
+
+/// A flattened, connector-agnostic view of one conductor run event, parsed
+/// from the agentd `run`-kind payload (`variant` + `details`). Defaulted
+/// fields are simply absent for variants that don't carry them.
+#[derive(Debug, Clone, Default)]
+pub struct RunEventView {
+    pub run_id: String,
+    pub variant: String,
+    pub flow_id: String,
+    pub steps: Vec<String>,
+    pub step: String,
+    pub agent: String,
+    pub message: String,
+    pub success: bool,
+    pub artifact: Option<String>,
+    pub summary: String,
+    pub artifacts: Vec<String>,
+    pub handoff: String,
+}
+
+#[derive(Debug, Default)]
+pub struct ActivityState {
+    pub clusters: Vec<RunCluster>,
+    /// run_id of the currently-expanded cluster (None = all collapsed).
+    pub expanded: Option<String>,
+    /// (run_id, step) of the open peek popover, if any.
+    pub peek: Option<(String, String)>,
+}
+
+impl ActivityState {
+    pub fn cluster(&self, run_id: &str) -> Option<&RunCluster> {
+        self.clusters.iter().find(|c| c.run_id == run_id)
+    }
+    fn cluster_mut(&mut self, run_id: &str) -> Option<&mut RunCluster> {
+        self.clusters.iter_mut().find(|c| c.run_id == run_id)
+    }
+    fn peek_is(&self, run_id: &str, step: &str) -> bool {
+        self.peek.as_ref().is_some_and(|(r, s)| r == run_id && s == step)
+    }
+
+    pub fn apply_run_event(&mut self, ev: &RunEventView) {
+        match ev.variant.as_str() {
+            "RunStarted" => {
+                if self.cluster(&ev.run_id).is_none() {
+                    self.clusters.push(RunCluster::new(
+                        ev.run_id.clone(), ev.flow_id.clone(), ev.steps.clone(),
+                    ));
+                }
+            }
+            "TaskAssigned" => {
+                if let Some(c) = self.cluster_mut(&ev.run_id) {
+                    if let Some(b) = c.bubble_mut(&ev.step) {
+                        b.agent = ev.agent.clone();
+                        b.tone = AgentTone::for_agent(&ev.agent);
+                    }
+                }
+            }
+            "TaskStarted" => {
+                let now = Instant::now();
+                if let Some(c) = self.cluster_mut(&ev.run_id) {
+                    if let Some(b) = c.bubble_mut(&ev.step) {
+                        b.state = BubbleState::Working;
+                        b.started_at.get_or_insert(now);
+                    }
+                }
+            }
+            "AgentMessage" => {
+                let open = self.peek_is(&ev.run_id, &ev.step);
+                if let Some(c) = self.cluster_mut(&ev.run_id) {
+                    if let Some(b) = c.bubble_mut(&ev.step) {
+                        b.logs.push(ev.message.clone());
+                        if b.logs.len() > 40 { b.logs.remove(0); }
+                        if !open { b.unread = b.unread.saturating_add(1); }
+                    }
+                }
+            }
+            "TaskFinished" => {
+                if let Some(c) = self.cluster_mut(&ev.run_id) {
+                    if let Some(b) = c.bubble_mut(&ev.step) {
+                        b.state = if ev.success { BubbleState::Done } else { BubbleState::Failed };
+                        b.artifact = ev.artifact.clone();
+                        b.summary = ev.summary.clone();
+                    }
+                }
+            }
+            "TaskError" => {
+                if let Some(c) = self.cluster_mut(&ev.run_id) {
+                    if let Some(b) = c.bubble_mut(&ev.step) {
+                        b.state = BubbleState::Failed;
+                        b.logs.push(format!("error: {}", ev.message));
+                    }
+                }
+            }
+            "StepRetrying" => {
+                if let Some(c) = self.cluster_mut(&ev.run_id) {
+                    if let Some(b) = c.bubble_mut(&ev.step) {
+                        b.state = BubbleState::Working;
+                        b.logs.push("retrying\u{2026}".into());
+                    }
+                }
+            }
+            "StepSkipped" => {
+                if let Some(c) = self.cluster_mut(&ev.run_id) {
+                    if let Some(b) = c.bubble_mut(&ev.step) {
+                        b.state = BubbleState::Skipped;
+                    }
+                }
+            }
+            "RunFinished" => {
+                if let Some(c) = self.cluster_mut(&ev.run_id) {
+                    c.status = ClusterStatus::Finished;
+                    c.artifacts = ev.artifacts.clone();
+                    c.handoff = ev.handoff.clone();
+                    c.finished_at = Some(Instant::now());
+                }
+            }
+            "RunFailed" => {
+                if let Some(c) = self.cluster_mut(&ev.run_id) {
+                    c.status = ClusterStatus::Failed;
+                    c.finished_at = Some(Instant::now());
+                }
+            }
+            "RunCancelled" => {
+                if let Some(c) = self.cluster_mut(&ev.run_id) {
+                    c.status = ClusterStatus::Cancelled;
+                    c.finished_at = Some(Instant::now());
+                }
+            }
+            // v1 ignores per-step approvals (spec §10).
+            _ => {}
+        }
+    }
+}
+
+#[cfg(test)]
+mod reducer_tests {
+    use super::*;
+
+    fn ev(variant: &str) -> RunEventView {
+        RunEventView { run_id: "run-1".into(), variant: variant.into(), ..Default::default() }
+    }
+
+    #[test]
+    fn full_lifecycle_builds_cluster() {
+        let mut s = ActivityState::default();
+        s.apply_run_event(&RunEventView {
+            steps: vec!["a".into(), "b".into()], flow_id: "research".into(), ..ev("RunStarted")
+        });
+        assert_eq!(s.clusters.len(), 1);
+        assert_eq!(s.cluster("run-1").unwrap().bubbles.len(), 2);
+
+        s.apply_run_event(&RunEventView { step: "a".into(), agent: "web-researcher".into(), ..ev("TaskAssigned") });
+        assert!(matches!(s.cluster("run-1").unwrap().bubbles[0].tone.0, ToneKey::Blue));
+
+        s.apply_run_event(&RunEventView { step: "a".into(), ..ev("TaskStarted") });
+        assert!(matches!(s.cluster("run-1").unwrap().bubbles[0].state, BubbleState::Working));
+
+        s.apply_run_event(&RunEventView { step: "a".into(), message: "google_search · x".into(), ..ev("AgentMessage") });
+        assert_eq!(s.cluster("run-1").unwrap().bubbles[0].logs.len(), 1);
+        assert_eq!(s.cluster("run-1").unwrap().bubbles[0].unread, 1);
+
+        s.apply_run_event(&RunEventView {
+            step: "a".into(), success: true, artifact: Some("/tmp/out.md".into()), summary: "ok".into(), ..ev("TaskFinished")
+        });
+        assert!(matches!(s.cluster("run-1").unwrap().bubbles[0].state, BubbleState::Done));
+        assert_eq!(s.cluster("run-1").unwrap().progress(), 0.5);
+
+        s.apply_run_event(&RunEventView {
+            artifacts: vec!["/tmp/out.md".into()], handoff: "# done".into(), ..ev("RunFinished")
+        });
+        assert!(matches!(s.cluster("run-1").unwrap().status, ClusterStatus::Finished));
+    }
+
+    #[test]
+    fn unknown_step_and_unknown_run_are_ignored() {
+        let mut s = ActivityState::default();
+        s.apply_run_event(&RunEventView { step: "ghost".into(), ..ev("TaskStarted") }); // no cluster yet
+        assert!(s.clusters.is_empty());
+        s.apply_run_event(&RunEventView { steps: vec!["a".into()], ..ev("RunStarted") });
+        s.apply_run_event(&RunEventView { step: "ghost".into(), ..ev("TaskStarted") }); // unknown step
+        assert!(matches!(s.cluster("run-1").unwrap().bubbles[0].state, BubbleState::Pending));
+    }
+
+    #[test]
+    fn failure_and_skip_and_cancel() {
+        let mut s = ActivityState::default();
+        s.apply_run_event(&RunEventView { steps: vec!["a".into(), "b".into()], ..ev("RunStarted") });
+        s.apply_run_event(&RunEventView { step: "a".into(), message: "boom".into(), ..ev("TaskError") });
+        assert!(matches!(s.cluster("run-1").unwrap().bubbles[0].state, BubbleState::Failed));
+        s.apply_run_event(&RunEventView { step: "b".into(), ..ev("StepSkipped") });
+        assert!(matches!(s.cluster("run-1").unwrap().bubbles[1].state, BubbleState::Skipped));
+        s.apply_run_event(&ev("RunCancelled"));
+        assert!(matches!(s.cluster("run-1").unwrap().status, ClusterStatus::Cancelled));
+    }
+
+    #[test]
+    fn unread_does_not_bump_while_peek_open() {
+        let mut s = ActivityState::default();
+        s.apply_run_event(&RunEventView { steps: vec!["a".into()], ..ev("RunStarted") });
+        s.peek = Some(("run-1".into(), "a".into()));
+        s.apply_run_event(&RunEventView { step: "a".into(), message: "m".into(), ..ev("AgentMessage") });
+        assert_eq!(s.cluster("run-1").unwrap().bubbles[0].unread, 0);
+    }
+
+    #[test]
+    fn approval_requested_is_ignored() {
+        let mut s = ActivityState::default();
+        s.apply_run_event(&RunEventView { steps: vec!["a".into()], ..ev("RunStarted") });
+        let before = format!("{:?}", s.cluster("run-1").unwrap().bubbles[0].state);
+        s.apply_run_event(&RunEventView { step: "a".into(), ..ev("ApprovalRequested") });
+        let after = format!("{:?}", s.cluster("run-1").unwrap().bubbles[0].state);
+        assert_eq!(before, after); // no state change (v1 ignores approvals)
+    }
+}
