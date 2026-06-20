@@ -42,10 +42,16 @@ pub(super) fn subscription(state: &RadialState) -> Subscription<Message> {
     // actually animating (thinking / awaiting a choice / an active scroll tween) —
     // a full-window redraw every 16 ms otherwise saturates the main thread and
     // makes typing laggy (the user types while idle, when nothing needs animating).
+    let runs_live = state.chat_window_mode
+        && state.activity.clusters.iter().any(|c| {
+            matches!(c.status, crate::activity::ClusterStatus::Running)
+                || c.finished_at.is_some_and(|t| t.elapsed().as_millis() < 7000)
+        });
     let needs_tick = !state.chat_window_mode
         || state.ai_loading
         || state.ai_pending_question.is_some()
-        || state.ai_scroll_active;
+        || state.ai_scroll_active
+        || runs_live;
     if needs_tick {
         subs.push(iced::time::every(std::time::Duration::from_millis(16)).map(|_| Message::Tick));
     }

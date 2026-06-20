@@ -272,6 +272,25 @@ pub enum Message {
     /// A conductor run-kind event, parsed into a flat view for the activity dock.
     RunEvent(crate::activity::RunEventView),
 
+    // ── Activity bubble action messages ────────────────────────────────────────
+
+    /// Expand the cluster for `run_id` (show all bubbles).
+    ActivityExpand(String),
+    /// Collapse all clusters + close any open peek popover.
+    ActivityCollapse,
+    /// Open or close the peek popover for `(run_id, step)`.
+    BubblePeekToggle(String, String),
+    /// Dismiss (remove) the finished cluster for `run_id`.
+    BubbleDismiss(String, String),
+    /// Cancel the in-flight run via D-Bus.
+    RunCancel(String),
+    /// Re-launch a flow: `(run_id, flow_id)`.  `run_id` is the old id (informational).
+    RunRetry(String, String),
+    /// Open an artifact path with xdg-open.
+    RunOpenArtifact(String),
+    /// Append the run's handoff / bubble logs into the active chat thread.
+    RunTranscript(String),
+
     /// A D-Bus event from agentd matched to an overlay chat thread.
     ///
     /// `session_id` is the raw thread id from D-Bus (`thread_or_run`).

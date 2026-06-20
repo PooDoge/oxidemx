@@ -321,6 +321,36 @@ pub async fn cancel_agentd_turn(
     Ok(())
 }
 
+/// Cancel a conductor run by `run_id` via the agentd D-Bus proxy.
+///
+/// Non-fatal: the caller ignores the error and waits for the `RunCancelled`
+/// event from agentd to confirm.
+pub async fn cancel_agentd_run(
+    run_id: &str,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    use oxidemx_agent_proxy::AgentProxy;
+
+    let conn = zbus::connection::Builder::session()?.build().await?;
+    let proxy = AgentProxy::new(&conn).await?;
+    proxy.cancel_run(run_id).await?;
+    Ok(())
+}
+
+/// Launch a conductor flow by `flow_id` and return the new run id.
+///
+/// `inputs_json` is passed as `"{}"` (empty inputs) for retries from the UI.
+pub async fn run_agentd_flow(
+    flow_id: &str,
+) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+    use oxidemx_agent_proxy::AgentProxy;
+
+    let conn = zbus::connection::Builder::session()?.build().await?;
+    let proxy = AgentProxy::new(&conn).await?;
+    let project = agentd_project();
+    let run_id = proxy.run_flow(&project, flow_id, "{}").await?;
+    Ok(run_id)
+}
+
 /// Fetch the transcript for `thread` from agentd and return it as a list of
 /// `(is_user, text)` pairs suitable for the overlay's `ChatMessage` history.
 ///

@@ -373,6 +373,10 @@ pub struct RadialState {
     /// decorated toplevel), not the radial overlay: `view` renders chat-only and
     /// `update` ignores the daemon radial-show/puck/handoff paths.
     pub chat_window_mode: bool,
+
+    /// Activity state for background conductor runs — bubbles, clusters,
+    /// expand/peek selection. Only meaningful (and mutated) in `chat_window_mode`.
+    pub activity: crate::activity::ActivityState,
 }
 
 /// Live widget data for the Splice Widgets page. Sparkline ring

@@ -1681,8 +1681,119 @@ pub(super) fn update(state: &mut RadialState, message: Message) -> Task<Message>
             scroll_chat_to_end()
         }
 
-        // handled in Task 5
-        Message::RunEvent(_) => Task::none()
+        // ── Activity bubble messages (all gated on chat_window_mode) ───────────
+
+        Message::RunEvent(view) => {
+            if state.chat_window_mode {
+                state.activity.apply_run_event(&view);
+            }
+            Task::none()
+        }
+
+        Message::ActivityExpand(run_id) => {
+            if state.chat_window_mode {
+                state.activity.expanded = Some(run_id);
+                state.activity.peek = None;
+            }
+            Task::none()
+        }
+
+        Message::ActivityCollapse => {
+            if state.chat_window_mode {
+                state.activity.expanded = None;
+                state.activity.peek = None;
+            }
+            Task::none()
+        }
+
+        Message::BubblePeekToggle(run_id, step) => {
+            if state.chat_window_mode {
+                let open = state.activity.peek.as_ref()
+                    .is_some_and(|(r, s)| *r == run_id && *s == step);
+                if open {
+                    state.activity.peek = None;
+                } else {
+                    // Opening the peek clears that bubble's unread count.
+                    if let Some(c) = state.activity.clusters.iter_mut()
+                        .find(|c| c.run_id == run_id)
+                    {
+                        if let Some(b) = c.bubbles.iter_mut().find(|b| b.step == step) {
+                            b.unread = 0;
+                        }
+                    }
+                    state.activity.peek = Some((run_id, step));
+                }
+            }
+            Task::none()
+        }
+
+        Message::BubbleDismiss(run_id, _step) => {
+            if state.chat_window_mode {
+                state.activity.clusters.retain(|c| c.run_id != run_id);
+                if state.activity.expanded.as_deref() == Some(run_id.as_str()) {
+                    state.activity.expanded = None;
+                }
+                state.activity.peek = None;
+            }
+            Task::none()
+        }
+
+        Message::RunOpenArtifact(path) => {
+            // xdg-open is fire-and-forget; failure is non-fatal.
+            let _ = std::process::Command::new("xdg-open").arg(&path).spawn();
+            Task::none()
+        }
+
+        Message::RunCancel(run_id) => {
+            // Issue cancel_run over D-Bus; do NOT optimistically mark cancelled
+            // here — wait for the RunCancelled event from the conductor (Rule 1).
+            Task::perform(
+                async move { crate::ai_client::cancel_agentd_run(&run_id).await },
+                |result| match result {
+                    Ok(()) => Message::Noop,
+                    Err(_) => Message::Noop,
+                },
+            )
+        }
+
+        Message::RunRetry(_run_id, flow_id) => {
+            // Re-launch the flow via D-Bus; the new run id is not tracked here —
+            // the conductor will emit RunStarted which wires up a new cluster.
+            Task::perform(
+                async move { crate::ai_client::run_agentd_flow(&flow_id).await },
+                |result| match result {
+                    Ok(_) => Message::Noop,
+                    Err(_) => Message::Noop,
+                },
+            )
+        }
+
+        Message::RunTranscript(run_id) => {
+            if state.chat_window_mode {
+                // Build the body from the cluster BEFORE taking the mutable borrow
+                // of ai_threads (borrow checker: two borrows of `state`).
+                let body = state.activity.cluster(&run_id).map(|c| {
+                    if !c.handoff.is_empty() {
+                        c.handoff.clone()
+                    } else {
+                        c.bubbles.iter()
+                            .flat_map(|b| b.logs.iter().cloned())
+                            .collect::<Vec<_>>()
+                            .join("\n")
+                    }
+                });
+                if let Some(body) = body {
+                    let idx = state.ai_active;
+                    if let Some(chat) = state.ai_threads.get_mut(idx) {
+                        chat.history.push(ChatMessage::assistant(body));
+                        chat.updated_at = crate::radial::now_secs();
+                    }
+                    crate::radial::save_chat_threads(&state.ai_threads);
+                    return scroll_chat_to_end();
+                }
+            }
+            Task::none()
+        }
     }
 }
 
