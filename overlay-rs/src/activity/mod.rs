@@ -47,6 +47,25 @@ impl ActivityState {
         self.peek.as_ref().is_some_and(|(r, s)| r == run_id && s == step)
     }
 
+    /// (active_or_just_finished, recent) split. A cluster is "recent" once it
+    /// finished/failed/cancelled more than 6s ago. Recent is capped at 5
+    /// (oldest dropped, logged — never silently truncated).
+    pub fn partition(&self) -> (Vec<&RunCluster>, Vec<&RunCluster>) {
+        let mut active = Vec::new();
+        let mut recent = Vec::new();
+        for c in &self.clusters {
+            let is_recent = !matches!(c.status, ClusterStatus::Running)
+                && c.finished_at.is_some_and(|t| t.elapsed().as_secs() >= 6);
+            if is_recent { recent.push(c); } else { active.push(c); }
+        }
+        if recent.len() > 5 {
+            let dropped = recent.len() - 5;
+            tracing::debug!("activity: dropping {dropped} old recent run(s) past the cap of 5");
+            recent.truncate(5);
+        }
+        (active, recent)
+    }
+
     pub fn apply_run_event(&mut self, ev: &RunEventView) {
         match ev.variant.as_str() {
             "RunStarted" => {
@@ -209,6 +228,27 @@ mod reducer_tests {
         s.peek = Some(("run-1".into(), "a".into()));
         s.apply_run_event(&RunEventView { step: "a".into(), message: "m".into(), ..ev("AgentMessage") });
         assert_eq!(s.cluster("run-1").unwrap().bubbles[0].unread, 0);
+    }
+
+    #[test]
+    fn partition_splits_active_and_recent() {
+        use std::time::{Duration, Instant};
+        let mut s = ActivityState::default();
+        // active: still running
+        s.apply_run_event(&RunEventView { run_id: "r-run".into(), variant: "RunStarted".into(), steps: vec!["a".into()], ..Default::default() });
+        // just finished (active — <6s)
+        s.apply_run_event(&RunEventView { run_id: "r-new".into(), variant: "RunStarted".into(), steps: vec!["a".into()], ..Default::default() });
+        s.apply_run_event(&RunEventView { run_id: "r-new".into(), variant: "RunFinished".into(), ..Default::default() });
+        // old finished (recent — >6s)
+        s.apply_run_event(&RunEventView { run_id: "r-old".into(), variant: "RunStarted".into(), steps: vec!["a".into()], ..Default::default() });
+        s.apply_run_event(&RunEventView { run_id: "r-old".into(), variant: "RunFinished".into(), ..Default::default() });
+        if let Some(c) = s.clusters.iter_mut().find(|c| c.run_id == "r-old") {
+            c.finished_at = Some(Instant::now() - Duration::from_secs(7));
+        }
+        let (active, recent) = s.partition();
+        assert_eq!(active.len(), 2, "running + just-finished are active");
+        assert_eq!(recent.len(), 1);
+        assert_eq!(recent[0].run_id, "r-old");
     }
 
     #[test]

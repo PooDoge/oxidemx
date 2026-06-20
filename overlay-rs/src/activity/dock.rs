@@ -22,9 +22,10 @@ pub fn dock_view<'a>(act: &'a ActivityState, kit: &Kit) -> Option<Element<'a, Me
     }
 
     let kit = *kit;
+    let (active, recent) = act.partition();
 
     match &act.expanded {
-        None => Some(collapsed_dock(act, kit)),
+        None => Some(collapsed_dock(active, recent, kit)),
         Some(run_id) => {
             let run_id = run_id.clone();
             Some(expanded_panel(act, kit, &run_id))
@@ -34,16 +35,52 @@ pub fn dock_view<'a>(act: &'a ActivityState, kit: &Kit) -> Option<Element<'a, Me
 
 // ── Collapsed: a row of cluster orbs ─────────────────────────────────────────
 
-fn collapsed_dock<'a>(act: &'a ActivityState, kit: Kit) -> Element<'a, Message> {
-    let orbs: Vec<Element<'_, Message>> = act
-        .clusters
+fn collapsed_dock<'a>(
+    active: Vec<&'a RunCluster>,
+    recent: Vec<&'a RunCluster>,
+    kit: Kit,
+) -> Element<'a, Message> {
+    let orbs: Vec<Element<'_, Message>> = active
         .iter()
         .map(|c| cluster_orb(kit, c))
         .collect();
 
-    container(
-        row(orbs).spacing(8.0).align_y(Alignment::Center),
-    )
+    let mut dock_row = row(orbs).spacing(8.0).align_y(Alignment::Center);
+
+    // Recent-run tray: small status dots for runs finished >6s ago (cap 5).
+    // Each dot is a button that expands the run's panel.
+    if !recent.is_empty() {
+        let tray_dots: Vec<Element<'_, Message>> = recent
+            .iter()
+            .map(|c| {
+                let dot_color = match c.status {
+                    ClusterStatus::Finished => kit.green,
+                    _ => kit.red, // Failed or Cancelled
+                };
+                let run_id = c.run_id.clone();
+                button(
+                    container(Space::new())
+                        .width(Length::Fixed(8.0))
+                        .height(Length::Fixed(8.0))
+                        .style(move |_| container::Style {
+                            background: Some(Background::Color(kit.fade(dot_color, 0.85))),
+                            border: Border::default().rounded(4.0),
+                            ..Default::default()
+                        }),
+                )
+                .padding(3)
+                .style(|_, _| button::Style::default())
+                .on_press(Message::ActivityExpand(run_id))
+                .into()
+            })
+            .collect();
+
+        dock_row = dock_row.push(
+            row(tray_dots).spacing(2.0).align_y(Alignment::Center),
+        );
+    }
+
+    container(dock_row)
     .padding([6, 8])
     .style(move |_| container::Style {
         background: Some(Background::Color(kit.fade(kit.surface0, 0.88))),
@@ -72,9 +109,11 @@ fn cluster_orb<'a>(kit: Kit, c: &'a RunCluster) -> Element<'a, Message> {
             .rounded(22.0)
             .color(kit.fade(orb_color, 0.6))
             .width(2.0),
+        // Shadow alpha breathes when running: 0.25–0.55 driven by kit.pulse.
+        // (bob/spin/appear + reduce-motion deferred — see spec §6)
         shadow: if is_running {
             iced::Shadow {
-                color: kit.fade(orb_color, 0.45),
+                color: kit.fade(orb_color, 0.25 + 0.30 * kit.pulse),
                 offset: iced::Vector::ZERO,
                 blur_radius: 10.0,
             }
@@ -310,6 +349,15 @@ fn bubble_view<'a>(
     let run_id_s = run_id.to_string();
     let step_s = b.step.clone();
 
+    // Border alpha breathes when working: 0.55–1.0 driven by kit.pulse.
+    // (bob/spin/appear + reduce-motion deferred — see spec §6)
+    let border_alpha = if is_live {
+        0.55 + 0.45 * kit.pulse
+    } else if peek_open {
+        1.0
+    } else {
+        0.5
+    };
     let orb = container(iced::widget::center(icon(icon_name, 22.0, kit.fade(tone_color, 1.0))))
         .width(Length::Fixed(52.0))
         .height(Length::Fixed(52.0))
@@ -317,7 +365,7 @@ fn bubble_view<'a>(
             background: Some(Background::Color(kit.fade(tone_color, alpha_fill))),
             border: Border::default()
                 .rounded(26.0)
-                .color(kit.fade(tone_color, if peek_open { 1.0 } else { 0.5 }))
+                .color(kit.fade(tone_color, border_alpha))
                 .width(if peek_open { 2.0 } else { 1.5 }),
             shadow: if is_live {
                 iced::Shadow {
