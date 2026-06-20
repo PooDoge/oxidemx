@@ -17,6 +17,19 @@ pub enum HarnessError {
     /// Verification command failed.
     #[error("verify error: {0}")]
     Verify(String),
+
+    /// A tool invocation requires human approval before the step may proceed.
+    ///
+    /// The executor maps this to `block_step` with reason
+    /// `"needs-approval: {tool}: {reason}"` and continues the run loop
+    /// (non-blocking — other independent steps are unaffected).
+    #[error("needs approval: {tool}: {reason}")]
+    NeedsApproval {
+        /// The name of the tool that requires approval.
+        tool: String,
+        /// Human-readable reason the tool needs approval.
+        reason: String,
+    },
 }
 
 impl From<oxidemx_ledger::LedgerError> for HarnessError {

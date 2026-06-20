@@ -1,4 +1,4 @@
-//! Parallel executor with approval gating, hard caps, and edge validation.
+//! Parallel executor with inline gate, hard caps, and edge validation.
 //!
 //! [`Executor`] drives a [`TaskManifest`] to completion.  In each iteration it
 //! snapshots ALL currently-ready steps, dispatches them concurrently (via a
@@ -7,15 +7,11 @@
 //!
 //! # Approval gating
 //!
-//! Before recording each `ToolInvocation` the executor asks the
-//! [`ApprovalClassifier`]:
-//!
-//! - `AutoAllow` / `AutoAllowIfReversible` → record and proceed.
-//! - `Ask` → `block_step(…, "needs-approval: …")`, stop processing that step,
-//!   but **continue the run loop to other ready steps** (non-blocking).
-//! - `AutoDeny` → `block_step(…, "tool auto-denied: …")`, stop that step.
-//!   A denied tool means the step cannot proceed correctly; blocking is the
-//!   conservative choice rather than silently skipping the call.
+//! Approval decisions are made by the `GatedToolExecutor` (SP2d-1) BEFORE the
+//! worker receives a tool call.  When a tool requires human approval the worker
+//! returns `Err(HarnessError::NeedsApproval { tool, reason })`.  The executor
+//! maps this to `block_step(manifest, step_id, "needs-approval: {tool}: {reason}", now)`
+//! and **continues the run loop to other ready steps** (non-blocking).
 //!
 //! # Caps
 //!
@@ -30,7 +26,7 @@
 //! After building the `inputs` map for a consumer step (from the outputs of
 //! its `needs` steps) the executor validates those inputs against the
 //! consumer's `input_schema` (if present).  On failure the consumer step is
-//! `block_step`-ped with reason `"schema-violation: …"`.
+//! `block_step`-ped with reason `"schema-violation: ..."`.
 //!
 //! # Borrow-across-await discipline
 //!
@@ -43,7 +39,6 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
 use futures::future::join_all;
-use oxidemx_approval::{ApprovalClassifier, Tier};
 use oxidemx_ledger::{CompletionPromise, TaskLedger, TaskManifest};
 use serde_json::Value;
 
@@ -106,9 +101,8 @@ struct WorkerResult {
 pub struct Executor<W: Worker, R: CommandRunner> {
     worker: W,
     verifier: Verifier<R>,
-    classifier: ApprovalClassifier,
     caps: Caps,
-    /// Working directory passed to the classifier and verifier.
+    /// Working directory passed to the verifier.
     cwd: PathBuf,
 }
 
@@ -117,14 +111,12 @@ impl<W: Worker, R: CommandRunner> Executor<W, R> {
     pub fn new(
         worker: W,
         verifier: Verifier<R>,
-        classifier: ApprovalClassifier,
         caps: Caps,
         cwd: PathBuf,
     ) -> Self {
         Self {
             worker,
             verifier,
-            classifier,
             caps,
             cwd,
         }
@@ -212,7 +204,7 @@ impl<W: Worker, R: CommandRunner> Executor<W, R> {
                     continue;
                 }
 
-                // Transition Pending → Running.
+                // Transition Pending -> Running.
                 if let Err(e) = ledger.start_step(manifest, &brief.id, now) {
                     let _ = ledger.fail_step(manifest, &brief.id, &e.to_string(), now);
                     report.failed += 1;
@@ -240,8 +232,8 @@ impl<W: Worker, R: CommandRunner> Executor<W, R> {
             // All worker futures for the ready batch are polled concurrently via
             // `futures::future::join_all`.  This overlaps I/O waits (LLM calls,
             // network) so N independent steps take ~max(latencies) rather than
-            // ~sum(latencies).  It is concurrent on one task — not multi-core
-            // parallelism — which is exactly what I/O-bound LLM calls need.
+            // ~sum(latencies).  It is concurrent on one task -- not multi-core
+            // parallelism -- which is exactly what I/O-bound LLM calls need.
             //
             // No manifest borrow is held here: all data was snapshotted into
             // owned `WorkerBrief` values before this point (step 1 + step 2).
@@ -262,24 +254,28 @@ impl<W: Worker, R: CommandRunner> Executor<W, R> {
             // All manifest mutations happen here, after all workers returned.
             for WorkerResult { step_id, outcome } in results {
                 match outcome {
+                    Err(HarnessError::NeedsApproval { ref tool, ref reason }) => {
+                        // Inline gate surfaced: block this step non-blocking.
+                        let block_reason = format!("needs-approval: {tool}: {reason}");
+                        let _ = ledger.block_step(manifest, &step_id, &block_reason, now);
+                        report.blocked += 1;
+                    }
                     Err(e) => {
                         let msg = e.to_string();
                         let _ = ledger.fail_step(manifest, &step_id, &msg, now);
                         report.failed += 1;
                     }
                     Ok(output) => {
-                        // Approval gating + caps, evaluated per tool invocation.
+                        // Caps, evaluated per tool invocation.
                         let mut step_blocked = false;
                         let mut block_reason = String::new();
 
-                        // Track per-step tool-call count for this step's budget.
-                        let mut step_call_count: u32 = 0;
                         // Retrieve the step's budget limit from the manifest.
                         let step_budget_max = manifest
                             .step(&step_id)
                             .and_then(|s| s.budget.max_tool_calls);
 
-                        for inv in &output.tool_calls {
+                        for (step_call_count, inv) in (0_u32..).zip(output.tool_calls.iter()) {
                             // Process-level total cap check.
                             if let Some(max) = self.caps.max_total_tool_calls {
                                 if total_tool_calls >= max {
@@ -289,50 +285,23 @@ impl<W: Worker, R: CommandRunner> Executor<W, R> {
                                 }
                             }
 
-                            // Approval classification.
-                            let decision =
-                                self.classifier.classify(&inv.name, &inv.args, &self.cwd);
-
-                            match decision.tier {
-                                Tier::AutoDeny => {
-                                    // Conservative: block the whole step.
+                            // Per-step budget check before recording the call.
+                            if let Some(max) = step_budget_max {
+                                if step_call_count >= max {
                                     step_blocked = true;
-                                    block_reason = format!(
-                                        "tool auto-denied: {} — {}",
-                                        inv.name, decision.reason
-                                    );
+                                    block_reason = "budget-exhausted".into();
                                     break;
-                                }
-                                Tier::Ask => {
-                                    // Non-blocking: block this step, continue loop.
-                                    step_blocked = true;
-                                    block_reason = format!(
-                                        "needs-approval: {} — {}",
-                                        inv.name, decision.reason
-                                    );
-                                    break;
-                                }
-                                Tier::AutoAllow | Tier::AutoAllowIfReversible => {
-                                    // Check per-step budget before recording the call.
-                                    if let Some(max) = step_budget_max {
-                                        if step_call_count >= max {
-                                            step_blocked = true;
-                                            block_reason = "budget-exhausted".into();
-                                            break;
-                                        }
-                                    }
-
-                                    let _ = ledger.record_tool_call(
-                                        manifest,
-                                        &step_id,
-                                        &inv.name,
-                                        true,
-                                        now,
-                                    );
-                                    total_tool_calls += 1;
-                                    step_call_count += 1;
                                 }
                             }
+
+                            let _ = ledger.record_tool_call(
+                                manifest,
+                                &step_id,
+                                &inv.name,
+                                true,
+                                now,
+                            );
+                            total_tool_calls += 1;
                         }
 
                         if step_blocked {
@@ -405,7 +374,7 @@ mod tests {
     use super::*;
     use crate::verify::MockRunner;
     use crate::worker::{MockWorker, StepOutput, ToolInvocation};
-    use oxidemx_approval::{ApprovalClassifier, ClassifierConfig};
+    use crate::HarnessError;
     use oxidemx_ledger::{Step, StepStatus, TaskId, TaskManifest};
 
     fn make_manifest() -> TaskManifest {
@@ -458,7 +427,6 @@ mod tests {
         let exec = Executor::new(
             worker,
             Verifier::new(MockRunner::ok("ok")),
-            ApprovalClassifier::default(),
             Caps { max_total_tool_calls: None },
             d.path().into(),
         );
@@ -489,7 +457,6 @@ mod tests {
         let exec = Executor::new(
             worker,
             Verifier::new(MockRunner::fail("E0308")),
-            ApprovalClassifier::default(),
             Caps { max_total_tool_calls: None },
             d.path().into(),
         );
@@ -504,58 +471,47 @@ mod tests {
 
     // ── T5 tests ──────────────────────────────────────────────────────────────
 
-    /// An `Ask`-tier tool call blocks the step but the run continues to other
-    /// independent steps (non-blocking).
-    ///
-    /// `execute_command "git commit -m x"` is classified as `Ask` by the
-    /// built-in shell classifier (unknown compound-style command).
+    /// A `NeedsApproval` error from the worker blocks the step but the run
+    /// continues to other independent steps (non-blocking).
     #[tokio::test]
-    async fn ask_tier_tool_blocks_step_but_run_continues() {
+    async fn needs_approval_blocks_step_run_continues() {
         let d = tempfile::tempdir().unwrap();
         let led = TaskLedger::new(d.path());
 
         // Two fully independent steps (no `needs`).
-        let mut m = TaskManifest::new(TaskId::from_raw("t-ask".into()), "test".into());
+        let mut m = TaskManifest::new(TaskId::from_raw("t-approval".into()), "test".into());
         m.steps = vec![Step::new("a", "risky"), Step::new("b", "clean")];
         led.create(&mut m, 0).unwrap();
 
-        // "a" emits execute_command "git commit -m x" → Ask tier.
-        // "b" has no tool calls → completes normally.
-        let worker = MockWorker::from_iter([
-            (
-                "a",
-                StepOutput {
-                    text: "risky step".into(),
-                    output: serde_json::json!({}),
-                    tool_calls: vec![ToolInvocation {
-                        name: "execute_command".into(),
-                        args: serde_json::json!({"command": "git commit -m x"}),
-                    }],
-                    verify_cmd: None,
-                },
-            ),
-            (
-                "b",
-                StepOutput {
-                    text: "clean step".into(),
-                    output: serde_json::json!({}),
-                    tool_calls: vec![],
-                    verify_cmd: None,
-                },
-            ),
-        ]);
+        // "a" -> Err(NeedsApproval) -- inline gate blocked execute_command.
+        // "b" -> Ok(done) -- completes normally.
+        let worker = MockWorker::from_iter([(
+            "b",
+            StepOutput {
+                text: "clean step".into(),
+                output: serde_json::json!({}),
+                tool_calls: vec![],
+                verify_cmd: None,
+            },
+        )])
+        .with_error(
+            "a",
+            HarnessError::NeedsApproval {
+                tool: "execute_command".into(),
+                reason: "git commit".into(),
+            },
+        );
 
         let exec = Executor::new(
             worker,
             Verifier::new(MockRunner::ok("ok")),
-            ApprovalClassifier::default(),
             Caps { max_total_tool_calls: None },
             d.path().into(),
         );
 
         let report = exec.run(&led, &mut m, 10).await;
 
-        // "b" must reach Done — the run did not hang on "a"'s Ask block.
+        // "b" must reach Done -- the run did not hang on "a"'s NeedsApproval block.
         assert_eq!(m.step("b").unwrap().status(), StepStatus::Done, "b must be Done");
         // "a" must be Blocked due to needs-approval.
         assert_eq!(
@@ -564,7 +520,7 @@ mod tests {
             "a must be Blocked(needs-approval)"
         );
         assert_eq!(report.completed, 1, "only b completed");
-        // Test itself completing proves the run didn't hang.
+        assert!(report.blocked >= 1, "at least one step blocked");
     }
 
     /// A consumer step whose assembled inputs fail its `input_schema` must be
@@ -596,7 +552,7 @@ mod tests {
         m.steps = vec![step_a, step_b];
         led.create(&mut m, 0).unwrap();
 
-        // "a" outputs {"n": "not-an-int"} — not an integer → schema-violation.
+        // "a" outputs {"n": "not-an-int"} -- not an integer -> schema-violation.
         let worker = MockWorker::from_iter([(
             "a",
             StepOutput {
@@ -610,7 +566,6 @@ mod tests {
         let exec = Executor::new(
             worker,
             Verifier::new(MockRunner::ok("ok")),
-            ApprovalClassifier::default(),
             Caps { max_total_tool_calls: None },
             d.path().into(),
         );
@@ -626,8 +581,8 @@ mod tests {
         assert_eq!(report.completed, 1, "only a completed");
     }
 
-    /// When `max_total_tool_calls = 1` and the worker emits 2 AutoAllow tool
-    /// calls, the second call hits the cap and the step is blocked.
+    /// When `max_total_tool_calls = 1` and the worker emits 2 tool calls,
+    /// the second call hits the cap and the step is blocked.
     #[tokio::test]
     async fn total_tool_cap_blocks() {
         let d = tempfile::tempdir().unwrap();
@@ -637,9 +592,9 @@ mod tests {
         m.steps = vec![Step::new("a", "greedy")];
         led.create(&mut m, 0).unwrap();
 
-        // Worker emits 2 `read_file` calls (both AutoAllow).
-        // Cap is 1 → after recording the first call total reaches 1 (= max),
-        // the second call triggers total_tool_calls >= max → block.
+        // Worker emits 2 `read_file` calls.
+        // Cap is 1 -> after recording the first call total reaches 1 (= max),
+        // the second call triggers total_tool_calls >= max -> block.
         let worker = MockWorker::from_iter([(
             "a",
             StepOutput {
@@ -662,7 +617,6 @@ mod tests {
         let exec = Executor::new(
             worker,
             Verifier::new(MockRunner::ok("ok")),
-            ApprovalClassifier::default(),
             Caps { max_total_tool_calls: Some(1) },
             d.path().into(),
         );
@@ -677,14 +631,14 @@ mod tests {
         let _ = report;
     }
 
-    /// Worker returning `Err` → step transitions to `Failed`, run continues to
+    /// Worker returning `Err` -> step transitions to `Failed`, run continues to
     /// independent steps.
     #[tokio::test]
     async fn worker_error_fails_step_run_continues() {
         let d = tempfile::tempdir().unwrap();
         let led = TaskLedger::new(d.path());
 
-        // Two independent steps.  "a" has no mock script → worker returns Err.
+        // Two independent steps.  "a" has no mock script -> worker returns Err.
         let mut m = TaskManifest::new(TaskId::from_raw("t-werr".into()), "worker err".into());
         m.steps = vec![Step::new("a", "fails"), Step::new("b", "ok")];
         led.create(&mut m, 0).unwrap();
@@ -702,7 +656,6 @@ mod tests {
         let exec = Executor::new(
             worker,
             Verifier::new(MockRunner::ok("ok")),
-            ApprovalClassifier::default(),
             Caps { max_total_tool_calls: None },
             d.path().into(),
         );
@@ -715,55 +668,8 @@ mod tests {
         assert_eq!(report.completed, 1);
     }
 
-    /// `AutoDeny` classification blocks the step with a "tool auto-denied" reason.
-    #[tokio::test]
-    async fn auto_deny_tool_blocks_step() {
-        let d = tempfile::tempdir().unwrap();
-        let led = TaskLedger::new(d.path());
-
-        let mut m = TaskManifest::new(TaskId::from_raw("t-deny".into()), "deny test".into());
-        m.steps = vec![Step::new("a", "dangerous")];
-        led.create(&mut m, 0).unwrap();
-
-        let config = ClassifierConfig {
-            extra_deny: vec!["dangerous_tool".into()],
-            extra_allow: vec![],
-        };
-        let classifier = ApprovalClassifier::from_config(config);
-
-        let worker = MockWorker::from_iter([(
-            "a",
-            StepOutput {
-                text: "dangerous step".into(),
-                output: serde_json::json!({}),
-                tool_calls: vec![ToolInvocation {
-                    name: "dangerous_tool".into(),
-                    args: serde_json::json!({}),
-                }],
-                verify_cmd: None,
-            },
-        )]);
-
-        let exec = Executor::new(
-            worker,
-            Verifier::new(MockRunner::ok("ok")),
-            classifier,
-            Caps { max_total_tool_calls: None },
-            d.path().into(),
-        );
-
-        let report = exec.run(&led, &mut m, 10).await;
-
-        assert_eq!(
-            m.step("a").unwrap().status(),
-            StepStatus::Blocked,
-            "step must be Blocked(auto-denied)"
-        );
-        let _ = report;
-    }
-
     /// Per-step tool-call budget is enforced independently of the global cap.
-    /// A step with `max_tool_calls = 1` emitting 2 AutoAllow calls → blocked.
+    /// A step with `max_tool_calls = 1` emitting 2 tool calls -> blocked.
     /// Global `max_total_tool_calls = None` (unlimited) ensures it's the per-step cap firing.
     #[tokio::test]
     async fn per_step_tool_cap_blocks() {
@@ -776,9 +682,9 @@ mod tests {
         m.steps = vec![step_a];
         led.create(&mut m, 0).unwrap();
 
-        // Worker emits 2 `read_file` calls (both AutoAllow).
-        // Per-step budget is 1 → after recording the first call step_call_count reaches 1 (= max),
-        // the second call triggers step_call_count >= max → block.
+        // Worker emits 2 `read_file` calls.
+        // Per-step budget is 1 -> after recording the first call step_call_count reaches 1 (= max),
+        // the second call triggers step_call_count >= max -> block.
         let worker = MockWorker::from_iter([(
             "a",
             StepOutput {
@@ -801,7 +707,6 @@ mod tests {
         let exec = Executor::new(
             worker,
             Verifier::new(MockRunner::ok("ok")),
-            ApprovalClassifier::default(),
             Caps { max_total_tool_calls: None },
             d.path().into(),
         );

@@ -7143,7 +7143,6 @@ dependencies = [
  "async-trait",
  "futures",
  "jsonschema",
- "oxidemx-approval",
  "oxidemx-ledger",
  "serde",
  "serde_json",

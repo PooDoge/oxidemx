@@ -23,8 +23,5 @@ pub use executor::{Caps, Executor, RunReport};
 pub use verify::{CommandResult, CommandRunner, Verifier, VerifyFailure};
 pub use worker::{StepOutput, ToolInvocation, Worker, WorkerBrief};
 
-// Re-export approval types so callers don't need to depend on oxidemx-approval directly.
-pub use oxidemx_approval::{ApprovalClassifier, ClassifierConfig, Decision, Tier};
-
 // Re-export CompletionPromise for callers that build trivial promises.
 pub use oxidemx_ledger::CompletionPromise;

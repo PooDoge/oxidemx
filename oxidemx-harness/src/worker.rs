@@ -61,10 +61,16 @@ pub trait Worker: Send + Sync {
 
 /// A scripted [`Worker`] for use in tests.
 ///
-/// Returns pre-configured [`StepOutput`] values keyed by `step_id`.
+/// Returns pre-configured [`StepOutput`] values keyed by `step_id`, OR a
+/// pre-configured [`HarnessError`] for steps that should fail with a specific
+/// error (e.g. `NeedsApproval`).
+///
+/// Priority: scripted errors take precedence over scripted outputs. If neither
+/// is configured for a step id the worker returns `HarnessError::Worker`.
 #[cfg(test)]
 pub struct MockWorker {
     steps: std::collections::HashMap<String, StepOutput>,
+    errors: std::collections::HashMap<String, HarnessError>,
 }
 
 #[cfg(test)]
@@ -75,7 +81,16 @@ impl MockWorker {
     ) -> Self {
         Self {
             steps: iter.into_iter().map(|(k, v)| (k.into(), v)).collect(),
+            errors: std::collections::HashMap::new(),
         }
+    }
+
+    /// Add a scripted error for a specific step id.
+    ///
+    /// When the worker is asked to run this step it returns `Err(error)`.
+    pub fn with_error(mut self, step_id: impl Into<String>, error: HarnessError) -> Self {
+        self.errors.insert(step_id.into(), error);
+        self
     }
 }
 
@@ -83,6 +98,18 @@ impl MockWorker {
 #[async_trait]
 impl Worker for MockWorker {
     async fn run_step(&self, brief: WorkerBrief) -> Result<StepOutput, HarnessError> {
+        // Scripted errors take priority over scripted outputs.
+        if let Some(err) = self.errors.get(&brief.step_id) {
+            return Err(match err {
+                HarnessError::NeedsApproval { tool, reason } => HarnessError::NeedsApproval {
+                    tool: tool.clone(),
+                    reason: reason.clone(),
+                },
+                HarnessError::Worker(msg) => HarnessError::Worker(msg.clone()),
+                HarnessError::Ledger(msg) => HarnessError::Ledger(msg.clone()),
+                HarnessError::Verify(msg) => HarnessError::Verify(msg.clone()),
+            });
+        }
         self.steps
             .get(&brief.step_id)
             .cloned()
