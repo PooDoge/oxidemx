@@ -127,3 +127,18 @@ is exercising executor flow, not approval gating.
   CPU-bound work or strict multi-core isolation, `Arc<dyn Worker + Send + Sync>` +
   `JoinSet::spawn` would be needed.  For I/O-bound LLM calls this is unnecessary.
   Straightforward SP2d follow-up if ever required.
+
+## SP2c final review fix — Per-step tool-call budget enforcement
+
+**Commit**: `42b33f5 fix(harness): enforce per-step tool-call budget per-invocation`
+
+The per-step budget was only checked ONCE at dispatch time, allowing a single step to exceed
+its `max_tool_calls` limit if returning multiple AutoAllow invocations. Fixed by:
+
+1. Carrying `budget_max_tool_calls: Option<u32>` into `StepBrief` snapshot (logical completeness).
+2. Tracking `step_call_count` across invocations within a single step's result application.
+3. Checking `step_call_count >= max` BEFORE recording each AutoAllow/Reversible call (guards the cap).
+4. If exceeded, blocking the step with "budget-exhausted" and stopping that step's tool processing.
+5. Both per-step and global-total caps apply independently; new test `per_step_tool_cap_blocks` confirms.
+
+Test suite: **13 tests passing** (added 1 new test). `cargo clippy -p oxidemx-harness -- -D warnings` clean.
