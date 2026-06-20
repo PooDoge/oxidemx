@@ -12,6 +12,16 @@ use crate::app::{ChatView, Message};
 use crate::chat_shell::{EDGE_PAD, HEADER_H};
 use crate::radial::RadialState;
 
+/// App logo for the standalone chat window's header (left slot). Decoded once —
+/// `Handle` is Arc-backed so `.clone()` per render is cheap (vs re-reading +
+/// re-hashing the 670 KB PNG every frame).
+static LOGO_HANDLE: std::sync::LazyLock<iced::widget::image::Handle> =
+    std::sync::LazyLock::new(|| {
+        iced::widget::image::Handle::from_bytes(
+            include_bytes!("../../../assets/oxidemx.png").to_vec(),
+        )
+    });
+
 pub fn view<'a>(state: &'a RadialState, kit: &Kit) -> Element<'a, Message> {
     let kit = *kit;
 
@@ -91,19 +101,55 @@ pub fn view<'a>(state: &'a RadialState, kit: &Kit) -> Element<'a, Message> {
         Message::ToggleDismiss,
     );
 
-    let bar = row![
-        // Left slot for the canvas-drawn 32 px puck: 14 px header
-        // padding + 32 px puck + 10 px gap.
-        Space::new().width(Length::Fixed(14.0 + 32.0 + 10.0)),
-        title_block,
-        Space::new().width(Length::Fill),
-        switcher,
-        close_btn,
-    ]
-    .spacing(6)
-    .align_y(Alignment::Center);
+    // In chat_window_mode: show the app logo in the left slot (the puck
+    // is not drawn); otherwise reserve space for the canvas-drawn puck.
+    let left_slot: iced::Element<'a, Message> = if state.chat_window_mode {
+        container(
+            iced::widget::image(LOGO_HANDLE.clone())
+                .width(Length::Fixed(26.0))
+                .height(Length::Fixed(26.0)),
+        )
+        .padding(iced::Padding { left: 14.0, ..Default::default() })
+        .into()
+    } else {
+        Space::new().width(Length::Fixed(14.0 + 32.0 + 10.0)).into()
+    };
 
-    container(bar)
+    // In chat_window_mode the WM frame closes the window; omit close_btn.
+    let mut bar_children: Vec<iced::Element<'a, Message>> = vec![
+        left_slot,
+        title_block.into(),
+        Space::new().width(Length::Fill).into(),
+        switcher.into(),
+    ];
+    if !state.chat_window_mode {
+        bar_children.push(close_btn.into());
+    }
+    // Fill so the spacer right-aligns the tabs in the chat window; keep the
+    // overlay header's original Shrink so its layout is byte-for-byte unchanged.
+    let bar = iced::widget::Row::from_vec(bar_children)
+        .width(if state.chat_window_mode {
+            Length::Fill
+        } else {
+            Length::Shrink
+        })
+        .spacing(6)
+        .align_y(Alignment::Center);
+
+    let bar_c = if state.chat_window_mode {
+        let a = kit.accent;
+        let s = kit.surface0;
+        Some(iced::Color {
+            r: a.r * 0.45 + s.r * 0.55,
+            g: a.g * 0.45 + s.g * 0.55,
+            b: a.b * 0.45 + s.b * 0.55,
+            a: 1.0,
+        })
+    } else {
+        None
+    };
+
+    let outer = container(bar)
         .width(Length::Fill)
         .height(Length::Fixed(EDGE_PAD + HEADER_H))
         .padding(iced::Padding {
@@ -111,6 +157,16 @@ pub fn view<'a>(state: &'a RadialState, kit: &Kit) -> Element<'a, Message> {
             right: EDGE_PAD + 8.0,
             bottom: 0.0,
             left: EDGE_PAD,
-        })
-        .into()
+        });
+
+    if let Some(bg) = bar_c {
+        outer
+            .style(move |_| iced::widget::container::Style {
+                background: Some(iced::Background::Color(bg)),
+                ..Default::default()
+            })
+            .into()
+    } else {
+        outer.into()
+    }
 }

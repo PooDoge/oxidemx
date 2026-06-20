@@ -113,6 +113,7 @@ impl RadialState {
             vision_shot_taken: false,
             use_agentd: config.overlay.ai.use_agentd,
             ai_agentd_approval: None,
+            chat_window_mode: false,
         }
     }
 

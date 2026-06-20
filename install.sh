@@ -1042,6 +1042,14 @@ install_files() {
         log_success "Overlay binary"
     fi
 
+    # Install standalone chat-window binary (oxidemx-chat, a sibling bin of
+    # overlay-rs) — a normal decorated window for the AI chat, launchable from
+    # the app menu / a hotkey, single-instance via org.oxidemx.Chat.
+    if chat_bin="$(pick_binary oxidemx-chat target/release/oxidemx-chat overlay-rs/target/release/oxidemx-chat)"; then
+        sudo install -Dm755 "$chat_bin" "$BIN_DIR/oxidemx-chat"
+        log_success "Chat window binary"
+    fi
+
     # Install settings binary (settings-rs) — optional
     if settings_bin="$(pick_binary oxidemx-settings target/release/oxidemx-settings settings-rs/target/release/oxidemx-settings)"; then
         sudo install -Dm755 "$settings_bin" "$BIN_DIR/oxidemx-settings"
@@ -1112,6 +1120,7 @@ install_files() {
     # Install desktop files
     sudo install -Dm644 packaging/oxidemx.desktop "$APP_DIR/oxidemx.desktop"
     sudo install -Dm644 packaging/org.oxidemx.settings.desktop "$APP_DIR/org.oxidemx.settings.desktop"
+    sudo install -Dm644 packaging/org.oxidemx.chat.desktop "$APP_DIR/org.oxidemx.chat.desktop"
 
     # Install icons
     sudo install -Dm644 assets/oxidemx.svg "$ICON_DIR/oxidemx.svg"

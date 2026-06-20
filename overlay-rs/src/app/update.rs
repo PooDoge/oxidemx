@@ -11,6 +11,28 @@ use crate::geometry::WINDOW_SIZE;
 use crate::radial::{ChatMessage, RadialState};
 
 pub(super) fn update(state: &mut RadialState, message: Message) -> Task<Message> {
+    // The chat WINDOW reuses this update fn but is not the radial overlay:
+    // ignore the daemon's radial show/hide and the puck/handoff geometry.
+    if state.chat_window_mode {
+        match &message {
+            // Daemon radial show/hide + puck/handoff geometry + chat-shell drag.
+            Message::Overlay(_)
+            | Message::HandoffPointer { .. }
+            | Message::HandoffClick { .. }
+            | Message::ChatHeaderPressed
+            | Message::ChatResizeStart
+            // Radial-only triggers (daemon/keyboard driven) — inert here.
+            | Message::CyclePage(_)
+            | Message::ToggleCursor { .. }
+            | Message::ToggleClickSelect
+            | Message::ToggleDismiss
+            // CRITICAL: a normal window loses focus routinely; the overlay's
+            // arm calls state.dismiss() (morph<0.5 here), which is precisely the
+            // dismiss-on-unfocus behavior this window exists to avoid.
+            | Message::WindowUnfocused => return Task::none(),
+            _ => {}
+        }
+    }
     // A chat-widget interaction arriving while the puck is armed is
     // a click the caps canvas never saw (the widget captured it) —
     // it still counts as "clicked in the chat outside the puck", so
@@ -527,6 +549,17 @@ pub(super) fn update(state: &mut RadialState, message: Message) -> Task<Message>
         Message::WindowFocused => {
             info!("window gained keyboard focus");
             Task::none()
+        }
+        Message::PresentWindow => {
+            // A second oxidemx-chat launch asked us to raise/focus.
+            // iced::window::gain_focus is best-effort on Wayland (focus-stealing
+            // prevention), but this at least prevents a duplicate window.
+            info!("PresentWindow: another launch signalled; attempting focus");
+            if let Some(id) = state.window_id {
+                iced::window::gain_focus(id)
+            } else {
+                Task::none()
+            }
         }
         Message::FocusedClassResolved(class) => {
             debug!(?class, "Focused window class resolved");

@@ -6,9 +6,17 @@ description = "OxideMX radial-menu overlay (Rust + iced + xdg-shell)"
 license = "GPL-3.0"
 repository = "https://github.com/PooDoge/oxidemx"
 
+[lib]
+name = "oxidemx_overlay"
+path = "src/lib.rs"
+
 [[bin]]
 name = "oxidemx-overlay"
 path = "src/main.rs"
+
+[[bin]]
+name = "oxidemx-chat"
+path = "src/bin/oxidemx-chat.rs"
 
 [dependencies]
 oxidemx-shared = { path = "../oxidemx-shared" }

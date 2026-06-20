@@ -196,7 +196,20 @@ pub fn view<'a>(state: &'a RadialState, kit: &Kit) -> Element<'a, Message> {
             .align_y(Alignment::End),
     );
 
-    container(col.spacing(6))
+    let bar_c = if state.chat_window_mode {
+        let a = kit.accent;
+        let s = kit.surface0;
+        Some(iced::Color {
+            r: a.r * 0.45 + s.r * 0.55,
+            g: a.g * 0.45 + s.g * 0.55,
+            b: a.b * 0.45 + s.b * 0.55,
+            a: 1.0,
+        })
+    } else {
+        None
+    };
+
+    let outer = container(col.spacing(6))
         .width(Length::Fill)
         .height(Length::Fixed(footer_h))
         .padding(iced::Padding {
@@ -204,6 +217,16 @@ pub fn view<'a>(state: &'a RadialState, kit: &Kit) -> Element<'a, Message> {
             right: EDGE_PAD + 10.0,
             bottom: EDGE_PAD + 10.0,
             left: EDGE_PAD + 10.0,
-        })
-        .into()
+        });
+
+    if let Some(bg) = bar_c {
+        outer
+            .style(move |_| iced::widget::container::Style {
+                background: Some(iced::Background::Color(bg)),
+                ..Default::default()
+            })
+            .into()
+    } else {
+        outer.into()
+    }
 }

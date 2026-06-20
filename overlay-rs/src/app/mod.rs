@@ -262,6 +262,11 @@ pub enum Message {
     /// landed (a Wayland client can't overcome this any other way).
     WindowFocused,
 
+    /// A second `oxidemx-chat` launch signalled the running instance to
+    /// raise/focus via `org.oxidemx.Chat Present`. Best-effort on Wayland
+    /// (focus-stealing prevention); the primary goal is preventing duplicates.
+    PresentWindow,
+
     // ── agentd (use_agentd = true) path ────────────────────────────────────
 
     /// A D-Bus event from agentd matched to an overlay chat thread.
@@ -348,6 +353,41 @@ fn boot() -> RadialState {
         }
     };
     RadialState::new(&config)
+}
+
+/// Run the chat as a normal, decorated toplevel WINDOW (the `oxidemx-chat`
+/// sibling binary). Mirrors `run()` but: plain window settings (no frameless/
+/// topmost/override_redirect, no cursor-helper), an opaque background, and a
+/// boot that sets `chat_window_mode = true`.
+pub fn run_chat_window() -> iced::Result {
+    iced::application(boot_chat_window, update, view)
+        .title("OxideMX Chat")
+        .window(iced::window::Settings {
+            size: iced::Size::new(520.0, 720.0),
+            min_size: Some(iced::Size::new(380.0, 480.0)),
+            decorations: true,
+            transparent: false,
+            // Wayland app_id — must match StartupWMClass in
+            // packaging/org.oxidemx.chat.desktop so the WM groups the window
+            // under the launcher entry (correct taskbar icon + grouping).
+            platform_specific: iced::window::settings::PlatformSpecific {
+                application_id: "org.oxidemx.Chat".to_string(),
+                ..Default::default()
+            },
+            ..Default::default()
+        })
+        .subscription(subscription)
+        .run()
+}
+
+fn boot_chat_window() -> RadialState {
+    let mut state = boot();
+    state.chat_window_mode = true;
+    // Stable show_time lets the status shader animate (the 16 ms Tick re-renders);
+    // morph parked at 1.0 is the "chat fully open" pose.
+    state.ai_morph = crate::anim::Tween::at(1.0);
+    state.show_time = Some(std::time::Instant::now());
+    state
 }
 
 #[allow(dead_code)]

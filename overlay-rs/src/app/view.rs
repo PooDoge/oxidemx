@@ -10,6 +10,13 @@ use crate::geometry::WINDOW_SIZE;
 use crate::radial::{Painter, RadialState};
 
 pub(super) fn view(state: &RadialState) -> Element<'_, Message> {
+    if state.chat_window_mode {
+        // Full-window chat with the same backdrop the overlay paints behind its
+        // morphed chat (warm `base` fill + the status-driven background shader),
+        // minus the radial canvas / disc / morph. Without the backdrop the chat
+        // chrome (header/footer) renders flat over the bare window.
+        return chat_window_view(state);
+    }
     let canvas = Canvas::new(Painter::new(state))
         .width(Length::Fixed(WINDOW_SIZE as f32))
         .height(Length::Fixed(WINDOW_SIZE as f32));
@@ -738,4 +745,122 @@ fn to_iced_color(hex: &str, default: Color) -> Color {
     oxidemx_shared::theme::parse_hex_rgba(hex)
         .map(|(r, g, b, a)| Color::from_rgba(r as f32, g as f32, b as f32, a as f32))
         .unwrap_or(default)
+}
+
+/// The standalone chat WINDOW's composition: the same warm `base` fill + the
+/// status-driven background shader the overlay paints behind its morphed chat,
+/// with the chat widgets on top, at full opacity (no disc/morph). Kept SEPARATE
+/// from the morph branch above — that branch is fragile (cache_epsilon stale-layer
+/// story) and can't be visually regression-tested while the overlay won't open, so
+/// it is left untouched; the small duplication of the status-FX layer reconciles
+/// in the future chat extraction.
+fn chat_window_view(state: &RadialState) -> Element<'_, Message> {
+    let palette = &state.theme.theme.colors;
+    // Opaque base fill over the whole decorated window (the WM draws the frame,
+    // so no rounded corners / shadow). This is the "top + bottom" coloring the
+    // chat chrome sits on; without it the header/footer read flat.
+    let base_c = to_iced_color(&palette.base, Color::from_rgba(0.07, 0.08, 0.09, 1.0));
+    let body = container(Space::new())
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .style(move |_| iced::widget::container::Style {
+            background: Some(iced::Background::Color(base_c)),
+            ..Default::default()
+        });
+    let mut children: Vec<Element<'_, Message>> = vec![body.into()];
+
+    // Status-driven background shader (aurora / status_fx über-shader), full
+    // strength — reacts to thinking / awaiting-approval / idle exactly like the
+    // overlay chat. OXIDEMX_NO_CHAT_AURORA=1 disables it (diagnostic escape hatch).
+    let chat_fx_enabled = std::env::var_os("OXIDEMX_NO_CHAT_AURORA").is_none();
+    let fx_cfg = &state.visuals.ai_fx;
+    let awaiting_choice = state.ai_pending_question.is_some();
+    let thinking = state.ai_loading && !awaiting_choice;
+    let pulse = state
+        .show_time
+        .map(|t| {
+            let secs = t.elapsed().as_secs_f32();
+            ((secs * std::f32::consts::TAU / 1.4).sin() + 1.0) / 2.0
+        })
+        .unwrap_or(0.0);
+    let vision_fx = std::env::var("OXIDEMX_VISION_FX").ok();
+    let status_fx = match vision_fx.as_deref() {
+        Some("thinking") => &fx_cfg.thinking,
+        Some("awaiting") => &fx_cfg.awaiting,
+        Some("idle") => &fx_cfg.idle,
+        _ if awaiting_choice => &fx_cfg.awaiting,
+        _ if thinking => &fx_cfg.thinking,
+        _ => &fx_cfg.idle,
+    };
+    let status_base = if vision_fx.is_none() && !thinking && !awaiting_choice {
+        0.22
+    } else if awaiting_choice || vision_fx.as_deref() == Some("awaiting") {
+        0.40 + 0.20 * pulse
+    } else {
+        0.5 + 0.3 * pulse
+    };
+    let fx_strength = status_fx.intensity.clamp(0.0, 1.0) * status_base;
+    if chat_fx_enabled && fx_strength > 0.001 {
+        let accent_rgba = oxidemx_shared::theme::parse_hex_rgba(&palette.accent)
+            .map(|(r, g, b, a)| [r as f32, g as f32, b as f32, a as f32])
+            .unwrap_or([0.5, 0.5, 1.0, 1.0]);
+        let accent2 = oxidemx_shared::theme::parse_hex_rgba(&palette.accent2)
+            .map(|(r, g, b, a)| [r as f32, g as f32, b as f32, a as f32])
+            .unwrap_or(accent_rgba);
+        let accent_dim = oxidemx_shared::theme::parse_hex_rgba(&palette.accent_dim)
+            .map(|(r, g, b, a)| [r as f32, g as f32, b as f32, a as f32])
+            .unwrap_or(accent_rgba);
+        let pick = |i: usize, fallback: [f32; 4]| -> [f32; 4] {
+            status_fx
+                .colors
+                .as_ref()
+                .and_then(|c| oxidemx_shared::theme::parse_hex_rgba(&c[i]))
+                .map(|(r, g, b, a)| [r as f32, g as f32, b as f32, a as f32])
+                .unwrap_or(fallback)
+        };
+        let c0 = pick(0, accent_rgba);
+        let c1 = pick(1, accent2);
+        let c2 = pick(2, accent_dim);
+        let start = state.show_time.unwrap_or_else(std::time::Instant::now);
+        match oxidemx_shared::config::AiFxConfig::mode_index(&status_fx.effect) {
+            Some(mode) => {
+                let fx = iced::widget::Shader::new(crate::render::status_fx::StatusFxProgram::new(
+                    start,
+                    mode,
+                    fx_strength,
+                    status_fx.speed,
+                    c0,
+                    c1,
+                    c2,
+                ))
+                .width(Length::Fill)
+                .height(Length::Fill);
+                children.push(fx.into());
+            }
+            None if status_fx.effect != "none" => {
+                let intensity = state.visuals.aurora_intensity.clamp(0.0, 1.0);
+                let chat_aurora =
+                    iced::widget::Shader::new(crate::render::aurora::ChatAuroraProgram(
+                        crate::render::aurora::AuroraProgram::new(
+                            start,
+                            c0,
+                            c1,
+                            c2,
+                            intensity.max(0.4) * fx_strength,
+                            crate::render::animation::MenuXformRaw::IDENTITY,
+                        ),
+                    ))
+                    .width(Length::Fill)
+                    .height(Length::Fill);
+                children.push(chat_aurora.into());
+            }
+            None => {}
+        }
+    }
+
+    children.push(crate::chat_ui::view(state, 1.0));
+    iced::widget::Stack::with_children(children)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .into()
 }
