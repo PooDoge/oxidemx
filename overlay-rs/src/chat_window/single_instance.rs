@@ -4,6 +4,7 @@
 
 use std::sync::Mutex;
 use tokio::sync::mpsc;
+use zbus::fdo::{DBusProxy, RequestNameFlags, RequestNameReply};
 use zbus::{connection, interface};
 
 const NAME: &str = "org.oxidemx.Chat";
@@ -46,29 +47,58 @@ pub fn take_present_receiver() -> Option<mpsc::UnboundedReceiver<()>> {
 /// a dead receiver so the caller still opens a window (never silently exits).
 pub async fn acquire_or_present() -> SingleInstance {
     let (tx, rx) = mpsc::unbounded_channel();
-    let built = connection::Builder::session()
-        .and_then(|b| b.name(NAME))
-        .and_then(|b| b.serve_at(PATH, PresentService { tx }));
-    match built {
-        Ok(builder) => match builder.build().await {
-            Ok(conn) => {
-                // Keep the connection alive by leaking it — it must outlive
-                // the iced event loop. Box::leak gives it a 'static lifetime.
-                Box::leak(Box::new(conn));
-                SingleInstance::Primary { present: rx }
-            }
-            Err(zbus::Error::NameTaken) => {
-                call_present().await;
-                SingleInstance::Secondary
-            }
-            // Degrade gracefully: open a window anyway rather than silently dying.
+    // Build a connection that serves the Present interface, but DON'T request the
+    // name via `Builder::name()` — that QUEUES on conflict, so a second instance
+    // becomes a queued owner and wrongly opens a window. Request the name
+    // explicitly below with DoNotQueue so a clash is detected as `Exists`.
+    let conn = match connection::Builder::session()
+        .and_then(|b| b.serve_at(PATH, PresentService { tx }))
+    {
+        Ok(b) => match b.build().await {
+            Ok(c) => c,
             Err(e) => {
-                tracing::warn!("D-Bus name acquire failed ({e}); opening window without single-instance guard");
-                SingleInstance::Primary { present: rx }
+                tracing::warn!("session bus connect failed ({e}); opening without single-instance");
+                return SingleInstance::Primary { present: rx };
             }
         },
         Err(e) => {
-            tracing::warn!("D-Bus builder failed ({e}); opening window without single-instance guard");
+            tracing::warn!("session bus builder failed ({e}); opening without single-instance");
+            return SingleInstance::Primary { present: rx };
+        }
+    };
+    let reply = match DBusProxy::new(&conn).await {
+        Ok(dbus) => match zbus::names::WellKnownName::try_from(NAME) {
+            Ok(name) => {
+                dbus.request_name(name, RequestNameFlags::DoNotQueue.into())
+                    .await
+            }
+            Err(e) => {
+                tracing::warn!("invalid name {NAME} ({e}); opening without single-instance");
+                Box::leak(Box::new(conn));
+                return SingleInstance::Primary { present: rx };
+            }
+        },
+        Err(e) => {
+            tracing::warn!("DBusProxy failed ({e}); opening without single-instance");
+            Box::leak(Box::new(conn));
+            return SingleInstance::Primary { present: rx };
+        }
+    };
+    match reply {
+        // We own org.oxidemx.Chat — keep the connection (+ served Present
+        // interface) alive for the life of the process.
+        Ok(RequestNameReply::PrimaryOwner) | Ok(RequestNameReply::AlreadyOwner) => {
+            Box::leak(Box::new(conn));
+            SingleInstance::Primary { present: rx }
+        }
+        // Another instance owns it — ask it to present itself, then exit.
+        Ok(RequestNameReply::Exists) | Ok(RequestNameReply::InQueue) => {
+            call_present().await;
+            SingleInstance::Secondary
+        }
+        Err(e) => {
+            tracing::warn!("request_name failed ({e}); opening without single-instance guard");
+            Box::leak(Box::new(conn));
             SingleInstance::Primary { present: rx }
         }
     }
