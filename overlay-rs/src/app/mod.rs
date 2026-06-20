@@ -371,6 +371,10 @@ pub fn run_chat_window() -> iced::Result {
 fn boot_chat_window() -> RadialState {
     let mut state = boot();
     state.chat_window_mode = true;
+    // Stable show_time lets the status shader animate (the 16 ms Tick re-renders);
+    // morph parked at 1.0 is the "chat fully open" pose.
+    state.ai_morph = crate::anim::Tween::at(1.0);
+    state.show_time = Some(std::time::Instant::now());
     state
 }
 
