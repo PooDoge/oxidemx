@@ -215,12 +215,18 @@ fn expanded_panel<'a>(
         .style(|_, _| button::Style { background: None, ..Default::default() })
         .on_press(Message::ActivityCollapse);
 
-    // The outer container in view.rs provides align_x(End).align_y(End).padding([0,18,96,0])
-    // for both collapsed and expanded cases — do NOT add another positioned wrapper here or
-    // the panel lands at 2× the intended bottom offset.
+    // Align panel_col to the bottom-right corner within the Fill×Fill Stack layer.
+    // The outer container in view.rs owns all padding ([0,18,96,0]); no padding here.
+    let aligned_panel = iced::widget::container(panel_col)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .align_x(iced::Alignment::End)
+        .align_y(iced::Alignment::End)
+        .into();
+
     iced::widget::Stack::with_children(vec![
         backdrop.into(),
-        panel_col.into(),
+        aligned_panel,
     ])
     .width(Length::Fill)
     .height(Length::Fill)
