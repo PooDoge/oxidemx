@@ -85,6 +85,9 @@ struct StepBrief {
     input_schema: Option<Value>,
     /// Whether the step's own per-step budget was already exceeded.
     budget_exceeded: bool,
+    /// The step's per-step tool-call budget limit, if any.
+    #[allow(dead_code)]
+    budget_max_tool_calls: Option<u32>,
 }
 
 /// Result of running a single step's worker.
@@ -172,6 +175,7 @@ impl<W: Worker, R: CommandRunner> Executor<W, R> {
                         inputs: Value::Object(inputs_map),
                         input_schema: s.input_schema.clone(),
                         budget_exceeded: s.budget_exceeded(),
+                        budget_max_tool_calls: s.budget.max_tool_calls,
                     }
                 })
                 .collect();
@@ -268,6 +272,13 @@ impl<W: Worker, R: CommandRunner> Executor<W, R> {
                         let mut step_blocked = false;
                         let mut block_reason = String::new();
 
+                        // Track per-step tool-call count for this step's budget.
+                        let mut step_call_count: u32 = 0;
+                        // Retrieve the step's budget limit from the manifest.
+                        let step_budget_max = manifest
+                            .step(&step_id)
+                            .and_then(|s| s.budget.max_tool_calls);
+
                         for inv in &output.tool_calls {
                             // Process-level total cap check.
                             if let Some(max) = self.caps.max_total_tool_calls {
@@ -302,6 +313,15 @@ impl<W: Worker, R: CommandRunner> Executor<W, R> {
                                     break;
                                 }
                                 Tier::AutoAllow | Tier::AutoAllowIfReversible => {
+                                    // Check per-step budget before recording the call.
+                                    if let Some(max) = step_budget_max {
+                                        if step_call_count >= max {
+                                            step_blocked = true;
+                                            block_reason = "budget-exhausted".into();
+                                            break;
+                                        }
+                                    }
+
                                     let _ = ledger.record_tool_call(
                                         manifest,
                                         &step_id,
@@ -310,6 +330,7 @@ impl<W: Worker, R: CommandRunner> Executor<W, R> {
                                         now,
                                     );
                                     total_tool_calls += 1;
+                                    step_call_count += 1;
                                 }
                             }
                         }
@@ -739,5 +760,60 @@ mod tests {
             "step must be Blocked(auto-denied)"
         );
         let _ = report;
+    }
+
+    /// Per-step tool-call budget is enforced independently of the global cap.
+    /// A step with `max_tool_calls = 1` emitting 2 AutoAllow calls → blocked.
+    /// Global `max_total_tool_calls = None` (unlimited) ensures it's the per-step cap firing.
+    #[tokio::test]
+    async fn per_step_tool_cap_blocks() {
+        let d = tempfile::tempdir().unwrap();
+        let led = TaskLedger::new(d.path());
+
+        let mut m = TaskManifest::new(TaskId::from_raw("t-step-cap".into()), "per-step cap test".into());
+        let mut step_a = Step::new("a", "exceeds-budget");
+        step_a.budget.max_tool_calls = Some(1);
+        m.steps = vec![step_a];
+        led.create(&mut m, 0).unwrap();
+
+        // Worker emits 2 `read_file` calls (both AutoAllow).
+        // Per-step budget is 1 → after recording the first call step_call_count reaches 1 (= max),
+        // the second call triggers step_call_count >= max → block.
+        let worker = MockWorker::from_iter([(
+            "a",
+            StepOutput {
+                text: "exceeds budget".into(),
+                output: serde_json::json!({}),
+                tool_calls: vec![
+                    ToolInvocation {
+                        name: "read_file".into(),
+                        args: serde_json::json!({"file_path": "a.rs"}),
+                    },
+                    ToolInvocation {
+                        name: "read_file".into(),
+                        args: serde_json::json!({"file_path": "b.rs"}),
+                    },
+                ],
+                verify_cmd: None,
+            },
+        )]);
+
+        let exec = Executor::new(
+            worker,
+            Verifier::new(MockRunner::ok("ok")),
+            ApprovalClassifier::default(),
+            Caps { max_total_tool_calls: None },
+            d.path().into(),
+        );
+
+        let report = exec.run(&led, &mut m, 10).await;
+
+        assert_eq!(
+            m.step("a").unwrap().status(),
+            StepStatus::Blocked,
+            "step must be Blocked(budget-exhausted)"
+        );
+        assert_eq!(report.blocked, 1);
+        assert_eq!(report.completed, 0);
     }
 }
