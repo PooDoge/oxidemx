@@ -2,6 +2,7 @@
 //! `run_chat_window()` (standalone chat window) for the two binaries.
 
 pub mod actions;
+pub mod activity;
 pub mod agent;
 pub mod agent_runtime;
 pub mod ai_client;
