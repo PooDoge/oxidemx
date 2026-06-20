@@ -25,7 +25,6 @@ pub(super) fn subscription(state: &RadialState) -> Subscription<Message> {
         // the subscription alive across rebuilds); yields
         // Message::WidgetHost scene/failure/registry events.
         Subscription::run(crate::widget_host::stream),
-        iced::time::every(std::time::Duration::from_millis(16)).map(|_| Message::Tick),
         iced::window::events().map(|(id, event)| match event {
             iced::window::Event::Opened { .. } => Message::WindowOpened(id),
             // Routed through its own message (not ToggleDismiss)
@@ -38,6 +37,18 @@ pub(super) fn subscription(state: &RadialState) -> Subscription<Message> {
             _ => Message::Noop,
         }),
     ];
+    // 60 Hz frame ticker. The radial overlay keeps it always-on (cheap at its
+    // small fixed size). The fullscreen chat window only ticks while something is
+    // actually animating (thinking / awaiting a choice / an active scroll tween) —
+    // a full-window redraw every 16 ms otherwise saturates the main thread and
+    // makes typing laggy (the user types while idle, when nothing needs animating).
+    let needs_tick = !state.chat_window_mode
+        || state.ai_loading
+        || state.ai_pending_question.is_some()
+        || state.ai_scroll_active;
+    if needs_tick {
+        subs.push(iced::time::every(std::time::Duration::from_millis(16)).map(|_| Message::Tick));
+    }
     // The daemon listener requests `org.oxidemx.overlay` + registers AgentHost
     // (dbus.rs). The standalone chat window must NOT run it — otherwise it steals
     // the radial overlay's bus name and the daemon can no longer reach the real
