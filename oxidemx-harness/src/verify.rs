@@ -108,52 +108,58 @@ fn fnv1a64(bytes: &[u8]) -> u64 {
     h
 }
 
+/// Mock command runner for testing.
+///
+/// Scripted to return a fixed success or failure response regardless of
+/// the program / args / cwd passed in.
+#[cfg(test)]
+pub struct MockRunner {
+    ok: bool,
+    stdout: String,
+    stderr: String,
+}
+
+#[cfg(test)]
+impl MockRunner {
+    /// Create a mock that returns success with the given stdout.
+    pub fn ok(stdout: &str) -> Self {
+        Self {
+            ok: true,
+            stdout: stdout.to_string(),
+            stderr: String::new(),
+        }
+    }
+
+    /// Create a mock that returns failure with the given stderr.
+    pub fn fail(stderr: &str) -> Self {
+        Self {
+            ok: false,
+            stdout: String::new(),
+            stderr: stderr.to_string(),
+        }
+    }
+}
+
+#[cfg(test)]
+#[async_trait]
+impl CommandRunner for MockRunner {
+    async fn run(
+        &self,
+        _program: &str,
+        _args: &[String],
+        _cwd: &Path,
+    ) -> CommandResult {
+        CommandResult {
+            ok: self.ok,
+            stdout: self.stdout.clone(),
+            stderr: self.stderr.clone(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// Mock command runner for testing.
-    struct MockRunner {
-        ok: bool,
-        stdout: String,
-        stderr: String,
-    }
-
-    impl MockRunner {
-        /// Create a mock that returns success with the given stdout.
-        fn ok(stdout: &str) -> Self {
-            Self {
-                ok: true,
-                stdout: stdout.to_string(),
-                stderr: String::new(),
-            }
-        }
-
-        /// Create a mock that returns failure with the given stderr.
-        fn fail(stderr: &str) -> Self {
-            Self {
-                ok: false,
-                stdout: String::new(),
-                stderr: stderr.to_string(),
-            }
-        }
-    }
-
-    #[async_trait]
-    impl CommandRunner for MockRunner {
-        async fn run(
-            &self,
-            _program: &str,
-            _args: &[String],
-            _cwd: &Path,
-        ) -> CommandResult {
-            CommandResult {
-                ok: self.ok,
-                stdout: self.stdout.clone(),
-                stderr: self.stderr.clone(),
-            }
-        }
-    }
 
     #[tokio::test]
     async fn verify_pass_yields_promise() {
