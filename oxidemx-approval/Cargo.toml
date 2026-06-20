@@ -1,0 +1,16 @@
+[package]
+name = "oxidemx-approval"
+version = "0.1.0"
+edition = "2021"
+description = "Risk-tiered approval classifier for autonomous agent tool calls"
+license = "MIT"
+
+[dependencies]
+git2 = { version = "0.20", default-features = false }
+shell-words = "1.1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "1"
+
+[dev-dependencies]
+tempfile = "3"

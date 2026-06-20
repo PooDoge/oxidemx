@@ -37,6 +37,7 @@ members = [
     "settings-rs",
     "spike-iced", "iced_gtk_themer",
     "tools/oxidemx-widget-cli",
+    "oxidemx-approval",
 ]
 exclude = ["pop_os_iced", "libcosmic", "oxidemx-widget-host/fixtures/*", "widgets/builtin/*", "vendor/AutoAgents"]
 
