@@ -32,17 +32,31 @@ slice); the SP2d-3 task executor; deep visual polish.
 
 ## 2. The truthfulness principle (the spine of this slice)
 
-The model must **never be the authority on a fact the system knows** (run status, file
-contents, test/command results) — the same rule as the verifier (`cargo`-pass, not
-self-report) and the ledger `CompletionPromise`. Three layers, applied here:
-- **Tool coverage** — any reportable state must be *queryable* by a tool (§3). No tool ⇒
-  forced guess.
-- **Render truth, don't narrate it** — the UI shows real `run_statuses` (§5); for state
-  the system tracks, **show it, don't ask the model**.
-- **Prompt + guard** — a system-prompt rule ("never state a run/task/file/test/command
-  status or result unless a tool call this turn returned it; else call the tool or say
-  you can't verify") + extend the existing `ResponseGuard` (grounding / no-new-facts) to
-  flag unbacked state-claims (§4).
+Re-evaluated against agent best practices + the Claude Code system prompts
+(`docs/research/claude-code-system-prompt-patterns.md`), which enforce truthfulness
+**structurally** — requiring tool output to exist before any status claim, never merely
+exhorting honesty ("Report outcomes accurately…"; "Read, search, and investigate freely —
+looking is not acting"). Same discipline as our verifier (`cargo`-pass, not self-report)
+and the ledger `CompletionPromise`. The invariant is **grounded narration** — not
+silencing the model. Layers, primary first:
+
+- **Grounded narration (invariant — ALL connectors).** The model may state verifiable
+  system state (run/task/file/test/command status or result) **only from a tool result in
+  the current turn**; otherwise it calls the tool or abstains ("I haven't checked"). This
+  is connector-agnostic — it must hold on Telegram/HTTP where there is no UI to read.
+- **Action vs. outcome (the testable line).** The model MAY narrate its own *actions*
+  ("I launched the flow, run `<id>`" — grounded in the tool's return); it MUST NOT assert
+  *outcomes it did not observe* ("still running" / "succeeded") without a status tool
+  result. "Looking is not acting": investigation is always free; assertion needs evidence.
+- **Tool coverage (enables the invariant).** Any reportable state must be *queryable* by a
+  tool (§3). No tool ⇒ the model is forced to guess.
+- **Render truth directly (defense-in-depth — UI connectors only).** The overlay shows
+  real `run_statuses` from source (§5): a second channel of truth + the authoritative
+  tiebreaker if model text and UI ever diverge. NOT a substitute for the invariant — there
+  is nothing to render on a headless connector.
+- **Verify (backstop).** Extend the existing `ResponseGuard` (grounding / no-new-facts) to
+  flag a state-claim unbacked by a turn observation — prompting alone never fully
+  eliminates confabulation (§4).
 
 ## 3. `RunLauncher` seam + real tools
 
@@ -52,8 +66,9 @@ self-report) and the ledger `CompletionPromise`. Three layers, applied here:
 
 ## 4. Truthfulness measures (cross-cutting)
 
-- **System-prompt rule** added to the agent's system prompt assembly (`oxidemx-agent-core::mode`/persona): the verbatim "never assert verifiable state without a tool result" rule (§2).
+- **System-prompt rule** (in `oxidemx-agent-core::mode`/persona assembly), worded as the §2 invariant + action/outcome line: *"State a run/task/file/test/command status or result ONLY from a tool result in this turn; otherwise call the tool or say you haven't checked. Narrate your actions, never unobserved outcomes. Looking is not acting — investigate freely."* Phrased structurally (evidence-gated), per the Claude Code prompts.
 - **`ResponseGuard` extension** (`oxidemx-agent-local::guard`): a check that flags a reply asserting a run/task status/result when no tool call in the turn returned it. Specced here; built as a follow-on if it needs turn-context plumbing (the prompt rule + tool coverage + UI-truth are the immediate fix; the guard is the safety net). Verdict → flag/regenerate, never silently pass a likely-fabricated status.
+- **Broader system-prompt rules** (from `docs/research/claude-code-system-prompt-patterns.md` — fold into the prompt assembly as a separate system-prompt pass, beyond this slice): evidence-gated outcome reporting; approval-scope non-transferability ("approved once ≠ approved always / adjacent context" — pairs with our `ApprovalClassifier`); reversibility gate (read freely, confirm before destructive/outward-facing); no gold-plating. Tracked, not built here.
 
 ## 5. Activity UI — the visible, truthful surface (overlay)
 
