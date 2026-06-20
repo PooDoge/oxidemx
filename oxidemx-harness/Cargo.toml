@@ -5,12 +5,14 @@ edition = "2021"
 
 [dependencies]
 oxidemx-ledger = { path = "../oxidemx-ledger" }
+oxidemx-approval = { path = "../oxidemx-approval" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "1"
 async-trait = "0.1"
-tokio = { version = "1", features = ["rt", "macros", "process"] }
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "process"] }
+jsonschema = { version = "0.46", default-features = false }
 
 [dev-dependencies]
-tokio = { version = "1", features = ["rt", "macros"] }
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros"] }
 tempfile = "3"
