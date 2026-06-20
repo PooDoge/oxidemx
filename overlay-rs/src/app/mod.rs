@@ -367,6 +367,13 @@ pub fn run_chat_window() -> iced::Result {
             min_size: Some(iced::Size::new(380.0, 480.0)),
             decorations: true,
             transparent: false,
+            // Wayland app_id — must match StartupWMClass in
+            // packaging/org.oxidemx.chat.desktop so the WM groups the window
+            // under the launcher entry (correct taskbar icon + grouping).
+            platform_specific: iced::window::settings::PlatformSpecific {
+                application_id: "org.oxidemx.Chat".to_string(),
+                ..Default::default()
+            },
             ..Default::default()
         })
         .subscription(subscription)

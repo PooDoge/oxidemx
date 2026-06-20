@@ -285,7 +285,14 @@ git commit -m "feat(overlay): single-instance chat window (org.oxidemx.Chat pres
 
 ---
 
-### Task 4: Daemon `ShowChat` signal + app subscribes
+### Task 4: Daemon `ShowChat` signal + app subscribes — ⏸ DEFERRED (follow-up)
+
+> **Status (2026-06-20): deferred, not implemented in this branch.** The chat window is
+> launchable today via the app-menu `.desktop` (Task 5) + a GNOME custom keybinding bound to
+> `oxidemx-chat`, both funneling through the single-instance present path. The MX-button →
+> daemon `ShowChat` trigger needs a daemon button-config action to actually *emit* the signal
+> (exposing the signal alone, with nothing emitting it, is a half-feature), so it's a separate
+> follow-up. The steps below remain the spec for that follow-up.
 
 **Files:**
 - Modify: the daemon D-Bus interface (find via `grep -rl "interface(name" oxidemx-daemon*/src` or wherever `org.oxidemx.Daemon` is defined — the unit runs `oxidemxd`)
