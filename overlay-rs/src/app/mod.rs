@@ -262,6 +262,11 @@ pub enum Message {
     /// landed (a Wayland client can't overcome this any other way).
     WindowFocused,
 
+    /// A second `oxidemx-chat` launch signalled the running instance to
+    /// raise/focus via `org.oxidemx.Chat Present`. Best-effort on Wayland
+    /// (focus-stealing prevention); the primary goal is preventing duplicates.
+    PresentWindow,
+
     // ── agentd (use_agentd = true) path ────────────────────────────────────
 
     /// A D-Bus event from agentd matched to an overlay chat thread.

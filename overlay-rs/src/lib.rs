@@ -46,5 +46,7 @@ pub(crate) mod theme;
 pub(crate) mod tray;
 pub mod widget_host;
 
+pub mod chat_window;
+
 pub use app::run;
 pub use app::run_chat_window;

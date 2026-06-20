@@ -550,6 +550,17 @@ pub(super) fn update(state: &mut RadialState, message: Message) -> Task<Message>
             info!("window gained keyboard focus");
             Task::none()
         }
+        Message::PresentWindow => {
+            // A second oxidemx-chat launch asked us to raise/focus.
+            // iced::window::gain_focus is best-effort on Wayland (focus-stealing
+            // prevention), but this at least prevents a duplicate window.
+            info!("PresentWindow: another launch signalled; attempting focus");
+            if let Some(id) = state.window_id {
+                iced::window::gain_focus(id)
+            } else {
+                Task::none()
+            }
+        }
         Message::FocusedClassResolved(class) => {
             debug!(?class, "Focused window class resolved");
             state.apply_focused_class(class);

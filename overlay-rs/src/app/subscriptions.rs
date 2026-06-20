@@ -45,6 +45,11 @@ pub(super) fn subscription(state: &RadialState) -> Subscription<Message> {
     if !state.chat_window_mode {
         subs.push(Subscription::run(crate::dbus::stream).map(Message::Overlay));
     }
+    // In chat-window mode, forward Present requests from the D-Bus single-instance
+    // service into the iced message loop so the window can try to gain focus.
+    if state.chat_window_mode {
+        subs.push(Subscription::run(present_stream));
+    }
     // agentd event subscriber — active only when the use_agentd flag is on.
     // The D-Bus connection is only opened when agentd routing is actually
     // enabled, keeping the default in-proc path free of any agentd D-Bus churn.
@@ -92,6 +97,22 @@ fn ai_stream_stream() -> impl futures_util::stream::Stream<Item = Message> {
         }
     });
 
+    rx
+}
+
+/// Forward Present requests from the single-instance D-Bus service into the
+/// iced message loop. Drains the receiver stashed by the binary before launch.
+fn present_stream() -> impl futures_util::stream::Stream<Item = Message> {
+    let (tx, rx) = async_channel::unbounded();
+    if let Some(mut present_rx) =
+        crate::chat_window::single_instance::take_present_receiver()
+    {
+        tokio::task::spawn(async move {
+            while present_rx.recv().await.is_some() {
+                let _ = tx.send(Message::PresentWindow).await;
+            }
+        });
+    }
     rx
 }
 
