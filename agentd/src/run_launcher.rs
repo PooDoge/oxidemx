@@ -171,10 +171,16 @@ impl RunLauncher for ConductorRunLauncher {
                 ))
             } else {
                 let ai_cfg = oxidemx_shared::config::AiConfig::default();
-                let api_key = ai_cfg
-                    .provider
-                    .key_env()
-                    .and_then(|env| std::env::var(env).ok())
+                // Resolve the key the SAME file-first way the chat path does
+                // (`oxidemx_agent::keys::provider_key` reads the stored
+                // `~/.config/oxidemx/<provider>.key`), falling back to the
+                // provider's key env var. The original moved body read ONLY the
+                // env var, so flows failed instantly when the key was stored in
+                // a file (the normal case) rather than the environment.
+                let api_key = oxidemx_agent::keys::provider_key(ai_cfg.provider)
+                    .or_else(|| {
+                        ai_cfg.provider.key_env().and_then(|env| std::env::var(env).ok())
+                    })
                     .unwrap_or_default();
                 Arc::new(oxidemx_conductor::supervisor::ConfigFactory {
                     provider: ai_cfg.provider,

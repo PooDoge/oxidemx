@@ -149,6 +149,7 @@ version = "0.0.1"
 dependencies = [
  "async-trait",
  "futures-util",
+ "oxidemx-agent",
  "oxidemx-agent-core",
  "oxidemx-agent-local",
  "oxidemx-agent-proxy",

@@ -14,6 +14,7 @@ mistral = ["oxidemx-agent-local/mistral"]
 [dependencies]
 oxidemx-shared = { path = "../oxidemx-shared" }
 oxidemx-planner = { path = "../oxidemx-planner" }
+oxidemx-agent = { path = "../oxidemx-agent" }   # keys::provider_key (file-based API keys)
 oxidemx-agent-core = { path = "../oxidemx-agent-core" }
 oxidemx-harness = { path = "../oxidemx-harness" }
 oxidemx-conductor = { path = "../oxidemx-conductor" }
