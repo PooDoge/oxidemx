@@ -1,139 +1,117 @@
-# Standalone chat window + shared chat-ui crate — design
+# Standalone chat window (sibling binary, in-place reuse) — design
 
-Date: 2026-06-20
-Status: design (brainstormed + approved in-chat; pending spec review → writing-plans).
+Date: 2026-06-20 (revised same day after a full chat-surface inventory)
+Status: design (approved in-chat — Option D). Supersedes the earlier "extract a shared
+`oxidemx-chat-ui` crate" plan in this doc's history: the inventory showed the chat is fused
+into the overlay (~38 `ai_*` fields in `RadialState`, ~60 of ~75 `Message` variants, ~840
+lines of chat `update` arms, all `chat_ui/` views take `&RadialState`, and `ai_morph` /
+`chat_focus_pending` / `ai_handoff` are shared with the radial canvas). A clean cross-crate
+extraction is a multi-day, high-risk refactor. So we ship the reliable window FIRST by
+reusing the overlay's chat **in place**, and defer the extraction (see "Incremental path").
 
 ## Problem
 
-The AI chat lives only inside the radial overlay (`oxidemx-overlay`), a frameless /
-transparent / always-on-top / `override_redirect` iced window positioned by a GNOME-shell
-extension. That window is fragile and currently **won't reliably open** on this Wayland
-session (it shows then vanishes / never appears). Rather than debug the overlay's
-windowing, give the chat its **own normal toplevel window** — system decorations, normal
-stacking/focus — that opens reliably from the app menu, a hotkey, or the MX button, and
-**reuses the exact same agentd surfaces and chat UI**. Decision recap (in-chat): extract a
-**shared chat crate** (both overlay and the new app consume it — no drift); **agentd-only**
-transport; launch via **menu + GNOME keybinding + daemon trigger**, single-instance.
+The AI chat lives only inside the radial overlay, whose window is frameless / transparent /
+always-on-top / `override_redirect` (`oxidemx-window::frameless_topmost`) and positioned by a
+GNOME-shell extension — and it currently **won't reliably open** on this Wayland session.
+The chat code itself works. So: give the chat its own **normal toplevel window** (system
+decorations, normal stacking/focus) via a **sibling binary** that reuses the overlay's chat
+in place, launchable from the app menu / a hotkey / the MX button, single-instance.
 
-## Current structure (from recon)
+## Approach: Option D — sibling binary `oxidemx-chat` + a `run_chat_window()` entry
 
-- Overlay windowing is already plain **iced xdg-shell** (no layer-shell); fragility comes
-  from `oxidemx-window::frameless_topmost` (`decorations:false, transparent, AlwaysOnTop,
-  override_redirect:true`) + cursor-helper positioning (`oxidemx-window/src/cursor_helper.rs`).
-- Chat UI is **baked into the overlay**: `overlay-rs/src/chat_ui/` (`mod.rs` entry
-  `view(&RadialState, alpha) -> Element<Message>` ~`mod.rs:50`; submodules `body/cards/footer/
-  header/memories/palette/skills/tasks/threads`). State lives in `RadialState`
-  (`overlay-rs/src/radial/mod.rs:49`): `ai_threads: Vec<ChatThread>`, `ai_loading`,
-  `ai_activity`, `ai_palette`, etc. Chat *update* logic is woven into the overlay's `Message`
-  enum (`app/mod.rs`) + `app/update.rs` (`Ai*`/`Agentd*` arms; `AgentProxy::new` at
-  `update.rs:1597`). Signal subscription: `app/agent_events.rs::stream()`.
-- **Reusable as-is:** `oxidemx-agent-proxy` (zbus `AgentProxy` for `org.oxidemx.Agent`:
-  `send_message`, `run_flow`, `run_status`, `list_threads`, `get_transcript`,
-  `respond_approval`, …; signals `event`/`approval_requested`/`model_status_changed`; zero
-  overlay deps), `oxidemx-widgets` (tokens/Kit/catalog/icons), `oxidemx-agent-core`
-  (`StreamEvent`, `AgentCardData`, `PendingQuestion`, `AgentMode`).
+No CLI flag on the overlay (the chat window is **always available as its own binary**). The
+overlay crate (`oxidemx-overlay`, dir `overlay-rs`) gains a second binary and one new public
+entry point; everything else (state, `chat_ui`, `update`, `agent_events`) is reused unchanged.
 
-## Components
+### 1. `oxidemx-overlay::run_chat_window()` (new lib entry, mirrors `app::run`)
 
-### 1. `oxidemx-chat-ui` (new shared crate)
+A sibling of `app::run()` (`overlay-rs/src/app/mod.rs:312`). Differences only:
+- **Window:** plain `iced::window::Settings` (decorations on, resizable, `min_size`,
+  `application_id = "org.oxidemx.Chat"`, sane default size) instead of
+  `oxidemx_window::frameless_topmost(...)`. No transparent/topmost/override_redirect, no
+  cursor-helper positioning.
+- **Boot:** sets a new `RadialState` field `chat_window_mode: bool = true` (the ONLY state
+  addition). Boots the same chat state (threads load, agentd subscription) but does not arm
+  the radial/puck/daemon-show path.
+- **View:** when `chat_window_mode`, `view()` renders `chat_ui::view(&state, 1.0)` full-window
+  and skips the radial canvas / disc / morph. (One branch at the top of the overlay `view()`.)
+- **Update:** when `chat_window_mode`, the daemon radial triggers (`MenuRequested`/`HideMenu`
+  from `dbus.rs`) and puck/handoff messages are ignored/no-ops; all `Ai*`/`Agentd*` chat
+  messages flow through the existing `update.rs` arms unchanged.
 
-The chat, extracted. Owns:
-- **`ChatState`** — the AI fields lifted from `RadialState`: `threads: Vec<ChatThread>`,
-  current-thread index, input buffer, `loading`/`activity` flags, and the panel state for
-  `palette`/`skills`/`tasks`/`memories`/`threads`. (`ChatThread` and the panel types move
-  here or to a shared location they already permit.)
-- **`ChatMessage`** — the `Ai*`/`Agentd*` variants trimmed out of the overlay `Message`.
-- **`pub fn view(state: &ChatState, alpha: f32) -> Element<'_, ChatMessage>`** — the moved
-  `chat_ui/` view, signature changed `&RadialState` → `&ChatState`.
-- **`pub fn update(state: &mut ChatState, msg: ChatMessage) -> Task<ChatMessage>`** — the
-  chat-handling logic lifted from `update.rs`: send via `AgentProxy.send_message`; apply
-  `event`-signal stream deltas; `run_flow`/`run_status` cards; approvals via
-  `respond_approval`.
-- **`pub fn subscription(state: &ChatState) -> Subscription<ChatMessage>`** — the moved
-  `agent_events::stream()` (agentd `event`/`approval_requested`/`model_status_changed`).
-- **Deps:** `oxidemx-agent-proxy`, `oxidemx-widgets`, `oxidemx-agent-core`, `iced`. **No**
-  `oxidemx-agent` (in-proc) — agentd-only.
-- **Boundary:** everything in `chat_ui/` + the `ai_*` state + agentd signal plumbing moves
-  here. `radial/`, `render/` (shaders), `chat_shell.rs` (puck/morph), `handoff.rs`,
-  daemon `dbus.rs`, `widget_host.rs`, `tray.rs`, cursor positioning **stay in the overlay**.
+### 2. `oxidemx-chat` binary
 
-### 2. `oxidemx-chat` (new binary)
+A `[[bin]]` in the overlay crate (`overlay-rs/src/bin/oxidemx-chat.rs`) whose `main()` calls
+`oxidemx_overlay::run_chat_window()`. **Single-instance:** before running, try to own D-Bus
+name `org.oxidemx.Chat`; if already owned, call a `Present` method on the running instance
+(which raises/focuses via `iced::window::gain_focus`) and exit. If claiming the name fails for
+any other reason, fall back to opening a plain window anyway (never exit silently). The
+present-request reaches the running app via a small D-Bus listener wired into the chat-window
+subscription.
 
-A thin iced **normal-window** app:
-- `iced::application(...)` with default-ish `window::Settings` (decorations on, resizable,
-  sane `min_size`, `application_id = "org.oxidemx.Chat"`). No frameless/transparent/topmost/
-  override_redirect, no cursor-helper. This is the whole reason it opens reliably.
-- `App { chat: ChatState }`; `update` → `chat_ui::update`; `view` → `chat_ui::view`;
-  `subscription` → `chat_ui::subscription` + a present-request channel.
-- **Single-instance:** at startup, attempt to own D-Bus name `org.oxidemx.Chat`. If already
-  owned, call a `Present` method on the running instance and exit; the running instance
-  raises/focuses (`iced::window::gain_focus`). Menu + keybinding + daemon-trigger all become
-  "open-or-present."
+### 3. Launch / trigger glue
 
-### 3. Overlay rewire
-
-`RadialState` gains `chat: ChatState`; the overlay `Message` keeps a `Chat(ChatMessage)`
-wrapper; `update.rs` routes those to `chat_ui::update`; the chat-shell `view` calls
-`chat_ui::view(&state.chat, alpha)`. The overlay keeps its puck/handoff shell but the chat
-content+logic is the shared crate. Overlay drops in-proc `oxidemx-agent` chat calls
-(agentd-only — finishing SP1c-T8b for the chat path). The overlay's non-chat behavior is
-unchanged.
-
-### 4. Launch / trigger
-
-- **`.desktop`** entry (app menu) → `oxidemx-chat` (added to `install.sh`).
-- **GNOME custom keybinding** → `oxidemx-chat` (user-configured; documented).
-- **Daemon `ShowChat`** — `oxidemxd` gains a D-Bus signal (or method) `ShowChat`; bind an MX
-  button/gesture to emit it; `oxidemx-chat` subscribes and presents. Small daemon addition.
-- All three funnel through the single-instance open-or-present path.
+- **`.desktop`** (app menu) → `oxidemx-chat`; added to `install.sh` + a desktop entry.
+- **GNOME custom keybinding** → `oxidemx-chat` (user-configured; documented in install output).
+- **Daemon `ShowChat`** — `oxidemxd` gains a D-Bus signal `ShowChat` (bind an MX button/gesture
+  to emit it); `oxidemx-chat`'s single-instance listener presents on it. Small daemon addition.
+- All three funnel through the single-instance "open-or-present" path.
 
 ## Data flow
 
-User input → `ChatMessage::Send` → `chat_ui::update` appends optimistic user bubble + spawns
-`AgentProxy.send_message` task → agentd streams via the `event` signal → `chat_ui::subscription`
-forwards deltas as `ChatMessage` → `update` appends/extends the assistant bubble; `run_flow`
-tool → a run card; `run_status` → ground-truth status (the truthful-runs work). Identical
-semantics in the overlay and the standalone window because both call the same crate.
+Identical to the overlay's chat today (Option D reuses it): user input → `AiSubmitPrompt` →
+`update.rs` → (agentd path) `ai_client::ask_ai_remote` → `AgentProxy.send_message` → agentd
+streams via the `event` signal → `agent_events::stream()` → `AgentdEvent`/`AiStream` →
+`update.rs` appends the assistant bubble; `run_flow`/`run_status` → run cards (the truthful-runs
+work). The chat window is agentd-path-focused (`use_agentd=true`), but since it reuses the
+shared `update.rs`, the in-proc path remains available until SP1c-T8b deletes it.
 
 ## Error handling
 
-- agentd absent / `send_message` D-Bus error → an error bubble ("agentd unavailable") +
-  retry, exactly as today. The systemd unit means agentd is normally up; a transient restart
-  surfaces the error rather than hanging.
-- Single-instance race: if owning `org.oxidemx.Chat` fails, fall back to launching a normal
-  (non-unique) window rather than exiting silently, so the user always gets a window.
+- agentd absent / `send_message` D-Bus error → existing error bubble + retry (unchanged).
+- Single-instance race / name-claim failure → open a plain (non-unique) window rather than
+  exit, so the user always gets a window.
 
 ## Testing
 
-- **`oxidemx-chat-ui`:** unit-test `ChatState::update` transitions against a **mock
-  `AgentProxy`/event source**: send → optimistic user bubble; `event` delta → assistant text
-  appended; `run_flow` result → run card; unknown/`run_status` → ground-truth status; approval
-  request → pending card. (First real unit coverage for chat logic, previously buried in
-  `update.rs`.)
-- **`oxidemx-chat`:** a launch + single-instance "second launch presents, doesn't duplicate"
-  check (headless-feasible via the D-Bus name path).
-- **Overlay:** existing overlay tests must still pass after the rewire (regression gate).
+- **`run_chat_window` boot:** a headless-feasible check that the chat-window mode boots with
+  normal window settings + `chat_window_mode=true` and does not arm the radial path (assert the
+  flag + that no `frameless_topmost` is used). Where iced makes a full headless run infeasible,
+  cover the mode-branch logic (view selects chat-only; daemon triggers are no-ops in mode) with
+  small unit tests on the pure helpers.
+- **Single-instance:** a "second launch presents, doesn't duplicate" check via the
+  `org.oxidemx.Chat` name path.
+- **Overlay regression:** existing overlay tests pass unchanged (D adds a field + branches, does
+  not move chat code).
 - Backend already covered by `scripts/agentd-smoke.sh`.
 
-## Scope / phasing (for the plan)
+## Scope / phasing
 
-Sizable slice — the extraction + overlay rewire is the bulk (chat is deeply woven into
-`update.rs`). Phases, each independently testable:
-1. **Extract + rewire:** create `oxidemx-chat-ui` by moving the chat out of the overlay;
-   rewire the overlay to consume it; overlay still builds + its tests pass.
-2. **Standalone app:** `oxidemx-chat` binary (normal window, single-instance) on top of the
-   crate; opens reliably + chats via agentd.
-3. **Launch glue:** daemon `ShowChat`, `.desktop`, keybinding doc, single-instance present;
-   add binary + `.desktop` to `install.sh`.
+1. `run_chat_window()` entry + the `chat_window_mode` field + the view/update branches +
+   normal window settings.
+2. `oxidemx-chat` binary + single-instance (`org.oxidemx.Chat`, present-on-relaunch).
+3. Launch glue: daemon `ShowChat`, `.desktop`, keybinding doc, `install.sh` (binary + entry).
 
-Out of scope: the activity-UI run bubbles (separate slice), the install-GUI (separate slice),
-debugging the radial overlay's own open bug (this sidesteps it; the overlay keeps working via
-the shared crate but its frameless-window fragility is a separate, now-lower-priority issue).
+Builds via distrobox (the overlay needs GTK/iced system libs).
+
+## Incremental path to the deferred clean extraction (NOT in this slice)
+
+The clean `oxidemx-chat-ui` crate extraction is deferred (multi-day, high-risk). Two low-risk,
+compiler-guided, same-crate refactors get us most of the way there and are queued as the next
+slice after this window ships:
+- **`ChatState` sub-struct:** move the ~38 `ai_*` fields into a `chat: ChatState` field on
+  `RadialState`, leaving the 3 radial-shared fields (`ai_morph`, `chat_focus_pending`,
+  `ai_handoff`) behind. This does the hard state-split in place; the eventual cross-crate move
+  becomes a near-mechanical lift-and-shift.
+- **`app/chat_update.rs`:** move the chat `update` arms (≈`update.rs:675-1630`) into their own
+  module (pure code move) to isolate the 840 lines.
+Neither is required for the window; both shrink the future extraction's risk.
 
 ## Risks
 
-- **Extraction depth:** `RadialState` is entangled; pulling `ChatState` + the chat `update`
-  arms cleanly is the main effort/risk. Mitigation: move incrementally, keep the overlay
-  compiling at each step; the `chat_ui/` files are already separate.
-- **iced state-by-tag reset** ([[feedback_iced_tree_state_by_tag]]): keep the standalone
-  app's root widget type constant; reuse the chat view's existing structure.
+- **Mode-branch leakage:** the `chat_window_mode` branches in `view`/`update` must be
+  exhaustive enough that no radial/daemon path runs in the chat window. Mitigation: keep the
+  branch at the top of `view()` and guard the daemon/puck/handoff arms in `update()`.
+- **iced state-by-tag reset** ([[feedback_iced_tree_state_by_tag]]): keep the chat-window root
+  widget type constant; reuse `chat_ui::view`'s existing structure.
