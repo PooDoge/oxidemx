@@ -118,6 +118,7 @@ pub fn view<'a>(state: &'a RadialState, kit: &Kit) -> Element<'a, Message> {
         bar_children.push(close_btn.into());
     }
     let bar = iced::widget::Row::from_vec(bar_children)
+        .width(Length::Fill)
         .spacing(6)
         .align_y(Alignment::Center);
 

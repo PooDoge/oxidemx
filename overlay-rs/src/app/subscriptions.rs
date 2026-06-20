@@ -17,7 +17,6 @@ pub(super) fn subscription(state: &RadialState) -> Subscription<Message> {
     //     menu is visible. (Cheap when nothing animates because
     //     update() returns Task::none() immediately.)
     let mut subs = vec![
-        Subscription::run(crate::dbus::stream).map(Message::Overlay),
         Subscription::run(crate::config::watch_stream)
             .map(|cfg| Message::ConfigReloaded(Box::new(cfg))),
         Subscription::run(ai_question_stream),
@@ -39,6 +38,13 @@ pub(super) fn subscription(state: &RadialState) -> Subscription<Message> {
             _ => Message::Noop,
         }),
     ];
+    // The daemon listener requests `org.oxidemx.overlay` + registers AgentHost
+    // (dbus.rs). The standalone chat window must NOT run it — otherwise it steals
+    // the radial overlay's bus name and the daemon can no longer reach the real
+    // overlay. The chat ignores radial show/hide triggers anyway.
+    if !state.chat_window_mode {
+        subs.push(Subscription::run(crate::dbus::stream).map(Message::Overlay));
+    }
     // agentd event subscriber — active only when the use_agentd flag is on.
     // The D-Bus connection is only opened when agentd routing is actually
     // enabled, keeping the default in-proc path free of any agentd D-Bus churn.
