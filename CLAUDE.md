@@ -34,10 +34,12 @@ has one; back it with a guard. (Full design: `docs/superpowers/specs/2026-06-20-
 
 ## Rule 2 — Rust quality bar
 
-- `cargo fmt` clean; `cargo clippy` clean (treat warnings as defects). Prefer idiomatic
-  Rust: borrow over clone, `?` over unwrap in non-test code, newtypes over primitive
-  obsession, `thiserror` for error enums, trait **seams** (`Arc<dyn Trait>`) for anything
-  that needs a mock in tests.
+- **Formatting:** the workspace has NO `rustfmt.toml` and is hand-formatted; do NOT run
+  repo-wide `cargo fmt` (it reformats unrelated files into a huge noise diff). Match the
+  surrounding style of the file you edit; only format the lines you add.
+- `cargo clippy` clean (treat warnings as defects). Prefer idiomatic Rust: borrow over
+  clone, `?` over unwrap in non-test code, newtypes over primitive obsession, `thiserror`
+  for error enums, trait **seams** (`Arc<dyn Trait>`) for anything that needs a mock in tests.
 - **No gold-plating** (Claude Code rule): don't add features, abstractions, or refactors
   beyond the task. Bug fixes stand alone. Three similar lines beat a premature abstraction.
 - TDD where it pays: mock-test pure/seam logic; compile-wire + live-test the
