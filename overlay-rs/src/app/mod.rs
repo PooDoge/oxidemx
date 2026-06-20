@@ -350,6 +350,30 @@ fn boot() -> RadialState {
     RadialState::new(&config)
 }
 
+/// Run the chat as a normal, decorated toplevel WINDOW (the `oxidemx-chat`
+/// sibling binary). Mirrors `run()` but: plain window settings (no frameless/
+/// topmost/override_redirect, no cursor-helper), an opaque background, and a
+/// boot that sets `chat_window_mode = true`.
+pub fn run_chat_window() -> iced::Result {
+    iced::application(boot_chat_window, update, view)
+        .title("OxideMX Chat")
+        .window(iced::window::Settings {
+            size: iced::Size::new(520.0, 720.0),
+            min_size: Some(iced::Size::new(380.0, 480.0)),
+            decorations: true,
+            transparent: false,
+            ..Default::default()
+        })
+        .subscription(subscription)
+        .run()
+}
+
+fn boot_chat_window() -> RadialState {
+    let mut state = boot();
+    state.chat_window_mode = true;
+    state
+}
+
 #[allow(dead_code)]
 fn _ensure_link(_e: &OverlayEvent) {
     error!("only here so the OverlayEvent path is referenced from app");

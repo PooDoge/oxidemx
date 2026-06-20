@@ -19,50 +19,7 @@
 //! All rendering happens via iced's `canvas::Frame` — no cairo, no
 //! GTK, no `*-devel` rpm-ostree layering. Pure Rust dep tree.
 
-mod actions;
-mod agent;
-mod agent_runtime;
-mod ai_client;
-mod anim;
-mod app;
-mod chat_shell;
-mod chat_ui;
-mod config;
-mod dbus;
-mod fonts;
-mod editor {
-    pub mod icon_picker;
-    pub mod preview;
-    pub mod slice_panel;
-    pub mod window;
-}
-mod geometry;
-mod handoff;
-mod haptic_client;
-mod input;
-mod radial;
-mod sampler;
-mod render {
-    pub mod animation;
-    pub mod aurora;
-    pub mod center_dome;
-    pub mod disc_bevel;
-    pub mod dispatch_burst;
-    pub mod drop_shadow;
-    pub mod hover_glow;
-    pub mod hover_tilt;
-    pub mod icons;
-    pub mod page_fx;
-    pub mod ripple;
-    pub mod sdf_ring;
-    pub mod slice_bevel;
-    pub mod slices;
-    pub mod specular_sweep;
-    pub mod status_fx;
-}
-mod theme;
-mod tray;
-mod widget_host;
+use oxidemx_overlay::{agent, ai_client, app, widget_host};
 
 fn main() -> iced::Result {
     // Headless heartbeat tick (run by a systemd user timer; see

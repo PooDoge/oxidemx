@@ -10,6 +10,10 @@ use crate::geometry::WINDOW_SIZE;
 use crate::radial::{Painter, RadialState};
 
 pub(super) fn view(state: &RadialState) -> Element<'_, Message> {
+    if state.chat_window_mode {
+        // Full-window chat; no radial canvas / disc / morph.
+        return crate::chat_ui::view(state, 1.0);
+    }
     let canvas = Canvas::new(Painter::new(state))
         .width(Length::Fixed(WINDOW_SIZE as f32))
         .height(Length::Fixed(WINDOW_SIZE as f32));

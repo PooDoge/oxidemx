@@ -11,6 +11,18 @@ use crate::geometry::WINDOW_SIZE;
 use crate::radial::{ChatMessage, RadialState};
 
 pub(super) fn update(state: &mut RadialState, message: Message) -> Task<Message> {
+    // The chat WINDOW reuses this update fn but is not the radial overlay:
+    // ignore the daemon's radial show/hide and the puck/handoff geometry.
+    if state.chat_window_mode {
+        match &message {
+            Message::Overlay(_)
+            | Message::HandoffPointer { .. }
+            | Message::HandoffClick { .. }
+            | Message::ChatHeaderPressed
+            | Message::ChatResizeStart => return Task::none(),
+            _ => {}
+        }
+    }
     // A chat-widget interaction arriving while the puck is armed is
     // a click the caps canvas never saw (the widget captured it) —
     // it still counts as "clicked in the chat outside the puck", so

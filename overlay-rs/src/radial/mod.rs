@@ -368,6 +368,11 @@ pub struct RadialState {
     /// Pending agentd approval card: `(request_id, card_json)`.
     /// `None` when no approval is outstanding on the agentd path.
     pub ai_agentd_approval: Option<(String, String)>,
+
+    /// When true, this RadialState drives the standalone chat WINDOW (a normal
+    /// decorated toplevel), not the radial overlay: `view` renders chat-only and
+    /// `update` ignores the daemon radial-show/puck/handoff paths.
+    pub chat_window_mode: bool,
 }
 
 /// Live widget data for the Splice Widgets page. Sparkline ring
