@@ -47,6 +47,9 @@ fn now_ms() -> u64 {
 pub struct RunEventBridge {
     /// The agentd project string (cwd path). Used to populate `AgentEvent.project`.
     pub project: String,
+    /// The run this bridge belongs to (one bridge per run). Stamped on every
+    /// emitted event so the UI can group step events under their run.
+    pub run_id: String,
     /// Emitter forwarding events to the D-Bus signal (or a recorder in tests).
     pub emitter: Arc<dyn EventEmitter>,
     /// Shared run-status table: `run_id → "running" | "finished" | "failed" | "cancelled"`.
@@ -56,11 +59,13 @@ pub struct RunEventBridge {
 impl RunEventBridge {
     pub fn new(
         project: impl Into<String>,
+        run_id: impl Into<String>,
         emitter: Arc<dyn EventEmitter>,
         statuses: Arc<Mutex<HashMap<String, String>>>,
     ) -> Self {
         Self {
             project: project.into(),
+            run_id: run_id.into(),
             emitter,
             statuses,
         }
@@ -104,24 +109,24 @@ impl EventSink for RunEventBridge {
                 }));
             }
             RunEvent::TaskAssigned { step, agent } => {
-                self.do_emit("", "TaskAssigned", serde_json::json!({
+                self.do_emit(self.run_id.clone(), "TaskAssigned", serde_json::json!({
                     "step": step,
                     "agent": agent,
                 }));
             }
             RunEvent::TaskStarted { step } => {
-                self.do_emit("", "TaskStarted", serde_json::json!({
+                self.do_emit(self.run_id.clone(), "TaskStarted", serde_json::json!({
                     "step": step,
                 }));
             }
             RunEvent::AgentMessage { step, message } => {
-                self.do_emit("", "AgentMessage", serde_json::json!({
+                self.do_emit(self.run_id.clone(), "AgentMessage", serde_json::json!({
                     "step": step,
                     "message": message,
                 }));
             }
             RunEvent::TaskFinished { step, success, artifact, summary } => {
-                self.do_emit("", "TaskFinished", serde_json::json!({
+                self.do_emit(self.run_id.clone(), "TaskFinished", serde_json::json!({
                     "step": step,
                     "success": success,
                     "artifact": artifact,
@@ -129,25 +134,25 @@ impl EventSink for RunEventBridge {
                 }));
             }
             RunEvent::TaskError { step, error } => {
-                self.do_emit("", "TaskError", serde_json::json!({
+                self.do_emit(self.run_id.clone(), "TaskError", serde_json::json!({
                     "step": step,
                     "error": error,
                 }));
             }
             RunEvent::StepRetrying { step, attempt } => {
-                self.do_emit("", "StepRetrying", serde_json::json!({
+                self.do_emit(self.run_id.clone(), "StepRetrying", serde_json::json!({
                     "step": step,
                     "attempt": attempt,
                 }));
             }
             RunEvent::StepSkipped { step, reason } => {
-                self.do_emit("", "StepSkipped", serde_json::json!({
+                self.do_emit(self.run_id.clone(), "StepSkipped", serde_json::json!({
                     "step": step,
                     "reason": reason,
                 }));
             }
             RunEvent::ApprovalRequested { step, card } => {
-                self.do_emit("", "ApprovalRequested", serde_json::json!({
+                self.do_emit(self.run_id.clone(), "ApprovalRequested", serde_json::json!({
                     "step": step,
                     "card": card,
                 }));
@@ -185,7 +190,7 @@ mod tests {
     fn make_bridge() -> (RunEventBridge, Arc<RecordingEmitter>, Arc<Mutex<HashMap<String, String>>>) {
         let emitter = Arc::new(RecordingEmitter::default());
         let statuses: Arc<Mutex<HashMap<String, String>>> = Arc::new(Mutex::new(HashMap::new()));
-        let bridge = RunEventBridge::new("test-project", emitter.clone(), statuses.clone());
+        let bridge = RunEventBridge::new("test-project", "run-77", emitter.clone(), statuses.clone());
         (bridge, emitter, statuses)
     }
 
@@ -270,6 +275,22 @@ mod tests {
         assert_eq!(emitter.events().len(), 7);
         for ev in emitter.events() {
             assert_eq!(ev.payload["kind"], "run");
+        }
+    }
+
+    #[tokio::test]
+    async fn step_events_carry_run_id() {
+        let (bridge, emitter, _statuses) = make_bridge();
+        bridge.emit(RunEvent::TaskStarted { step: "s1".into() }).await;
+        bridge.emit(RunEvent::AgentMessage { step: "s1".into(), message: "hi".into() }).await;
+        bridge.emit(RunEvent::TaskFinished {
+            step: "s1".into(), success: true, artifact: None, summary: "done".into(),
+        }).await;
+        for ev in emitter.events() {
+            assert_eq!(
+                ev.payload["run_id"], "run-77",
+                "every step event must carry the owning run_id, got {:?}", ev.payload
+            );
         }
     }
 }

@@ -215,6 +215,7 @@ impl RunLauncher for ConductorRunLauncher {
         // ── 9. Spawn the supervisor ───────────────────────────────────────
         let bridge = Arc::new(RunEventBridge::new(
             project,
+            run_id.clone(),
             self.emitter.clone(),
             self.run_statuses.clone(),
         ));
