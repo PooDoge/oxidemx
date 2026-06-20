@@ -130,7 +130,8 @@ fn expanded_panel<'a>(
 ) -> Element<'a, Message> {
     let Some(cluster) = act.cluster(run_id) else {
         // Run disappeared while expanded — collapse gracefully.
-        return button(Space::new())
+        // Space must fill the layer so the button has actual hit area.
+        return button(Space::new().width(Length::Fill).height(Length::Fill))
             .padding(0)
             .style(|_, _| button::Style::default())
             .on_press(Message::ActivityCollapse)
@@ -214,20 +215,12 @@ fn expanded_panel<'a>(
         .style(|_, _| button::Style { background: None, ..Default::default() })
         .on_press(Message::ActivityCollapse);
 
+    // The outer container in view.rs provides align_x(End).align_y(End).padding([0,18,96,0])
+    // for both collapsed and expanded cases — do NOT add another positioned wrapper here or
+    // the panel lands at 2× the intended bottom offset.
     iced::widget::Stack::with_children(vec![
         backdrop.into(),
-        container(panel_col)
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .align_x(iced::Alignment::End)
-            .align_y(iced::Alignment::End)
-            .padding(iced::Padding {
-                top: 0.0,
-                right: 18.0,
-                bottom: 96.0,
-                left: 0.0,
-            })
-            .into(),
+        panel_col.into(),
     ])
     .width(Length::Fill)
     .height(Length::Fill)
@@ -312,12 +305,12 @@ fn bubble_view<'a>(
     let step_s = b.step.clone();
 
     let orb = container(iced::widget::center(icon(icon_name, 22.0, kit.fade(tone_color, 1.0))))
-        .width(Length::Fixed(44.0))
-        .height(Length::Fixed(44.0))
+        .width(Length::Fixed(52.0))
+        .height(Length::Fixed(52.0))
         .style(move |_| container::Style {
             background: Some(Background::Color(kit.fade(tone_color, alpha_fill))),
             border: Border::default()
-                .rounded(22.0)
+                .rounded(26.0)
                 .color(kit.fade(tone_color, if peek_open { 1.0 } else { 0.5 }))
                 .width(if peek_open { 2.0 } else { 1.5 }),
             shadow: if is_live {
@@ -335,16 +328,16 @@ fn bubble_view<'a>(
     let mut orb_stack: Vec<Element<'_, Message>> = vec![orb.into()];
     if let Some(badge) = badge_el {
         let badge_wrap = container(badge)
-            .width(Length::Fixed(44.0))
-            .height(Length::Fixed(44.0))
+            .width(Length::Fixed(52.0))
+            .height(Length::Fixed(52.0))
             .align_x(iced::Alignment::End)
             .align_y(iced::Alignment::Start);
         orb_stack.push(badge_wrap.into());
     }
 
     let orb_with_badge = iced::widget::Stack::with_children(orb_stack)
-        .width(Length::Fixed(44.0))
-        .height(Length::Fixed(44.0));
+        .width(Length::Fixed(52.0))
+        .height(Length::Fixed(52.0));
 
     // Agent name label
     let agent_label = if b.agent.is_empty() { &b.step } else { &b.agent };
@@ -445,17 +438,24 @@ fn peek_view<'a>(
     .spacing(8)
     .align_y(Alignment::Center);
 
-    // Progress bar
+    // Progress bar — 286px panel minus 2×12px padding = 262px track width.
+    // FillPortion only works proportionally inside a Row/Column with siblings;
+    // using it as a sole child just fills 100%. Use a Row with fill-bar + Space
+    // so the fill fraction is semantically correct.
     let progress = cluster.progress();
+    let track_width = 262.0_f32;
+    let fill_px = (track_width * progress.clamp(0.0, 1.0)).max(0.0);
+    let fill_bar = container(Space::new())
+        .width(Length::Fixed(fill_px))
+        .height(Length::Fixed(4.0))
+        .style(move |_| container::Style {
+            background: Some(Background::Color(kit.fade(kit.accent, 1.0))),
+            border: Border::default().rounded(2.0),
+            ..Default::default()
+        });
     let progress_bar = container(
-        container(Space::new())
-            .width(Length::FillPortion((progress * 100.0) as u16))
-            .height(Length::Fixed(4.0))
-            .style(move |_| container::Style {
-                background: Some(Background::Color(kit.fade(kit.accent, 1.0))),
-                border: Border::default().rounded(2.0),
-                ..Default::default()
-            }),
+        row![fill_bar, Space::new().width(Length::Fill)]
+            .spacing(0),
     )
     .width(Length::Fill)
     .height(Length::Fixed(4.0))
