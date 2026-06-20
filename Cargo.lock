@@ -152,6 +152,7 @@ dependencies = [
  "oxidemx-agent-core",
  "oxidemx-agent-local",
  "oxidemx-agent-proxy",
+ "oxidemx-approval",
  "oxidemx-conductor",
  "oxidemx-shared",
  "reqwest 0.12.28",
