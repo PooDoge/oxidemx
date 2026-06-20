@@ -26,16 +26,22 @@ use crate::seams::HostCapability;
 
 /// Concrete [`ToolExecutor`] for agentd.
 ///
-/// Stores the project paths (used for cwd-scoped tools) and a
-/// [`HostCapability`] seam (for host-delegated tools).
+/// Stores the project paths (used for cwd-scoped tools), a
+/// [`HostCapability`] seam (for host-delegated tools), and a
+/// [`RunLauncher`] seam (for run-launch + status tools, Task 5).
 pub struct AgentToolExecutor {
     pub(crate) paths: ProjectPaths,
     pub(crate) host: Arc<dyn HostCapability>,
+    pub(crate) run_launcher: Arc<dyn crate::run_launcher::RunLauncher>,
 }
 
 impl AgentToolExecutor {
-    pub fn new(paths: ProjectPaths, host: Arc<dyn HostCapability>) -> Self {
-        Self { paths, host }
+    pub fn new(
+        paths: ProjectPaths,
+        host: Arc<dyn HostCapability>,
+        run_launcher: Arc<dyn crate::run_launcher::RunLauncher>,
+    ) -> Self {
+        Self { paths, host, run_launcher }
     }
 }
 
@@ -95,6 +101,7 @@ mod tests {
         AgentToolExecutor::new(
             ProjectPaths::resolve(cwd),
             Arc::new(UnavailableHost),
+            Arc::new(crate::run_launcher::NoopRunLauncher),
         )
     }
 

@@ -82,6 +82,7 @@ pub trait TurnRunner: Send + Sync {
         emitter: &Arc<dyn EventEmitter>,
         paths: &crate::projects::ProjectPaths,
         host: &Arc<dyn crate::seams::HostCapability>,
+        run_launcher: &Arc<dyn crate::run_launcher::RunLauncher>,
     ) -> Result<(String, (u64, u64)), AgentdError>;
 }
 
@@ -109,6 +110,7 @@ impl TurnRunner for CoreTurnRunner {
         emitter: &Arc<dyn EventEmitter>,
         paths: &crate::projects::ProjectPaths,
         host: &Arc<dyn crate::seams::HostCapability>,
+        run_launcher: &Arc<dyn crate::run_launcher::RunLauncher>,
     ) -> Result<(String, (u64, u64)), AgentdError> {
         use oxidemx_agent_core::mode::AgentMode;
         use oxidemx_approval::ApprovalClassifier;
@@ -131,6 +133,7 @@ impl TurnRunner for CoreTurnRunner {
             std::sync::Arc::new(crate::tools::AgentToolExecutor::new(
                 paths.clone(),
                 host.clone(),
+                run_launcher.clone(),
             ));
         let prompt_adapter = std::sync::Arc::new(ApproverPrompt::new(
             approver.clone(),
@@ -361,6 +364,7 @@ impl AgentService {
 
         // Run the turn, passing prior history for multi-turn context.
         // paths is cloned into run_turn for the executor; no lock held across await.
+        let run_launcher: Arc<dyn crate::run_launcher::RunLauncher> = self.run_launcher.clone();
         let (reply, usage) = self
             .turn_runner
             .run_turn(
@@ -372,6 +376,7 @@ impl AgentService {
                 &self.emitter,
                 &paths,
                 &self.host,
+                &run_launcher,
             )
             .await?;
 
@@ -994,7 +999,9 @@ mod tests {
             emitter: &Arc<dyn EventEmitter>,
             paths: &crate::projects::ProjectPaths,
             host: &Arc<dyn crate::seams::HostCapability>,
+            run_launcher: &Arc<dyn crate::run_launcher::RunLauncher>,
         ) -> Result<(String, (u64, u64)), AgentdError> {
+            let _ = run_launcher;
             // Record history length for multi-turn assertion.
             *self.last_history_len.lock().unwrap_or_else(|e| e.into_inner()) = history.len();
 
@@ -1023,7 +1030,11 @@ mod tests {
 
                 // Call the real AgentToolExecutor with "read_file" to prove
                 // the native tool bridge works end-to-end.
-                let exec = crate::tools::AgentToolExecutor::new(paths.clone(), host.clone());
+                let exec = crate::tools::AgentToolExecutor::new(
+                    paths.clone(),
+                    host.clone(),
+                    Arc::new(crate::run_launcher::NoopRunLauncher),
+                );
                 use oxidemx_agent_core::tool::ToolExecutor;
                 let _ = exec.execute(
                     "read_file",

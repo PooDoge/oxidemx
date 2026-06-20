@@ -108,6 +108,7 @@ impl TurnRunner for LiveMock {
         _emitter: &Arc<dyn EventEmitter>,
         _paths: &agentd::projects::ProjectPaths,
         _host: &Arc<dyn agentd::seams::HostCapability>,
+        _run_launcher: &Arc<dyn agentd::run_launcher::RunLauncher>,
     ) -> Result<(String, (u64, u64)), AgentdError> {
         Ok(("live-bus-reply".to_string(), (0, 0)))
     }

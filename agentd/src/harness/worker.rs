@@ -64,6 +64,7 @@ impl Worker for CoreWorker {
             Arc::new(crate::tools::AgentToolExecutor::new(
                 self.paths.clone(),
                 self.host.clone(),
+                Arc::new(crate::run_launcher::NoopRunLauncher),
             ));
         let exec: Arc<dyn oxidemx_agent_core::tool::ToolExecutor> =
             Arc::new(GatedToolExecutor::new(

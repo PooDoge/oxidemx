@@ -497,6 +497,7 @@ pub(super) mod test_support {
         crate::tools::AgentToolExecutor::new(
             crate::projects::ProjectPaths::resolve(cwd),
             host,
+            Arc::new(crate::run_launcher::NoopRunLauncher),
         )
     }
 }
