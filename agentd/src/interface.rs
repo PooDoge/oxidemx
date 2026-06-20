@@ -20,20 +20,18 @@
 
 #![forbid(unsafe_code)]
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
-use tokio_util::sync::CancellationToken;
 use zbus::{fdo, interface, object_server::SignalEmitter};
 
 use crate::error::AgentdError;
 use crate::journal::{Journal, JournalEntry};
 use crate::models::ModelControls;
 use crate::projects::{ProjectKey, ProjectPaths};
-use crate::run_bridge::RunEventBridge;
 use crate::seams::{AgentEvent, Approver, EventEmitter, HostCapability, Verdict};
 use crate::sessions::{Sessions, TranscriptTurn};
 
@@ -84,6 +82,7 @@ pub trait TurnRunner: Send + Sync {
         emitter: &Arc<dyn EventEmitter>,
         paths: &crate::projects::ProjectPaths,
         host: &Arc<dyn crate::seams::HostCapability>,
+        run_launcher: &Arc<dyn crate::run_launcher::RunLauncher>,
     ) -> Result<(String, (u64, u64)), AgentdError>;
 }
 
@@ -111,6 +110,7 @@ impl TurnRunner for CoreTurnRunner {
         emitter: &Arc<dyn EventEmitter>,
         paths: &crate::projects::ProjectPaths,
         host: &Arc<dyn crate::seams::HostCapability>,
+        run_launcher: &Arc<dyn crate::run_launcher::RunLauncher>,
     ) -> Result<(String, (u64, u64)), AgentdError> {
         use oxidemx_agent_core::mode::AgentMode;
         use oxidemx_approval::ApprovalClassifier;
@@ -133,6 +133,7 @@ impl TurnRunner for CoreTurnRunner {
             std::sync::Arc::new(crate::tools::AgentToolExecutor::new(
                 paths.clone(),
                 host.clone(),
+                run_launcher.clone(),
             ));
         let prompt_adapter = std::sync::Arc::new(ApproverPrompt::new(
             approver.clone(),
@@ -272,6 +273,9 @@ pub struct AgentService {
     /// Shared run-status table: `run_id → "running" | "finished" | "failed" | "cancelled"`.
     /// Populated by `RunEventBridge` and read by `run_status`.
     pub run_statuses: Arc<Mutex<HashMap<String, String>>>,
+    /// Single source of truth for launching + querying runs. The D-Bus methods
+    /// below delegate to it; the agent tools share the same instance.
+    pub run_launcher: Arc<crate::run_launcher::ConductorRunLauncher>,
 }
 
 impl AgentService {
@@ -284,6 +288,13 @@ impl AgentService {
         emitter: Arc<dyn EventEmitter>,
         host: Arc<dyn HostCapability>,
     ) -> Self {
+        let active_runs = Arc::new(Mutex::new(HashMap::new()));
+        let run_statuses = Arc::new(Mutex::new(HashMap::new()));
+        let run_launcher = Arc::new(crate::run_launcher::ConductorRunLauncher::new(
+            active_runs.clone(),
+            run_statuses.clone(),
+            emitter.clone(),
+        ));
         Self {
             projects,
             sessions,
@@ -292,8 +303,9 @@ impl AgentService {
             emitter,
             host,
             turn_runner: Arc::new(CoreTurnRunner),
-            active_runs: Arc::new(Mutex::new(HashMap::new())),
-            run_statuses: Arc::new(Mutex::new(HashMap::new())),
+            active_runs,
+            run_statuses,
+            run_launcher,
         }
     }
 
@@ -352,6 +364,7 @@ impl AgentService {
 
         // Run the turn, passing prior history for multi-turn context.
         // paths is cloned into run_turn for the executor; no lock held across await.
+        let run_launcher: Arc<dyn crate::run_launcher::RunLauncher> = self.run_launcher.clone();
         let (reply, usage) = self
             .turn_runner
             .run_turn(
@@ -363,6 +376,7 @@ impl AgentService {
                 &self.emitter,
                 &paths,
                 &self.host,
+                &run_launcher,
             )
             .await?;
 
@@ -550,125 +564,11 @@ impl AgentService {
         flow_id: &str,
         inputs_json: &str,
     ) -> Result<String, AgentdError> {
-        let cwd = PathBuf::from(project);
-        let paths = self.projects.resolve(&cwd);
-
-        // ── 1. Load flow doc + roster ─────────────────────────────────────
-        let flows_root = oxidemx_conductor::loader::default_flows_root();
-        let agents_root = oxidemx_conductor::loader::default_agents_root();
-        let (doc, roster) =
-            oxidemx_conductor::loader::load_flow(&flows_root, &agents_root, flow_id)
-                .map_err(|e| AgentdError::NotFound(e.to_string()))?;
-
-        // ── 2. Validate plan ──────────────────────────────────────────────
-        let plan =
-            oxidemx_conductor::plan::validate(&doc, &roster, oxidemx_conductor::KNOWN_TOOLS)
-                .map_err(|errs| {
-                    let msgs: Vec<String> = errs.iter().map(|e| e.to_string()).collect();
-                    AgentdError::NotFound(format!("invalid flow: {}", msgs.join("; ")))
-                })?;
-
-        // ── 3. Parse inputs JSON → BTreeMap<String, String> ──────────────
-        let provided: BTreeMap<String, String> = if inputs_json.trim().is_empty()
-            || inputs_json.trim() == "{}"
-        {
-            BTreeMap::new()
-        } else {
-            let v: serde_json::Value = serde_json::from_str(inputs_json)
-                .map_err(|e| AgentdError::Io(format!("inputs_json parse: {e}")))?;
-            match v {
-                serde_json::Value::Object(map) => map
-                    .into_iter()
-                    .map(|(k, v)| (k, v.as_str().unwrap_or_default().to_string()))
-                    .collect(),
-                _ => BTreeMap::new(),
-            }
-        };
-
-        // ── 4. Resolve inputs (merge with defaults, check required) ───────
-        let inputs =
-            oxidemx_conductor::supervisor::resolve_inputs(&plan, &provided).map_err(|missing| {
-                AgentdError::NotFound(format!(
-                    "missing required inputs: {}",
-                    missing.join(", ")
-                ))
-            })?;
-
-        // ── 5. Build run_id + workdir ─────────────────────────────────────
-        let run_id = {
-            use std::sync::atomic::{AtomicU64, Ordering};
-            static NEXT: AtomicU64 = AtomicU64::new(1);
-            format!("run-{}", NEXT.fetch_add(1, Ordering::Relaxed))
-        };
-        let workdir = paths.runs_dir().join(&run_id);
-        std::fs::create_dir_all(&workdir).map_err(|e| AgentdError::Io(e.to_string()))?;
-
-        // ── 6. Build the provider factory ─────────────────────────────────
-        // In tests with OXIDEMX_TEST_MOCK_FLOW=1 we use the echoing mock so
-        // no API key is required. In production the config-based factory is used.
-        let factory: Arc<dyn oxidemx_conductor::supervisor::ProviderFactory> =
-            if std::env::var_os("OXIDEMX_TEST_MOCK_FLOW").is_some() {
-                Arc::new(oxidemx_conductor::supervisor::FixedFactory(
-                    oxidemx_conductor::mock::MockProvider::echoing(),
-                ))
-            } else {
-                // Build from the default AiConfig (honours env-var keys).
-                let ai_cfg = oxidemx_shared::config::AiConfig::default();
-                let api_key = ai_cfg
-                    .provider
-                    .key_env()
-                    .and_then(|env| std::env::var(env).ok())
-                    .unwrap_or_default();
-                Arc::new(oxidemx_conductor::supervisor::ConfigFactory {
-                    provider: ai_cfg.provider,
-                    api_key,
-                })
-            };
-
-        // ── 7. Build cancel token + RunOptions ────────────────────────────
-        let cancel = CancellationToken::new();
-        let opts = oxidemx_conductor::supervisor::RunOptions {
-            run_id: run_id.clone(),
-            inputs,
-            workdir,
-            roster,
-            factory,
-            cancel: cancel.clone(),
-            approval: oxidemx_conductor::approval::ApprovalPolicy::Autonomous,
-            allowlist: vec![],
-        };
-
-        // ── 8. Register handle ────────────────────────────────────────────
-        let handle = oxidemx_conductor::RunHandle {
-            run_id: run_id.clone(),
-            cancel: cancel.clone(),
-        };
-        {
-            let mut guard = self
-                .active_runs
-                .lock()
-                .unwrap_or_else(|e| e.into_inner());
-            guard.insert(run_id.clone(), handle);
-            // guard dropped here — NEVER held across .await
-        }
-
-        // ── 9. Spawn the supervisor ───────────────────────────────────────
-        let bridge = Arc::new(RunEventBridge::new(
-            project,
-            self.emitter.clone(),
-            self.run_statuses.clone(),
-        ));
-        let active_runs = self.active_runs.clone();
-        let rid = run_id.clone();
-
-        tokio::spawn(async move {
-            oxidemx_conductor::supervisor::run_flow(&plan, opts, bridge).await;
-            // Remove the handle once the run completes (success, fail, or cancel).
-            let mut guard = active_runs.lock().unwrap_or_else(|e| e.into_inner());
-            guard.remove(&rid);
-        });
-
-        Ok(run_id)
+        use crate::run_launcher::RunLauncher;
+        self.run_launcher
+            .launch(project, flow_id, inputs_json)
+            .await
+            .map_err(AgentdError::NotFound)
     }
 
     // ── list_flows ────────────────────────────────────────────────────────────
@@ -713,33 +613,18 @@ impl AgentService {
     /// `"failed"`, or `"cancelled"`. Returns `NotFound` if the run_id is
     /// unknown (was never started or has been garbage-collected).
     pub async fn run_status(&self, run_id: &str) -> Result<String, AgentdError> {
-        let guard = self
-            .run_statuses
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
-        guard
-            .get(run_id)
-            .cloned()
+        use crate::run_launcher::RunLauncher;
+        self.run_launcher
+            .status(run_id)
+            .map(|s| s.as_str().to_string())
             .ok_or_else(|| AgentdError::NotFound(format!("unknown run_id: {run_id}")))
     }
 
     // ── list_runs ─────────────────────────────────────────────────────────────
 
     pub async fn list_runs(&self, project: &str) -> Result<Vec<String>, AgentdError> {
-        let cwd = PathBuf::from(project);
-        let paths = self.projects.resolve(&cwd);
-        let runs_dir = paths.runs_dir();
-        let mut ids = Vec::new();
-        if let Ok(entries) = std::fs::read_dir(&runs_dir) {
-            for entry in entries.flatten() {
-                if entry.path().is_dir() {
-                    if let Some(name) = entry.file_name().to_str() {
-                        ids.push(name.to_string());
-                    }
-                }
-            }
-        }
-        Ok(ids)
+        use crate::run_launcher::RunLauncher;
+        Ok(self.run_launcher.list_runs(project))
     }
 
     // ── cancel_run ────────────────────────────────────────────────────────────
@@ -1114,7 +999,9 @@ mod tests {
             emitter: &Arc<dyn EventEmitter>,
             paths: &crate::projects::ProjectPaths,
             host: &Arc<dyn crate::seams::HostCapability>,
+            run_launcher: &Arc<dyn crate::run_launcher::RunLauncher>,
         ) -> Result<(String, (u64, u64)), AgentdError> {
+            let _ = run_launcher;
             // Record history length for multi-turn assertion.
             *self.last_history_len.lock().unwrap_or_else(|e| e.into_inner()) = history.len();
 
@@ -1143,7 +1030,11 @@ mod tests {
 
                 // Call the real AgentToolExecutor with "read_file" to prove
                 // the native tool bridge works end-to-end.
-                let exec = crate::tools::AgentToolExecutor::new(paths.clone(), host.clone());
+                let exec = crate::tools::AgentToolExecutor::new(
+                    paths.clone(),
+                    host.clone(),
+                    Arc::new(crate::run_launcher::NoopRunLauncher),
+                );
                 use oxidemx_agent_core::tool::ToolExecutor;
                 let _ = exec.execute(
                     "read_file",
@@ -1212,6 +1103,13 @@ mod tests {
             let stub_svc = Arc::new(StubLocalService::new());
             let models = Arc::new(ModelControls::new(stub_svc, emitter.clone()));
 
+            let active_runs = Arc::new(std::sync::Mutex::new(std::collections::HashMap::new()));
+            let run_statuses = Arc::new(std::sync::Mutex::new(std::collections::HashMap::new()));
+            let run_launcher = Arc::new(crate::run_launcher::ConductorRunLauncher::new(
+                active_runs.clone(),
+                run_statuses.clone(),
+                emitter.clone(),
+            ));
             let svc = Arc::new(AgentService {
                 projects: ProjectRegistry::with_store_base(store_base),
                 sessions: Arc::new(Sessions::new()),
@@ -1220,8 +1118,9 @@ mod tests {
                 emitter: emitter.clone(),
                 host: Arc::new(UnavailableHost),
                 turn_runner: Arc::new(runner),
-                active_runs: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
-                run_statuses: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
+                active_runs,
+                run_statuses,
+                run_launcher,
             });
 
             TestEnv {

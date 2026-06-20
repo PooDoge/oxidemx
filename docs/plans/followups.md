@@ -357,3 +357,7 @@ priority order, with deferral reasons verified in-code:
 - NOTE: 'StepGraph validate()/cycle-check' + 'grammar-constrained decoding' are now scoped INTO SP2b, and 'record_tool_call/TaskCreated + per-step budget' INTO SP2c (see SP2 spec §7). [2026-06-19]
 - SP2c final-review minors (address in SP2d): RunReport.blocked conflates dep-failed vs dep-needs-approval; extract_path_arg covers file_path/path/source but not destination/new_path (document mutation tools must expose the WRITTEN path); reversible.rs ancestor-directory-symlink not resolved (leaf-only); git2 default-features=false disables transports (fine for HEAD-tree read). [SP2c final review]
 - SP2d-2 T3: chat GatedToolExecutor uses ApprovalClassifier::default() not from_config(project .oxidemx/config.toml) - wire per-project classifier config (spec §5.1). + capture worker tool_calls (StreamEvent::Card) into StepOutput for ledger record_tool_call. [SP2d-2->SP2d-3/SP2e]
+
+## truthful-visible-runs backend (2026-06-20) follow-ups
+- M1: ConductorRunLauncher.launch inputs_json — non-string JSON values silently coerce to "" (run_launcher.rs ~144). Validate/reject instead (inherited; deferred as gold-plating).
+- M2: run_flow tool description (mode.rs ~203) still mentions a 'Watch button to Mission Control' card — trim/realign when the activity-UI slice lands.
