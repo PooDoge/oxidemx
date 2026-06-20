@@ -20,7 +20,7 @@
 #![forbid(unsafe_code)]
 
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use serde_json::Value;
@@ -30,6 +30,37 @@ use oxidemx_agent_core::tool::ToolExecutor;
 use oxidemx_approval::{ApprovalClassifier, Tier};
 
 // ── Public types ──────────────────────────────────────────────────────────────
+
+/// A record of a blocked tool call.
+///
+/// Pushed into a [`GateLog`] whenever the gate blocks a call (AutoDeny,
+/// Ask→NEEDS_APPROVAL, or Ask→denied-by-user). Used by the Worker to detect
+/// that a tool was blocked and route to the approval flow.
+#[derive(Debug, Clone)]
+pub struct GateBlock {
+    /// The tool name that was blocked.
+    pub tool: String,
+    /// The classifier's human-readable reason for the block.
+    pub reason: String,
+}
+
+/// Shared audit log of blocked tool calls.
+///
+/// The Worker passes `Some(Arc::clone(&log))` when constructing a
+/// [`GatedToolExecutor`]; chat-path callers pass `None`.
+pub type GateLog = Arc<Mutex<Vec<GateBlock>>>;
+
+/// Helper: push a block record to the log if one is present.
+///
+/// The guard is acquired, the record pushed, and the guard dropped before
+/// returning — it is never held across an `.await`.
+fn record_block(log: &Option<GateLog>, tool: &str, reason: &str) {
+    if let Some(log) = log {
+        let mut guard = log.lock().unwrap_or_else(|e| e.into_inner());
+        guard.push(GateBlock { tool: tool.to_string(), reason: reason.to_string() });
+        // guard dropped here — no await follows in this helper.
+    }
+}
 
 /// Whether a human is present to respond to [`Tier::Ask`] prompts.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -60,6 +91,7 @@ pub struct GatedToolExecutor {
     prompt: Option<Arc<dyn ApprovalPrompt>>,
     mode: GateMode,
     cwd: PathBuf,
+    gate_log: Option<GateLog>,
 }
 
 impl GatedToolExecutor {
@@ -70,14 +102,18 @@ impl GatedToolExecutor {
     /// - `prompt`     — optional confirmation UI; required in [`GateMode::Attended`].
     /// - `mode`       — [`GateMode::Attended`] or [`GateMode::Autonomous`].
     /// - `cwd`        — agent working directory (used by the path-escape checks).
+    /// - `gate_log`   — optional audit log; the Worker passes `Some(log)` to
+    ///   detect blocked calls and route to the approval flow.
+    ///   Chat callers pass `None`.
     pub fn new(
         inner: Arc<dyn ToolExecutor>,
         classifier: ApprovalClassifier,
         prompt: Option<Arc<dyn ApprovalPrompt>>,
         mode: GateMode,
         cwd: PathBuf,
+        gate_log: Option<GateLog>,
     ) -> Self {
-        Self { inner, classifier, prompt, mode, cwd }
+        Self { inner, classifier, prompt, mode, cwd, gate_log }
     }
 }
 
@@ -100,7 +136,10 @@ impl ToolExecutor for GatedToolExecutor {
             }
 
             // ── Hard deny: never delegate ──────────────────────────────────
-            Tier::AutoDeny => Err(format!("tool denied: {}", d.reason)),
+            Tier::AutoDeny => {
+                record_block(&self.gate_log, name, &d.reason);
+                Err(format!("tool denied: {}", d.reason))
+            }
 
             // ── Requires approval ──────────────────────────────────────────
             Tier::Ask => match (self.mode, self.prompt.as_ref()) {
@@ -110,11 +149,13 @@ impl ToolExecutor for GatedToolExecutor {
                     if prompt.confirm(name, &d.reason).await {
                         self.inner.execute(name, args, sink).await
                     } else {
+                        record_block(&self.gate_log, name, &d.reason);
                         Err(format!("denied by user: {}", d.reason))
                     }
                 }
                 _ => {
                     // Autonomous mode, or no prompt available.
+                    record_block(&self.gate_log, name, &d.reason);
                     Err(format!("NEEDS_APPROVAL: {name}: {}", d.reason))
                 }
             },
@@ -198,6 +239,7 @@ mod tests {
             None,
             GateMode::Autonomous,
             tempfile::tempdir().unwrap().path().into(),
+            None,
         );
         let r = g
             .execute("read_file", serde_json::json!({"file_path":"x"}), &None)
@@ -215,6 +257,7 @@ mod tests {
             None,
             GateMode::Autonomous,
             tempfile::tempdir().unwrap().path().into(),
+            None,
         );
         let r = g
             .execute(
@@ -236,6 +279,7 @@ mod tests {
             None,
             GateMode::Autonomous,
             tempfile::tempdir().unwrap().path().into(),
+            None,
         );
         // a commit is Ask tier
         let r = g
@@ -258,6 +302,7 @@ mod tests {
             Some(Arc::new(OkPrompt)),
             GateMode::Attended,
             tempfile::tempdir().unwrap().path().into(),
+            None,
         );
         let r = g
             .execute(
@@ -279,6 +324,7 @@ mod tests {
             Some(Arc::new(DenyPrompt)),
             GateMode::Attended,
             tempfile::tempdir().unwrap().path().into(),
+            None,
         );
         let r = g
             .execute(
@@ -300,6 +346,7 @@ mod tests {
             None,                       // Attended mode but NO prompt wired
             GateMode::Attended,
             tempfile::tempdir().unwrap().path().into(),
+            None,
         );
         let r = g
             .execute(
@@ -310,5 +357,18 @@ mod tests {
             .await;
         assert!(r.unwrap_err().contains("NEEDS_APPROVAL")); // fails closed
         assert!(rec.calls().is_empty());                     // inner NEVER ran
+    }
+
+    // ── Task 2 tests (verbatim from brief) ───────────────────────────────────
+
+    #[tokio::test]
+    async fn gate_records_block_in_log_on_deny() {
+        let log: GateLog = Arc::new(Mutex::new(Vec::new()));
+        let rec = Arc::new(RecordingExecutor::default());
+        let g = GatedToolExecutor::new(rec.clone(), ApprovalClassifier::default(), None,
+            GateMode::Autonomous, tempfile::tempdir().unwrap().path().into(), Some(log.clone()));
+        let _ = g.execute("execute_command", serde_json::json!({"command":"git push --force"}), &None).await;
+        assert!(rec.calls().is_empty());                         // gate held
+        assert_eq!(log.lock().unwrap_or_else(|e| e.into_inner()).len(), 1);  // recorded
     }
 }

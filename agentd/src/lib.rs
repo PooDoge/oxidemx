@@ -1,6 +1,7 @@
 //! agentd — persistent, project-aware agent host (org.oxidemx.Agent).
 #![forbid(unsafe_code)]
 
+pub mod agent;
 pub mod error;
 pub mod host_proxy;
 pub mod interface;
