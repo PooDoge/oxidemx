@@ -17,6 +17,7 @@ oxidemx-agent-core = { path = "../oxidemx-agent-core" }
 oxidemx-conductor = { path = "../oxidemx-conductor" }
 oxidemx-agent-local = { path = "../oxidemx-agent-local" }
 oxidemx-agent-proxy = { path = "../oxidemx-agent-proxy" }
+oxidemx-approval = { path = "../oxidemx-approval" }
 zbus = "5"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "fs"] }
 tokio-util = "0.7"

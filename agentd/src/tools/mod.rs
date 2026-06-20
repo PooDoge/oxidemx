@@ -11,6 +11,7 @@
 
 mod agent;
 mod fs;
+pub mod gated;
 
 use std::sync::Arc;
 use async_trait::async_trait;
