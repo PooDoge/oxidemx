@@ -211,14 +211,28 @@ pub fn agent_tool_declarations() -> Vec<serde_json::Value> {
                     "inputs_json": {
                         "type": "string",
                         "description": "Optional JSON object of input values keyed by name, e.g. {\"url\": \"https://…\"}. Declared flow defaults apply for anything omitted."
-                    },
-                    "mock": {
-                        "type": "boolean",
-                        "description": "Run with the deterministic mock provider (no LLM calls) for a dry run. Default false (real run)."
                     }
                 },
                 "required": ["flow_id"]
             }
+        }),
+        json!({
+            "type": "function",
+            "name": "run_status",
+            "description": "Check the live status of a background flow run by its run_id (returned by run_flow). Returns the real status: running, finished, failed, or cancelled. ALWAYS call this before telling the user whether a run is done — never guess or claim a status you have not queried.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "run_id": { "type": "string", "description": "The run id returned by run_flow, e.g. \"run-3\"" }
+                },
+                "required": ["run_id"]
+            }
+        }),
+        json!({
+            "type": "function",
+            "name": "list_runs",
+            "description": "List the ids of background flow runs for the current project. Use to find a run_id when the user refers to a run without giving its id.",
+            "parameters": { "type": "object", "properties": {} }
         }),
         json!({
             "type": "function",

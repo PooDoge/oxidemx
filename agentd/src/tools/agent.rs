@@ -1,6 +1,7 @@
 //! Native tool bodies for the "agent" tools:
-//! `compose_flow`, `run_flow`, `use_skill`, `memory`, `persona`,
-//! `schedule_task`, and the host-delegated `ask_multiple_choice_question`.
+//! `compose_flow`, `run_flow`, `run_status`, `list_runs`, `use_skill`,
+//! `memory`, `persona`, `schedule_task`, and the host-delegated
+//! `ask_multiple_choice_question`.
 //!
 //! # Project-scoping notes
 //!
@@ -13,18 +14,6 @@
 //! * `use_skill` — scans `paths.merged_skill_roots()`, which includes both
 //!   global roots and the project-local `.oxidemx/skills` directory. This
 //!   is fully project-scoped.
-//!
-//! # `run_flow` / `compose_flow` handling
-//!
-//! The tool bodies are intentionally **thin**:
-//! * `compose_flow` writes the `flow.md` to the global flows directory then
-//!   calls `oxidemx-conductor validate <id>` via subprocess (identical to the
-//!   oracle) so validation is always consistent with the conductor.
-//! * `run_flow` returns a descriptive "delegated to Task 4" message instead
-//!   of shelling out or running the supervisor inline. Task 4 wires the full
-//!   conductor `run_flow` into `AgentService`; duplicating the supervisor
-//!   logic here would create a split-brain. The stub is marked clearly so
-//!   Task 4 knows exactly where to replace it.
 #![forbid(unsafe_code)]
 
 use std::path::PathBuf;
@@ -32,6 +21,7 @@ use std::sync::Arc;
 
 use serde_json::Value;
 
+use crate::run_launcher::RunLauncher;
 use crate::seams::HostCapability;
 
 // ── Skill helpers ─────────────────────────────────────────────────────────────
@@ -176,33 +166,68 @@ pub(super) async fn compose_flow(args: &Value) -> Result<String, String> {
 
 // ── run_flow ──────────────────────────────────────────────────────────────────
 
-/// `run_flow` — declared keys: `flow_id`, `inputs_json` (optional), `mock` (optional).
+/// `run_flow` — declared keys: `flow_id`, `inputs_json` (optional).
 ///
-/// **Thin stub for Task 3**: returns a typed "delegated to AgentService.run_flow"
-/// result. Task 4 replaces this stub body with a call into the conductor
-/// supervisor wired through `AgentService`. Do NOT add supervisor logic here.
-pub(super) async fn run_flow(args: &Value) -> Result<String, String> {
+/// Launches a real conductor run via the `RunLauncher` and returns the real
+/// run_id. (The `mock` key is honoured via the OXIDEMX_TEST_MOCK_FLOW env in
+/// the launcher; it is no longer a tool argument.)
+pub(super) async fn run_flow(
+    launcher: &Arc<dyn RunLauncher>,
+    paths: &crate::projects::ProjectPaths,
+    args: &Value,
+) -> Result<String, String> {
     let flow_id = args["flow_id"]
         .as_str()
         .ok_or_else(|| "run_flow: missing 'flow_id' argument".to_string())?;
-    let mock = args
-        .get("mock")
-        .and_then(Value::as_bool)
-        .unwrap_or(false);
     let inputs_json = args
         .get("inputs_json")
         .and_then(Value::as_str)
-        .unwrap_or("")
-        .to_string();
+        .unwrap_or("{}");
+    let project = paths.cwd.to_string_lossy();
+    match launcher.launch(&project, flow_id, inputs_json).await {
+        Ok(run_id) => Ok(format!(
+            "Launched flow '{flow_id}' — run id `{run_id}`. It is now running in the \
+             background; check its status with run_status(run_id=\"{run_id}\") — do not \
+             guess whether it has finished."
+        )),
+        Err(e) => Err(format!("run_flow: could not launch '{flow_id}': {e}")),
+    }
+}
 
-    // Task 4 TODO: replace this stub with AgentService.run_flow(flow_id, inputs, mock).
-    // The stub returns a structured message so the model knows it needs to wait
-    // for the real implementation rather than silently failing.
-    Ok(format!(
-        "run_flow delegated to AgentService (Task 4 pending): \
-         flow_id={flow_id}, mock={mock}, inputs={inputs_json}. \
-         Full conductor integration is wired in Task 4."
-    ))
+// ── run_status ────────────────────────────────────────────────────────────────
+
+/// `run_status` — declared key: `run_id`. Ground truth from the run table.
+pub(super) async fn run_status(
+    launcher: &Arc<dyn RunLauncher>,
+    args: &Value,
+) -> Result<String, String> {
+    let run_id = args["run_id"]
+        .as_str()
+        .ok_or_else(|| "run_status: missing 'run_id' argument".to_string())?;
+    match launcher.status(run_id) {
+        Some(s) => Ok(format!("Run `{run_id}` status: {}.", s.as_str())),
+        None => Ok(format!(
+            "No run with id `{run_id}` is known (it was never started or has been \
+             cleaned up). Do not assume a status."
+        )),
+    }
+}
+
+// ── list_runs ─────────────────────────────────────────────────────────────────
+
+/// `list_runs` — no args. Lists known run ids for the project.
+pub(super) async fn list_runs(
+    launcher: &Arc<dyn RunLauncher>,
+    paths: &crate::projects::ProjectPaths,
+    _args: &Value,
+) -> Result<String, String> {
+    let project = paths.cwd.to_string_lossy();
+    let ids = launcher.list_runs(&project);
+    if ids.is_empty() {
+        Ok("No runs found for this project.".into())
+    } else {
+        Ok(format!("Known runs: {}.", ids.join(", ")))
+    }
 }
 
 // ── schedule_task ─────────────────────────────────────────────────────────────
@@ -451,6 +476,7 @@ pub(super) mod test_support {
     use async_trait::async_trait;
     use serde_json::Value;
 
+    use crate::run_launcher::{RunLauncher, RunStatus};
     use crate::seams::HostCapability;
     use crate::error::AgentdError;
 
@@ -489,6 +515,36 @@ pub(super) mod test_support {
         }
     }
 
+    /// A [`RunLauncher`] that always returns a fixed run_id from `launch`, and
+    /// reports `RunStatus::Running` for that id.
+    pub struct FakeLauncher {
+        pub run_id: String,
+    }
+
+    #[async_trait]
+    impl RunLauncher for FakeLauncher {
+        async fn launch(
+            &self,
+            _project: &str,
+            _flow_id: &str,
+            _inputs_json: &str,
+        ) -> Result<String, String> {
+            Ok(self.run_id.clone())
+        }
+
+        fn status(&self, run_id: &str) -> Option<RunStatus> {
+            if run_id == self.run_id {
+                Some(RunStatus::Running)
+            } else {
+                None
+            }
+        }
+
+        fn list_runs(&self, _project: &str) -> Vec<String> {
+            vec![self.run_id.clone()]
+        }
+    }
+
     /// Build a test executor with a specific `HostCapability`.
     pub fn test_executor_with_host(
         cwd: &std::path::Path,
@@ -498,6 +554,18 @@ pub(super) mod test_support {
             crate::projects::ProjectPaths::resolve(cwd),
             host,
             Arc::new(crate::run_launcher::NoopRunLauncher),
+        )
+    }
+
+    /// Build a test executor with a specific `RunLauncher` (uses `UnavailableHost`).
+    pub fn test_executor_with_launcher(
+        cwd: &std::path::Path,
+        launcher: Arc<dyn RunLauncher>,
+    ) -> crate::tools::AgentToolExecutor {
+        crate::tools::AgentToolExecutor::new(
+            crate::projects::ProjectPaths::resolve(cwd),
+            Arc::new(crate::seams::UnavailableHost),
+            launcher,
         )
     }
 }
@@ -721,12 +789,13 @@ mod tests {
         assert!(out.contains("letters or numbers"));
     }
 
-    // ── run_flow (thin stub) ──────────────────────────────────────────────────
+    // ── run_flow (real launcher) ──────────────────────────────────────────────
 
     #[tokio::test]
-    async fn run_flow_stub_returns_delegation_message() {
+    async fn run_flow_tool_launches_and_reports_run_id() {
         let d = tempfile::tempdir().unwrap();
-        let exec = test_executor_with_host(d.path(), Arc::new(crate::seams::UnavailableHost));
+        let launcher = Arc::new(FakeLauncher { run_id: "run-7".to_string() });
+        let exec = test_executor_with_launcher(d.path(), launcher);
         let out = exec
             .execute(
                 "run_flow",
@@ -735,6 +804,41 @@ mod tests {
             )
             .await
             .unwrap();
-        assert!(out.contains("delegated") || out.contains("Task 4"));
+        assert!(out.contains("run-7"), "output should contain the real run id: {out}");
+        assert!(out.contains("Launched"), "output should mention Launched: {out}");
+    }
+
+    // ── run_status (ground truth) ─────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn run_status_tool_reports_ground_truth() {
+        let d = tempfile::tempdir().unwrap();
+        let launcher = Arc::new(FakeLauncher { run_id: "run-42".to_string() });
+        let exec = test_executor_with_launcher(d.path(), launcher);
+
+        // Known run → returns "running"
+        let out = exec
+            .execute(
+                "run_status",
+                serde_json::json!({"run_id": "run-42"}),
+                &None,
+            )
+            .await
+            .unwrap();
+        assert!(out.contains("running"), "should report running status: {out}");
+
+        // Unknown run → reports unknown / no run
+        let out2 = exec
+            .execute(
+                "run_status",
+                serde_json::json!({"run_id": "run-999"}),
+                &None,
+            )
+            .await
+            .unwrap();
+        assert!(
+            out2.contains("No run") || out2.contains("unknown") || out2.contains("known"),
+            "unknown id should say no/unknown: {out2}"
+        );
     }
 }

@@ -70,7 +70,9 @@ impl ToolExecutor for AgentToolExecutor {
             "persona"      => agent::persona(&args),
             "schedule_task" => agent::schedule_task(&args).await,
             "compose_flow" => agent::compose_flow(&args).await,
-            "run_flow"     => agent::run_flow(&args).await,
+            "run_flow"     => agent::run_flow(&self.run_launcher, &self.paths, &args).await,
+            "run_status"   => agent::run_status(&self.run_launcher, &args).await,
+            "list_runs"    => agent::list_runs(&self.run_launcher, &self.paths, &args).await,
 
             // ── Host-delegated tools (Task 3) ────────────────────────────
             "ask_multiple_choice_question" => {
