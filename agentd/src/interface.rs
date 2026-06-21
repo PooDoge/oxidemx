@@ -1367,6 +1367,101 @@ You are an echo agent. Repeat the task back.
         std::env::remove_var("OXIDEMX_TEST_MOCK_FLOW");
     }
 
+    // ── Test 4a-2: run_flow emits RunFinished with handoff ────────────────────
+    //
+    // Diagnostic test: verifies that a completed mock run emits a terminal
+    // RunFinished event through the full agentd run path (run_launcher →
+    // run_bridge → supervisor). This isolates a UI "Working… forever" symptom:
+    // if this test fails, the bug is in the backend (RunFinished never emitted);
+    // if it passes, the bug is in the UI/delivery layer.
+
+    #[tokio::test]
+    async fn run_flow_emits_run_finished_with_handoff() {
+        let tmp = tempfile::tempdir().unwrap();
+        let flows_dir = tmp.path().join("flows");
+        let agents_dir = tmp.path().join("agents");
+        write_flow_fixture(&flows_dir, &agents_dir);
+
+        std::env::set_var("OXIDEMX_FLOWS_DIR", &flows_dir);
+        std::env::set_var("OXIDEMX_AGENTS_DIR", &agents_dir);
+        std::env::set_var("OXIDEMX_TEST_MOCK_FLOW", "1");
+
+        let env = TestEnv::new();
+        let run_id = env
+            .svc
+            .run_flow(env.cwd_str(), TEST_FLOW_ID, "{}")
+            .await
+            .unwrap();
+
+        // Poll until the run reports a TERMINAL status ("finished", "failed",
+        // or "cancelled") — not just any status. Timeout at ~3s (150 × 20ms).
+        let mut final_status = String::new();
+        for _ in 0..150 {
+            if let Ok(s) = env.svc.run_status(&run_id).await {
+                if s == "finished" || s == "failed" || s == "cancelled" {
+                    final_status = s;
+                    break;
+                }
+            }
+            tokio::time::sleep(ms(20)).await;
+        }
+
+        // Collect all emitted variants for the failure diagnostic.
+        let events = env.emitter.events();
+        let run_variants: Vec<String> = events
+            .iter()
+            .filter(|e| e.payload["kind"] == "run")
+            .map(|e| {
+                e.payload["variant"]
+                    .as_str()
+                    .unwrap_or("<missing>")
+                    .to_string()
+            })
+            .collect();
+
+        println!("run_flow_emits_run_finished: final_status={final_status:?}");
+        println!("run_flow_emits_run_finished: variant sequence = {run_variants:?}");
+
+        // ── Core assertion: a RunFinished event was emitted ─────────────────
+        let run_finished_ev = events.iter().find(|e| {
+            e.payload["kind"] == "run" && e.payload["variant"] == "RunFinished"
+        });
+        assert!(
+            run_finished_ev.is_some(),
+            "DIAGNOSTIC FAIL — RunFinished was NEVER emitted.\n\
+             final status = {final_status:?}\n\
+             variant sequence = {run_variants:?}\n\
+             This means the backend bug is the cause: the supervisor or \
+             run_bridge did not emit a terminal RunFinished event."
+        );
+
+        // ── Secondary assertion: handoff or artifacts present ───────────────
+        // The mock fixture has one step (hello) that echoes its task. No
+        // [delivery] block, so the supervisor uses the last topo step's output
+        // as handoff_markdown. It should be non-empty (the echoed mock reply).
+        let details = &run_finished_ev.unwrap().payload["details"];
+        let handoff = details["handoff_markdown"].as_str().unwrap_or("");
+        let artifacts = details["artifacts"]
+            .as_array()
+            .map(|a| a.len())
+            .unwrap_or(0);
+        assert!(
+            !handoff.is_empty() || artifacts > 0,
+            "RunFinished emitted but both handoff_markdown and artifacts are empty; \
+             details = {details:#?}"
+        );
+
+        println!(
+            "run_flow_emits_run_finished: PASS — \
+             RunFinished emitted with handoff={handoff:?} artifacts_count={artifacts}"
+        );
+
+        // Clean up env vars.
+        std::env::remove_var("OXIDEMX_FLOWS_DIR");
+        std::env::remove_var("OXIDEMX_AGENTS_DIR");
+        std::env::remove_var("OXIDEMX_TEST_MOCK_FLOW");
+    }
+
     // ── Test 4b: cancel_run cancels the run token ─────────────────────────────
 
     #[tokio::test]
