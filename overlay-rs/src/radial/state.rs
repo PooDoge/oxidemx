@@ -353,6 +353,17 @@ impl RadialState {
         &mut self.ai_threads[i]
     }
 
+    /// Set a thread's `working` flag and mirror it onto `ai_loading`
+    /// when the thread is the currently-active one.
+    pub fn set_thread_working(&mut self, idx: usize, on: bool) {
+        if let Some(t) = self.ai_threads.get_mut(idx) {
+            t.working = on;
+        }
+        self.ai_loading = crate::radial::chat_threads::mirror_loading(
+            self.ai_active, idx, on, self.ai_loading,
+        );
+    }
+
     /// Start a fresh conversation. Reuses the current thread when
     /// it's still empty (no stacking of blank threads); otherwise
     /// appends a new one and switches to it.
@@ -361,6 +372,10 @@ impl RadialState {
             self.ai_threads.push(ChatThread::default());
             self.ai_active = self.ai_threads.len() - 1;
         }
+        self.ai_loading = self.ai_threads
+            .get(self.ai_active)
+            .map(|t| t.working)
+            .unwrap_or(false);
         self.ai_show_threads = false;
         self.ai_show_memories = false;
         self.ai_show_tasks = false;
@@ -375,6 +390,10 @@ impl RadialState {
         if idx < self.ai_threads.len() {
             self.ai_active = idx;
         }
+        self.ai_loading = self.ai_threads
+            .get(self.ai_active)
+            .map(|t| t.working)
+            .unwrap_or(false);
         self.ai_show_threads = false;
         self.ai_show_memories = false;
         self.ai_show_tasks = false;

@@ -817,12 +817,12 @@ pub(super) fn update(state: &mut RadialState, message: Message) -> Task<Message>
             user_msg.image_path = thumb_path;
             chat.history.push(user_msg);
             chat.updated_at = now;
-            state.ai_loading = true;
+            let thread_idx = state.ai_active;
+            state.set_thread_working(thread_idx, true);
             state.ai_turn_tokens = (0, 0);
             state.ai_activity = Some("Thinking…".to_string());
             let mode = state.chat().mode;
             let model = state.chat().model.clone();
-            let thread_idx = state.ai_active;
             // Each thread carries a stable session id (survives the thread
             // list's index-shifting deletes). Mint one on first turn; the
             // session manager keys the thread's reused provider on it.
@@ -892,7 +892,7 @@ pub(super) fn update(state: &mut RadialState, message: Message) -> Task<Message>
             Task::batch([task, scroll_chat_to_end()])
         }
         Message::AiResponseReceived(thread_idx, res) => {
-            state.ai_loading = false;
+            state.set_thread_working(thread_idx, false);
             state.ai_activity = None;
             state.ai_stream = None;
             state.ai_stream_md = Vec::new();
@@ -1064,7 +1064,7 @@ pub(super) fn update(state: &mut RadialState, message: Message) -> Task<Message>
                         }
                     },
                 );
-                state.ai_loading = false;
+                state.set_thread_working(state.ai_active, false);
                 state.ai_activity = Some("Stop requested (cancellation not yet available)".to_string());
                 state.ai_stream_md = Vec::new();
                 if let Some((idx, partial)) = state.ai_stream.take() {
@@ -1086,7 +1086,7 @@ pub(super) fn update(state: &mut RadialState, message: Message) -> Task<Message>
                     use oxidemx_agent::session::SessionStore;
                     crate::agent_runtime::SESSIONS.cancel(&id);
                 }
-                state.ai_loading = false;
+                state.set_thread_working(state.ai_active, false);
                 state.ai_activity = None;
                 state.ai_stream_md = Vec::new();
                 if let Some((idx, partial)) = state.ai_stream.take() {
@@ -1464,7 +1464,7 @@ pub(super) fn update(state: &mut RadialState, message: Message) -> Task<Message>
                     .chat_mut()
                     .history
                     .push(ChatMessage::user(choice.clone()));
-                state.ai_loading = true;
+                state.set_thread_working(state.ai_active, true);
                 Task::perform(
                     async move {
                         let _ = tx.send(choice).await;
@@ -1477,7 +1477,7 @@ pub(super) fn update(state: &mut RadialState, message: Message) -> Task<Message>
         }
         Message::AiQuestionReceived(pending) => {
             state.ai_pending_question = Some(pending);
-            state.ai_loading = false;
+            state.set_thread_working(state.ai_active, false);
             state.trigger_ripple();
             Task::none()
         }
@@ -1621,7 +1621,7 @@ pub(super) fn update(state: &mut RadialState, message: Message) -> Task<Message>
 
         // agentd turn complete — commit the final reply text.
         Message::AgentdFinal { thread_idx, text } => {
-            state.ai_loading = false;
+            state.set_thread_working(thread_idx, false);
             state.ai_activity = None;
             state.ai_stream = None;
             state.ai_stream_md = Vec::new();
@@ -1644,7 +1644,9 @@ pub(super) fn update(state: &mut RadialState, message: Message) -> Task<Message>
         } => {
             state.ai_agentd_approval = Some((request_id, card_json));
             // Mark as not loading so the user can see the approval card.
-            state.ai_loading = false;
+            // `thread` is a session-id string, not an index; use the active
+            // thread (approval cards surface on the active conversation).
+            state.set_thread_working(state.ai_active, false);
             state.ai_activity = Some(format!("Waiting for approval (thread {thread})"));
             Task::none()
         }
@@ -1652,7 +1654,7 @@ pub(super) fn update(state: &mut RadialState, message: Message) -> Task<Message>
         // User responded to an agentd approval card.
         Message::AgentdRespondApproval { request_id, allow } => {
             state.ai_agentd_approval = None;
-            state.ai_loading = true;
+            state.set_thread_working(state.ai_active, true);
             state.ai_activity = Some("Continuing…".to_string());
             let project = crate::ai_client::agentd_project();
             Task::perform(
