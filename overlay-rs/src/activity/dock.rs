@@ -15,14 +15,19 @@ use oxidemx_widgets::tokens;
 use crate::activity::{ActivityState, BubbleState, ClusterStatus, RunCluster};
 use crate::app::Message;
 
-/// Entry point: returns `None` when there are no clusters (dock is hidden).
-pub fn dock_view<'a>(act: &'a ActivityState, kit: &Kit) -> Option<Element<'a, Message>> {
-    if act.clusters.is_empty() {
+/// Entry point: returns `None` when there are no clusters for the active
+/// conversation (dock is hidden when the active thread has no runs).
+pub fn dock_view<'a>(act: &'a ActivityState, kit: &Kit, active_conv: &str) -> Option<Element<'a, Message>> {
+    let kit = *kit;
+    let (active, recent) = {
+        let (a, r) = act.partition();
+        let a: Vec<&RunCluster> = a.into_iter().filter(|c| c.conversation_id == active_conv).collect();
+        let r: Vec<&RunCluster> = r.into_iter().filter(|c| c.conversation_id == active_conv).collect();
+        (a, r)
+    };
+    if active.is_empty() && recent.is_empty() {
         return None;
     }
-
-    let kit = *kit;
-    let (active, recent) = act.partition();
 
     match &act.expanded {
         None => Some(collapsed_dock(active, recent, kit)),

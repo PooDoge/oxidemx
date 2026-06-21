@@ -67,13 +67,20 @@ impl ActivityState {
         (active, recent)
     }
 
+    /// Return only clusters belonging to the given conversation id.
+    pub fn clusters_for<'a>(&'a self, conv: &str) -> Vec<&'a RunCluster> {
+        self.clusters.iter().filter(|c| c.conversation_id == conv).collect()
+    }
+
     pub fn apply_run_event(&mut self, ev: &RunEventView) {
         match ev.variant.as_str() {
             "RunStarted" => {
                 if self.cluster(&ev.run_id).is_none() {
-                    self.clusters.push(RunCluster::new(
+                    let mut c = RunCluster::new(
                         ev.run_id.clone(), ev.flow_id.clone(), ev.steps.clone(),
-                    ));
+                    );
+                    c.conversation_id = ev.conversation_id.clone();
+                    self.clusters.push(c);
                 }
             }
             "TaskAssigned" => {
@@ -271,6 +278,17 @@ mod reducer_tests {
         assert_eq!(active.len(), 2, "running + just-finished are active");
         assert_eq!(recent.len(), 1);
         assert_eq!(recent[0].run_id, "r-old");
+    }
+
+    #[test]
+    fn clusters_filter_by_conversation() {
+        let mut st = ActivityState::default();
+        st.apply_run_event(&RunEventView{ run_id:"r1".into(), conversation_id:"chat-1".into(),
+            variant:"RunStarted".into(), ..Default::default() });
+        st.apply_run_event(&RunEventView{ run_id:"r2".into(), conversation_id:"chat-2".into(),
+            variant:"RunStarted".into(), ..Default::default() });
+        assert_eq!(st.clusters_for("chat-1").len(), 1);
+        assert_eq!(st.clusters_for("chat-2").len(), 1);
     }
 
     #[test]

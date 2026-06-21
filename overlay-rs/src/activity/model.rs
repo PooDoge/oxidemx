@@ -104,6 +104,7 @@ impl AgentBubble {
 pub struct RunCluster {
     pub run_id: String,
     pub flow_id: String,
+    pub conversation_id: String,
     pub status: ClusterStatus,
     pub bubbles: Vec<AgentBubble>,
     pub artifacts: Vec<String>,
@@ -116,6 +117,7 @@ impl RunCluster {
         Self {
             run_id: run_id.into(),
             flow_id: flow_id.into(),
+            conversation_id: String::new(),
             status: ClusterStatus::Running,
             bubbles: steps.into_iter().map(AgentBubble::new).collect(),
             artifacts: Vec::new(),

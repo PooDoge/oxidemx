@@ -69,6 +69,79 @@ fn flows_dir() -> Result<PathBuf, String> {
     Ok(PathBuf::from(home).join(".config/oxidemx/flows"))
 }
 
+/// Resolve the runs directory: `$OXIDEMX_RUNS_DIR` else `$XDG_DATA_HOME/oxidemx/runs`
+/// else `$HOME/.local/share/oxidemx/runs`.
+fn runs_dir() -> Option<PathBuf> {
+    if let Ok(d) = std::env::var("OXIDEMX_RUNS_DIR") {
+        return Some(PathBuf::from(d));
+    }
+    let base = std::env::var("XDG_DATA_HOME")
+        .ok()
+        .map(PathBuf::from)
+        .or_else(|| {
+            std::env::var("HOME").ok().map(|h| PathBuf::from(h).join(".local/share"))
+        })?;
+    Some(base.join("oxidemx/runs"))
+}
+
+/// Read `runs_dir/<run_id>/run.json` and return a short introspection string:
+/// artifact list + first ~800 chars of the preferred artifact.
+/// Returns `None` if the run dir or run.json cannot be read.
+pub(super) fn run_introspection(run_id: &str) -> Option<String> {
+    let dir = runs_dir()?.join(run_id);
+    let json_path = dir.join("run.json");
+    let raw = std::fs::read_to_string(&json_path).ok()?;
+    let v: serde_json::Value = serde_json::from_str(&raw).ok()?;
+
+    let artifacts: Vec<String> = v["artifacts"]
+        .as_array()
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|x| x.as_str().map(|s| s.to_string()))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let success = v["success"].as_bool().unwrap_or(false);
+    let error = v["error"].as_str().unwrap_or("").to_string();
+
+    // Prefer ANSWER.md; fall back to last artifact.
+    let primary = artifacts
+        .iter()
+        .find(|a| a.to_ascii_uppercase().ends_with("ANSWER.MD") || *a == "ANSWER.md")
+        .or_else(|| artifacts.last())
+        .cloned();
+
+    let excerpt = primary.as_ref().and_then(|name| {
+        // The artifact path may be absolute or relative to the run dir.
+        let p = std::path::Path::new(name);
+        let full = if p.is_absolute() { p.to_path_buf() } else { dir.join(name) };
+        std::fs::read_to_string(&full)
+            .ok()
+            .map(|s| {
+                let trimmed: String = s.chars().take(800).collect();
+                trimmed
+            })
+    });
+
+    let art_list = if artifacts.is_empty() {
+        "(no artifacts)".to_string()
+    } else {
+        artifacts.join(", ")
+    };
+
+    let mut out = format!(
+        "success={success}, artifacts=[{art_list}]"
+    );
+    if !error.is_empty() {
+        out.push_str(&format!(", error={error}"));
+    }
+    if let Some(exc) = excerpt {
+        out.push_str(&format!("\n--- answer excerpt ---\n{exc}"));
+    }
+    Some(out)
+}
+
 // =============================================================================
 // Tool implementations
 // =============================================================================
@@ -206,7 +279,15 @@ pub(super) async fn run_status(
         .as_str()
         .ok_or_else(|| "run_status: missing 'run_id' argument".to_string())?;
     match launcher.status(run_id) {
-        Some(s) => Ok(format!("Run `{run_id}` status: {}.", s.as_str())),
+        Some(s) => {
+            let base = format!("Run `{run_id}` status: {}.", s.as_str());
+            if s == crate::run_launcher::RunStatus::Finished {
+                if let Some(intro) = run_introspection(run_id) {
+                    return Ok(format!("{base}\n{intro}"));
+                }
+            }
+            Ok(base)
+        }
         None => Ok(format!(
             "No run with id `{run_id}` is known (it was never started or has been \
              cleaned up). Do not assume a status."
@@ -838,6 +919,37 @@ mod tests {
             .unwrap();
         assert!(out.contains("run-7"), "output should contain the real run id: {out}");
         assert!(out.contains("Launched"), "output should mention Launched: {out}");
+    }
+
+    // ── run_introspection ─────────────────────────────────────────────────────
+
+    #[test]
+    fn run_introspection_reads_answer_md() {
+        let dir = tempfile::tempdir().unwrap();
+        let run_id = "test-run-999";
+        let run_dir = dir.path().join(run_id);
+        std::fs::create_dir_all(&run_dir).unwrap();
+
+        // Write run.json
+        std::fs::write(
+            run_dir.join("run.json"),
+            r#"{"run_id":"test-run-999","flow_id":"doc","success":true,"artifacts":["ANSWER.md"],"conversation_id":"chat-1"}"#,
+        ).unwrap();
+        // Write artifact
+        std::fs::write(
+            run_dir.join("ANSWER.md"),
+            "The answer is 42.\nDetailed explanation follows.",
+        ).unwrap();
+
+        // Point OXIDEMX_RUNS_DIR at the temp dir
+        std::env::set_var("OXIDEMX_RUNS_DIR", dir.path().to_str().unwrap());
+
+        let result = super::run_introspection(run_id).expect("introspection should succeed");
+        assert!(result.contains("ANSWER.md"), "should list artifact: {result}");
+        assert!(result.contains("The answer is 42"), "should include excerpt: {result}");
+        assert!(result.contains("success=true"), "should report success: {result}");
+
+        std::env::remove_var("OXIDEMX_RUNS_DIR");
     }
 
     // ── run_status (ground truth) ─────────────────────────────────────────────
