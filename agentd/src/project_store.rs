@@ -38,7 +38,7 @@ impl ProjectStore {
         }
     }
 
-    pub fn save(&self, projects: &[Project]) {
+    fn save(&self, projects: &[Project]) {
         let p = self.path();
         let tmp = self.store_base.join("projects.json.tmp");
         let json = match serde_json::to_string_pretty(projects) {
@@ -80,13 +80,14 @@ impl ProjectStore {
     /// Creates a new project, appends it, saves, and returns it.
     pub fn create(&self, name: &str, default_working_dir: PathBuf) -> Project {
         let mut projects = self.load();
-        let base_id = format!("proj-{}", now_ms());
+        let ts = now_ms();
+        let base_id = format!("proj-{ts}");
         let id = unique_id(&base_id, &projects);
         let project = Project {
             id: ProjectId::from(id),
             name: name.to_string(),
             default_working_dir,
-            created_at: now_ms(),
+            created_at: ts,
         };
         projects.push(project.clone());
         self.save(&projects);
