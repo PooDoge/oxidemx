@@ -108,20 +108,23 @@ pub(super) fn run_introspection(run_id: &str) -> Option<String> {
     // Prefer ANSWER.md; fall back to last artifact.
     let primary = artifacts
         .iter()
-        .find(|a| a.to_ascii_uppercase().ends_with("ANSWER.MD") || *a == "ANSWER.md")
+        .find(|a| a.to_ascii_uppercase().ends_with("ANSWER.MD"))
         .or_else(|| artifacts.last())
         .cloned();
 
     let excerpt = primary.as_ref().and_then(|name| {
-        // The artifact path may be absolute or relative to the run dir.
+        // Defense-in-depth: reject any artifact name that is absolute or
+        // contains parent-directory components — the path must stay inside
+        // the run workdir.
         let p = std::path::Path::new(name);
-        let full = if p.is_absolute() { p.to_path_buf() } else { dir.join(name) };
-        std::fs::read_to_string(&full)
+        let is_safe = !p.is_absolute()
+            && !p.components().any(|c| c == std::path::Component::ParentDir);
+        if !is_safe {
+            return None;
+        }
+        std::fs::read_to_string(dir.join(name))
             .ok()
-            .map(|s| {
-                let trimmed: String = s.chars().take(800).collect();
-                trimmed
-            })
+            .map(|s| s.chars().take(800).collect::<String>())
     });
 
     let art_list = if artifacts.is_empty() {
@@ -948,6 +951,40 @@ mod tests {
         assert!(result.contains("ANSWER.md"), "should list artifact: {result}");
         assert!(result.contains("The answer is 42"), "should include excerpt: {result}");
         assert!(result.contains("success=true"), "should report success: {result}");
+
+        std::env::remove_var("OXIDEMX_RUNS_DIR");
+    }
+
+    /// Absolute and parent-traversal artifact names must NOT cause files outside
+    /// the run workdir to be read into the excerpt.
+    #[test]
+    fn run_introspection_rejects_traversal_artifact_paths() {
+        let dir = tempfile::tempdir().unwrap();
+        let run_id = "test-run-traversal";
+        let run_dir = dir.path().join(run_id);
+        std::fs::create_dir_all(&run_dir).unwrap();
+
+        // Write a sentinel file outside the run dir that must NOT be read.
+        let sentinel = dir.path().join("sentinel.txt");
+        std::fs::write(&sentinel, "SECRET_CONTENT_MUST_NOT_APPEAR").unwrap();
+
+        // Artifact list with an absolute path and a traversal path.
+        let abs_path = sentinel.to_string_lossy();
+        let run_json = format!(
+            r#"{{"run_id":"{run_id}","flow_id":"x","success":true,"artifacts":["{abs_path}","../sentinel.txt"],"conversation_id":"chat-1"}}"#
+        );
+        std::fs::write(run_dir.join("run.json"), run_json).unwrap();
+
+        std::env::set_var("OXIDEMX_RUNS_DIR", dir.path().to_str().unwrap());
+
+        let result = super::run_introspection(run_id)
+            .expect("introspection should still succeed (artifact list is returned)");
+
+        // The artifact names appear in the list, but no excerpt is read.
+        assert!(
+            !result.contains("SECRET_CONTENT_MUST_NOT_APPEAR"),
+            "traversal/absolute artifact must not be read into excerpt: {result}"
+        );
 
         std::env::remove_var("OXIDEMX_RUNS_DIR");
     }

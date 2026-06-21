@@ -32,8 +32,19 @@ pub fn dock_view<'a>(act: &'a ActivityState, kit: &Kit, active_conv: &str) -> Op
     match &act.expanded {
         None => Some(collapsed_dock(active, recent, kit)),
         Some(run_id) => {
-            let run_id = run_id.clone();
-            Some(expanded_panel(act, kit, &run_id))
+            // Only render the expanded panel when the run belongs to the active
+            // conversation. If the user switched conversations while a panel was
+            // open, fall through to the normal collapsed dock for the new thread.
+            let belongs = act
+                .cluster(run_id)
+                .map(|c| c.conversation_id.as_str() == active_conv)
+                .unwrap_or(false);
+            if belongs {
+                let run_id = run_id.clone();
+                Some(expanded_panel(act, kit, &run_id))
+            } else {
+                Some(collapsed_dock(active, recent, kit))
+            }
         }
     }
 }
