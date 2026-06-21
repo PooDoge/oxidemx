@@ -1719,6 +1719,35 @@ pub(super) fn update(state: &mut RadialState, message: Message) -> Task<Message>
             if state.chat_window_mode {
                 state.activity.apply_run_event(&view);
             }
+            // Auto-deliver terminal results into the originating conversation.
+            let terminal = matches!(view.variant.as_str(),
+                "RunFinished" | "RunFailed" | "RunCancelled");
+            if terminal {
+                let idx = crate::app::agent_events::session_to_thread_idx(
+                    &state.ai_threads, &view.conversation_id);
+                if let Some(idx) = idx {
+                    let body = crate::activity::delivery_message(&view);
+                    if !body.is_empty() {
+                        let mut msg = ChatMessage::assistant(body);
+                        msg.card = Some(crate::ai_client::AgentCardData::Flow {
+                            flow_id: view.flow_id.clone(),
+                            run_id: view.run_id.clone(),
+                            success: view.variant == "RunFinished",
+                            steps: vec![],
+                            artifacts: view.artifacts.clone(),
+                        });
+                        if let Some(t) = state.ai_threads.get_mut(idx) {
+                            t.history.push(msg);
+                            t.updated_at = crate::radial::now_secs();
+                        }
+                        state.set_thread_working(idx, false);
+                        crate::radial::save_chat_threads(&state.ai_threads);
+                        if idx == state.ai_active {
+                            return scroll_chat_to_end();
+                        }
+                    }
+                }
+            }
             Task::none()
         }
 

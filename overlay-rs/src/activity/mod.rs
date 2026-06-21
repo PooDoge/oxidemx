@@ -160,6 +160,28 @@ impl ActivityState {
     }
 }
 
+/// The assistant-message body posted to a conversation when its flow run ends.
+/// Header line (flow · status · counts) + the full handoff markdown on success,
+/// or the failure reason on failure/cancel. Artifact cards are rendered by the
+/// chat from `RunEventView.artifacts` separately (Task 8).
+pub fn delivery_message(v: &RunEventView) -> String {
+    match v.variant.as_str() {
+        "RunFinished" => {
+            let n = v.artifacts.len();
+            let head = format!("**{}** · ✓ · {n} artifact(s)", v.flow_id);
+            if v.handoff.trim().is_empty() {
+                format!("{head}\n\n_(flow produced no inline answer; see artifacts)_")
+            } else {
+                format!("{head}\n\n{}", v.handoff)
+            }
+        }
+        "RunFailed" => format!("**{}** · ✗ failed\n\n{}", v.flow_id,
+            if v.message.is_empty() { "(no reason reported)".into() } else { v.message.clone() }),
+        "RunCancelled" => format!("**{}** · ⊘ cancelled", v.flow_id),
+        _ => String::new(),
+    }
+}
+
 #[cfg(test)]
 mod reducer_tests {
     use super::*;
@@ -259,5 +281,22 @@ mod reducer_tests {
         s.apply_run_event(&RunEventView { step: "a".into(), ..ev("ApprovalRequested") });
         let after = format!("{:?}", s.cluster("run-1").unwrap().bubbles[0].state);
         assert_eq!(before, after); // no state change (v1 ignores approvals)
+    }
+
+    #[test]
+    fn delivered_message_has_header_and_handoff() {
+        let v = RunEventView {
+            variant: "RunFinished".into(), flow_id: "doc-digest".into(),
+            handoff: "# Answer\nkey points".into(),
+            artifacts: vec!["ANSWER.md".into(), "debug/digest.md".into()],
+            ..Default::default()
+        };
+        let body = delivery_message(&v);
+        assert!(body.starts_with("**doc-digest** · ✓"));
+        assert!(body.contains("# Answer"));
+        let f = RunEventView { variant: "RunFailed".into(), flow_id: "x".into(),
+            message: "step boom".into(), ..Default::default() };
+        assert!(delivery_message(&f).contains("✗"));
+        assert!(delivery_message(&f).contains("step boom"));
     }
 }
