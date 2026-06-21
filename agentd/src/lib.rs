@@ -7,6 +7,7 @@ pub mod harness;
 pub mod host_proxy;
 pub mod interface;
 pub mod journal;
+pub mod model;
 pub mod models;
 pub mod projects;
 pub mod run_bridge;
