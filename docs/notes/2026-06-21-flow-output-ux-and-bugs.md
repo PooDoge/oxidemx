@@ -29,6 +29,17 @@ brainstorming batch alongside Phase 2a (typed I/O).
 3. **research-digest fails to run in chat** (Jim suspects the flow def) — re-test after install;
    the W1 user-disk fix is applied but the in-proc launcher may differ.
 
+## ★ HEADLINE DELIVERY BUG — flow result never auto-posts to chat (confirmed 2026-06-21)
+When a flow is launched from chat, the agent's `run_flow` tool is **fire-and-background**: it
+returns a `run_id` and the agent's turn ENDS ("launched run-N"). When the flow finishes,
+`RunFinished{handoff_markdown, artifacts}` reaches the **activity bubble** (Transcript button shows
+it on demand) but **nothing auto-posts the result into the chat thread**. So the user only sees the
+final output by clicking the bubble's Transcript. **Fix:** on `RunFinished` for a chat-launched run,
+auto-deliver the result (handoff/ANSWER.md, richly — see below) into the launching conversation as
+an assistant message. Requires the run→thread linkage (the bubbles' deferred conversation-scoping
+gap — currently `ActivityState` is window-global, runs aren't tied to a thread). This is the #1
+delivery item; the terseness + artifact-card items below are how that delivered message should look.
+
 ## Flow final-delivery is too terse (investigation + design)
 Every successfully-run flow ends with a terse final response, e.g. *"The doc-digest flow ran;
 the points are in ANSWER.md at ~/.local/share/oxidemx/runs/doc-digest-1782034089084/ANSWER.md."*
