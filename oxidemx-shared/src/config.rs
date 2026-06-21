@@ -1244,12 +1244,10 @@ pub struct AiConfig {
     #[serde(default = "default_fast_model")]
     pub fast_model: String,
 
-    /// Route overlay chat through `agentd` over D-Bus (`AgentProxy`) instead
-    /// of the built-in in-process provider.  Default **false** — the in-proc
-    /// path is used until Task 8 flips this default and removes in-proc code.
-    /// Set `true` in `~/.config/oxidemx/config.json` under `"ai": {}` to test
-    /// the agentd path while agentd is running.
-    #[serde(default)]
+    /// Route overlay chat through `agentd` over D-Bus (`AgentProxy`). Default
+    /// **true**: flows require agentd (in-proc holds the turn open + scrapes
+    /// status). Pin `false` under `"ai": {}` to force the legacy in-proc path.
+    #[serde(default = "default_true")]
     pub use_agentd: bool,
 }
 
@@ -1263,10 +1261,12 @@ impl Default for AiConfig {
             routing_enabled: false,
             fast_provider: default_fast_provider(),
             fast_model: default_fast_model(),
-            use_agentd: false,
+            use_agentd: true,
         }
     }
 }
+
+fn default_true() -> bool { true }
 
 fn default_ai_model() -> String {
     "gemini-2.5-flash".to_string()
@@ -1420,6 +1420,19 @@ mod tests {
         let json = serde_json::to_string(&model).unwrap();
         let back: Capabilities = serde_json::from_str(&json).unwrap();
         assert_eq!(back, model);
+    }
+
+    #[test]
+    fn use_agentd_defaults_on_and_roundtrips() {
+        let c = AiConfig::default();
+        assert!(c.use_agentd, "agentd is the default chat path for flows");
+        // false must still serialize (no skip) so a user can pin it off and have it stick.
+        let mut off = AiConfig::default();
+        off.use_agentd = false;
+        let json = serde_json::to_string(&off).unwrap();
+        assert!(json.contains("\"use_agentd\":false"));
+        let back: AiConfig = serde_json::from_str(&json).unwrap();
+        assert!(!back.use_agentd);
     }
 
     #[test]

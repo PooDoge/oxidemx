@@ -14,6 +14,7 @@ use std::time::Instant;
 #[derive(Debug, Clone, Default)]
 pub struct RunEventView {
     pub run_id: String,
+    pub conversation_id: String,
     pub variant: String,
     pub flow_id: String,
     pub steps: Vec<String>,
@@ -66,13 +67,20 @@ impl ActivityState {
         (active, recent)
     }
 
+    /// Return only clusters belonging to the given conversation id.
+    pub fn clusters_for<'a>(&'a self, conv: &str) -> Vec<&'a RunCluster> {
+        self.clusters.iter().filter(|c| c.conversation_id == conv).collect()
+    }
+
     pub fn apply_run_event(&mut self, ev: &RunEventView) {
         match ev.variant.as_str() {
             "RunStarted" => {
                 if self.cluster(&ev.run_id).is_none() {
-                    self.clusters.push(RunCluster::new(
+                    let mut c = RunCluster::new(
                         ev.run_id.clone(), ev.flow_id.clone(), ev.steps.clone(),
-                    ));
+                    );
+                    c.conversation_id = ev.conversation_id.clone();
+                    self.clusters.push(c);
                 }
             }
             "TaskAssigned" => {
@@ -156,6 +164,28 @@ impl ActivityState {
             // v1 ignores per-step approvals (spec §10).
             _ => {}
         }
+    }
+}
+
+/// The assistant-message body posted to a conversation when its flow run ends.
+/// Header line (flow · status · counts) + the full handoff markdown on success,
+/// or the failure reason on failure/cancel. Artifact cards are rendered by the
+/// chat from `RunEventView.artifacts` separately (Task 8).
+pub fn delivery_message(v: &RunEventView) -> String {
+    match v.variant.as_str() {
+        "RunFinished" => {
+            let n = v.artifacts.len();
+            let head = format!("**{}** · ✓ · {n} artifact(s)", v.flow_id);
+            if v.handoff.trim().is_empty() {
+                format!("{head}\n\n_(flow produced no inline answer; see artifacts)_")
+            } else {
+                format!("{head}\n\n{}", v.handoff)
+            }
+        }
+        "RunFailed" => format!("**{}** · ✗ failed\n\n{}", v.flow_id,
+            if v.message.is_empty() { "(no reason reported)".into() } else { v.message.clone() }),
+        "RunCancelled" => format!("**{}** · ⊘ cancelled", v.flow_id),
+        _ => String::new(),
     }
 }
 
@@ -251,6 +281,17 @@ mod reducer_tests {
     }
 
     #[test]
+    fn clusters_filter_by_conversation() {
+        let mut st = ActivityState::default();
+        st.apply_run_event(&RunEventView{ run_id:"r1".into(), conversation_id:"chat-1".into(),
+            variant:"RunStarted".into(), ..Default::default() });
+        st.apply_run_event(&RunEventView{ run_id:"r2".into(), conversation_id:"chat-2".into(),
+            variant:"RunStarted".into(), ..Default::default() });
+        assert_eq!(st.clusters_for("chat-1").len(), 1);
+        assert_eq!(st.clusters_for("chat-2").len(), 1);
+    }
+
+    #[test]
     fn approval_requested_is_ignored() {
         let mut s = ActivityState::default();
         s.apply_run_event(&RunEventView { steps: vec!["a".into()], ..ev("RunStarted") });
@@ -258,5 +299,22 @@ mod reducer_tests {
         s.apply_run_event(&RunEventView { step: "a".into(), ..ev("ApprovalRequested") });
         let after = format!("{:?}", s.cluster("run-1").unwrap().bubbles[0].state);
         assert_eq!(before, after); // no state change (v1 ignores approvals)
+    }
+
+    #[test]
+    fn delivered_message_has_header_and_handoff() {
+        let v = RunEventView {
+            variant: "RunFinished".into(), flow_id: "doc-digest".into(),
+            handoff: "# Answer\nkey points".into(),
+            artifacts: vec!["ANSWER.md".into(), "debug/digest.md".into()],
+            ..Default::default()
+        };
+        let body = delivery_message(&v);
+        assert!(body.starts_with("**doc-digest** · ✓"));
+        assert!(body.contains("# Answer"));
+        let f = RunEventView { variant: "RunFailed".into(), flow_id: "x".into(),
+            message: "step boom".into(), ..Default::default() };
+        assert!(delivery_message(&f).contains("✗"));
+        assert!(delivery_message(&f).contains("step boom"));
     }
 }

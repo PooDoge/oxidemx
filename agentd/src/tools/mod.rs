@@ -27,12 +27,15 @@ use crate::seams::HostCapability;
 /// Concrete [`ToolExecutor`] for agentd.
 ///
 /// Stores the project paths (used for cwd-scoped tools), a
-/// [`HostCapability`] seam (for host-delegated tools), and a
-/// [`RunLauncher`] seam (for run-launch + status tools, Task 5).
+/// [`HostCapability`] seam (for host-delegated tools), a
+/// [`RunLauncher`] seam (for run-launch + status tools, Task 5), and
+/// the `conversation_id` of the chat thread that created this executor
+/// (forwarded into `run_flow` → `RunLauncher::launch`).
 pub struct AgentToolExecutor {
     pub(crate) paths: ProjectPaths,
     pub(crate) host: Arc<dyn HostCapability>,
     pub(crate) run_launcher: Arc<dyn crate::run_launcher::RunLauncher>,
+    pub(crate) conversation_id: String,
 }
 
 impl AgentToolExecutor {
@@ -40,8 +43,9 @@ impl AgentToolExecutor {
         paths: ProjectPaths,
         host: Arc<dyn HostCapability>,
         run_launcher: Arc<dyn crate::run_launcher::RunLauncher>,
+        conversation_id: String,
     ) -> Self {
-        Self { paths, host, run_launcher }
+        Self { paths, host, run_launcher, conversation_id }
     }
 }
 
@@ -70,7 +74,7 @@ impl ToolExecutor for AgentToolExecutor {
             "persona"      => agent::persona(&args),
             "schedule_task" => agent::schedule_task(&args).await,
             "compose_flow" => agent::compose_flow(&args).await,
-            "run_flow"     => agent::run_flow(&self.run_launcher, &self.paths, &args).await,
+            "run_flow"     => agent::run_flow(&self.run_launcher, &self.paths, &self.conversation_id, &args).await,
             "run_status"   => agent::run_status(&self.run_launcher, &args).await,
             "list_runs"    => agent::list_runs(&self.run_launcher, &self.paths, &args).await,
 
@@ -104,6 +108,7 @@ mod tests {
             ProjectPaths::resolve(cwd),
             Arc::new(UnavailableHost),
             Arc::new(crate::run_launcher::NoopRunLauncher),
+            String::new(),
         )
     }
 

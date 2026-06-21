@@ -340,6 +340,8 @@ fn start_run(state: &mut App) -> Task<Message> {
         cancel,
         approval,
         allowlist: load_allowlist(),
+        // Mission Control runs flows locally, not from a chat conversation.
+        conversation_id: String::new(),
     };
 
     Task::stream(run_stream(plan, opts))

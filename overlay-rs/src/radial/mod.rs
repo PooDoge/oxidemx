@@ -31,7 +31,9 @@ mod painter;
 mod state;
 mod submenu;
 
-pub use chat_threads::{load_chat_threads, now_secs, save_chat_threads, ChatMessage, ChatThread};
+pub use chat_threads::{
+    load_chat_threads, now_secs, save_chat_threads, ArtifactBody, ChatMessage, ChatThread,
+};
 pub use pages::AI_PAGE_NAME;
 pub use painter::Painter;
 pub use submenu::{
@@ -157,6 +159,11 @@ pub struct RadialState {
     pub ai_turn_tokens: (u32, u32),
     /// Agent/flow card messages (by history index) the user expanded.
     pub ai_card_expanded: std::collections::HashSet<usize>,
+    /// Artifact absolute paths the user manually expanded (keyed by abs path string).
+    pub ai_artifact_expanded: std::collections::HashSet<String>,
+    /// Cached artifact bodies (raw text + parsed markdown), populated once at
+    /// flow-card delivery. Keyed by absolute path string. Runtime-only.
+    pub ai_artifact_cache: std::collections::HashMap<String, ArtifactBody>,
     /// A reply image opened in the full-window lightbox (its URL/path),
     /// or `None` when the lightbox is closed.
     pub ai_lightbox: Option<String>,

@@ -229,6 +229,7 @@ async fn cmd_run(args: &[String]) -> ExitCode {
         cancel,
         approval,
         allowlist,
+        conversation_id: String::new(),
     };
     let outcome = run_flow(&plan, run_opts, Arc::new(JsonLinesSink)).await;
 
@@ -408,6 +409,7 @@ async fn cmd_tick(args: &[String]) -> ExitCode {
             cancel: CancellationToken::new(),
             approval: ApprovalPolicy::parse(&plan.doc.manifest.defaults.approval),
             allowlist: allowlist.clone(),
+            conversation_id: String::new(),
         };
         let outcome = run_flow(&plan, run_opts, Arc::new(JsonLinesSink)).await;
         let record = serde_json::json!({

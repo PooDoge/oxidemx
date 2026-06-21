@@ -51,7 +51,14 @@ pub fn conversation<'a>(state: &'a RadialState, kit: &Kit) -> Element<'a, Messag
         for (i, msg) in state.chat().history.iter().enumerate() {
             if let Some(card) = &msg.card {
                 let expanded = state.ai_card_expanded.contains(&i);
-                list = list.push(super::cards::view(card, &kit, i, expanded));
+                list = list.push(super::cards::view(
+                    card,
+                    &kit,
+                    i,
+                    expanded,
+                    &state.ai_artifact_expanded,
+                    &state.ai_artifact_cache,
+                ));
                 continue;
             }
             list = list.push(bubble_row(state, kit, i, msg));

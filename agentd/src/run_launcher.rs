@@ -57,6 +57,7 @@ pub trait RunLauncher: Send + Sync {
         project: &str,
         flow_id: &str,
         inputs_json: &str,
+        conversation_id: &str,
     ) -> Result<String, String>;
 
     /// Current status of `run_id`, or `None` if unknown (never started / GC'd).
@@ -77,6 +78,7 @@ impl RunLauncher for NoopRunLauncher {
         _project: &str,
         _flow_id: &str,
         _inputs_json: &str,
+        _conversation_id: &str,
     ) -> Result<String, String> {
         Err("run launching is not available in this context".into())
     }
@@ -109,7 +111,7 @@ impl ConductorRunLauncher {
 
 #[async_trait]
 impl RunLauncher for ConductorRunLauncher {
-    async fn launch(&self, project: &str, flow_id: &str, inputs_json: &str)
+    async fn launch(&self, project: &str, flow_id: &str, inputs_json: &str, conversation_id: &str)
         -> Result<String, String>
     {
         let cwd = PathBuf::from(project);
@@ -199,6 +201,7 @@ impl RunLauncher for ConductorRunLauncher {
             cancel: cancel.clone(),
             approval: oxidemx_conductor::approval::ApprovalPolicy::Autonomous,
             allowlist: vec![],
+            conversation_id: conversation_id.to_string(),
         };
 
         // ── 8. Register handle ────────────────────────────────────────────
@@ -216,6 +219,7 @@ impl RunLauncher for ConductorRunLauncher {
         let bridge = Arc::new(RunEventBridge::new(
             project,
             run_id.clone(),
+            conversation_id,
             self.emitter.clone(),
             self.run_statuses.clone(),
         ));
@@ -269,7 +273,7 @@ mod tests {
     #[tokio::test]
     async fn noop_launcher_fails_honestly_and_queries_empty() {
         let l = NoopRunLauncher;
-        assert!(l.launch("/tmp/p", "flow", "{}").await.is_err());
+        assert!(l.launch("/tmp/p", "flow", "{}", "").await.is_err());
         assert_eq!(l.status("run-1"), None);
         assert!(l.list_runs("/tmp/p").is_empty());
     }
@@ -304,7 +308,7 @@ mod tests {
         let l = launcher_with_statuses(&[]);
         // A flow id that does not exist on disk must surface a real error,
         // never a fake "launched".
-        let err = l.launch("/tmp/nonexistent-project", "definitely-not-a-real-flow", "{}")
+        let err = l.launch("/tmp/nonexistent-project", "definitely-not-a-real-flow", "{}", "")
             .await
             .unwrap_err();
         assert!(!err.is_empty());

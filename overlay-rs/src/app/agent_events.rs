@@ -206,12 +206,13 @@ fn demux_event(thread_or_run: &str, payload_json: &str) -> Message {
             };
             let view = crate::activity::RunEventView {
                 run_id: val.get("run_id").and_then(|x| x.as_str()).unwrap_or(thread_or_run).to_string(),
+                conversation_id: val.get("conversation_id").and_then(|x| x.as_str()).unwrap_or_default().to_string(),
                 variant: val.get("variant").and_then(|x| x.as_str()).unwrap_or("run").to_string(),
                 flow_id: s(&d, "flow_id"),
                 steps: strs(&d, "steps"),
                 step: s(&d, "step"),
                 agent: s(&d, "agent"),
-                message: { let m = s(&d, "message"); if m.is_empty() { s(&d, "error") } else { m } },
+                message: { let m = s(&d, "message"); if !m.is_empty() { m } else { let e = s(&d, "error"); if !e.is_empty() { e } else { s(&d, "reason") } } },
                 success: d.get("success").and_then(|x| x.as_bool()).unwrap_or(false),
                 artifact: d.get("artifact").and_then(|x| x.as_str()).map(String::from),
                 summary: s(&d, "summary"),
@@ -230,6 +231,23 @@ fn demux_event(thread_or_run: &str, payload_json: &str) -> Message {
 #[cfg(test)]
 mod run_parse_tests {
     use super::*;
+
+    #[test]
+    fn demux_run_event_carries_conversation_id() {
+        let payload = serde_json::json!({
+            "kind": "run", "variant": "RunFinished", "run_id": "run-1",
+            "conversation_id": "chat-4",
+            "details": { "artifacts": ["ANSWER.md"], "handoff_markdown": "done" }
+        }).to_string();
+        match demux_event("run-1", &payload) {
+            Message::RunEvent(v) => {
+                assert_eq!(v.conversation_id, "chat-4");
+                assert_eq!(v.variant, "RunFinished");
+                assert_eq!(v.handoff, "done");
+            }
+            _ => panic!("expected RunEvent"),
+        }
+    }
 
     #[test]
     fn parses_run_started_into_view() {
@@ -251,6 +269,25 @@ mod run_parse_tests {
         let payload = r#"{"kind":"run","variant":"TaskError","run_id":"run-9","details":{"step":"a","error":"boom"}}"#;
         match demux_event("run-9", payload) {
             Message::RunEvent(v) => { assert_eq!(v.variant, "TaskError"); assert_eq!(v.message, "boom"); }
+            other => panic!("expected RunEvent, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn run_failed_reason_reaches_message() {
+        // RunFailed payloads from the conductor carry `details.reason`
+        // (no `message` or `error` field).  The fallback chain must
+        // surface it or the auto-delivered chat notice shows "(no reason reported)".
+        let payload = serde_json::json!({
+            "kind": "run", "variant": "RunFailed", "run_id": "run-7",
+            "details": { "reason": "step boom" }
+        }).to_string();
+        match demux_event("run-7", &payload) {
+            Message::RunEvent(v) => {
+                assert_eq!(v.variant, "RunFailed");
+                assert_eq!(v.message, "step boom",
+                    "reason must be in fallback chain; got '{}'", v.message);
+            }
             other => panic!("expected RunEvent, got {other:?}"),
         }
     }

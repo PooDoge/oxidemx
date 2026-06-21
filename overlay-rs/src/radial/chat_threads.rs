@@ -2,6 +2,13 @@
 //! `ChatThread`, and the load/save round-trip to
 //! `~/.config/oxidemx/ai-chats.json`.
 
+/// Cached body of a flow artifact: raw text + parsed markdown items.
+/// Runtime-only — never persisted.
+pub struct ArtifactBody {
+    pub raw: String,
+    pub md: Vec<iced::widget::markdown::Item>,
+}
+
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct ChatMessage {
     pub is_user: bool,
@@ -135,6 +142,11 @@ pub struct ChatThread {
     /// First user prompt, truncated — shown in the thread list.
     #[serde(default)]
     pub title: String,
+    /// Runtime-only: whether this thread currently has an AI turn in
+    /// flight. Never serialized — resets to `false` on load, which is
+    /// correct (an in-flight turn cannot survive an overlay restart).
+    #[serde(skip)]
+    pub working: bool,
     pub mode: crate::ai_client::AgentMode,
     #[serde(default)]
     pub history: Vec<ChatMessage>,
@@ -180,6 +192,7 @@ impl Default for ChatThread {
     fn default() -> Self {
         ChatThread {
             title: String::new(),
+            working: false,
             mode: crate::ai_client::AgentMode::Agentic,
             history: Vec::new(),
             session_id: None,
@@ -191,6 +204,13 @@ impl Default for ChatThread {
             summary_upto: 0,
         }
     }
+}
+
+/// The active thread's working flag is mirrored onto the window-global
+/// `ai_loading` (which the footer reads). A background thread changing state
+/// must not touch the active mirror.
+pub fn mirror_loading(active: usize, idx: usize, on: bool, current: bool) -> bool {
+    if idx == active { on } else { current }
 }
 
 /// Most threads kept on disk — oldest beyond this are dropped on save.
@@ -238,5 +258,17 @@ pub fn save_chat_threads(threads: &[ChatThread]) {
             }
         }
         Err(e) => tracing::warn!(error = %e, "failed to serialise AI chats"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::mirror_loading;
+
+    #[test]
+    fn working_mirrors_only_active_thread() {
+        assert!(mirror_loading(2, 2, true, false));   // active thread on → mirror on
+        assert!(!mirror_loading(2, 0, true, false));  // other thread on → mirror unchanged
+        assert!(mirror_loading(2, 0, true, true));    // other thread → keep current true
     }
 }

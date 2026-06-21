@@ -866,7 +866,11 @@ fn chat_window_view(state: &RadialState) -> Element<'_, Message> {
         1.0,
         pulse,
     );
-    if let Some(dock) = crate::activity::dock::dock_view(&state.activity, &kit) {
+    let active_conv = state.ai_threads
+        .get(state.ai_active)
+        .and_then(|t| t.session_id.clone())
+        .unwrap_or_default();
+    if let Some(dock) = crate::activity::dock::dock_view(&state.activity, &kit, &active_conv) {
         children.push(
             iced::widget::container(dock)
                 .width(Length::Fill)

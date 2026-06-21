@@ -817,12 +817,12 @@ pub(super) fn update(state: &mut RadialState, message: Message) -> Task<Message>
             user_msg.image_path = thumb_path;
             chat.history.push(user_msg);
             chat.updated_at = now;
-            state.ai_loading = true;
+            let thread_idx = state.ai_active;
+            state.set_thread_working(thread_idx, true);
             state.ai_turn_tokens = (0, 0);
             state.ai_activity = Some("Thinking…".to_string());
             let mode = state.chat().mode;
             let model = state.chat().model.clone();
-            let thread_idx = state.ai_active;
             // Each thread carries a stable session id (survives the thread
             // list's index-shifting deletes). Mint one on first turn; the
             // session manager keys the thread's reused provider on it.
@@ -892,7 +892,7 @@ pub(super) fn update(state: &mut RadialState, message: Message) -> Task<Message>
             Task::batch([task, scroll_chat_to_end()])
         }
         Message::AiResponseReceived(thread_idx, res) => {
-            state.ai_loading = false;
+            state.set_thread_working(thread_idx, false);
             state.ai_activity = None;
             state.ai_stream = None;
             state.ai_stream_md = Vec::new();
@@ -1064,7 +1064,7 @@ pub(super) fn update(state: &mut RadialState, message: Message) -> Task<Message>
                         }
                     },
                 );
-                state.ai_loading = false;
+                state.set_thread_working(state.ai_active, false);
                 state.ai_activity = Some("Stop requested (cancellation not yet available)".to_string());
                 state.ai_stream_md = Vec::new();
                 if let Some((idx, partial)) = state.ai_stream.take() {
@@ -1086,7 +1086,7 @@ pub(super) fn update(state: &mut RadialState, message: Message) -> Task<Message>
                     use oxidemx_agent::session::SessionStore;
                     crate::agent_runtime::SESSIONS.cancel(&id);
                 }
-                state.ai_loading = false;
+                state.set_thread_working(state.ai_active, false);
                 state.ai_activity = None;
                 state.ai_stream_md = Vec::new();
                 if let Some((idx, partial)) = state.ai_stream.take() {
@@ -1464,7 +1464,7 @@ pub(super) fn update(state: &mut RadialState, message: Message) -> Task<Message>
                     .chat_mut()
                     .history
                     .push(ChatMessage::user(choice.clone()));
-                state.ai_loading = true;
+                state.set_thread_working(state.ai_active, true);
                 Task::perform(
                     async move {
                         let _ = tx.send(choice).await;
@@ -1477,7 +1477,7 @@ pub(super) fn update(state: &mut RadialState, message: Message) -> Task<Message>
         }
         Message::AiQuestionReceived(pending) => {
             state.ai_pending_question = Some(pending);
-            state.ai_loading = false;
+            state.set_thread_working(state.ai_active, false);
             state.trigger_ripple();
             Task::none()
         }
@@ -1621,7 +1621,7 @@ pub(super) fn update(state: &mut RadialState, message: Message) -> Task<Message>
 
         // agentd turn complete — commit the final reply text.
         Message::AgentdFinal { thread_idx, text } => {
-            state.ai_loading = false;
+            state.set_thread_working(thread_idx, false);
             state.ai_activity = None;
             state.ai_stream = None;
             state.ai_stream_md = Vec::new();
@@ -1644,7 +1644,9 @@ pub(super) fn update(state: &mut RadialState, message: Message) -> Task<Message>
         } => {
             state.ai_agentd_approval = Some((request_id, card_json));
             // Mark as not loading so the user can see the approval card.
-            state.ai_loading = false;
+            // `thread` is a session-id string, not an index; use the active
+            // thread (approval cards surface on the active conversation).
+            state.set_thread_working(state.ai_active, false);
             state.ai_activity = Some(format!("Waiting for approval (thread {thread})"));
             Task::none()
         }
@@ -1652,7 +1654,7 @@ pub(super) fn update(state: &mut RadialState, message: Message) -> Task<Message>
         // User responded to an agentd approval card.
         Message::AgentdRespondApproval { request_id, allow } => {
             state.ai_agentd_approval = None;
-            state.ai_loading = true;
+            state.set_thread_working(state.ai_active, true);
             state.ai_activity = Some("Continuing…".to_string());
             let project = crate::ai_client::agentd_project();
             Task::perform(
@@ -1717,6 +1719,77 @@ pub(super) fn update(state: &mut RadialState, message: Message) -> Task<Message>
             if state.chat_window_mode {
                 state.activity.apply_run_event(&view);
             }
+            // Auto-deliver terminal results into the originating conversation.
+            let terminal = matches!(view.variant.as_str(),
+                "RunFinished" | "RunFailed" | "RunCancelled");
+            if terminal {
+                let idx = crate::app::agent_events::session_to_thread_idx(
+                    &state.ai_threads, &view.conversation_id);
+                if let Some(idx) = idx {
+                    let body = crate::activity::delivery_message(&view);
+                    if !body.is_empty() {
+                        let mut msg = ChatMessage::assistant(body);
+                        msg.card = Some(crate::ai_client::AgentCardData::Flow {
+                            flow_id: view.flow_id.clone(),
+                            run_id: view.run_id.clone(),
+                            success: view.variant == "RunFinished",
+                            steps: vec![],
+                            artifacts: view.artifacts.clone(),
+                        });
+                        // Populate artifact-body cache once at delivery so the render
+                        // path never does per-frame file I/O.
+                        for rel in &view.artifacts {
+                            let abs = crate::chat_ui::cards::run_artifact_abs(
+                                &view.run_id,
+                                rel,
+                            );
+                            let key = abs.to_string_lossy().to_string();
+                            state.ai_artifact_cache.entry(key).or_insert_with(|| {
+                                let mut raw =
+                                    std::fs::read_to_string(&abs).unwrap_or_default();
+                                if raw.len() > 65536 {
+                                    let mut end = 65536usize;
+                                    while !raw.is_char_boundary(end) {
+                                        end -= 1;
+                                    }
+                                    raw.truncate(end);
+                                }
+                                let ext = abs
+                                    .extension()
+                                    .and_then(|e| e.to_str())
+                                    .unwrap_or("")
+                                    .to_lowercase();
+                                let md_items: Vec<iced::widget::markdown::Item> =
+                                    match ext.as_str() {
+                                        "md" | "markdown" | "txt" | "" => {
+                                            iced::widget::markdown::parse(&raw).collect()
+                                        }
+                                        other => {
+                                            let lang =
+                                                crate::chat_ui::cards::lang_for_ext(other);
+                                            let fenced =
+                                                format!("```{lang}\n{raw}\n```");
+                                            iced::widget::markdown::parse(&fenced).collect()
+                                        }
+                                    };
+                                crate::radial::ArtifactBody {
+                                    raw,
+                                    md: md_items,
+                                }
+                            });
+                        }
+                        if let Some(t) = state.ai_threads.get_mut(idx) {
+                            t.history.push(msg);
+                            t.updated_at = crate::radial::now_secs();
+                        }
+                        state.set_thread_working(idx, false);
+                        crate::radial::save_chat_threads(&state.ai_threads);
+                        if idx == state.ai_active {
+                            return scroll_chat_to_end();
+                        }
+                    }
+                }
+            }
             Task::none()
         }
 
@@ -1771,6 +1844,33 @@ pub(super) fn update(state: &mut RadialState, message: Message) -> Task<Message>
         Message::RunOpenArtifact(path) => {
             // xdg-open is fire-and-forget; failure is non-fatal.
             let _ = std::process::Command::new("xdg-open").arg(&path).spawn();
+            Task::none()
+        }
+
+        Message::RunOpenFolder(path) => {
+            let dir = std::path::Path::new(&path)
+                .parent()
+                .map(|p| p.to_path_buf())
+                .unwrap_or_else(|| std::path::PathBuf::from(&path));
+            let _ = std::process::Command::new("xdg-open").arg(dir).spawn();
+            Task::none()
+        }
+
+        Message::RunCopyPath(path) => {
+            state.ai_toast = Some(("✓ Copied".to_string(), std::time::Instant::now()));
+            Task::batch([
+                iced::clipboard::write(path),
+                Task::perform(
+                    tokio::time::sleep(std::time::Duration::from_millis(1600)),
+                    |_| Message::AiToastExpire,
+                ),
+            ])
+        }
+
+        Message::ArtifactToggleExpand(path) => {
+            if !state.ai_artifact_expanded.remove(&path) {
+                state.ai_artifact_expanded.insert(path);
+            }
             Task::none()
         }
 

@@ -293,6 +293,12 @@ pub enum Message {
     RunRetry(String, String),
     /// Open an artifact path with xdg-open.
     RunOpenArtifact(String),
+    /// Open the folder containing an artifact (xdg-open the parent dir).
+    RunOpenFolder(String),
+    /// Copy an absolute artifact path to the clipboard.
+    RunCopyPath(String),
+    /// Toggle a chat artifact card's expanded/collapsed body (keyed by abs path).
+    ArtifactToggleExpand(String),
     /// Append the run's handoff / bubble logs into the active chat thread.
     RunTranscript(String),
 
