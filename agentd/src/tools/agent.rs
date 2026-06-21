@@ -174,6 +174,7 @@ pub(super) async fn compose_flow(args: &Value) -> Result<String, String> {
 pub(super) async fn run_flow(
     launcher: &Arc<dyn RunLauncher>,
     paths: &crate::projects::ProjectPaths,
+    conversation_id: &str,
     args: &Value,
 ) -> Result<String, String> {
     let flow_id = args["flow_id"]
@@ -184,7 +185,7 @@ pub(super) async fn run_flow(
         .and_then(Value::as_str)
         .unwrap_or("{}");
     let project = paths.cwd.to_string_lossy();
-    match launcher.launch(&project, flow_id, inputs_json).await {
+    match launcher.launch(&project, flow_id, inputs_json, conversation_id).await {
         Ok(run_id) => Ok(format!(
             "Launched flow '{flow_id}' — run id `{run_id}`. It is now running in the \
              background; check its status with run_status(run_id=\"{run_id}\") — do not \
@@ -528,6 +529,7 @@ pub(super) mod test_support {
             _project: &str,
             _flow_id: &str,
             _inputs_json: &str,
+            _conversation_id: &str,
         ) -> Result<String, String> {
             Ok(self.run_id.clone())
         }
@@ -554,6 +556,7 @@ pub(super) mod test_support {
             crate::projects::ProjectPaths::resolve(cwd),
             host,
             Arc::new(crate::run_launcher::NoopRunLauncher),
+            String::new(),
         )
     }
 
@@ -566,6 +569,7 @@ pub(super) mod test_support {
             crate::projects::ProjectPaths::resolve(cwd),
             Arc::new(crate::seams::UnavailableHost),
             launcher,
+            String::new(),
         )
     }
 }
@@ -787,6 +791,34 @@ mod tests {
             .await
             .unwrap();
         assert!(out.contains("letters or numbers"));
+    }
+
+    // ── run_flow — conversation_id forwarding ────────────────────────────────
+
+    struct RecordingLauncher { last_conv: std::sync::Arc<std::sync::Mutex<String>> }
+    #[async_trait::async_trait]
+    impl crate::run_launcher::RunLauncher for RecordingLauncher {
+        async fn launch(&self, _p: &str, _f: &str, _i: &str, conversation_id: &str)
+            -> Result<String, String> {
+            *self.last_conv.lock().unwrap() = conversation_id.to_string();
+            Ok("run-test".into())
+        }
+        fn status(&self, _r: &str) -> Option<crate::run_launcher::RunStatus> { None }
+        fn list_runs(&self, _p: &str) -> Vec<String> { vec![] }
+    }
+
+    #[tokio::test]
+    async fn run_flow_forwards_conversation_id() {
+        // Capture the Arc before boxing so we can assert without downcast.
+        let captured = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
+        let l: std::sync::Arc<dyn crate::run_launcher::RunLauncher> =
+            std::sync::Arc::new(RecordingLauncher { last_conv: captured.clone() });
+        let paths = crate::projects::ProjectPaths::resolve(std::path::Path::new("/tmp"));
+        let args = serde_json::json!({ "flow_id": "doc-digest" });
+        let out = super::run_flow(&l, &paths, "chat-7", &args).await.unwrap();
+        assert!(out.contains("run-test"));
+        let conv = captured.lock().unwrap().clone();
+        assert_eq!(conv, "chat-7", "run_flow must forward conversation_id to launcher::launch");
     }
 
     // ── run_flow (real launcher) ──────────────────────────────────────────────

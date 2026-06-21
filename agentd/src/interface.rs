@@ -134,6 +134,7 @@ impl TurnRunner for CoreTurnRunner {
                 paths.clone(),
                 host.clone(),
                 run_launcher.clone(),
+                thread.to_string(),
             ));
         let prompt_adapter = std::sync::Arc::new(ApproverPrompt::new(
             approver.clone(),
@@ -566,7 +567,7 @@ impl AgentService {
     ) -> Result<String, AgentdError> {
         use crate::run_launcher::RunLauncher;
         self.run_launcher
-            .launch(project, flow_id, inputs_json)
+            .launch(project, flow_id, inputs_json, "")
             .await
             .map_err(AgentdError::NotFound)
     }
@@ -1034,6 +1035,7 @@ mod tests {
                     paths.clone(),
                     host.clone(),
                     Arc::new(crate::run_launcher::NoopRunLauncher),
+                    thread.to_string(),
                 );
                 use oxidemx_agent_core::tool::ToolExecutor;
                 let _ = exec.execute(
