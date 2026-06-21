@@ -161,8 +161,11 @@ fn read_settings_toml(oxide_dir: &Path) -> toml::Value {
 ///
 /// - Scalars / non-list arrays: `over` (closer) replaces `base`.
 /// - Arrays under a **known list key** (dotted path in `list_keys`): union
-///   (`base` + `over`, dedup preserving order, `base` first so closest
-///   items appear last — caller reverses layers to get closest-wins order).
+///   (`over` items first, then `base` items not already present, dedup
+///   preserving order).  The caller applies layers farthest→closest, so
+///   each successive `merge_toml` call places the closer layer's entries
+///   before the accumulated farther entries — yielding a globally
+///   closest-first union after all layers are merged.
 /// - Tables: recurse.
 ///
 /// `path` is the dotted key path accumulated during recursion (used to
@@ -196,9 +199,12 @@ fn merge_toml_at(
         }
         (toml::Value::Array(base_arr), toml::Value::Array(over_arr)) => {
             if list_keys.contains(&path) {
-                // Union: base items first, then over items not already present.
-                let mut result = base_arr.clone();
-                for item in over_arr {
+                // Union: over (closer layer) items first, then base items not
+                // already present.  Caller merges farthest→closest, so each
+                // call places the closer layer before accumulated farther
+                // entries — yielding a globally closest-first union.
+                let mut result = over_arr.clone();
+                for item in base_arr {
                     if !result.contains(&item) {
                         result.push(item);
                     }
@@ -268,13 +274,23 @@ allow = ["b", "c"]
             "closer scalar must win"
         );
 
-        // List union: base items first, over items appended (dedup).
+        // List union: over (closer) items first, then base-only items (dedup).
+        // Expected order: over had ["b","c"], base had ["a","b"].
+        // Result: ["b","c"] from over, then "a" from base (b already present).
         let allow = perm_allow(&merged);
         assert!(allow.contains(&"a".to_string()), "base-only item present");
         assert!(allow.contains(&"b".to_string()), "shared item present once");
         assert!(allow.contains(&"c".to_string()), "over-only item present");
         // Dedup: "b" appears exactly once.
         assert_eq!(allow.iter().filter(|&x| x == "b").count(), 1, "no duplicates");
+        // Positional: over items come before base-only items (closest-first).
+        // "b" (from over) must appear before "a" (base-only).
+        let pos_b = allow.iter().position(|x| x == "b").unwrap();
+        let pos_a = allow.iter().position(|x| x == "a").unwrap();
+        assert!(
+            pos_b < pos_a,
+            "closer layer's 'b' (pos {pos_b}) must precede farther layer's 'a' (pos {pos_a}); got {allow:?}"
+        );
     }
 
     // ── Integration test: walk-up semantics ────────────────────────────────
@@ -330,6 +346,15 @@ allow = ["b", "c"]
         assert!(
             !allow.contains(&"a".to_string()),
             "root=true must stop the user-global underlay"
+        );
+        // Positional (closest-first): sub's "c" (closer layer) must come before
+        // proj's "b" (farther layer).
+        let pos_c = allow.iter().position(|x| x == "c").unwrap();
+        let pos_b = allow.iter().position(|x| x == "b").unwrap();
+        assert_eq!(
+            allow,
+            vec!["c".to_string(), "b".to_string()],
+            "closest-first order required: sub 'c' (pos {pos_c}) before proj 'b' (pos {pos_b})"
         );
     }
 }

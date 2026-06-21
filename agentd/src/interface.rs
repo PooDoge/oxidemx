@@ -206,6 +206,7 @@ impl ProjectRegistry {
         if let Some(base) = &self.store_base_override {
             let key = ProjectKey::from_cwd(cwd);
             let store = base.join("projects").join(key.as_str());
+            // SYNC: keep this .oxide/.oxidemx resolution in step with ProjectPaths::resolve (projects.rs).
             // Prefer .oxide; fall back to .oxidemx for back-compat.
             let preferred = cwd.join(".oxide");
             let compat = cwd.join(".oxidemx");
