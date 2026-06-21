@@ -9,6 +9,7 @@ pub mod interface;
 pub mod journal;
 pub mod model;
 pub mod models;
+pub mod project_store;
 pub mod projects;
 pub mod run_bridge;
 pub mod run_launcher;
