@@ -666,20 +666,36 @@ pub(super) fn update(state: &mut RadialState, message: Message) -> Task<Message>
         }
         Message::WindowCloseRequested(id) => {
             // The standalone chat window sets `exit_on_close_request=false`, so the
-            // WM close (X) arrives here. `iced::application` runs on the daemon loop
-            // and won't end on its own when the last window closes — return
-            // `iced::exit()` to terminate `run()` and let the process exit cleanly.
-            // Gated on chat_window_mode: the radial overlay keeps the default
-            // behaviour and never sets exit_on_close_request=false, so this can't
-            // fire there.
+            // WM close (X) arrives here instead of the runtime destroying the window
+            // in place. We must terminate the process ourselves.
+            //
+            // We do NOT use `iced::exit()` (graceful event-loop teardown): the chat
+            // process holds a multi-thread tokio runtime + a leaked zbus connection
+            // (bin/oxidemx-chat.rs), and tearing those down — plus the wgpu/Wayland
+            // surface — on the main thread can block, which the compositor reports as
+            // "Not Responding" and the user has to force-quit. The UI loop is done and
+            // all chat state is persisted on every change, so exit immediately without
+            // running destructors; the OS reaps the runtime, sockets, and GPU surface.
+            // Gated on chat_window_mode: the radial overlay keeps default close
+            // behaviour and never sets exit_on_close_request=false, so this can't fire
+            // there.
             if state.chat_window_mode {
-                info!("chat window close requested ({id:?}); exiting");
-                return iced::exit();
+                info!(
+                    "chat window close requested ({id:?}); pid={} exiting immediately",
+                    std::process::id()
+                );
+                crate::radial::save_chat_threads(&state.ai_threads);
+                std::process::exit(0);
             }
             Task::none()
         }
         Message::WindowOpened(id) => {
-            info!("WindowOpened event received: {:?}", id);
+            info!(
+                "WindowOpened event received: {:?} (pid={}, chat_window_mode={})",
+                id,
+                std::process::id(),
+                state.chat_window_mode
+            );
             state.window_id = Some(id);
             // Vision-loop dev hook (OXIDEMX_VISION_SHOT=<png path>):
             // self-show without any daemon signal, optionally jump
