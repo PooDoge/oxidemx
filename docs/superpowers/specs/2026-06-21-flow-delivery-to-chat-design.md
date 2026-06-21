@@ -153,15 +153,21 @@ falling back to the broken in-proc path.
 
 ---
 
-## Build phasing (ship value incrementally inside S1)
+## Build order (single shippable cut — cards included, per approval 2026-06-21)
 
-1. **Phase 1 — Foundation + truthful delivery:** `use_agentd` revert fix (F) → `ToolContext` +
-   `conversation_id` end-to-end (A) → per-conversation run state (B) → auto-deliver plain handoff +
-   clear state + failure/cancel notices (B/C) → retire in-proc scrape; authoritative status +
-   `run_status` reachable (E). **This phase alone fixes the stuck-state, terseness, missing-delivery,
-   and false-failed bugs.**
-2. **Phase 2 — Enrichment:** inline artifact cards (D) + conversation-scoped bubbles (B) + the result
-   header polish (C) + run self-introspection (E).
+Cards ship in the first cut. Implementation order follows the dependency chain (each task ends with
+an independently testable deliverable):
+
+1. **`use_agentd` revert fix (F)** — prerequisite; flows require agentd.
+2. **`ToolContext` + `conversation_id` end-to-end (A)** — the linkage foundation.
+3. **Per-conversation run state (B)** — retire window-global `ai_loading`.
+4. **Auto-deliver on `RunFinished` + clear state + failure/cancel notices (B/C)** — fixes
+   missing-delivery, stuck-state, terseness.
+5. **Authoritative status + `run_status` reachable; retire in-proc scrape (E)** — fixes false-failed
+   (Rule 1).
+6. **Inline artifact cards (D)** — open/folder/copy, truncate/expand, markdown vs `iced_highlighter`,
+   density-aware.
+7. **Conversation-scoped bubbles (B) + result-header polish (C) + run self-introspection (E).**
 
 ## Out of scope (future specs)
 
