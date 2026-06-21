@@ -1,5 +1,14 @@
 # Open items from Jim (2026-06-21) — flow output UX + bugs + next brainstorm
 
+## ⮕ RESUME ANCHOR (post-compaction entry point)
+**State:** W1 (conductor correctness) is DONE + MERGED to `phase1-local-llm-gateway` (e76a136) +
+**now installed** (agentd + oxidemx-conductor host-built + pkexec'd 2026-06-21; `use_agentd:true`
+re-set; agentd restarted; one clean `oxidemx-chat` relaunched in agentd mode). Program memory:
+[[project_flow_schema_v2]] (W1 ✅, Phase 2a next). Deploy rule reinforced: [[feedback_install_and_restart_after_updates]].
+**Next action:** Jim will add more brainstorming points, then we brainstorm THIS batch (below) +
+**Phase 2a (typed structured I/O)** — the next Flow Schema v2 slice. Use the superpowers
+brainstorming skill. The items below are the agreed scope to fold in.
+
 Captured before context compaction. These come AFTER W1 (shipped) and feed the next
 brainstorming batch alongside Phase 2a (typed I/O).
 
