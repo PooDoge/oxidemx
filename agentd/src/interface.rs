@@ -1082,6 +1082,104 @@ impl AgentService {
         let infos = self.models.list();
         serde_json::to_string(&infos).map_err(|e| AgentdError::Io(e.to_string()))
     }
+
+    // ── migrate_on_start ──────────────────────────────────────────────────────
+
+    /// Startup migration: ensure the Personal project exists, then scan every
+    /// project store directory for transcript files not yet in the Personal
+    /// conversation index, and upsert a `Conversation` row for each.
+    ///
+    /// Idempotent: threads already indexed are silently skipped.
+    /// Best-effort: a bad/unreadable transcript logs a warning and continues.
+    pub async fn migrate_on_start(&self) -> Result<(), AgentdError> {
+        let store = self.project_store();
+        let personal = store.ensure_personal();
+        let index = self.conversation_index_for(&personal);
+        let projects_root = self.projects.projects_root();
+        let default_model = oxidemx_shared::config::AiConfig::default().model;
+
+        // Enumerate every subdirectory under the projects root — each is a
+        // project-key-named store dir that may contain a `transcripts/` subdir.
+        let entries = match std::fs::read_dir(&projects_root) {
+            Ok(e) => e,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(e) => return Err(AgentdError::Io(e.to_string())),
+        };
+
+        for entry in entries.flatten() {
+            let store_dir = entry.path();
+            if !store_dir.is_dir() {
+                continue;
+            }
+            let transcripts_dir = store_dir.join("transcripts");
+            let ts = crate::sessions::TranscriptStore::new(&transcripts_dir);
+            let threads = match ts.list_threads() {
+                Ok(t) => t,
+                Err(e) => {
+                    tracing::warn!("migrate_on_start: list_threads failed for {}: {e}", transcripts_dir.display());
+                    continue;
+                }
+            };
+
+            for thread_id in threads {
+                let cid = ConversationId::from(thread_id.as_str());
+                if index.get(&cid).is_some() {
+                    continue; // already indexed
+                }
+                let turns = match ts.read(&thread_id) {
+                    Ok(t) => t,
+                    Err(e) => {
+                        tracing::warn!("migrate_on_start: read transcript {thread_id} failed: {e}");
+                        continue;
+                    }
+                };
+                let title: String = turns
+                    .iter()
+                    .find(|t| t.role == "user")
+                    .map(|t| t.text.chars().take(60).collect())
+                    .unwrap_or_default();
+                let created_at = turns.first().map(|t| t.ts).unwrap_or_else(now_ms);
+                let updated_at = turns.last().map(|t| t.ts).unwrap_or(created_at);
+                let conv = Conversation {
+                    id: cid,
+                    project_id: personal.id.clone(),
+                    title,
+                    working_dir: personal.default_working_dir.clone(),
+                    model: default_model.clone(),
+                    summary: String::new(),
+                    summary_upto: 0,
+                    tokens_prompt: 0,
+                    tokens_completion: 0,
+                    created_at,
+                    updated_at,
+                    worktree: None,
+                };
+                index.upsert(conv);
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Test helper: delete all `conversations.json` files under the projects
+    /// root so the migration test can simulate an upgrade where transcripts
+    /// exist but the index does not.
+    ///
+    /// Only compiled in `#[cfg(test)]`.
+    #[cfg(test)]
+    pub fn debug_delete_conversation_index_files(&self) {
+        let projects_root = self.projects.projects_root();
+        let entries = match std::fs::read_dir(&projects_root) {
+            Ok(e) => e,
+            Err(_) => return,
+        };
+        for entry in entries.flatten() {
+            let conv_json = entry.path().join("conversations.json");
+            if conv_json.exists() {
+                let _ = std::fs::remove_file(&conv_json);
+            }
+        }
+    }
 }
 
 // ── D-Bus interface ───────────────────────────────────────────────────────────
@@ -2136,6 +2234,25 @@ You are an echo agent. Repeat the task back.
             json.contains("personal"),
             "expected 'personal' in JSON; got: {json}"
         );
+    }
+
+    // ── Task 9: migrate_on_start indexes pre-existing transcripts ────────────
+
+    #[tokio::test]
+    async fn migration_creates_personal_and_indexes_existing_transcripts() {
+        let env = TestEnv::new();
+        // simulate a pre-existing transcript by sending a message first
+        env.svc.send_message(env.cwd_str(), "chat-old", "old prompt", None).await.unwrap();
+        // wipe the index (simulate upgrade from a build with transcripts but no index)
+        env.svc.debug_delete_conversation_index_files();
+        env.svc.migrate_on_start().await.unwrap();
+        let personal = env.svc.list_projects().await.unwrap()
+            .into_iter()
+            .find(|p| p.id.as_str() == "personal")
+            .unwrap();
+        let convs = env.svc.list_conversations(personal.id.as_str()).await.unwrap();
+        assert!(convs.iter().any(|c| c.id.as_str() == "chat-old"),
+            "expected chat-old in Personal conversations after migration; got: {convs:#?}");
     }
 
     // ── Test 7: remove_worktree respects dirty flag (Findings 2 + 3) ─────────

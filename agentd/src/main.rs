@@ -133,6 +133,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
     let svc = Arc::new(svc);
 
+    // 4a. Run startup migration (best-effort; never aborts startup on error).
+    if let Err(e) = svc.migrate_on_start().await {
+        tracing::warn!("migrate_on_start failed (non-fatal): {e}");
+    }
+
     // 5. Build the zbus session connection, serving at /org/oxidemx/Agent.
     let connection = zbus::connection::Builder::session()?
         .serve_at("/org/oxidemx/Agent", AgentInterface::new(svc.clone()))?
