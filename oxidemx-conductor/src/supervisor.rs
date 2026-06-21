@@ -80,6 +80,10 @@ pub struct RunOptions {
     /// allowlist installed for `execute_command`).
     pub approval: ApprovalPolicy,
     pub allowlist: Vec<String>,
+    /// The chat conversation that launched this run (`ChatThread.session_id` /
+    /// agentd `thread`), echoed back on run events so the UI delivers the
+    /// result to the originating conversation. Empty for non-chat launches.
+    pub conversation_id: String,
 }
 
 /// A handle to an in-flight run: its id and the token that cancels it.
@@ -748,6 +752,7 @@ fn write_run_json(opts: &RunOptions, flow_id: &str, success: bool, artifacts: &[
         "success": success,
         "artifacts": artifacts,
         "error": error,
+        "conversation_id": opts.conversation_id,
     });
     let _ = std::fs::write(
         opts.workdir.join("run.json"),
@@ -867,6 +872,7 @@ mod tests {
             cancel: CancellationToken::new(),
             approval: ApprovalPolicy::Autonomous,
             allowlist: vec![],
+            conversation_id: String::new(),
         }
     }
 
@@ -1155,5 +1161,26 @@ output = "B.md"
         assert!(dir.join("A.md").exists());
         assert!(!dir.join("B.md").exists());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn run_json_records_conversation_id() {
+        let dir = std::env::temp_dir().join(format!("oxidemx-condtest-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let opts = RunOptions {
+            run_id: "run-1".into(),
+            inputs: Default::default(),
+            workdir: dir.clone(),
+            roster: roster(),
+            factory: std::sync::Arc::new(FixedFactory(crate::mock::MockProvider::echoing())),
+            cancel: tokio_util::sync::CancellationToken::new(),
+            approval: crate::approval::ApprovalPolicy::Autonomous,
+            allowlist: vec![],
+            conversation_id: "chat-9".into(),
+        };
+        write_run_json(&opts, "doc-digest", true, &["ANSWER.md".into()], &None);
+        let v: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(dir.join("run.json")).unwrap()).unwrap();
+        assert_eq!(v["conversation_id"], "chat-9");
     }
 }

@@ -114,7 +114,6 @@ impl RunLauncher for ConductorRunLauncher {
     async fn launch(&self, project: &str, flow_id: &str, inputs_json: &str, conversation_id: &str)
         -> Result<String, String>
     {
-        let _ = conversation_id; // wired into RunOptions/RunEventBridge in Tasks 3-4
         let cwd = PathBuf::from(project);
         let paths = ProjectPaths::resolve(&cwd);
 
@@ -202,6 +201,7 @@ impl RunLauncher for ConductorRunLauncher {
             cancel: cancel.clone(),
             approval: oxidemx_conductor::approval::ApprovalPolicy::Autonomous,
             allowlist: vec![],
+            conversation_id: conversation_id.to_string(),
         };
 
         // ── 8. Register handle ────────────────────────────────────────────
