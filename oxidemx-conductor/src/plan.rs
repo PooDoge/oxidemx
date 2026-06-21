@@ -86,6 +86,37 @@ impl FlowPlan {
     pub fn ancestors_of(&self, id: &str) -> Option<&BTreeSet<String>> {
         self.ancestors.get(id)
     }
+
+    /// Steps grouped into the parallel execution stages the scheduler
+    /// produces: stage 0 = entry nodes (no `needs`); stage N = steps whose
+    /// `needs` all resolved in stages `0..N`. Order within a stage follows
+    /// `topo` (deterministic). This mirrors the supervisor's readiness rule
+    /// and is the concurrency contract the flow_stages tests assert.
+    pub fn stages(&self) -> Vec<Vec<String>> {
+        let mut placed: BTreeSet<String> = BTreeSet::new();
+        let mut remaining: Vec<&str> = self.topo.iter().map(String::as_str).collect();
+        let mut out: Vec<Vec<String>> = Vec::new();
+        while !remaining.is_empty() {
+            let ready: Vec<String> = remaining
+                .iter()
+                .filter(|id| {
+                    self.step(id)
+                        .map(|s| s.needs.iter().all(|n| placed.contains(n)))
+                        .unwrap_or(false)
+                })
+                .map(|s| s.to_string())
+                .collect();
+            if ready.is_empty() {
+                break; // defensive: a cycle can't reach here (validate rejects cycles)
+            }
+            for id in &ready {
+                placed.insert(id.clone());
+            }
+            remaining.retain(|id| !placed.contains(*id));
+            out.push(ready);
+        }
+        out
+    }
 }
 
 /// Validate a flow document against a roster and the known-tool set.
@@ -387,6 +418,7 @@ mod tests {
         for (id, tools) in [
             ("web-researcher", "[\"execute_command\"]"),
             ("summarizer", "[]"),
+            ("extractor", "[]"),
             ("writer", "[]"),
             ("skeptic", "[]"),
         ] {
@@ -535,6 +567,59 @@ context = ["@step:a@"]
         let src = "---\n[flow]\nid=\"x\"\n[[step]]\nid=\"s\"\nagent=\"w\"\ntask=\"t\"\n---\n";
         let errs = validate(&doc(src), &r, &["execute_command"]).unwrap_err();
         assert!(errs.iter().any(|e| e.message.contains("unknown tool `rm_rf`")));
+    }
+
+    const DIAMOND: &str = r#"---
+[flow]
+id = "diamond"
+description = "x"
+[[step]]
+id = "a"
+task = "t"
+agent = "web-researcher"
+[[step]]
+id = "b"
+needs = ["a"]
+task = "t"
+agent = "web-researcher"
+[[step]]
+id = "c"
+needs = ["a"]
+task = "t"
+agent = "web-researcher"
+[[step]]
+id = "d"
+needs = ["b", "c"]
+task = "t"
+agent = "web-researcher"
+---
+body"#;
+
+    #[test]
+    fn stages_groups_parallel_steps() {
+        let plan = validate(&doc(DIAMOND), &roster(), &["execute_command"]).expect("valid");
+        assert_eq!(
+            plan.stages(),
+            vec![
+                vec!["a".to_string()],
+                vec!["b".to_string(), "c".to_string()],
+                vec!["d".to_string()],
+            ]
+        );
+    }
+
+    #[test]
+    fn stages_of_linear_chain() {
+        // GOOD is the existing linear fixture (ingest → digest → answer).
+        let plan = validate(&doc(GOOD), &roster(), &["execute_command"]).expect("valid");
+        assert_eq!(
+            plan.stages(),
+            vec![
+                vec!["ingest".to_string()],
+                vec!["digest".to_string()],
+                vec!["answer".to_string()],
+            ]
+        );
     }
 
     #[test]
