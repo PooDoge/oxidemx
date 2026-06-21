@@ -365,6 +365,8 @@ pub enum Message {
     AiLocalEndpointChanged(String),
     /// AI tab: hybrid routing toggled.
     AiRoutingToggled(bool),
+    /// AI tab: agentd D-Bus routing toggled.
+    AiUseAgentdToggled(bool),
     /// AI tab: fast/local routing provider changed.
     AiFastProviderChanged(oxidemx_shared::config::AiProvider),
     /// AI tab: fast/local routing model edited/picked.
@@ -2702,6 +2704,11 @@ fn update_inner(state: &mut State, message: Message) -> Task<Message> {
         }
         Message::AiRoutingToggled(on) => {
             state.config.overlay.ai.routing_enabled = on;
+            state.touch();
+            Task::none()
+        }
+        Message::AiUseAgentdToggled(on) => {
+            state.config.overlay.ai.use_agentd = on;
             state.touch();
             Task::none()
         }

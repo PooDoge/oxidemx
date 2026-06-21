@@ -7,7 +7,7 @@
 //! `~/.config/oxidemx/gemini.key` with 0600 perms.
 
 use crate::{Message, State};
-use iced::widget::{button, checkbox, column, container, pick_list, row, rule, text, text_input};
+use iced::widget::{button, checkbox, column, container, pick_list, row, rule, text, text_input, toggler, Space};
 use iced::{Alignment, Element, Length};
 use oxidemx_shared::config::AiProvider;
 use oxidemx_widgets::style;
@@ -43,6 +43,7 @@ pub fn view(state: &State) -> Element<'_, Message> {
 
     body.push(section_block(state, "API key", key_panel(state)))
         .push(section_block(state, "Hybrid routing", routing_panel(state)))
+        .push(section_block(state, "Agent routing", agentd_panel(state)))
         .push(section_block(state, "Local Models", local_models_panel(state)))
         .push(section_block(state, "Command allowlist", allowlist_editor(state)))
         .into()
@@ -230,6 +231,34 @@ fn key_panel(state: &State) -> Element<'_, Message> {
     }
 
     column![intro, status_line, form].spacing(8).into()
+}
+
+// ============================================================================
+// Agent routing (agentd D-Bus path)
+// ============================================================================
+
+fn agentd_panel(state: &State) -> Element<'_, Message> {
+    let pal = &state.palette;
+
+    let intro = text(
+        "When on, overlay chat is routed through the agentd daemon over D-Bus. \
+         Required for flow delivery (activity bubbles, auto-delivery). Turn off \
+         only to force the legacy in-process path for debugging.",
+    )
+    .size(11)
+    .style(style::text_dim(pal));
+
+    // Route chat through agentd (required for flows: bubbles + auto-delivery).
+    let agentd_row = row![
+        text("Run agent through agentd (required for flows)").size(13),
+        Space::new().width(Length::Fill),
+        toggler(state.config.overlay.ai.use_agentd)
+            .on_toggle(Message::AiUseAgentdToggled)
+            .style(style::toggler_style(pal)),
+    ]
+    .align_y(Alignment::Center);
+
+    column![intro, agentd_row].spacing(8).into()
 }
 
 // ============================================================================
