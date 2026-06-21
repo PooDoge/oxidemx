@@ -481,6 +481,49 @@ impl AgentService {
             }),
         });
 
+        // ── Upsert the ConversationIndex (best-effort; never fails the turn) ──
+        // Map cwd → project, then get-or-create the Conversation row.
+        match self.ensure_personal_or_for_cwd(project).await {
+            Err(e) => {
+                tracing::warn!("send_message: skipping conversation index upsert: {e}");
+            }
+            Ok(key_project) => {
+                let idx = self.conversation_index_for(&key_project);
+                let cid = ConversationId::from(thread);
+                let now = now_ms();
+                let default_model = oxidemx_shared::config::AiConfig::default().model;
+                let model_str = _model_hint.unwrap_or(&default_model).to_string();
+                let conv = match idx.get(&cid) {
+                    Some(mut existing) => {
+                        // Keep the title; bump updated_at and accumulate tokens.
+                        existing.updated_at = now;
+                        existing.tokens_prompt += usage.0;
+                        existing.tokens_completion += usage.1;
+                        existing
+                    }
+                    None => {
+                        // New conversation — derive title from the first user turn.
+                        let title: String = text.chars().take(60).collect();
+                        Conversation {
+                            id: cid,
+                            project_id: key_project.id.clone(),
+                            title,
+                            working_dir: paths.cwd.clone(),
+                            model: model_str,
+                            summary: String::new(),
+                            summary_upto: 0,
+                            tokens_prompt: usage.0,
+                            tokens_completion: usage.1,
+                            created_at: now,
+                            updated_at: now,
+                            worktree: None,
+                        }
+                    }
+                };
+                idx.upsert(conv);
+            }
+        }
+
         Ok(turn_id)
     }
 
@@ -768,6 +811,46 @@ impl AgentService {
         conv.updated_at = now_ms();
         self.conversation_index_for(&project).upsert(conv.clone());
         Ok(conv)
+    }
+
+    // ── ensure_personal_or_for_cwd ────────────────────────────────────────────
+
+    /// Map a cwd string to a `Project`, auto-registering if necessary.
+    ///
+    /// - If `cwd` equals the overlay's global config dir (`~/.config/oxidemx`),
+    ///   return the **Personal** project.
+    /// - Otherwise find an existing project whose `default_working_dir` matches
+    ///   `cwd` (canonicalize both for comparison); if none, create one whose
+    ///   name is the directory's file_name basename.
+    pub async fn ensure_personal_or_for_cwd(&self, cwd: &str) -> Result<Project, AgentdError> {
+        let cwd_path = PathBuf::from(cwd);
+        let global_cfg = Self::user_global_config_dir();
+
+        // Canonicalize for comparison; fall back to the raw path on error.
+        let canon_cwd = std::fs::canonicalize(&cwd_path).unwrap_or_else(|_| cwd_path.clone());
+        let canon_cfg = std::fs::canonicalize(&global_cfg).unwrap_or_else(|_| global_cfg.clone());
+
+        if canon_cwd == canon_cfg {
+            return Ok(self.project_store().ensure_personal());
+        }
+
+        // Search for an existing project whose default_working_dir matches.
+        let store = self.project_store();
+        for project in store.list() {
+            let canon_proj = std::fs::canonicalize(&project.default_working_dir)
+                .unwrap_or_else(|_| project.default_working_dir.clone());
+            if canon_proj == canon_cwd {
+                return Ok(project);
+            }
+        }
+
+        // None found — auto-register.
+        let name = cwd_path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("unknown")
+            .to_string();
+        Ok(store.create(&name, cwd_path))
     }
 
     // ── remove_worktree ───────────────────────────────────────────────────────
@@ -1888,6 +1971,21 @@ You are an echo agent. Repeat the task back.
         assert_eq!(env.svc.get_conversation(c.id.as_str()).await.unwrap().unwrap().title, "renamed");
         assert_eq!(env.svc.list_conversations(p.id.as_str()).await.unwrap().len(), 1);
     }
+    // ── Task 7: send_message upserts the conversation index ──────────────────
+
+    #[tokio::test]
+    async fn send_message_upserts_conversation_index() {
+        let env = TestEnv::new();
+        let proj = env.cwd_str();
+        env.svc.send_message(proj, "chat-77", "hello world", None).await.unwrap();
+        let key_proj = env.svc.ensure_personal_or_for_cwd(proj).await.unwrap();
+        let convs = env.svc.list_conversations(key_proj.id.as_str()).await.unwrap();
+        assert!(
+            convs.iter().any(|c| c.id.as_str() == "chat-77" && c.title.starts_with("hello")),
+            "expected a conversation with id=chat-77 and title starting with 'hello'; got: {convs:#?}"
+        );
+    }
+
     // ── Test 7: remove_worktree respects dirty flag (Findings 2 + 3) ─────────
 
     /// Builds an `AgentService` with a `MockGit` injected via `self.git`.
