@@ -1226,6 +1226,135 @@ impl AgentInterface {
         self.svc.list_models().await.map_err(to_fdo)
     }
 
+    // ── Project / conversation / worktree methods (Task 8) ────────────────────
+
+    /// Rich project list — returns serde_json of `Vec<Project>`.
+    /// The legacy `list_projects()` (returns `Vec<String>` keys) is unchanged.
+    async fn list_project_details(&self) -> fdo::Result<String> {
+        let projects = self.svc.list_projects().await.map_err(to_fdo)?;
+        serde_json::to_string(&projects).map_err(|e| fdo::Error::Failed(e.to_string()))
+    }
+
+    async fn create_project(
+        &self,
+        name: &str,
+        default_working_dir: &str,
+    ) -> fdo::Result<String> {
+        let project = self
+            .svc
+            .create_project(name, Path::new(default_working_dir))
+            .await
+            .map_err(to_fdo)?;
+        serde_json::to_string(&project).map_err(|e| fdo::Error::Failed(e.to_string()))
+    }
+
+    async fn init_project_from_conversation(
+        &self,
+        conversation_id: &str,
+        name: &str,
+        default_working_dir: &str,
+    ) -> fdo::Result<String> {
+        let project = self
+            .svc
+            .init_project_from_conversation(conversation_id, name, Path::new(default_working_dir))
+            .await
+            .map_err(to_fdo)?;
+        serde_json::to_string(&project).map_err(|e| fdo::Error::Failed(e.to_string()))
+    }
+
+    async fn list_conversations(&self, project_id: &str) -> fdo::Result<String> {
+        let convs = self.svc.list_conversations(project_id).await.map_err(to_fdo)?;
+        serde_json::to_string(&convs).map_err(|e| fdo::Error::Failed(e.to_string()))
+    }
+
+    async fn get_conversation(&self, conversation_id: &str) -> fdo::Result<String> {
+        let conv = self
+            .svc
+            .get_conversation(conversation_id)
+            .await
+            .map_err(to_fdo)?;
+        serde_json::to_string(&conv).map_err(|e| fdo::Error::Failed(e.to_string()))
+    }
+
+    async fn create_conversation(
+        &self,
+        project_id: &str,
+        working_dir: &str,
+    ) -> fdo::Result<String> {
+        let dir = if working_dir.is_empty() {
+            None
+        } else {
+            Some(Path::new(working_dir))
+        };
+        let conv = self
+            .svc
+            .create_conversation(project_id, dir)
+            .await
+            .map_err(to_fdo)?;
+        serde_json::to_string(&conv).map_err(|e| fdo::Error::Failed(e.to_string()))
+    }
+
+    async fn rename_conversation(
+        &self,
+        conversation_id: &str,
+        title: &str,
+    ) -> fdo::Result<()> {
+        self.svc
+            .rename_conversation(conversation_id, title)
+            .await
+            .map_err(to_fdo)
+    }
+
+    async fn delete_conversation(&self, conversation_id: &str) -> fdo::Result<()> {
+        self.svc
+            .delete_conversation(conversation_id)
+            .await
+            .map_err(to_fdo)
+    }
+
+    async fn set_conversation_working_dir(
+        &self,
+        conversation_id: &str,
+        dir: &str,
+    ) -> fdo::Result<()> {
+        self.svc
+            .set_conversation_working_dir(conversation_id, Path::new(dir))
+            .await
+            .map_err(to_fdo)
+    }
+
+    async fn create_worktree_for_conversation(
+        &self,
+        conversation_id: &str,
+        name: &str,
+        base_ref: &str,
+    ) -> fdo::Result<String> {
+        let wt_name = if name.is_empty() { None } else { Some(name) };
+        let wt_ref = if base_ref.is_empty() { None } else { Some(base_ref) };
+        let conv = self
+            .svc
+            .create_worktree_for_conversation(conversation_id, wt_name, wt_ref)
+            .await
+            .map_err(to_fdo)?;
+        serde_json::to_string(&conv).map_err(|e| fdo::Error::Failed(e.to_string()))
+    }
+
+    async fn remove_worktree(&self, conversation_id: &str) -> fdo::Result<()> {
+        self.svc
+            .remove_worktree(conversation_id)
+            .await
+            .map_err(to_fdo)
+    }
+
+    async fn resolve_config(&self, working_dir: &str) -> fdo::Result<String> {
+        let cfg = self
+            .svc
+            .resolve_config(Path::new(working_dir))
+            .await
+            .map_err(to_fdo)?;
+        serde_json::to_string(&cfg).map_err(|e| fdo::Error::Failed(e.to_string()))
+    }
+
     // ── Signals ───────────────────────────────────────────────────────────────
 
     /// Fired whenever an agent event (turn started, turn done, tool call, etc.)
@@ -1983,6 +2112,29 @@ You are an echo agent. Repeat the task back.
         assert!(
             convs.iter().any(|c| c.id.as_str() == "chat-77" && c.title.starts_with("hello")),
             "expected a conversation with id=chat-77 and title starting with 'hello'; got: {convs:#?}"
+        );
+    }
+
+    // ── Task 8: D-Bus wrappers — list_project_details returns JSON ──────────
+
+    #[tokio::test]
+    async fn dbus_list_project_details_returns_json() {
+        let env = TestEnv::new();
+        // Ensure a project exists so the JSON is non-trivially populated.
+        let _p = env
+            .svc
+            .create_project("personal", std::path::Path::new("/tmp"))
+            .await
+            .unwrap();
+        let iface = AgentInterface::new(env.svc.clone());
+        let json = iface.list_project_details().await.unwrap();
+        // The JSON must be a valid array and contain the project name we created.
+        let parsed: serde_json::Value = serde_json::from_str(&json)
+            .expect("list_project_details must return valid JSON");
+        assert!(parsed.is_array(), "expected a JSON array");
+        assert!(
+            json.contains("personal"),
+            "expected 'personal' in JSON; got: {json}"
         );
     }
 

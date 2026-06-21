@@ -14,6 +14,7 @@
 //! - [`ResolvedConfig`] — merged result
 //! - [`merge_toml`] — pure merge helper (exposed for tests / downstream)
 
+use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
 // ── Known list keys (dotted paths whose arrays are unioned across layers) ────
@@ -32,7 +33,7 @@ const LIST_KEYS: &[&str] = &[
 // ── ResolvedConfig ────────────────────────────────────────────────────────────
 
 /// The merged result of layering zero or more `.oxide` / `.oxidemx` dirs.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ResolvedConfig {
     /// Deep-merged settings (scalar closest-wins; list keys unioned).
     pub settings: toml::Value,
