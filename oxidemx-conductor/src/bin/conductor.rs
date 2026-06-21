@@ -93,11 +93,11 @@ fn cmd_list() -> ExitCode {
 }
 
 fn cmd_validate(args: &[String]) -> ExitCode {
-    let Some(id) = args.first().filter(|a| !a.starts_with("--")) else {
+    let opts = parse_opts(args);
+    let Some(id) = opts.positionals.first() else {
         eprintln!("usage: oxidemx-conductor validate <flow-id>");
         return ExitCode::FAILURE;
     };
-    let opts = parse_opts(args);
     let flows_root = opts.flows_dir.unwrap_or_else(default_flows_root);
     let agents_root = opts.agents_dir.unwrap_or_else(default_agents_root);
 
@@ -116,6 +116,20 @@ fn cmd_validate(args: &[String]) -> ExitCode {
                 plan.topo.len(),
                 plan.topo.join(" → ")
             );
+            if opts.stages {
+                println!("stages:");
+                for (i, stage) in plan.stages().iter().enumerate() {
+                    let label = if i == 0 { " (entry)" } else if stage.len() > 1 { " (parallel)" } else { "" };
+                    println!("  stage {i}{label}: {}", stage.join(", "));
+                }
+            }
+            // Non-fatal foot-gun warning: a route step with no needs runs with
+            // no upstream context.
+            for s in &doc.manifest.steps {
+                if s.kind == "route" && s.needs.is_empty() {
+                    eprintln!("  warning: route step `{}` has no `needs`; it will run with no upstream context", s.id);
+                }
+            }
             ExitCode::SUCCESS
         }
         Err(errors) => {
@@ -489,6 +503,7 @@ struct Opts {
     workdir: Option<PathBuf>,
     flows_dir: Option<PathBuf>,
     agents_dir: Option<PathBuf>,
+    stages: bool,
     /// Non-flag arguments (e.g. the oneshot prompt tokens).
     positionals: Vec<String>,
 }
@@ -533,6 +548,7 @@ fn parse_opts(args: &[String]) -> Opts {
                 o.agents_dir = args.get(i + 1).map(PathBuf::from);
                 i += 1;
             }
+            "--stages" => o.stages = true,
             other => o.positionals.push(other.to_string()),
         }
         i += 1;
