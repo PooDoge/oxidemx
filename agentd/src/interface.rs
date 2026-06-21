@@ -28,12 +28,17 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use async_trait::async_trait;
 use zbus::{fdo, interface, object_server::SignalEmitter};
 
+use crate::conversations_index::ConversationIndex;
 use crate::error::AgentdError;
 use crate::journal::{Journal, JournalEntry};
+use crate::model::{Conversation, ConversationId, Project, ProjectId};
 use crate::models::ModelControls;
+use crate::oxide_config::{resolve_oxide_config, ResolvedConfig};
+use crate::project_store::ProjectStore;
 use crate::projects::{ProjectKey, ProjectPaths};
 use crate::seams::{AgentEvent, Approver, EventEmitter, HostCapability, Verdict};
 use crate::sessions::{Sessions, TranscriptTurn};
+use crate::worktree::{create_conversation_worktree, remove_if_unchanged, RealGit};
 
 // ── Timestamp helpers ─────────────────────────────────────────────────────────
 
@@ -43,6 +48,14 @@ fn now_ms() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis() as u64)
         .unwrap_or(0)
+}
+
+// ── Config-dir helper (mirrors projects.rs::default_home_config) ─────────────
+
+fn default_home_config() -> PathBuf {
+    std::env::var_os("HOME")
+        .map(|h| PathBuf::from(h).join(".config"))
+        .unwrap_or_else(|| PathBuf::from(".config"))
 }
 
 // ── Turn-id generator (same style as runtime::new_session_id) ────────────────
@@ -226,6 +239,27 @@ impl ProjectRegistry {
             }
         } else {
             ProjectPaths::resolve(cwd)
+        }
+    }
+
+    /// The root directory that contains `projects.json` and per-project subdirs.
+    ///
+    /// With a `store_base_override` (tests): `<override>/projects`.
+    /// Without: `$XDG_DATA_HOME/oxidemx/projects` (or `~/.local/share/oxidemx/projects`).
+    pub fn projects_root(&self) -> PathBuf {
+        match &self.store_base_override {
+            Some(b) => b.join("projects"),
+            None => {
+                let data = std::env::var_os("XDG_DATA_HOME")
+                    .map(PathBuf::from)
+                    .filter(|p| p.is_absolute())
+                    .or_else(|| {
+                        std::env::var_os("HOME")
+                            .map(|h| PathBuf::from(h).join(".local").join("share"))
+                    })
+                    .unwrap_or_else(|| PathBuf::from(".local/share"));
+                data.join("oxidemx").join("projects")
+            }
         }
     }
 
@@ -496,11 +530,272 @@ impl AgentService {
         ts.list_threads()
     }
 
+    // ── project + conversation helpers ────────────────────────────────────────
+
+    /// Build a `ProjectStore` rooted at the projects dir for this registry.
+    fn project_store(&self) -> ProjectStore {
+        ProjectStore::new(self.projects.projects_root())
+    }
+
+    /// Build a `ConversationIndex` scoped to the given project's store dir.
+    ///
+    /// The per-project dir = `<projects_root>/<key>` where
+    /// `key = ProjectKey::from_cwd(&project.default_working_dir)`.
+    fn conversation_index_for(&self, project: &Project) -> ConversationIndex {
+        let root = self.projects.projects_root();
+        let key = ProjectKey::from_cwd(&project.default_working_dir);
+        ConversationIndex::new(root.join(key.as_str()))
+    }
+
+    /// Scan every project's conversation index for `id`.
+    ///
+    /// Returns `Some((project, conversation))` on the first match, or `None`.
+    fn find_conversation(&self, id: &str) -> Option<(Project, Conversation)> {
+        let cid = ConversationId::from(id);
+        for project in self.project_store().list() {
+            let idx = self.conversation_index_for(&project);
+            if let Some(c) = idx.get(&cid) {
+                return Some((project, c));
+            }
+        }
+        None
+    }
+
+    /// Compute the user-global config dir (`~/.config/oxidemx`).
+    fn user_global_config_dir() -> PathBuf {
+        let base = if let Some(xdg) = std::env::var_os("XDG_CONFIG_HOME") {
+            let p = PathBuf::from(xdg);
+            if p.is_absolute() { p } else { default_home_config() }
+        } else {
+            default_home_config()
+        };
+        base.join("oxidemx")
+    }
+
     // ── list_projects ─────────────────────────────────────────────────────────
 
-    /// List all known project key strings in the store.
-    pub async fn list_projects(&self) -> Result<Vec<String>, AgentdError> {
-        Ok(self.projects.list_project_keys())
+    /// List all projects in the store (including Personal if bootstrapped).
+    pub async fn list_projects(&self) -> Result<Vec<Project>, AgentdError> {
+        Ok(self.project_store().list())
+    }
+
+    // ── create_project ────────────────────────────────────────────────────────
+
+    /// Create a new named project rooted at `default_working_dir`.
+    pub async fn create_project(
+        &self,
+        name: &str,
+        default_working_dir: &Path,
+    ) -> Result<Project, AgentdError> {
+        Ok(self.project_store().create(name, default_working_dir.to_path_buf()))
+    }
+
+    // ── init_project_from_conversation ───────────────────────────────────────
+
+    /// Promote a conversation to its own project.
+    ///
+    /// Creates the project, then moves the conversation's index row from
+    /// its old project's index to the new one (updating `project_id` and
+    /// `working_dir`).
+    pub async fn init_project_from_conversation(
+        &self,
+        conversation_id: &str,
+        name: &str,
+        default_working_dir: &Path,
+    ) -> Result<Project, AgentdError> {
+        let (old_project, mut conv) = self.find_conversation(conversation_id).ok_or_else(|| {
+            AgentdError::NotFound(format!("conversation not found: {conversation_id}"))
+        })?;
+
+        let project = self.project_store().create(name, default_working_dir.to_path_buf());
+
+        // Remove from old project's index.
+        let old_idx = self.conversation_index_for(&old_project);
+        old_idx.delete(&conv.id);
+
+        // Insert into new project's index.
+        conv.project_id = project.id.clone();
+        conv.working_dir = default_working_dir.to_path_buf();
+        let new_idx = self.conversation_index_for(&project);
+        new_idx.upsert(conv);
+
+        Ok(project)
+    }
+
+    // ── list_conversations ────────────────────────────────────────────────────
+
+    /// List all conversations for the given project id.
+    pub async fn list_conversations(
+        &self,
+        project_id: &str,
+    ) -> Result<Vec<Conversation>, AgentdError> {
+        let pid = ProjectId::from(project_id);
+        let project = self.project_store().get(&pid).ok_or_else(|| {
+            AgentdError::NotFound(format!("project not found: {project_id}"))
+        })?;
+        Ok(self.conversation_index_for(&project).list())
+    }
+
+    // ── get_conversation ──────────────────────────────────────────────────────
+
+    /// Get a single conversation by id (scans all projects).
+    pub async fn get_conversation(
+        &self,
+        conversation_id: &str,
+    ) -> Result<Option<Conversation>, AgentdError> {
+        Ok(self.find_conversation(conversation_id).map(|(_, c)| c))
+    }
+
+    // ── create_conversation ───────────────────────────────────────────────────
+
+    /// Create a new conversation in the given project.
+    ///
+    /// `working_dir` defaults to the project's `default_working_dir`.
+    /// The model defaults to `AiConfig::default().model`.
+    pub async fn create_conversation(
+        &self,
+        project_id: &str,
+        working_dir: Option<&Path>,
+    ) -> Result<Conversation, AgentdError> {
+        let pid = ProjectId::from(project_id);
+        let project = self.project_store().get(&pid).ok_or_else(|| {
+            AgentdError::NotFound(format!("project not found: {project_id}"))
+        })?;
+        let ts = now_ms();
+        let id = format!("conv-{ts}");
+        let dir = working_dir
+            .map(|p| p.to_path_buf())
+            .unwrap_or_else(|| project.default_working_dir.clone());
+        let model = oxidemx_shared::config::AiConfig::default().model;
+        let conv = Conversation {
+            id: ConversationId::from(id),
+            project_id: project.id.clone(),
+            title: String::new(),
+            working_dir: dir,
+            model,
+            summary: String::new(),
+            summary_upto: 0,
+            tokens_prompt: 0,
+            tokens_completion: 0,
+            created_at: ts,
+            updated_at: ts,
+            worktree: None,
+        };
+        self.conversation_index_for(&project).upsert(conv.clone());
+        Ok(conv)
+    }
+
+    // ── rename_conversation ───────────────────────────────────────────────────
+
+    pub async fn rename_conversation(
+        &self,
+        conversation_id: &str,
+        title: &str,
+    ) -> Result<(), AgentdError> {
+        let (project, _) = self.find_conversation(conversation_id).ok_or_else(|| {
+            AgentdError::NotFound(format!("conversation not found: {conversation_id}"))
+        })?;
+        let cid = ConversationId::from(conversation_id);
+        self.conversation_index_for(&project).rename(&cid, title);
+        Ok(())
+    }
+
+    // ── delete_conversation ───────────────────────────────────────────────────
+
+    pub async fn delete_conversation(
+        &self,
+        conversation_id: &str,
+    ) -> Result<(), AgentdError> {
+        let (project, _) = self.find_conversation(conversation_id).ok_or_else(|| {
+            AgentdError::NotFound(format!("conversation not found: {conversation_id}"))
+        })?;
+        let cid = ConversationId::from(conversation_id);
+        self.conversation_index_for(&project).delete(&cid);
+        Ok(())
+    }
+
+    // ── set_conversation_working_dir ──────────────────────────────────────────
+
+    pub async fn set_conversation_working_dir(
+        &self,
+        conversation_id: &str,
+        working_dir: &Path,
+    ) -> Result<(), AgentdError> {
+        let (project, _) = self.find_conversation(conversation_id).ok_or_else(|| {
+            AgentdError::NotFound(format!("conversation not found: {conversation_id}"))
+        })?;
+        let cid = ConversationId::from(conversation_id);
+        self.conversation_index_for(&project)
+            .set_working_dir(&cid, working_dir.to_path_buf());
+        Ok(())
+    }
+
+    // ── create_worktree_for_conversation ──────────────────────────────────────
+
+    /// Create a git worktree for a conversation, set as its `working_dir`.
+    ///
+    /// `name` defaults to a slug of the conversation id.
+    /// `base_ref` defaults to `"head"`.
+    pub async fn create_worktree_for_conversation(
+        &self,
+        conversation_id: &str,
+        name: Option<&str>,
+        base_ref: Option<&str>,
+    ) -> Result<Conversation, AgentdError> {
+        let (project, mut conv) = self.find_conversation(conversation_id).ok_or_else(|| {
+            AgentdError::NotFound(format!("conversation not found: {conversation_id}"))
+        })?;
+        let repo = conv.working_dir.clone();
+        let slug_name: String;
+        let wt_name = match name {
+            Some(n) => n,
+            None => {
+                slug_name = conversation_id
+                    .chars()
+                    .map(|c| if c.is_alphanumeric() || c == '-' { c } else { '-' })
+                    .collect();
+                slug_name.as_str()
+            }
+        };
+        let ref_str = base_ref.unwrap_or("head");
+        let wt = create_conversation_worktree(&RealGit, &repo, wt_name, ref_str)
+            .map_err(AgentdError::Io)?;
+        conv.working_dir = wt.path.clone();
+        conv.worktree = Some(wt);
+        conv.updated_at = now_ms();
+        self.conversation_index_for(&project).upsert(conv.clone());
+        Ok(conv)
+    }
+
+    // ── remove_worktree ───────────────────────────────────────────────────────
+
+    /// Remove the conversation's worktree if it is clean (no uncommitted changes).
+    ///
+    /// On success, clears `worktree` and resets `working_dir` to the project default.
+    pub async fn remove_worktree(&self, conversation_id: &str) -> Result<(), AgentdError> {
+        let (project, mut conv) = self.find_conversation(conversation_id).ok_or_else(|| {
+            AgentdError::NotFound(format!("conversation not found: {conversation_id}"))
+        })?;
+        let wt = match conv.worktree.take() {
+            Some(w) => w,
+            None => return Ok(()), // nothing to remove
+        };
+        let repo = project.default_working_dir.clone();
+        remove_if_unchanged(&RealGit, &wt, &repo)
+            .map_err(AgentdError::Io)?;
+        conv.working_dir = project.default_working_dir.clone();
+        conv.worktree = None;
+        conv.updated_at = now_ms();
+        self.conversation_index_for(&project).upsert(conv);
+        Ok(())
+    }
+
+    // ── resolve_config ────────────────────────────────────────────────────────
+
+    /// Resolve the merged `.oxide` config for `working_dir`.
+    pub async fn resolve_config(&self, working_dir: &Path) -> Result<ResolvedConfig, AgentdError> {
+        let user_global = Self::user_global_config_dir();
+        Ok(resolve_oxide_config(working_dir, &user_global))
     }
 
     // ── respond_approval ──────────────────────────────────────────────────────
@@ -754,8 +1049,9 @@ impl AgentInterface {
         self.svc.list_threads(project).await.map_err(to_fdo)
     }
 
-    async fn list_projects(&self) -> fdo::Result<Vec<String>> {
-        self.svc.list_projects().await.map_err(to_fdo)
+    async fn list_projects(&self) -> fdo::Result<String> {
+        let projects = self.svc.list_projects().await.map_err(to_fdo)?;
+        serde_json::to_string(&projects).map_err(|e| fdo::Error::Failed(e.to_string()))
     }
 
     async fn respond_approval(
@@ -1275,12 +1571,13 @@ mod tests {
             .await
             .unwrap();
 
-        // list_projects should include the key for the active project.
-        let projects = env.svc.list_projects().await.unwrap();
+        // list_project_keys should include the key for the active project
+        // (send_message creates the store dir, not a ProjectStore entry).
+        let keys = env.svc.projects.list_project_keys();
         let key = env.key_str();
         assert!(
-            projects.iter().any(|p| p.contains(&key)),
-            "expected project key {key} in {projects:?}"
+            keys.iter().any(|p| p.contains(&key)),
+            "expected project key {key} in {keys:?}"
         );
 
         // list_threads should return ["t1"].
@@ -1566,5 +1863,19 @@ You are an echo agent. Repeat the task back.
             hist_len >= 2,
             "expected last_history_len ≥2 on turn 2, got {hist_len}"
         );
+    }
+
+    // ── Task 6: project + conversation CRUD via AgentService ──────────────────
+
+    #[tokio::test]
+    async fn project_and_conversation_crud_via_service() {
+        let env = TestEnv::new();
+        let p = env.svc.create_project("Repo", std::path::Path::new("/tmp/repo")).await.unwrap();
+        assert!(env.svc.list_projects().await.unwrap().iter().any(|x| x.id == p.id));
+        let c = env.svc.create_conversation(p.id.as_str(), None).await.unwrap();
+        assert_eq!(c.project_id, p.id);
+        env.svc.rename_conversation(c.id.as_str(), "renamed").await.unwrap();
+        assert_eq!(env.svc.get_conversation(c.id.as_str()).await.unwrap().unwrap().title, "renamed");
+        assert_eq!(env.svc.list_conversations(p.id.as_str()).await.unwrap().len(), 1);
     }
 }
