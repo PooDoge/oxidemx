@@ -79,6 +79,11 @@ pub enum Message {
     /// in the live state without restarting the overlay.
     ConfigReloaded(Box<oxidemx_shared::AppConfig>),
     WindowOpened(iced::window::Id),
+    /// WM close (X) requested. Only delivered to the standalone chat window,
+    /// which sets `exit_on_close_request=false` so the runtime forwards the
+    /// request instead of silently destroying the window and leaving the
+    /// daemon event loop spinning (the "Not Responding" hang).
+    WindowCloseRequested(iced::window::Id),
     /// Result of querying the monitor size for centering fallback.
     CenterOverlay(Option<Size>),
 
@@ -389,6 +394,11 @@ pub fn run_chat_window() -> iced::Result {
             min_size: Some(iced::Size::new(380.0, 480.0)),
             decorations: true,
             transparent: false,
+            // Forward the WM close (X) to update() as CloseRequested instead of
+            // letting the runtime destroy the window in place: `iced::application`
+            // runs on the daemon loop, which does NOT auto-exit when its last
+            // window closes, so we must return `iced::exit()` ourselves.
+            exit_on_close_request: false,
             // Wayland app_id — must match StartupWMClass in
             // packaging/org.oxidemx.chat.desktop so the WM groups the window
             // under the launcher entry (correct taskbar icon + grouping).

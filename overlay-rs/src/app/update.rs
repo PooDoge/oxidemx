@@ -664,6 +664,20 @@ pub(super) fn update(state: &mut RadialState, message: Message) -> Task<Message>
             state.send_widget_slice_event(idx, oxidemx_widget_host::SliceEvent::Scroll(delta));
             Task::none()
         }
+        Message::WindowCloseRequested(id) => {
+            // The standalone chat window sets `exit_on_close_request=false`, so the
+            // WM close (X) arrives here. `iced::application` runs on the daemon loop
+            // and won't end on its own when the last window closes — return
+            // `iced::exit()` to terminate `run()` and let the process exit cleanly.
+            // Gated on chat_window_mode: the radial overlay keeps the default
+            // behaviour and never sets exit_on_close_request=false, so this can't
+            // fire there.
+            if state.chat_window_mode {
+                info!("chat window close requested ({id:?}); exiting");
+                return iced::exit();
+            }
+            Task::none()
+        }
         Message::WindowOpened(id) => {
             info!("WindowOpened event received: {:?}", id);
             state.window_id = Some(id);

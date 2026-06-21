@@ -34,6 +34,7 @@ pub(super) fn subscription(state: &RadialState) -> Subscription<Message> {
             iced::window::Event::Focused => Message::WindowFocused,
             iced::window::Event::Resized(size) => Message::WindowResized(size),
             iced::window::Event::FileDropped(path) => Message::AiFileDropped(path),
+            iced::window::Event::CloseRequested => Message::WindowCloseRequested(id),
             _ => Message::Noop,
         }),
     ];
