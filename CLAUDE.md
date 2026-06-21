@@ -21,6 +21,18 @@ when a field-standard one exists. The convention sources we've researched live i
 - **Agent behavior / prompts** (`docs/research/claude-code-system-prompt-patterns.md`):
   enforce truthfulness **structurally, not by exhortation**.
 
+**Anything touching the AI/agent framework** (agents, tools, flows, schemas, events, the
+provider seam, prompts) must use names + shapes that match how the field's well-built
+projects name them — so the code reads natively to LLMs and future contributors. When a
+term isn't already fixed in `docs/research/`, compare against quality references before
+naming, and prefer their field-standard terms over a local invention:
+- **Microsoft AgentSchema** — https://github.com/microsoft/AgentSchema (declarative agent /
+  tool / action schema shapes).
+- **Nous Research Hermes-Agent** — https://github.com/nousresearch/hermes-agent (agent loop +
+  skills naming).
+- **Claude Code source** — https://github.com/chauncygu/collection-claude-code-source-code/tree/main/claude-code-source-code
+  (tool, message, and harness naming + prompt patterns).
+
 If a new area has no researched convention, find the field-standard term before coding;
 if none exists, pick the clearest and note why.
 
