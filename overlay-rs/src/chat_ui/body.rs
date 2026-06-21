@@ -57,6 +57,7 @@ pub fn conversation<'a>(state: &'a RadialState, kit: &Kit) -> Element<'a, Messag
                     i,
                     expanded,
                     &state.ai_artifact_expanded,
+                    &state.ai_artifact_cache,
                 ));
                 continue;
             }

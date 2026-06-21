@@ -38,8 +38,26 @@ pub fn preview(body: &str, max: usize) -> String {
     s
 }
 
+/// Map a file extension to a markdown fenced-block language name for highlighting.
+pub(crate) fn lang_for_ext(ext: &str) -> &'static str {
+    match ext {
+        "rs" => "rust",
+        "py" => "python",
+        "js" => "javascript",
+        "ts" => "typescript",
+        "json" => "json",
+        "toml" => "toml",
+        "yaml" | "yml" => "yaml",
+        "sh" | "bash" => "bash",
+        "c" => "c",
+        "cpp" | "cc" | "h" => "cpp",
+        "go" => "go",
+        _ => "",
+    }
+}
+
 /// Resolve an artifact's relative path to an absolute path under the runs dir.
-fn run_artifact_abs(run_id: &str, rel: &str) -> std::path::PathBuf {
+pub(crate) fn run_artifact_abs(run_id: &str, rel: &str) -> std::path::PathBuf {
     let runs_dir = std::env::var_os("OXIDEMX_RUNS_DIR")
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|| {
@@ -60,13 +78,14 @@ fn run_artifact_abs(run_id: &str, rel: &str) -> std::path::PathBuf {
 /// Render an agent card. `index` is the owning history index (for the
 /// collapse toggle); `expanded` is whether the user opened it.
 /// `artifact_expanded` is the set of artifact absolute paths the user has
-/// manually toggled open.
+/// manually toggled open. `artifact_cache` holds pre-read artifact bodies.
 pub fn view<'a>(
     card: &'a AgentCardData,
     kit: &Kit,
     index: usize,
     expanded: bool,
-    artifact_expanded: &std::collections::HashSet<String>,
+    artifact_expanded: &'a std::collections::HashSet<String>,
+    artifact_cache: &'a std::collections::HashMap<String, crate::radial::ArtifactBody>,
 ) -> Element<'a, Message> {
     let kit = *kit;
     let (tone, icon_name, title, meta) = match card {
@@ -296,27 +315,23 @@ pub fn view<'a>(
                     .file_name()
                     .map(|n| n.to_string_lossy().into_owned())
                     .unwrap_or_else(|| rel.clone());
+                // Toggle logic: presence in ai_artifact_expanded FLIPS the density
+                // default. This lets expand work both when default=true (<=2) and
+                // default=false (>2).
                 let is_expanded = artifact_expanded.contains(&abs_str)
-                    || default_expanded(artifacts.len());
-                // Read file content (capped at 64 KB)
-                let content: String = if is_expanded {
-                    let raw = std::fs::read_to_string(&abs).unwrap_or_default();
-                    if raw.len() > 65536 {
-                        raw.chars().take(65536).collect()
-                    } else {
-                        raw
-                    }
-                } else {
-                    String::new()
-                };
-                // Title row
-                let title = text(filename)
-                    .size(11.5)
-                    .font(iced::Font {
-                        weight: iced::font::Weight::Semibold,
-                        ..Default::default()
-                    })
-                    .color(kit.fade(kit.text, 1.0));
+                    != default_expanded(artifacts.len());
+                // Title row — always a click target for toggle
+                let title_toggle = abs_str.clone();
+                let title_el = iced::widget::mouse_area(
+                    text(filename)
+                        .size(11.5)
+                        .font(iced::Font {
+                            weight: iced::font::Weight::Semibold,
+                            ..Default::default()
+                        })
+                        .color(kit.fade(kit.text, 1.0)),
+                )
+                .on_press(Message::ArtifactToggleExpand(title_toggle));
                 // Button row: open-file, open-folder, copy-path
                 let abs_for_open = abs_str.clone();
                 let abs_for_folder = abs_str.clone();
@@ -363,27 +378,47 @@ pub fn view<'a>(
                 let btn_row = row![btn_open, btn_folder, btn_copy]
                     .spacing(5)
                     .align_y(Alignment::Center);
-                let mut artifact_col = column![title, btn_row].spacing(4);
-                // Body: preview or full, click to toggle
-                if is_expanded && !content.is_empty() {
-                    let body_preview = preview(&content, 400);
-                    let toggle_abs = abs_str.clone();
-                    let body_text = container(
-                        text(body_preview)
+                let mut artifact_col = column![title_el, btn_row].spacing(4);
+                // Body: expanded → full markdown/code from cache;
+                // collapsed → dim one-line preview with click-to-expand.
+                let body_area: Element<'a, Message> = if is_expanded {
+                    if let Some(body) = artifact_cache.get(&abs_str) {
+                        let md_view = iced::widget::markdown::view(
+                            &body.md,
+                            iced::Theme::CatppuccinMocha,
+                        )
+                        .map(|u| Message::AiLinkClicked(u.to_string()));
+                        container(md_view)
+                            .width(Length::Fill)
+                            .padding([6, 9])
+                            .style(super::catalog::surface_style(
+                                kit,
+                                super::Surface::CrustWell,
+                            ))
+                            .into()
+                    } else {
+                        text("(loading…)")
+                            .size(11.0)
+                            .color(kit.fade(kit.subtext0, 1.0))
+                            .into()
+                    }
+                } else {
+                    let preview_text = artifact_cache
+                        .get(&abs_str)
+                        .map(|b| preview(&b.raw, 160))
+                        .unwrap_or_default();
+                    let toggle_abs2 = abs_str.clone();
+                    iced::widget::mouse_area(
+                        text(preview_text)
                             .size(11.0)
                             .font(iced::Font::MONOSPACE)
-                            .color(kit.fade(kit.text, 1.0)),
+                            .color(kit.fade(kit.subtext0, 1.0))
+                            .wrapping(iced::widget::text::Wrapping::None),
                     )
-                    .width(Length::Fill)
-                    .padding([6, 9])
-                    .style(super::catalog::surface_style(
-                        kit,
-                        super::Surface::CrustWell,
-                    ));
-                    let body_area = iced::widget::mouse_area(body_text)
-                        .on_press(Message::ArtifactToggleExpand(toggle_abs));
-                    artifact_col = artifact_col.push(body_area);
-                }
+                    .on_press(Message::ArtifactToggleExpand(toggle_abs2))
+                    .into()
+                };
+                artifact_col = artifact_col.push(body_area);
                 // Wrap in a subtle container
                 col = col.push(
                     container(artifact_col)
@@ -478,6 +513,7 @@ fn mini_switch<'a>(kit: Kit, on: bool, msg: Message) -> Element<'a, Message> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashSet;
 
     #[test]
     fn artifact_preview_truncates_and_density_collapses() {
@@ -489,5 +525,38 @@ mod tests {
         let p = preview(&body, 400);
         assert!(p.len() <= 401 && p.ends_with('…'));
         assert_eq!(preview("short", 400), "short");
+    }
+
+    #[test]
+    fn artifact_toggle_flips_expand_in_both_directions() {
+        // is_expanded = artifact_expanded.contains(key) != default_expanded(n)
+        // This XOR means: presence in the set FLIPS the density default.
+        //
+        // n=1 (default=true):
+        //   no toggle → false != true  = true  → expanded  (honours default)
+        //   with toggle → true != true  = false → collapsed (user flipped it)
+        //
+        // n=5 (default=false):
+        //   no toggle → false != false = false → collapsed  (honours default)
+        //   with toggle → true != false = true  → expanded  (user flipped it)
+        let key = "/tmp/test-artifact.rs".to_string();
+        let mut expanded: HashSet<String> = HashSet::new();
+
+        // n=1: default expanded, no manual toggle → stays expanded
+        let is_exp_no_toggle_n1 = expanded.contains(&key) != default_expanded(1);
+        assert!(is_exp_no_toggle_n1, "n=1, no toggle: default should be expanded");
+
+        expanded.insert(key.clone());
+        let is_exp_with_toggle_n1 = expanded.contains(&key) != default_expanded(1);
+        assert!(!is_exp_with_toggle_n1, "n=1, toggle present: should collapse");
+
+        // n=5: default collapsed, no manual toggle → stays collapsed
+        expanded.clear();
+        let is_exp_no_toggle_n5 = expanded.contains(&key) != default_expanded(5);
+        assert!(!is_exp_no_toggle_n5, "n=5, no toggle: default should be collapsed");
+
+        expanded.insert(key.clone());
+        let is_exp_with_toggle_n5 = expanded.contains(&key) != default_expanded(5);
+        assert!(is_exp_with_toggle_n5, "n=5, toggle present: should expand");
     }
 }

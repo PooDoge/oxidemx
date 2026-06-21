@@ -2,6 +2,13 @@
 //! `ChatThread`, and the load/save round-trip to
 //! `~/.config/oxidemx/ai-chats.json`.
 
+/// Cached body of a flow artifact: raw text + parsed markdown items.
+/// Runtime-only — never persisted.
+pub struct ArtifactBody {
+    pub raw: String,
+    pub md: Vec<iced::widget::markdown::Item>,
+}
+
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct ChatMessage {
     pub is_user: bool,

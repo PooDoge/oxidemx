@@ -1736,6 +1736,48 @@ pub(super) fn update(state: &mut RadialState, message: Message) -> Task<Message>
                             steps: vec![],
                             artifacts: view.artifacts.clone(),
                         });
+                        // Populate artifact-body cache once at delivery so the render
+                        // path never does per-frame file I/O.
+                        for rel in &view.artifacts {
+                            let abs = crate::chat_ui::cards::run_artifact_abs(
+                                &view.run_id,
+                                rel,
+                            );
+                            let key = abs.to_string_lossy().to_string();
+                            state.ai_artifact_cache.entry(key).or_insert_with(|| {
+                                let mut raw =
+                                    std::fs::read_to_string(&abs).unwrap_or_default();
+                                if raw.len() > 65536 {
+                                    let mut end = 65536usize;
+                                    while !raw.is_char_boundary(end) {
+                                        end -= 1;
+                                    }
+                                    raw.truncate(end);
+                                }
+                                let ext = abs
+                                    .extension()
+                                    .and_then(|e| e.to_str())
+                                    .unwrap_or("")
+                                    .to_lowercase();
+                                let md_items: Vec<iced::widget::markdown::Item> =
+                                    match ext.as_str() {
+                                        "md" | "markdown" | "txt" | "" => {
+                                            iced::widget::markdown::parse(&raw).collect()
+                                        }
+                                        other => {
+                                            let lang =
+                                                crate::chat_ui::cards::lang_for_ext(other);
+                                            let fenced =
+                                                format!("```{lang}\n{raw}\n```");
+                                            iced::widget::markdown::parse(&fenced).collect()
+                                        }
+                                    };
+                                crate::radial::ArtifactBody {
+                                    raw,
+                                    md: md_items,
+                                }
+                            });
+                        }
                         if let Some(t) = state.ai_threads.get_mut(idx) {
                             t.history.push(msg);
                             t.updated_at = crate::radial::now_secs();
