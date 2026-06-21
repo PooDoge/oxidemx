@@ -45,6 +45,7 @@ output = "debug/claims.md"
 [[step]]
 id = "stress-test"
 kind = "reflect"
+needs = ["digest"]
 target = "digest"
 critic = "skeptic"
 max_rounds = 2

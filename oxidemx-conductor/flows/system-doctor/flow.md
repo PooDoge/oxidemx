@@ -25,6 +25,7 @@ timeout_secs = 240
 [[step]]
 id = "review"
 kind = "reflect"
+needs = ["diagnose"]
 target = "diagnose"
 critic = "skeptic"
 max_rounds = 2
