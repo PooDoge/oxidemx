@@ -6,7 +6,7 @@ description = "Analyzes the Rust agent codebase for common integration patterns 
 version = 1
 
 [inputs]
-codebase_path = { type="string", required=true, default="." }
+codebase_path = { type="string", default="." }
 
 [defaults]
 model = "gemini-1.5-pro"
