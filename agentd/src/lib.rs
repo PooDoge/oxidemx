@@ -19,6 +19,7 @@ pub mod seams;
 pub mod sessions;
 pub mod stream_bridge;
 pub mod tools;
+pub mod worktree;
 
 #[cfg(test)]
 mod tests {
