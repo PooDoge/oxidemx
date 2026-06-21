@@ -194,42 +194,48 @@ pub fn remove_if_unchanged(
 // Tests
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Test mock (pub(crate) so interface tests can inject it)
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+pub(crate) struct MockGit {
+    pub clean: bool,
+    pub calls: std::sync::Mutex<Vec<String>>,
+}
+
+#[cfg(test)]
+impl Git for MockGit {
+    fn worktree_add(
+        &self,
+        _r: &Path,
+        dst: &Path,
+        branch: &str,
+        base: &str,
+    ) -> Result<(), String> {
+        self.calls
+            .lock()
+            .unwrap()
+            .push(format!("add {} {} {}", dst.display(), branch, base));
+        Ok(())
+    }
+
+    fn worktree_remove(&self, _r: &Path, dst: &Path) -> Result<(), String> {
+        self.calls
+            .lock()
+            .unwrap()
+            .push(format!("remove {}", dst.display()));
+        Ok(())
+    }
+
+    fn is_clean(&self, _w: &Path) -> Result<bool, String> {
+        Ok(self.clean)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    struct MockGit {
-        clean: bool,
-        calls: std::sync::Mutex<Vec<String>>,
-    }
-
-    impl Git for MockGit {
-        fn worktree_add(
-            &self,
-            _r: &Path,
-            dst: &Path,
-            branch: &str,
-            base: &str,
-        ) -> Result<(), String> {
-            self.calls
-                .lock()
-                .unwrap()
-                .push(format!("add {} {} {}", dst.display(), branch, base));
-            Ok(())
-        }
-
-        fn worktree_remove(&self, _r: &Path, dst: &Path) -> Result<(), String> {
-            self.calls
-                .lock()
-                .unwrap()
-                .push(format!("remove {}", dst.display()));
-            Ok(())
-        }
-
-        fn is_clean(&self, _w: &Path) -> Result<bool, String> {
-            Ok(self.clean)
-        }
-    }
 
     #[test]
     fn create_uses_oxide_worktrees_path_and_branch() {

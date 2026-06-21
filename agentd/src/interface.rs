@@ -38,7 +38,7 @@ use crate::project_store::ProjectStore;
 use crate::projects::{ProjectKey, ProjectPaths};
 use crate::seams::{AgentEvent, Approver, EventEmitter, HostCapability, Verdict};
 use crate::sessions::{Sessions, TranscriptTurn};
-use crate::worktree::{create_conversation_worktree, remove_if_unchanged, RealGit};
+use crate::worktree::{create_conversation_worktree, remove_if_unchanged, Git, RealGit};
 
 // ── Timestamp helpers ─────────────────────────────────────────────────────────
 
@@ -321,6 +321,8 @@ pub struct AgentService {
     /// Single source of truth for launching + querying runs. The D-Bus methods
     /// below delegate to it; the agent tools share the same instance.
     pub run_launcher: Arc<crate::run_launcher::ConductorRunLauncher>,
+    /// Injectable git seam — production uses `RealGit`; tests inject `MockGit`.
+    pub git: Arc<dyn Git>,
 }
 
 impl AgentService {
@@ -351,6 +353,7 @@ impl AgentService {
             active_runs,
             run_statuses,
             run_launcher,
+            git: Arc::new(RealGit),
         }
     }
 
@@ -758,7 +761,7 @@ impl AgentService {
             }
         };
         let ref_str = base_ref.unwrap_or("head");
-        let wt = create_conversation_worktree(&RealGit, &repo, wt_name, ref_str)
+        let wt = create_conversation_worktree(&*self.git, &repo, wt_name, ref_str)
             .map_err(AgentdError::Io)?;
         conv.working_dir = wt.path.clone();
         conv.worktree = Some(wt);
@@ -781,10 +784,17 @@ impl AgentService {
             None => return Ok(()), // nothing to remove
         };
         let repo = project.default_working_dir.clone();
-        remove_if_unchanged(&RealGit, &wt, &repo)
+        let removed = remove_if_unchanged(&*self.git, &wt, &repo)
             .map_err(AgentdError::Io)?;
-        conv.working_dir = project.default_working_dir.clone();
+        if !removed {
+            // dirty worktree: keep the record intact, surface an error
+            return Err(AgentdError::Project(
+                "worktree has uncommitted changes; not removed".into(),
+            ));
+        }
+        // only now clear it
         conv.worktree = None;
+        conv.working_dir = project.default_working_dir.clone();
         conv.updated_at = now_ms();
         self.conversation_index_for(&project).upsert(conv);
         Ok(())
@@ -1049,9 +1059,8 @@ impl AgentInterface {
         self.svc.list_threads(project).await.map_err(to_fdo)
     }
 
-    async fn list_projects(&self) -> fdo::Result<String> {
-        let projects = self.svc.list_projects().await.map_err(to_fdo)?;
-        serde_json::to_string(&projects).map_err(|e| fdo::Error::Failed(e.to_string()))
+    async fn list_projects(&self) -> fdo::Result<Vec<String>> {
+        Ok(self.svc.projects.list_project_keys())
     }
 
     async fn respond_approval(
@@ -1429,6 +1438,7 @@ mod tests {
                 active_runs,
                 run_statuses,
                 run_launcher,
+                git: Arc::new(RealGit),
             });
 
             TestEnv {
@@ -1878,4 +1888,116 @@ You are an echo agent. Repeat the task back.
         assert_eq!(env.svc.get_conversation(c.id.as_str()).await.unwrap().unwrap().title, "renamed");
         assert_eq!(env.svc.list_conversations(p.id.as_str()).await.unwrap().len(), 1);
     }
+    // ── Test 7: remove_worktree respects dirty flag (Findings 2 + 3) ─────────
+
+    /// Builds an `AgentService` with a `MockGit` injected via `self.git`.
+    /// - Clean mock: `remove_worktree` clears the conversation record.
+    /// - Dirty mock: `remove_worktree` returns `Err` AND the record is untouched.
+    #[tokio::test]
+    async fn remove_worktree_respects_dirty_flag() {
+        use crate::worktree::MockGit;
+
+        // ── helpers to build a service with an injected MockGit ──────────────
+        fn build_svc_with_git(git: Arc<dyn crate::worktree::Git>) -> (Arc<AgentService>, tempfile::TempDir) {
+            let tmp = tempfile::tempdir().unwrap();
+            let store_base = tmp.path().join("store");
+            let emitter = Arc::new(crate::seams::RecordingEmitter::default());
+            let approver = Arc::new(crate::seams::Approver::new(emitter.clone()));
+            let stub_svc = Arc::new(StubLocalService::new());
+            let models = Arc::new(crate::models::ModelControls::new(stub_svc, emitter.clone()));
+            let active_runs = Arc::new(std::sync::Mutex::new(std::collections::HashMap::new()));
+            let run_statuses = Arc::new(std::sync::Mutex::new(std::collections::HashMap::new()));
+            let run_launcher = Arc::new(crate::run_launcher::ConductorRunLauncher::new(
+                active_runs.clone(),
+                run_statuses.clone(),
+                emitter.clone(),
+            ));
+            let runner = MockTurnRunner::new("mock reply");
+            let svc = Arc::new(AgentService {
+                projects: ProjectRegistry::with_store_base(store_base),
+                sessions: Arc::new(Sessions::new()),
+                models,
+                approver: approver.clone(),
+                emitter: emitter.clone(),
+                host: Arc::new(crate::seams::UnavailableHost),
+                turn_runner: Arc::new(runner),
+                active_runs,
+                run_statuses,
+                run_launcher,
+                git,
+            });
+            (svc, tmp)
+        }
+
+        // ── shared setup: create project + conversation ──────────────────────
+        async fn setup_conv(svc: &AgentService) -> (crate::model::Project, crate::model::Conversation) {
+            let p = svc.create_project("TestRepo", std::path::Path::new("/tmp/testgitrepo")).await.unwrap();
+            let c = svc.create_conversation(p.id.as_str(), None).await.unwrap();
+            (p, c)
+        }
+
+        // ── CLEAN path: worktree should be removed, record cleared ───────────
+        {
+            let clean_git = Arc::new(MockGit { clean: true, calls: Default::default() });
+            let (svc, _tmp) = build_svc_with_git(clean_git);
+            let (project, conv) = setup_conv(&svc).await;
+
+            // Inject a fake worktree record directly via the conversation index.
+            let mut conv_mut = conv.clone();
+            conv_mut.worktree = Some(crate::model::Worktree {
+                path: project.default_working_dir.join(".oxide").join("worktrees").join("test-wt"),
+                branch: "worktree-test-wt".into(),
+                base_ref: "head".into(),
+            });
+            conv_mut.working_dir = conv_mut.worktree.as_ref().unwrap().path.clone();
+            svc.conversation_index_for(&project).upsert(conv_mut);
+
+            // remove_worktree with a clean git should succeed.
+            svc.remove_worktree(conv.id.as_str()).await.unwrap();
+
+            // After removal the conversation record should have worktree cleared.
+            let after = svc.get_conversation(conv.id.as_str()).await.unwrap().unwrap();
+            assert!(after.worktree.is_none(), "clean remove: worktree should be None after removal");
+            assert_eq!(
+                after.working_dir,
+                project.default_working_dir,
+                "clean remove: working_dir should be reset to project default"
+            );
+        }
+
+        // ── DIRTY path: worktree should NOT be removed, record intact ────────
+        {
+            let dirty_git = Arc::new(MockGit { clean: false, calls: Default::default() });
+            let (svc, _tmp) = build_svc_with_git(dirty_git);
+            let (project, conv) = setup_conv(&svc).await;
+
+            // Inject a fake worktree record.
+            let wt_path = project.default_working_dir.join(".oxide").join("worktrees").join("dirty-wt");
+            let mut conv_mut = conv.clone();
+            conv_mut.worktree = Some(crate::model::Worktree {
+                path: wt_path.clone(),
+                branch: "worktree-dirty-wt".into(),
+                base_ref: "head".into(),
+            });
+            conv_mut.working_dir = wt_path.clone();
+            svc.conversation_index_for(&project).upsert(conv_mut);
+
+            // remove_worktree with a dirty git should return an Err.
+            let result = svc.remove_worktree(conv.id.as_str()).await;
+            assert!(result.is_err(), "dirty remove: expected Err, got Ok");
+
+            // The conversation record must still have its worktree (index not wiped).
+            let after = svc.get_conversation(conv.id.as_str()).await.unwrap().unwrap();
+            assert!(
+                after.worktree.is_some(),
+                "dirty remove: worktree should still be Some after failed remove"
+            );
+            assert_eq!(
+                after.working_dir,
+                wt_path,
+                "dirty remove: working_dir should NOT have been reset"
+            );
+        }
+    }
+
 }
