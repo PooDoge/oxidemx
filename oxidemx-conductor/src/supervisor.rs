@@ -1040,6 +1040,7 @@ output = "debug/draft.md"
 [[step]]
 id = "review"
 kind = "reflect"
+needs = ["draft"]
 target = "draft"
 critic = "skeptic"
 max_rounds = 2

@@ -181,7 +181,7 @@ pub fn validate(
     for s in steps {
         match s.kind.as_str() {
             "agent" => validate_agent_step(s, roster, known_tools, &ancestors, &mut errors),
-            "reflect" => validate_reflect_step(s, &ids, roster, &mut errors),
+            "reflect" => validate_reflect_step(s, &ids, roster, &ancestors, &mut errors),
             "route" => validate_route_step(s, &ids, &mut errors),
             other => errors.push(ValidationError::step(
                 &s.id,
@@ -292,6 +292,7 @@ fn validate_reflect_step(
     s: &Step,
     ids: &BTreeSet<&str>,
     roster: &Roster,
+    ancestors: &BTreeMap<String, BTreeSet<String>>,
     errors: &mut Vec<ValidationError>,
 ) {
     match &s.target {
@@ -302,7 +303,21 @@ fn validate_reflect_step(
                 format!("reflect target `{t}` is not a step"),
             ));
         }
-        _ => {}
+        Some(t) => {
+            // The target must be a real dependency, not just a runtime gate —
+            // otherwise Kahn's sort treats this reflect step as an entry node
+            // and it goes "ready" too early (the foot-gun).
+            let empty = BTreeSet::new();
+            let anc = ancestors.get(&s.id).unwrap_or(&empty);
+            if !s.needs.iter().any(|n| n == t) && !anc.contains(t.as_str()) {
+                errors.push(ValidationError::step(
+                    &s.id,
+                    format!(
+                        "reflect target `{t}` must be listed in `needs` (directly or transitively)"
+                    ),
+                ));
+            }
+        }
     }
     match &s.critic {
         None => errors.push(ValidationError::step(&s.id, "reflect step has no `critic`")),
@@ -619,6 +634,32 @@ body"#;
                 vec!["digest".to_string()],
                 vec!["answer".to_string()],
             ]
+        );
+    }
+
+    const REFLECT_NO_NEEDS: &str = r#"---
+[flow]
+id = "rn"
+description = "x"
+[[step]]
+id = "make"
+task = "t"
+agent = "web-researcher"
+[[step]]
+id = "check"
+kind = "reflect"
+target = "make"
+critic = "skeptic"
+---
+body"#;
+
+    #[test]
+    fn reflect_target_must_be_in_needs() {
+        let errs = validate(&doc(REFLECT_NO_NEEDS), &roster(), &["execute_command"]).unwrap_err();
+        assert!(
+            errs.iter().any(|e| e.step.as_deref() == Some("check")
+                && e.message.contains("needs")),
+            "expected a reflect-target-in-needs error, got {errs:?}"
         );
     }
 
