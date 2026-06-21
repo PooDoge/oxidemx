@@ -10,6 +10,7 @@ pub mod interface;
 pub mod journal;
 pub mod model;
 pub mod models;
+pub mod oxide_config;
 pub mod project_store;
 pub mod projects;
 pub mod run_bridge;
@@ -50,12 +51,12 @@ mod tests {
     #[test]
     fn merge_prefers_project_local() {
         let proj = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(proj.path().join(".oxidemx/skills")).unwrap();
+        std::fs::create_dir_all(proj.path().join(".oxide/skills")).unwrap();
         let p = ProjectPaths::resolve(proj.path());
         let roots = p.merged_skill_roots();
         // project-local skills dir is present and is LAST (wins on name collision)
         assert_eq!(
-            roots.last().map(|r| r.ends_with(".oxidemx/skills")),
+            roots.last().map(|r| r.ends_with(".oxide/skills")),
             Some(true)
         );
         assert!(p.store.components().any(|c| c.as_os_str() == "projects"));

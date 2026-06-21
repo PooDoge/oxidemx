@@ -206,7 +206,16 @@ impl ProjectRegistry {
         if let Some(base) = &self.store_base_override {
             let key = ProjectKey::from_cwd(cwd);
             let store = base.join("projects").join(key.as_str());
-            let local = cwd.join(".oxidemx");
+            // Prefer .oxide; fall back to .oxidemx for back-compat.
+            let preferred = cwd.join(".oxide");
+            let compat = cwd.join(".oxidemx");
+            let local = if preferred.exists() {
+                preferred
+            } else if compat.exists() {
+                compat
+            } else {
+                preferred // default to new name when neither exists yet
+            };
             // Construct directly since ProjectPaths fields are public.
             ProjectPaths {
                 key,

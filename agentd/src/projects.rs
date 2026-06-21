@@ -8,7 +8,7 @@
 //! - A [`ProjectPaths`] bundle that records where every agentd artifact for
 //!   the project lives — both in the central per-project store
 //!   (`~/.local/share/oxidemx/projects/<key>/`) and in the project-local
-//!   `.oxidemx/` directory.
+//!   `.oxide/` directory (`.oxidemx/` accepted for back-compat).
 //! - Merge helpers that layer project-local config/skills/MCP OVER global
 //!   config, so the project-local version wins on name collision (the same
 //!   pattern Claude Code uses with `.claude/`).
@@ -108,24 +108,38 @@ fn sanitize_slug(s: &str) -> String {
 /// - `store` is the central per-project store under `$XDG_DATA_HOME` (or
 ///   `~/.local/share`) — agentd writes transcripts, run journals, and learned
 ///   facts here.
-/// - `local` is the project-local `.oxidemx/` directory inside `cwd` — users
+/// - `local` is the project-local `.oxide/` directory inside `cwd` — users
 ///   can drop project-scoped skills, MCP config, or a `config.toml` here.
+///   If `.oxide/` does not exist but `.oxidemx/` does, `.oxidemx/` is used
+///   for back-compat; new projects get `.oxide/`.
 #[derive(Clone)]
 pub struct ProjectPaths {
     pub key: ProjectKey,
     pub cwd: PathBuf,
     /// `~/.local/share/oxidemx/projects/<key>`
     pub store: PathBuf,
-    /// `<cwd>/.oxidemx`
+    /// `<cwd>/.oxide` (preferred) or `<cwd>/.oxidemx` (back-compat)
     pub local: PathBuf,
 }
 
 impl ProjectPaths {
     /// Resolve all paths for the project rooted at `cwd`.
+    ///
+    /// `local` is set to `<cwd>/.oxide` if that directory exists, else
+    /// `<cwd>/.oxidemx` (back-compat for existing projects), else the
+    /// canonical new name `<cwd>/.oxide` (for projects not yet created).
     pub fn resolve(cwd: &Path) -> ProjectPaths {
         let key = ProjectKey::from_cwd(cwd);
         let store = data_dir().join("oxidemx").join("projects").join(key.as_str());
-        let local = cwd.join(".oxidemx");
+        let preferred = cwd.join(".oxide");
+        let compat = cwd.join(".oxidemx");
+        let local = if preferred.exists() {
+            preferred
+        } else if compat.exists() {
+            compat
+        } else {
+            preferred // default to new name when neither exists yet
+        };
         ProjectPaths {
             key,
             cwd: cwd.to_path_buf(),
@@ -172,11 +186,13 @@ impl ProjectPaths {
     /// `oxidemx_agent_core::skills::global_skill_roots()`), then
     /// `<cwd>/.claude/skills`, then `<local>/skills` last — so a
     /// project-local skill with the same name as a global one wins.
+    ///
+    /// `local` is `.oxide/` (preferred) or `.oxidemx/` (back-compat).
     pub fn merged_skill_roots(&self) -> Vec<PathBuf> {
         let mut roots = oxidemx_agent_core::skills::global_skill_roots();
         // Project-local Claude-compatible root (mirrors Claude Code's layout).
         roots.push(self.cwd.join(".claude").join("skills"));
-        // Project-local oxidemx root (wins on collision).
+        // Project-local .oxide root (wins on collision).
         roots.push(self.local.join("skills"));
         roots
     }
@@ -184,6 +200,7 @@ impl ProjectPaths {
     /// Merged MCP server configuration: global `~/.config/oxidemx/mcp.toml`
     /// base, project-local `<local>/mcp.toml` servers override by name.
     ///
+    /// `local` is `.oxide/` (preferred) or `.oxidemx/` (back-compat).
     /// Both files are expected to be TOML tables with a top-level `servers`
     /// key mapping server names to their config objects. Missing files are
     /// silently skipped. Returns a JSON `Value` so callers don't need to
@@ -360,9 +377,12 @@ mod tests {
     #[test]
     fn project_config_parses_when_present() {
         let d = tempfile::tempdir().unwrap();
+        // Use back-compat .oxidemx to verify that resolve() still picks it up.
         std::fs::create_dir_all(d.path().join(".oxidemx")).unwrap();
         std::fs::write(d.path().join(".oxidemx/config.toml"), "name = \"test\"\n").unwrap();
         let p = ProjectPaths::resolve(d.path());
+        // resolve() should choose .oxidemx (back-compat, since .oxide absent).
+        assert!(p.local.ends_with(".oxidemx"), "back-compat path selected");
         let cfg = p.project_config().expect("should parse");
         assert_eq!(
             cfg.get("name").and_then(|v| v.as_str()),
@@ -385,11 +405,13 @@ mod tests {
     #[test]
     fn merge_prefers_project_local() {
         let d = tempfile::tempdir().unwrap();
+        // Create .oxide/skills so that resolve() picks .oxide (preferred).
+        std::fs::create_dir_all(d.path().join(".oxide/skills")).unwrap();
         let p = ProjectPaths::resolve(d.path());
         let roots = p.merged_skill_roots();
         // Verify the skills roots are in the expected order, with both Claude-compatible
-        // and oxidemx-local roots present, and .oxidemx/skills last.
+        // and oxide-local roots present, and .oxide/skills last.
         assert!(roots.iter().any(|r| r.ends_with(".claude/skills")));
-        assert!(roots.last().is_some_and(|r| r.ends_with(".oxidemx/skills")));
+        assert!(roots.last().is_some_and(|r| r.ends_with(".oxide/skills")));
     }
 }
