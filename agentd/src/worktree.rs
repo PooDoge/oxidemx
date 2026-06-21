@@ -106,6 +106,51 @@ impl Git for RealGit {
 // Helpers
 // ---------------------------------------------------------------------------
 
+/// Copy literal-path entries from `repo/.oxideinclude` into `dst`.
+///
+/// Blank, comment (`#`), glob (`*`/`?`/`[`), absolute, and parent-dir (`..`)
+/// entries are silently skipped.  Only paths that exist in `repo` are copied.
+fn copy_oxideinclude(repo: &Path, dst: &Path) -> Result<(), String> {
+    let include_path = repo.join(".oxideinclude");
+    if !include_path.exists() {
+        return Ok(());
+    }
+    let content = std::fs::read_to_string(&include_path)
+        .map_err(|e| format!("read .oxideinclude: {e}"))?;
+    for line in content.lines() {
+        let trimmed = line.trim();
+        // Skip blank, comment, and glob lines (anything with * ? [ ])
+        if trimmed.is_empty()
+            || trimmed.starts_with('#')
+            || trimmed.contains('*')
+            || trimmed.contains('?')
+            || trimmed.contains('[')
+        {
+            continue;
+        }
+        // Guard: reject absolute paths and any path that escapes the repo
+        // via parent-dir components ("../secret", "/etc/passwd", etc.).
+        let p = std::path::Path::new(trimmed);
+        if p.is_absolute()
+            || p.components()
+                .any(|c| c == std::path::Component::ParentDir)
+        {
+            continue; // .oxideinclude entries must stay inside the repo
+        }
+        let src = repo.join(trimmed);
+        if src.exists() {
+            let dest = dst.join(trimmed);
+            if let Some(parent) = dest.parent() {
+                std::fs::create_dir_all(parent)
+                    .map_err(|e| format!("mkdir {}: {e}", parent.display()))?;
+            }
+            std::fs::copy(&src, &dest)
+                .map_err(|e| format!("copy {trimmed}: {e}"))?;
+        }
+    }
+    Ok(())
+}
+
 /// Create a per-conversation worktree at `repo/.oxide/worktrees/<name>`.
 ///
 /// Copies any literal-path entries from `repo/.oxideinclude` into the new
@@ -120,35 +165,7 @@ pub fn create_conversation_worktree(
     let branch = format!("worktree-{name}");
 
     git.worktree_add(repo, &dst, &branch, base_ref)?;
-
-    // Copy .oxideinclude literal paths if the file exists.
-    let include_path = repo.join(".oxideinclude");
-    if include_path.exists() {
-        let content = std::fs::read_to_string(&include_path)
-            .map_err(|e| format!("read .oxideinclude: {e}"))?;
-        for line in content.lines() {
-            let trimmed = line.trim();
-            // Skip blank, comment, and glob lines (anything with * ? [ ])
-            if trimmed.is_empty()
-                || trimmed.starts_with('#')
-                || trimmed.contains('*')
-                || trimmed.contains('?')
-                || trimmed.contains('[')
-            {
-                continue;
-            }
-            let src = repo.join(trimmed);
-            if src.exists() {
-                let dest = dst.join(trimmed);
-                if let Some(parent) = dest.parent() {
-                    std::fs::create_dir_all(parent)
-                        .map_err(|e| format!("mkdir {}: {e}", parent.display()))?;
-                }
-                std::fs::copy(&src, &dest)
-                    .map_err(|e| format!("copy {trimmed}: {e}"))?;
-            }
-        }
-    }
+    copy_oxideinclude(repo, &dst)?;
 
     Ok(Worktree {
         path: dst,
@@ -248,5 +265,55 @@ mod tests {
             false
         );
         assert!(dirty.calls.lock().unwrap().is_empty());
+    }
+
+    /// `.oxideinclude` path-escape guard: safe relative entries are copied;
+    /// absolute and parent-dir entries are rejected and never escape the repo.
+    #[test]
+    fn oxideinclude_rejects_absolute_and_parent_dir_paths() {
+        use std::fs;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = tmp.path().join("repo");
+        let dst = repo.join(".oxide").join("worktrees").join("t");
+        fs::create_dir_all(&dst).unwrap();
+
+        // Safe file that should be copied.
+        fs::write(repo.join("keep.txt"), b"safe").unwrap();
+
+        // Sentinel above the repo root — must NOT be touched.
+        let sentinel = tmp.path().join("escape.txt");
+        fs::write(&sentinel, b"secret").unwrap();
+
+        // .oxideinclude: one safe line, one absolute, one parent-dir.
+        let include = format!(
+            "keep.txt\n/etc/hostname\n../escape.txt\n"
+        );
+        fs::write(repo.join(".oxideinclude"), include.as_bytes()).unwrap();
+
+        copy_oxideinclude(&repo, &dst).unwrap();
+
+        // Safe entry copied.
+        assert!(
+            dst.join("keep.txt").exists(),
+            "keep.txt should have been copied into the worktree"
+        );
+
+        // Absolute and parent-dir entries must NOT have been acted on.
+        assert!(
+            !dst.join("etc").join("hostname").exists(),
+            "/etc/hostname must not appear in the worktree"
+        );
+        assert!(
+            !dst.join("escape.txt").exists(),
+            "../escape.txt must not appear in the worktree"
+        );
+
+        // The sentinel file one level above the repo must be untouched.
+        assert_eq!(
+            fs::read(&sentinel).unwrap(),
+            b"secret",
+            "sentinel file above repo must not be modified"
+        );
     }
 }
