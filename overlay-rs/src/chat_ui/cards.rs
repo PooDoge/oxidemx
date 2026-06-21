@@ -11,13 +11,62 @@ use super::Kit;
 use crate::ai_client::AgentCardData;
 use crate::app::Message;
 
+// ── Artifact helpers ──────────────────────────────────────────────────────────
+
+/// Default expand state for an artifact card given how many artifacts the
+/// message carries: one or two artifacts open expanded; many default collapsed.
+pub fn default_expanded(artifact_count: usize) -> bool {
+    artifact_count <= 2
+}
+
+/// Truncate `body` so the result fits in at most `max` bytes (UTF-8), appending
+/// '…' (3 bytes) when cut. Returns the original string when it already fits.
+pub fn preview(body: &str, max: usize) -> String {
+    if body.len() <= max {
+        return body.to_string();
+    }
+    // Reserve 3 bytes for the '…' marker; walk back to a char boundary.
+    let cut = max.saturating_sub('…'.len_utf8());
+    let cut = body
+        .char_indices()
+        .map(|(i, _)| i)
+        .take_while(|&i| i <= cut)
+        .last()
+        .unwrap_or(0);
+    let mut s = body[..cut].to_string();
+    s.push('…');
+    s
+}
+
+/// Resolve an artifact's relative path to an absolute path under the runs dir.
+fn run_artifact_abs(run_id: &str, rel: &str) -> std::path::PathBuf {
+    let runs_dir = std::env::var_os("OXIDEMX_RUNS_DIR")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| {
+            let base = std::env::var_os("XDG_DATA_HOME")
+                .map(std::path::PathBuf::from)
+                .or_else(|| {
+                    std::env::var_os("HOME")
+                        .map(|h| std::path::PathBuf::from(h).join(".local/share"))
+                })
+                .unwrap_or_else(|| std::path::PathBuf::from("."));
+            base.join("oxidemx").join("runs")
+        });
+    runs_dir.join(run_id).join(rel)
+}
+
+// ── Card view ─────────────────────────────────────────────────────────────────
+
 /// Render an agent card. `index` is the owning history index (for the
 /// collapse toggle); `expanded` is whether the user opened it.
+/// `artifact_expanded` is the set of artifact absolute paths the user has
+/// manually toggled open.
 pub fn view<'a>(
     card: &'a AgentCardData,
     kit: &Kit,
     index: usize,
     expanded: bool,
+    artifact_expanded: &std::collections::HashSet<String>,
 ) -> Element<'a, Message> {
     let kit = *kit;
     let (tone, icon_name, title, meta) = match card {
@@ -214,6 +263,7 @@ pub fn view<'a>(
         }
         AgentCardData::Flow {
             flow_id,
+            run_id,
             steps,
             artifacts,
             ..
@@ -238,12 +288,112 @@ pub fn view<'a>(
                     .align_y(Alignment::Center),
                 );
             }
-            if !artifacts.is_empty() {
+            // Per-artifact sub-cards
+            for rel in artifacts.iter() {
+                let abs = run_artifact_abs(run_id, rel);
+                let abs_str = abs.to_string_lossy().into_owned();
+                let filename = abs
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| rel.clone());
+                let is_expanded = artifact_expanded.contains(&abs_str)
+                    || default_expanded(artifacts.len());
+                // Read file content (capped at 64 KB)
+                let content: String = if is_expanded {
+                    let raw = std::fs::read_to_string(&abs).unwrap_or_default();
+                    if raw.len() > 65536 {
+                        raw.chars().take(65536).collect()
+                    } else {
+                        raw
+                    }
+                } else {
+                    String::new()
+                };
+                // Title row
+                let title = text(filename)
+                    .size(11.5)
+                    .font(iced::Font {
+                        weight: iced::font::Weight::Semibold,
+                        ..Default::default()
+                    })
+                    .color(kit.fade(kit.text, 1.0));
+                // Button row: open-file, open-folder, copy-path
+                let abs_for_open = abs_str.clone();
+                let abs_for_folder = abs_str.clone();
+                let abs_for_copy = abs_str.clone();
+                let btn_open = button(
+                    text("↗ open").size(10.0).color(kit.fade(kit.subtext1, 1.0)),
+                )
+                .padding([2, 7])
+                .style(move |_, _| button::Style {
+                    border: iced::border::Border {
+                        color: kit.fade(kit.surface2, 1.0),
+                        width: 1.0,
+                        radius: 5.0.into(),
+                    },
+                    ..Default::default()
+                })
+                .on_press(Message::RunOpenArtifact(abs_for_open));
+                let btn_folder = button(
+                    text("⊟ folder").size(10.0).color(kit.fade(kit.subtext1, 1.0)),
+                )
+                .padding([2, 7])
+                .style(move |_, _| button::Style {
+                    border: iced::border::Border {
+                        color: kit.fade(kit.surface2, 1.0),
+                        width: 1.0,
+                        radius: 5.0.into(),
+                    },
+                    ..Default::default()
+                })
+                .on_press(Message::RunOpenFolder(abs_for_folder));
+                let btn_copy = button(
+                    text("⧉ path").size(10.0).color(kit.fade(kit.subtext1, 1.0)),
+                )
+                .padding([2, 7])
+                .style(move |_, _| button::Style {
+                    border: iced::border::Border {
+                        color: kit.fade(kit.surface2, 1.0),
+                        width: 1.0,
+                        radius: 5.0.into(),
+                    },
+                    ..Default::default()
+                })
+                .on_press(Message::RunCopyPath(abs_for_copy));
+                let btn_row = row![btn_open, btn_folder, btn_copy]
+                    .spacing(5)
+                    .align_y(Alignment::Center);
+                let mut artifact_col = column![title, btn_row].spacing(4);
+                // Body: preview or full, click to toggle
+                if is_expanded && !content.is_empty() {
+                    let body_preview = preview(&content, 400);
+                    let toggle_abs = abs_str.clone();
+                    let body_text = container(
+                        text(body_preview)
+                            .size(11.0)
+                            .font(iced::Font::MONOSPACE)
+                            .color(kit.fade(kit.text, 1.0)),
+                    )
+                    .width(Length::Fill)
+                    .padding([6, 9])
+                    .style(super::catalog::surface_style(
+                        kit,
+                        super::Surface::CrustWell,
+                    ));
+                    let body_area = iced::widget::mouse_area(body_text)
+                        .on_press(Message::ArtifactToggleExpand(toggle_abs));
+                    artifact_col = artifact_col.push(body_area);
+                }
+                // Wrap in a subtle container
                 col = col.push(
-                    text(format!("artifacts: {}", artifacts.join(", ")))
-                        .size(10)
-                        .font(iced::Font::MONOSPACE)
-                        .color(kit.fade(kit.subtext0, 1.0)),
+                    container(artifact_col)
+                        .padding(iced::Padding {
+                            top: 6.0,
+                            right: 8.0,
+                            bottom: 6.0,
+                            left: 8.0,
+                        })
+                        .style(super::catalog::surface_style(kit, super::Surface::CrustWell)),
                 );
             }
             let chips = vec![chip(
@@ -323,4 +473,21 @@ fn io_block<'a>(kit: Kit, label: &'static str, body: &str) -> Element<'a, Messag
 /// Small pill switch (Task card enable toggle) — the shared MiniSwitch.
 fn mini_switch<'a>(kit: Kit, on: bool, msg: Message) -> Element<'a, Message> {
     super::widgets::switch(kit, on, msg)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn artifact_preview_truncates_and_density_collapses() {
+        // many artifacts → default collapsed (no preview lines)
+        assert!(default_expanded(1));
+        assert!(!default_expanded(5));
+        // preview truncates to N chars with an ellipsis marker
+        let body = "x".repeat(5000);
+        let p = preview(&body, 400);
+        assert!(p.len() <= 401 && p.ends_with('…'));
+        assert_eq!(preview("short", 400), "short");
+    }
 }

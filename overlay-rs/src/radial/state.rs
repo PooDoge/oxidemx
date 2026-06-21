@@ -64,6 +64,7 @@ impl RadialState {
             ai_image_cache: std::collections::HashMap::new(),
             ai_turn_tokens: (0, 0),
             ai_card_expanded: std::collections::HashSet::new(),
+            ai_artifact_expanded: std::collections::HashSet::new(),
             ai_lightbox: None,
             ai_activity: None,
             ai_abort: None,

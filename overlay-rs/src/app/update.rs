@@ -1805,6 +1805,33 @@ pub(super) fn update(state: &mut RadialState, message: Message) -> Task<Message>
             Task::none()
         }
 
+        Message::RunOpenFolder(path) => {
+            let dir = std::path::Path::new(&path)
+                .parent()
+                .map(|p| p.to_path_buf())
+                .unwrap_or_else(|| std::path::PathBuf::from(&path));
+            let _ = std::process::Command::new("xdg-open").arg(dir).spawn();
+            Task::none()
+        }
+
+        Message::RunCopyPath(path) => {
+            state.ai_toast = Some(("✓ Copied".to_string(), std::time::Instant::now()));
+            Task::batch([
+                iced::clipboard::write(path),
+                Task::perform(
+                    tokio::time::sleep(std::time::Duration::from_millis(1600)),
+                    |_| Message::AiToastExpire,
+                ),
+            ])
+        }
+
+        Message::ArtifactToggleExpand(path) => {
+            if !state.ai_artifact_expanded.remove(&path) {
+                state.ai_artifact_expanded.insert(path);
+            }
+            Task::none()
+        }
+
         Message::RunCancel(run_id) => {
             // Issue cancel_run over D-Bus; do NOT optimistically mark cancelled
             // here — wait for the RunCancelled event from the conductor (Rule 1).

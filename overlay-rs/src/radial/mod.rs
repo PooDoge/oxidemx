@@ -157,6 +157,8 @@ pub struct RadialState {
     pub ai_turn_tokens: (u32, u32),
     /// Agent/flow card messages (by history index) the user expanded.
     pub ai_card_expanded: std::collections::HashSet<usize>,
+    /// Artifact absolute paths the user manually expanded (keyed by abs path string).
+    pub ai_artifact_expanded: std::collections::HashSet<String>,
     /// A reply image opened in the full-window lightbox (its URL/path),
     /// or `None` when the lightbox is closed.
     pub ai_lightbox: Option<String>,
