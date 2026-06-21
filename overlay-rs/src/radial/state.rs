@@ -422,6 +422,7 @@ impl RadialState {
         }
         self.ai_renaming = None;
         self.ai_hover_msg = None;
+        self.ai_loading = self.ai_threads.get(self.ai_active).map(|t| t.working).unwrap_or(false);
     }
 
     /// Retarget the disc ↔ chat morph to match the active page.

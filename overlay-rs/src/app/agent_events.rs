@@ -212,7 +212,7 @@ fn demux_event(thread_or_run: &str, payload_json: &str) -> Message {
                 steps: strs(&d, "steps"),
                 step: s(&d, "step"),
                 agent: s(&d, "agent"),
-                message: { let m = s(&d, "message"); if m.is_empty() { s(&d, "error") } else { m } },
+                message: { let m = s(&d, "message"); if !m.is_empty() { m } else { let e = s(&d, "error"); if !e.is_empty() { e } else { s(&d, "reason") } } },
                 success: d.get("success").and_then(|x| x.as_bool()).unwrap_or(false),
                 artifact: d.get("artifact").and_then(|x| x.as_str()).map(String::from),
                 summary: s(&d, "summary"),
@@ -269,6 +269,25 @@ mod run_parse_tests {
         let payload = r#"{"kind":"run","variant":"TaskError","run_id":"run-9","details":{"step":"a","error":"boom"}}"#;
         match demux_event("run-9", payload) {
             Message::RunEvent(v) => { assert_eq!(v.variant, "TaskError"); assert_eq!(v.message, "boom"); }
+            other => panic!("expected RunEvent, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn run_failed_reason_reaches_message() {
+        // RunFailed payloads from the conductor carry `details.reason`
+        // (no `message` or `error` field).  The fallback chain must
+        // surface it or the auto-delivered chat notice shows "(no reason reported)".
+        let payload = serde_json::json!({
+            "kind": "run", "variant": "RunFailed", "run_id": "run-7",
+            "details": { "reason": "step boom" }
+        }).to_string();
+        match demux_event("run-7", &payload) {
+            Message::RunEvent(v) => {
+                assert_eq!(v.variant, "RunFailed");
+                assert_eq!(v.message, "step boom",
+                    "reason must be in fallback chain; got '{}'", v.message);
+            }
             other => panic!("expected RunEvent, got {other:?}"),
         }
     }
