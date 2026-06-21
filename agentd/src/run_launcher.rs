@@ -219,6 +219,7 @@ impl RunLauncher for ConductorRunLauncher {
         let bridge = Arc::new(RunEventBridge::new(
             project,
             run_id.clone(),
+            conversation_id,
             self.emitter.clone(),
             self.run_statuses.clone(),
         ));

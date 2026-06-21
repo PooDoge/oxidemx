@@ -50,6 +50,9 @@ pub struct RunEventBridge {
     /// The run this bridge belongs to (one bridge per run). Stamped on every
     /// emitted event so the UI can group step events under their run.
     pub run_id: String,
+    /// The originating chat conversation. Stamped on every emitted run event so
+    /// the overlay can route the flow's result back to the right conversation.
+    pub conversation_id: String,
     /// Emitter forwarding events to the D-Bus signal (or a recorder in tests).
     pub emitter: Arc<dyn EventEmitter>,
     /// Shared run-status table: `run_id → "running" | "finished" | "failed" | "cancelled"`.
@@ -60,12 +63,14 @@ impl RunEventBridge {
     pub fn new(
         project: impl Into<String>,
         run_id: impl Into<String>,
+        conversation_id: impl Into<String>,
         emitter: Arc<dyn EventEmitter>,
         statuses: Arc<Mutex<HashMap<String, String>>>,
     ) -> Self {
         Self {
             project: project.into(),
             run_id: run_id.into(),
+            conversation_id: conversation_id.into(),
             emitter,
             statuses,
         }
@@ -85,6 +90,7 @@ impl RunEventBridge {
             "kind": "run",
             "variant": variant,
             "run_id": run_id,
+            "conversation_id": self.conversation_id,
             "details": details,
         });
         self.emitter.emit(AgentEvent {
@@ -190,7 +196,7 @@ mod tests {
     fn make_bridge() -> (RunEventBridge, Arc<RecordingEmitter>, Arc<Mutex<HashMap<String, String>>>) {
         let emitter = Arc::new(RecordingEmitter::default());
         let statuses: Arc<Mutex<HashMap<String, String>>> = Arc::new(Mutex::new(HashMap::new()));
-        let bridge = RunEventBridge::new("test-project", "run-77", emitter.clone(), statuses.clone());
+        let bridge = RunEventBridge::new("test-project", "run-77", "chat-test", emitter.clone(), statuses.clone());
         (bridge, emitter, statuses)
     }
 
@@ -292,5 +298,25 @@ mod tests {
                 "every step event must carry the owning run_id, got {:?}", ev.payload
             );
         }
+    }
+
+    #[tokio::test]
+    async fn payload_carries_conversation_id() {
+        #[derive(Default)]
+        struct Rec { last: std::sync::Mutex<Option<serde_json::Value>> }
+        impl crate::seams::EventEmitter for Rec {
+            fn emit(&self, ev: crate::seams::AgentEvent) { *self.last.lock().unwrap() = Some(ev.payload); }
+        }
+        let rec = std::sync::Arc::new(Rec::default());
+        let bridge = RunEventBridge::new(
+            "/p", "run-1", "chat-3",
+            rec.clone(), std::sync::Arc::new(std::sync::Mutex::new(Default::default())),
+        );
+        bridge.emit(oxidemx_conductor::event::RunEvent::RunFinished {
+            run_id: "run-1".into(), artifacts: vec![], handoff_markdown: "hi".into(),
+        }).await;
+        let p = rec.last.lock().unwrap().clone().unwrap();
+        assert_eq!(p["conversation_id"], "chat-3");
+        assert_eq!(p["variant"], "RunFinished");
     }
 }
