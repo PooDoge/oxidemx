@@ -1085,9 +1085,15 @@ impl AgentService {
 
     // ── migrate_on_start ──────────────────────────────────────────────────────
 
-    /// Startup migration: ensure the Personal project exists, then scan every
-    /// project store directory for transcript files not yet in the Personal
-    /// conversation index, and upsert a `Conversation` row for each.
+    /// Startup migration: ensure the Personal project exists, then scan
+    /// Personal's transcript directory for transcript files not yet in the
+    /// Personal conversation index, and upsert a `Conversation` row for each.
+    ///
+    /// Scoped to Personal only: pre-feature data is all under the overlay
+    /// global (Personal) key. Named projects get indexed by `send_message`
+    /// as they are used, so migration only needs to recover pre-existing
+    /// Personal transcripts. Scanning all dirs would collapse named-project
+    /// conversations into Personal with the wrong project attribution.
     ///
     /// Idempotent: threads already indexed are silently skipped.
     /// Best-effort: a bad/unreadable transcript logs a warning and continues.
@@ -1098,64 +1104,52 @@ impl AgentService {
         let projects_root = self.projects.projects_root();
         let default_model = oxidemx_shared::config::AiConfig::default().model;
 
-        // Enumerate every subdirectory under the projects root — each is a
-        // project-key-named store dir that may contain a `transcripts/` subdir.
-        let entries = match std::fs::read_dir(&projects_root) {
-            Ok(e) => e,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-            Err(e) => return Err(AgentdError::Io(e.to_string())),
+        // Scope the scan to Personal's transcript dir only.
+        let personal_key = ProjectKey::from_cwd(&personal.default_working_dir);
+        let transcripts_dir = projects_root.join(personal_key.as_str()).join("transcripts");
+        let ts = crate::sessions::TranscriptStore::new(&transcripts_dir);
+        let threads = match ts.list_threads() {
+            Ok(t) => t,
+            Err(e) => {
+                tracing::warn!("migrate_on_start: list_threads failed for {}: {e}", transcripts_dir.display());
+                return Ok(());
+            }
         };
 
-        for entry in entries.flatten() {
-            let store_dir = entry.path();
-            if !store_dir.is_dir() {
-                continue;
+        for thread_id in threads {
+            let cid = ConversationId::from(thread_id.as_str());
+            if index.get(&cid).is_some() {
+                continue; // already indexed
             }
-            let transcripts_dir = store_dir.join("transcripts");
-            let ts = crate::sessions::TranscriptStore::new(&transcripts_dir);
-            let threads = match ts.list_threads() {
+            let turns = match ts.read(&thread_id) {
                 Ok(t) => t,
                 Err(e) => {
-                    tracing::warn!("migrate_on_start: list_threads failed for {}: {e}", transcripts_dir.display());
+                    tracing::warn!("migrate_on_start: read transcript {thread_id} failed: {e}");
                     continue;
                 }
             };
-
-            for thread_id in threads {
-                let cid = ConversationId::from(thread_id.as_str());
-                if index.get(&cid).is_some() {
-                    continue; // already indexed
-                }
-                let turns = match ts.read(&thread_id) {
-                    Ok(t) => t,
-                    Err(e) => {
-                        tracing::warn!("migrate_on_start: read transcript {thread_id} failed: {e}");
-                        continue;
-                    }
-                };
-                let title: String = turns
-                    .iter()
-                    .find(|t| t.role == "user")
-                    .map(|t| t.text.chars().take(60).collect())
-                    .unwrap_or_default();
-                let created_at = turns.first().map(|t| t.ts).unwrap_or_else(now_ms);
-                let updated_at = turns.last().map(|t| t.ts).unwrap_or(created_at);
-                let conv = Conversation {
-                    id: cid,
-                    project_id: personal.id.clone(),
-                    title,
-                    working_dir: personal.default_working_dir.clone(),
-                    model: default_model.clone(),
-                    summary: String::new(),
-                    summary_upto: 0,
-                    tokens_prompt: 0,
-                    tokens_completion: 0,
-                    created_at,
-                    updated_at,
-                    worktree: None,
-                };
-                index.upsert(conv);
-            }
+            let title: String = turns
+                .iter()
+                .find(|t| t.role == "user")
+                .map(|t| t.text.chars().take(60).collect())
+                .unwrap_or_default();
+            let created_at = turns.first().map(|t| t.ts).unwrap_or_else(now_ms);
+            let updated_at = turns.last().map(|t| t.ts).unwrap_or(created_at);
+            let conv = Conversation {
+                id: cid,
+                project_id: personal.id.clone(),
+                title,
+                working_dir: personal.default_working_dir.clone(),
+                model: default_model.clone(),
+                summary: String::new(),
+                summary_upto: 0,
+                tokens_prompt: 0,
+                tokens_completion: 0,
+                created_at,
+                updated_at,
+                worktree: None,
+            };
+            index.upsert(conv);
         }
 
         Ok(())
@@ -2241,18 +2235,47 @@ You are an echo agent. Repeat the task back.
     #[tokio::test]
     async fn migration_creates_personal_and_indexes_existing_transcripts() {
         let env = TestEnv::new();
-        // simulate a pre-existing transcript by sending a message first
-        env.svc.send_message(env.cwd_str(), "chat-old", "old prompt", None).await.unwrap();
-        // wipe the index (simulate upgrade from a build with transcripts but no index)
+
+        // Build the Personal project and compute its transcript dir the same
+        // way migrate_on_start does, so the transcript lands where the
+        // Personal-only scan will find it.
+        let personal = env.svc.project_store().ensure_personal();
+        let personal_key = ProjectKey::from_cwd(&personal.default_working_dir);
+        let projects_root = env.svc.projects.projects_root();
+        let transcripts_dir = projects_root.join(personal_key.as_str()).join("transcripts");
+
+        // Write a pre-existing transcript directly under Personal's dir.
+        let ts = crate::sessions::TranscriptStore::new(&transcripts_dir);
+        ts.append(
+            "chat-old",
+            &crate::sessions::TranscriptTurn {
+                role: "user".into(),
+                text: "old prompt".into(),
+                ts: 1_700_000_000_000,
+            },
+        ).unwrap();
+
+        // Simulate an upgrade: wipe the index, then run migration.
         env.svc.debug_delete_conversation_index_files();
         env.svc.migrate_on_start().await.unwrap();
-        let personal = env.svc.list_projects().await.unwrap()
+
+        let personal_after = env.svc.list_projects().await.unwrap()
             .into_iter()
             .find(|p| p.id.as_str() == "personal")
             .unwrap();
-        let convs = env.svc.list_conversations(personal.id.as_str()).await.unwrap();
-        assert!(convs.iter().any(|c| c.id.as_str() == "chat-old"),
-            "expected chat-old in Personal conversations after migration; got: {convs:#?}");
+        let convs = env.svc.list_conversations(personal_after.id.as_str()).await.unwrap();
+        assert!(
+            convs.iter().any(|c| c.id.as_str() == "chat-old"),
+            "expected chat-old in Personal conversations after migration; got: {convs:#?}"
+        );
+        // Reviewer-required: project_id must be "personal" (not some other key).
+        let chat_old = convs.iter().find(|c| c.id.as_str() == "chat-old").unwrap();
+        assert_eq!(
+            chat_old.project_id.as_str(),
+            "personal",
+            "migrated conversation must carry project_id=personal; got: {:?}",
+            chat_old.project_id
+        );
     }
 
     // ── Test 7: remove_worktree respects dirty flag (Findings 2 + 3) ─────────
