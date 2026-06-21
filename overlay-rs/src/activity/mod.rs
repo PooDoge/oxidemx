@@ -14,6 +14,7 @@ use std::time::Instant;
 #[derive(Debug, Clone, Default)]
 pub struct RunEventView {
     pub run_id: String,
+    pub conversation_id: String,
     pub variant: String,
     pub flow_id: String,
     pub steps: Vec<String>,

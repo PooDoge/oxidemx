@@ -206,6 +206,7 @@ fn demux_event(thread_or_run: &str, payload_json: &str) -> Message {
             };
             let view = crate::activity::RunEventView {
                 run_id: val.get("run_id").and_then(|x| x.as_str()).unwrap_or(thread_or_run).to_string(),
+                conversation_id: val.get("conversation_id").and_then(|x| x.as_str()).unwrap_or_default().to_string(),
                 variant: val.get("variant").and_then(|x| x.as_str()).unwrap_or("run").to_string(),
                 flow_id: s(&d, "flow_id"),
                 steps: strs(&d, "steps"),
@@ -230,6 +231,23 @@ fn demux_event(thread_or_run: &str, payload_json: &str) -> Message {
 #[cfg(test)]
 mod run_parse_tests {
     use super::*;
+
+    #[test]
+    fn demux_run_event_carries_conversation_id() {
+        let payload = serde_json::json!({
+            "kind": "run", "variant": "RunFinished", "run_id": "run-1",
+            "conversation_id": "chat-4",
+            "details": { "artifacts": ["ANSWER.md"], "handoff_markdown": "done" }
+        }).to_string();
+        match demux_event("run-1", &payload) {
+            Message::RunEvent(v) => {
+                assert_eq!(v.conversation_id, "chat-4");
+                assert_eq!(v.variant, "RunFinished");
+                assert_eq!(v.handoff, "done");
+            }
+            _ => panic!("expected RunEvent"),
+        }
+    }
 
     #[test]
     fn parses_run_started_into_view() {
