@@ -28,12 +28,17 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use async_trait::async_trait;
 use zbus::{fdo, interface, object_server::SignalEmitter};
 
+use crate::conversations_index::ConversationIndex;
 use crate::error::AgentdError;
 use crate::journal::{Journal, JournalEntry};
+use crate::model::{Conversation, ConversationId, Project, ProjectId};
 use crate::models::ModelControls;
+use crate::oxide_config::{resolve_oxide_config, ResolvedConfig};
+use crate::project_store::ProjectStore;
 use crate::projects::{ProjectKey, ProjectPaths};
 use crate::seams::{AgentEvent, Approver, EventEmitter, HostCapability, Verdict};
 use crate::sessions::{Sessions, TranscriptTurn};
+use crate::worktree::{create_conversation_worktree, remove_if_unchanged, Git, RealGit};
 
 // ── Timestamp helpers ─────────────────────────────────────────────────────────
 
@@ -43,6 +48,14 @@ fn now_ms() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis() as u64)
         .unwrap_or(0)
+}
+
+// ── Config-dir helper (mirrors projects.rs::default_home_config) ─────────────
+
+fn default_home_config() -> PathBuf {
+    std::env::var_os("HOME")
+        .map(|h| PathBuf::from(h).join(".config"))
+        .unwrap_or_else(|| PathBuf::from(".config"))
 }
 
 // ── Turn-id generator (same style as runtime::new_session_id) ────────────────
@@ -206,7 +219,17 @@ impl ProjectRegistry {
         if let Some(base) = &self.store_base_override {
             let key = ProjectKey::from_cwd(cwd);
             let store = base.join("projects").join(key.as_str());
-            let local = cwd.join(".oxidemx");
+            // SYNC: keep this .oxide/.oxidemx resolution in step with ProjectPaths::resolve (projects.rs).
+            // Prefer .oxide; fall back to .oxidemx for back-compat.
+            let preferred = cwd.join(".oxide");
+            let compat = cwd.join(".oxidemx");
+            let local = if preferred.exists() {
+                preferred
+            } else if compat.exists() {
+                compat
+            } else {
+                preferred // default to new name when neither exists yet
+            };
             // Construct directly since ProjectPaths fields are public.
             ProjectPaths {
                 key,
@@ -216,6 +239,27 @@ impl ProjectRegistry {
             }
         } else {
             ProjectPaths::resolve(cwd)
+        }
+    }
+
+    /// The root directory that contains `projects.json` and per-project subdirs.
+    ///
+    /// With a `store_base_override` (tests): `<override>/projects`.
+    /// Without: `$XDG_DATA_HOME/oxidemx/projects` (or `~/.local/share/oxidemx/projects`).
+    pub fn projects_root(&self) -> PathBuf {
+        match &self.store_base_override {
+            Some(b) => b.join("projects"),
+            None => {
+                let data = std::env::var_os("XDG_DATA_HOME")
+                    .map(PathBuf::from)
+                    .filter(|p| p.is_absolute())
+                    .or_else(|| {
+                        std::env::var_os("HOME")
+                            .map(|h| PathBuf::from(h).join(".local").join("share"))
+                    })
+                    .unwrap_or_else(|| PathBuf::from(".local/share"));
+                data.join("oxidemx").join("projects")
+            }
         }
     }
 
@@ -277,6 +321,8 @@ pub struct AgentService {
     /// Single source of truth for launching + querying runs. The D-Bus methods
     /// below delegate to it; the agent tools share the same instance.
     pub run_launcher: Arc<crate::run_launcher::ConductorRunLauncher>,
+    /// Injectable git seam — production uses `RealGit`; tests inject `MockGit`.
+    pub git: Arc<dyn Git>,
 }
 
 impl AgentService {
@@ -307,6 +353,7 @@ impl AgentService {
             active_runs,
             run_statuses,
             run_launcher,
+            git: Arc::new(RealGit),
         }
     }
 
@@ -434,6 +481,49 @@ impl AgentService {
             }),
         });
 
+        // ── Upsert the ConversationIndex (best-effort; never fails the turn) ──
+        // Map cwd → project, then get-or-create the Conversation row.
+        match self.ensure_personal_or_for_cwd(project).await {
+            Err(e) => {
+                tracing::warn!("send_message: skipping conversation index upsert: {e}");
+            }
+            Ok(key_project) => {
+                let idx = self.conversation_index_for(&key_project);
+                let cid = ConversationId::from(thread);
+                let now = now_ms();
+                let default_model = oxidemx_shared::config::AiConfig::default().model;
+                let model_str = _model_hint.unwrap_or(&default_model).to_string();
+                let conv = match idx.get(&cid) {
+                    Some(mut existing) => {
+                        // Keep the title; bump updated_at and accumulate tokens.
+                        existing.updated_at = now;
+                        existing.tokens_prompt += usage.0;
+                        existing.tokens_completion += usage.1;
+                        existing
+                    }
+                    None => {
+                        // New conversation — derive title from the first user turn.
+                        let title: String = text.chars().take(60).collect();
+                        Conversation {
+                            id: cid,
+                            project_id: key_project.id.clone(),
+                            title,
+                            working_dir: paths.cwd.clone(),
+                            model: model_str,
+                            summary: String::new(),
+                            summary_upto: 0,
+                            tokens_prompt: usage.0,
+                            tokens_completion: usage.1,
+                            created_at: now,
+                            updated_at: now,
+                            worktree: None,
+                        }
+                    }
+                };
+                idx.upsert(conv);
+            }
+        }
+
         Ok(turn_id)
     }
 
@@ -486,11 +576,331 @@ impl AgentService {
         ts.list_threads()
     }
 
+    // ── project + conversation helpers ────────────────────────────────────────
+
+    /// Build a `ProjectStore` rooted at the projects dir for this registry.
+    fn project_store(&self) -> ProjectStore {
+        ProjectStore::new(self.projects.projects_root())
+    }
+
+    /// The store dir for a project. Personal resolves to the overlay global-config
+    /// cwd (the same string send_message receives), NOT its empty default_working_dir,
+    /// so Personal's transcripts (written by send_message) and its conversation index
+    /// share one key dir.
+    fn project_store_dir(&self, project: &Project) -> PathBuf {
+        let key = if project.id.as_str() == crate::model::PERSONAL_PROJECT_ID {
+            crate::projects::ProjectKey::from_cwd(&Self::user_global_config_dir())
+        } else {
+            crate::projects::ProjectKey::from_cwd(&project.default_working_dir)
+        };
+        self.projects.projects_root().join(key.as_str())
+    }
+
+    /// Build a `ConversationIndex` scoped to the given project's store dir.
+    ///
+    /// Personal resolves to the overlay global-config cwd key (same as
+    /// send_message) so transcript + index share one dir. Other projects
+    /// use their `default_working_dir`.
+    fn conversation_index_for(&self, project: &Project) -> ConversationIndex {
+        ConversationIndex::new(self.project_store_dir(project))
+    }
+
+    /// Scan every project's conversation index for `id`.
+    ///
+    /// Returns `Some((project, conversation))` on the first match, or `None`.
+    fn find_conversation(&self, id: &str) -> Option<(Project, Conversation)> {
+        let cid = ConversationId::from(id);
+        for project in self.project_store().list() {
+            let idx = self.conversation_index_for(&project);
+            if let Some(c) = idx.get(&cid) {
+                return Some((project, c));
+            }
+        }
+        None
+    }
+
+    /// Compute the user-global config dir (`~/.config/oxidemx`).
+    fn user_global_config_dir() -> PathBuf {
+        let base = if let Some(xdg) = std::env::var_os("XDG_CONFIG_HOME") {
+            let p = PathBuf::from(xdg);
+            if p.is_absolute() { p } else { default_home_config() }
+        } else {
+            default_home_config()
+        };
+        base.join("oxidemx")
+    }
+
     // ── list_projects ─────────────────────────────────────────────────────────
 
-    /// List all known project key strings in the store.
-    pub async fn list_projects(&self) -> Result<Vec<String>, AgentdError> {
-        Ok(self.projects.list_project_keys())
+    /// List all projects in the store (including Personal if bootstrapped).
+    pub async fn list_projects(&self) -> Result<Vec<Project>, AgentdError> {
+        Ok(self.project_store().list())
+    }
+
+    // ── create_project ────────────────────────────────────────────────────────
+
+    /// Create a new named project rooted at `default_working_dir`.
+    pub async fn create_project(
+        &self,
+        name: &str,
+        default_working_dir: &Path,
+    ) -> Result<Project, AgentdError> {
+        Ok(self.project_store().create(name, default_working_dir.to_path_buf()))
+    }
+
+    // ── init_project_from_conversation ───────────────────────────────────────
+
+    /// Promote a conversation to its own project.
+    ///
+    /// Creates the project, then moves the conversation's index row from
+    /// its old project's index to the new one (updating `project_id` and
+    /// `working_dir`).
+    pub async fn init_project_from_conversation(
+        &self,
+        conversation_id: &str,
+        name: &str,
+        default_working_dir: &Path,
+    ) -> Result<Project, AgentdError> {
+        let (old_project, mut conv) = self.find_conversation(conversation_id).ok_or_else(|| {
+            AgentdError::NotFound(format!("conversation not found: {conversation_id}"))
+        })?;
+
+        let project = self.project_store().create(name, default_working_dir.to_path_buf());
+
+        // Remove from old project's index.
+        let old_idx = self.conversation_index_for(&old_project);
+        old_idx.delete(&conv.id);
+
+        // Insert into new project's index.
+        conv.project_id = project.id.clone();
+        conv.working_dir = default_working_dir.to_path_buf();
+        let new_idx = self.conversation_index_for(&project);
+        new_idx.upsert(conv);
+
+        Ok(project)
+    }
+
+    // ── list_conversations ────────────────────────────────────────────────────
+
+    /// List all conversations for the given project id.
+    pub async fn list_conversations(
+        &self,
+        project_id: &str,
+    ) -> Result<Vec<Conversation>, AgentdError> {
+        let pid = ProjectId::from(project_id);
+        let project = self.project_store().get(&pid).ok_or_else(|| {
+            AgentdError::NotFound(format!("project not found: {project_id}"))
+        })?;
+        Ok(self.conversation_index_for(&project).list())
+    }
+
+    // ── get_conversation ──────────────────────────────────────────────────────
+
+    /// Get a single conversation by id (scans all projects).
+    pub async fn get_conversation(
+        &self,
+        conversation_id: &str,
+    ) -> Result<Option<Conversation>, AgentdError> {
+        Ok(self.find_conversation(conversation_id).map(|(_, c)| c))
+    }
+
+    // ── create_conversation ───────────────────────────────────────────────────
+
+    /// Create a new conversation in the given project.
+    ///
+    /// `working_dir` defaults to the project's `default_working_dir`.
+    /// The model defaults to `AiConfig::default().model`.
+    pub async fn create_conversation(
+        &self,
+        project_id: &str,
+        working_dir: Option<&Path>,
+    ) -> Result<Conversation, AgentdError> {
+        let pid = ProjectId::from(project_id);
+        let project = self.project_store().get(&pid).ok_or_else(|| {
+            AgentdError::NotFound(format!("project not found: {project_id}"))
+        })?;
+        let ts = now_ms();
+        let id = format!("conv-{ts}");
+        let dir = working_dir
+            .map(|p| p.to_path_buf())
+            .unwrap_or_else(|| project.default_working_dir.clone());
+        let model = oxidemx_shared::config::AiConfig::default().model;
+        let conv = Conversation {
+            id: ConversationId::from(id),
+            project_id: project.id.clone(),
+            title: String::new(),
+            working_dir: dir,
+            model,
+            summary: String::new(),
+            summary_upto: 0,
+            tokens_prompt: 0,
+            tokens_completion: 0,
+            created_at: ts,
+            updated_at: ts,
+            worktree: None,
+        };
+        self.conversation_index_for(&project).upsert(conv.clone());
+        Ok(conv)
+    }
+
+    // ── rename_conversation ───────────────────────────────────────────────────
+
+    pub async fn rename_conversation(
+        &self,
+        conversation_id: &str,
+        title: &str,
+    ) -> Result<(), AgentdError> {
+        let (project, _) = self.find_conversation(conversation_id).ok_or_else(|| {
+            AgentdError::NotFound(format!("conversation not found: {conversation_id}"))
+        })?;
+        let cid = ConversationId::from(conversation_id);
+        self.conversation_index_for(&project).rename(&cid, title);
+        Ok(())
+    }
+
+    // ── delete_conversation ───────────────────────────────────────────────────
+
+    pub async fn delete_conversation(
+        &self,
+        conversation_id: &str,
+    ) -> Result<(), AgentdError> {
+        let (project, _) = self.find_conversation(conversation_id).ok_or_else(|| {
+            AgentdError::NotFound(format!("conversation not found: {conversation_id}"))
+        })?;
+        let cid = ConversationId::from(conversation_id);
+        self.conversation_index_for(&project).delete(&cid);
+        Ok(())
+    }
+
+    // ── set_conversation_working_dir ──────────────────────────────────────────
+
+    pub async fn set_conversation_working_dir(
+        &self,
+        conversation_id: &str,
+        working_dir: &Path,
+    ) -> Result<(), AgentdError> {
+        let (project, _) = self.find_conversation(conversation_id).ok_or_else(|| {
+            AgentdError::NotFound(format!("conversation not found: {conversation_id}"))
+        })?;
+        let cid = ConversationId::from(conversation_id);
+        self.conversation_index_for(&project)
+            .set_working_dir(&cid, working_dir.to_path_buf());
+        Ok(())
+    }
+
+    // ── create_worktree_for_conversation ──────────────────────────────────────
+
+    /// Create a git worktree for a conversation, set as its `working_dir`.
+    ///
+    /// `name` defaults to a slug of the conversation id.
+    /// `base_ref` defaults to `"head"`.
+    pub async fn create_worktree_for_conversation(
+        &self,
+        conversation_id: &str,
+        name: Option<&str>,
+        base_ref: Option<&str>,
+    ) -> Result<Conversation, AgentdError> {
+        let (project, mut conv) = self.find_conversation(conversation_id).ok_or_else(|| {
+            AgentdError::NotFound(format!("conversation not found: {conversation_id}"))
+        })?;
+        let repo = conv.working_dir.clone();
+        let slug_name: String;
+        let wt_name = match name {
+            Some(n) => n,
+            None => {
+                slug_name = conversation_id
+                    .chars()
+                    .map(|c| if c.is_alphanumeric() || c == '-' { c } else { '-' })
+                    .collect();
+                slug_name.as_str()
+            }
+        };
+        let ref_str = base_ref.unwrap_or("head");
+        let wt = create_conversation_worktree(&*self.git, &repo, wt_name, ref_str)
+            .map_err(AgentdError::Io)?;
+        conv.working_dir = wt.path.clone();
+        conv.worktree = Some(wt);
+        conv.updated_at = now_ms();
+        self.conversation_index_for(&project).upsert(conv.clone());
+        Ok(conv)
+    }
+
+    // ── ensure_personal_or_for_cwd ────────────────────────────────────────────
+
+    /// Map a cwd string to a `Project`, auto-registering if necessary.
+    ///
+    /// - If `cwd` equals the overlay's global config dir (`~/.config/oxidemx`),
+    ///   return the **Personal** project.
+    /// - Otherwise find an existing project whose `default_working_dir` matches
+    ///   `cwd` (canonicalize both for comparison); if none, create one whose
+    ///   name is the directory's file_name basename.
+    pub async fn ensure_personal_or_for_cwd(&self, cwd: &str) -> Result<Project, AgentdError> {
+        let cwd_path = PathBuf::from(cwd);
+        let global_cfg = Self::user_global_config_dir();
+
+        // Canonicalize for comparison; fall back to the raw path on error.
+        let canon_cwd = std::fs::canonicalize(&cwd_path).unwrap_or_else(|_| cwd_path.clone());
+        let canon_cfg = std::fs::canonicalize(&global_cfg).unwrap_or_else(|_| global_cfg.clone());
+
+        if canon_cwd == canon_cfg {
+            return Ok(self.project_store().ensure_personal());
+        }
+
+        // Search for an existing project whose default_working_dir matches.
+        let store = self.project_store();
+        for project in store.list() {
+            let canon_proj = std::fs::canonicalize(&project.default_working_dir)
+                .unwrap_or_else(|_| project.default_working_dir.clone());
+            if canon_proj == canon_cwd {
+                return Ok(project);
+            }
+        }
+
+        // None found — auto-register.
+        let name = cwd_path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("unknown")
+            .to_string();
+        Ok(store.create(&name, cwd_path))
+    }
+
+    // ── remove_worktree ───────────────────────────────────────────────────────
+
+    /// Remove the conversation's worktree if it is clean (no uncommitted changes).
+    ///
+    /// On success, clears `worktree` and resets `working_dir` to the project default.
+    pub async fn remove_worktree(&self, conversation_id: &str) -> Result<(), AgentdError> {
+        let (project, mut conv) = self.find_conversation(conversation_id).ok_or_else(|| {
+            AgentdError::NotFound(format!("conversation not found: {conversation_id}"))
+        })?;
+        let wt = match conv.worktree.take() {
+            Some(w) => w,
+            None => return Ok(()), // nothing to remove
+        };
+        let repo = project.default_working_dir.clone();
+        let removed = remove_if_unchanged(&*self.git, &wt, &repo)
+            .map_err(AgentdError::Io)?;
+        if !removed {
+            // dirty worktree: keep the record intact, surface an error
+            return Err(AgentdError::Project(
+                "worktree has uncommitted changes; not removed".into(),
+            ));
+        }
+        // only now clear it
+        conv.worktree = None;
+        conv.working_dir = project.default_working_dir.clone();
+        conv.updated_at = now_ms();
+        self.conversation_index_for(&project).upsert(conv);
+        Ok(())
+    }
+
+    // ── resolve_config ────────────────────────────────────────────────────────
+
+    /// Resolve the merged `.oxide` config for `working_dir`.
+    pub async fn resolve_config(&self, working_dir: &Path) -> Result<ResolvedConfig, AgentdError> {
+        let user_global = Self::user_global_config_dir();
+        Ok(resolve_oxide_config(working_dir, &user_global))
     }
 
     // ── respond_approval ──────────────────────────────────────────────────────
@@ -684,6 +1094,98 @@ impl AgentService {
         let infos = self.models.list();
         serde_json::to_string(&infos).map_err(|e| AgentdError::Io(e.to_string()))
     }
+
+    // ── migrate_on_start ──────────────────────────────────────────────────────
+
+    /// Startup migration: ensure the Personal project exists, then scan
+    /// Personal's transcript directory for transcript files not yet in the
+    /// Personal conversation index, and upsert a `Conversation` row for each.
+    ///
+    /// Scoped to Personal only: pre-feature data is all under the overlay
+    /// global (Personal) key. Named projects get indexed by `send_message`
+    /// as they are used, so migration only needs to recover pre-existing
+    /// Personal transcripts. Scanning all dirs would collapse named-project
+    /// conversations into Personal with the wrong project attribution.
+    ///
+    /// Idempotent: threads already indexed are silently skipped.
+    /// Best-effort: a bad/unreadable transcript logs a warning and continues.
+    pub async fn migrate_on_start(&self) -> Result<(), AgentdError> {
+        let store = self.project_store();
+        let personal = store.ensure_personal();
+        let index = self.conversation_index_for(&personal);
+        let default_model = oxidemx_shared::config::AiConfig::default().model;
+
+        // Scope the scan to Personal's transcript dir only.
+        // project_store_dir resolves Personal to the overlay global-config key,
+        // which matches the dir send_message writes transcripts into.
+        let transcripts_dir = self.project_store_dir(&personal).join("transcripts");
+        let ts = crate::sessions::TranscriptStore::new(&transcripts_dir);
+        let threads = match ts.list_threads() {
+            Ok(t) => t,
+            Err(e) => {
+                tracing::warn!("migrate_on_start: list_threads failed for {}: {e}", transcripts_dir.display());
+                return Ok(());
+            }
+        };
+
+        for thread_id in threads {
+            let cid = ConversationId::from(thread_id.as_str());
+            if index.get(&cid).is_some() {
+                continue; // already indexed
+            }
+            let turns = match ts.read(&thread_id) {
+                Ok(t) => t,
+                Err(e) => {
+                    tracing::warn!("migrate_on_start: read transcript {thread_id} failed: {e}");
+                    continue;
+                }
+            };
+            let title: String = turns
+                .iter()
+                .find(|t| t.role == "user")
+                .map(|t| t.text.chars().take(60).collect())
+                .unwrap_or_default();
+            let created_at = turns.first().map(|t| t.ts).unwrap_or_else(now_ms);
+            let updated_at = turns.last().map(|t| t.ts).unwrap_or(created_at);
+            let conv = Conversation {
+                id: cid,
+                project_id: personal.id.clone(),
+                title,
+                working_dir: personal.default_working_dir.clone(),
+                model: default_model.clone(),
+                summary: String::new(),
+                summary_upto: 0,
+                tokens_prompt: 0,
+                tokens_completion: 0,
+                created_at,
+                updated_at,
+                worktree: None,
+            };
+            index.upsert(conv);
+        }
+
+        Ok(())
+    }
+
+    /// Test helper: delete all `conversations.json` files under the projects
+    /// root so the migration test can simulate an upgrade where transcripts
+    /// exist but the index does not.
+    ///
+    /// Only compiled in `#[cfg(test)]`.
+    #[cfg(test)]
+    pub fn debug_delete_conversation_index_files(&self) {
+        let projects_root = self.projects.projects_root();
+        let entries = match std::fs::read_dir(&projects_root) {
+            Ok(e) => e,
+            Err(_) => return,
+        };
+        for entry in entries.flatten() {
+            let conv_json = entry.path().join("conversations.json");
+            if conv_json.exists() {
+                let _ = std::fs::remove_file(&conv_json);
+            }
+        }
+    }
 }
 
 // ── D-Bus interface ───────────────────────────────────────────────────────────
@@ -745,7 +1247,7 @@ impl AgentInterface {
     }
 
     async fn list_projects(&self) -> fdo::Result<Vec<String>> {
-        self.svc.list_projects().await.map_err(to_fdo)
+        Ok(self.svc.projects.list_project_keys())
     }
 
     async fn respond_approval(
@@ -826,6 +1328,135 @@ impl AgentInterface {
 
     async fn list_models(&self) -> fdo::Result<String> {
         self.svc.list_models().await.map_err(to_fdo)
+    }
+
+    // ── Project / conversation / worktree methods (Task 8) ────────────────────
+
+    /// Rich project list — returns serde_json of `Vec<Project>`.
+    /// The legacy `list_projects()` (returns `Vec<String>` keys) is unchanged.
+    async fn list_project_details(&self) -> fdo::Result<String> {
+        let projects = self.svc.list_projects().await.map_err(to_fdo)?;
+        serde_json::to_string(&projects).map_err(|e| fdo::Error::Failed(e.to_string()))
+    }
+
+    async fn create_project(
+        &self,
+        name: &str,
+        default_working_dir: &str,
+    ) -> fdo::Result<String> {
+        let project = self
+            .svc
+            .create_project(name, Path::new(default_working_dir))
+            .await
+            .map_err(to_fdo)?;
+        serde_json::to_string(&project).map_err(|e| fdo::Error::Failed(e.to_string()))
+    }
+
+    async fn init_project_from_conversation(
+        &self,
+        conversation_id: &str,
+        name: &str,
+        default_working_dir: &str,
+    ) -> fdo::Result<String> {
+        let project = self
+            .svc
+            .init_project_from_conversation(conversation_id, name, Path::new(default_working_dir))
+            .await
+            .map_err(to_fdo)?;
+        serde_json::to_string(&project).map_err(|e| fdo::Error::Failed(e.to_string()))
+    }
+
+    async fn list_conversations(&self, project_id: &str) -> fdo::Result<String> {
+        let convs = self.svc.list_conversations(project_id).await.map_err(to_fdo)?;
+        serde_json::to_string(&convs).map_err(|e| fdo::Error::Failed(e.to_string()))
+    }
+
+    async fn get_conversation(&self, conversation_id: &str) -> fdo::Result<String> {
+        let conv = self
+            .svc
+            .get_conversation(conversation_id)
+            .await
+            .map_err(to_fdo)?;
+        serde_json::to_string(&conv).map_err(|e| fdo::Error::Failed(e.to_string()))
+    }
+
+    async fn create_conversation(
+        &self,
+        project_id: &str,
+        working_dir: &str,
+    ) -> fdo::Result<String> {
+        let dir = if working_dir.is_empty() {
+            None
+        } else {
+            Some(Path::new(working_dir))
+        };
+        let conv = self
+            .svc
+            .create_conversation(project_id, dir)
+            .await
+            .map_err(to_fdo)?;
+        serde_json::to_string(&conv).map_err(|e| fdo::Error::Failed(e.to_string()))
+    }
+
+    async fn rename_conversation(
+        &self,
+        conversation_id: &str,
+        title: &str,
+    ) -> fdo::Result<()> {
+        self.svc
+            .rename_conversation(conversation_id, title)
+            .await
+            .map_err(to_fdo)
+    }
+
+    async fn delete_conversation(&self, conversation_id: &str) -> fdo::Result<()> {
+        self.svc
+            .delete_conversation(conversation_id)
+            .await
+            .map_err(to_fdo)
+    }
+
+    async fn set_conversation_working_dir(
+        &self,
+        conversation_id: &str,
+        dir: &str,
+    ) -> fdo::Result<()> {
+        self.svc
+            .set_conversation_working_dir(conversation_id, Path::new(dir))
+            .await
+            .map_err(to_fdo)
+    }
+
+    async fn create_worktree_for_conversation(
+        &self,
+        conversation_id: &str,
+        name: &str,
+        base_ref: &str,
+    ) -> fdo::Result<String> {
+        let wt_name = if name.is_empty() { None } else { Some(name) };
+        let wt_ref = if base_ref.is_empty() { None } else { Some(base_ref) };
+        let conv = self
+            .svc
+            .create_worktree_for_conversation(conversation_id, wt_name, wt_ref)
+            .await
+            .map_err(to_fdo)?;
+        serde_json::to_string(&conv).map_err(|e| fdo::Error::Failed(e.to_string()))
+    }
+
+    async fn remove_worktree(&self, conversation_id: &str) -> fdo::Result<()> {
+        self.svc
+            .remove_worktree(conversation_id)
+            .await
+            .map_err(to_fdo)
+    }
+
+    async fn resolve_config(&self, working_dir: &str) -> fdo::Result<String> {
+        let cfg = self
+            .svc
+            .resolve_config(Path::new(working_dir))
+            .await
+            .map_err(to_fdo)?;
+        serde_json::to_string(&cfg).map_err(|e| fdo::Error::Failed(e.to_string()))
     }
 
     // ── Signals ───────────────────────────────────────────────────────────────
@@ -1123,6 +1754,7 @@ mod tests {
                 active_runs,
                 run_statuses,
                 run_launcher,
+                git: Arc::new(RealGit),
             });
 
             TestEnv {
@@ -1265,12 +1897,13 @@ mod tests {
             .await
             .unwrap();
 
-        // list_projects should include the key for the active project.
-        let projects = env.svc.list_projects().await.unwrap();
+        // list_project_keys should include the key for the active project
+        // (send_message creates the store dir, not a ProjectStore entry).
+        let keys = env.svc.projects.list_project_keys();
         let key = env.key_str();
         assert!(
-            projects.iter().any(|p| p.contains(&key)),
-            "expected project key {key} in {projects:?}"
+            keys.iter().any(|p| p.contains(&key)),
+            "expected project key {key} in {keys:?}"
         );
 
         // list_threads should return ["t1"].
@@ -1557,4 +2190,275 @@ You are an echo agent. Repeat the task back.
             "expected last_history_len ≥2 on turn 2, got {hist_len}"
         );
     }
+
+    // ── Task 6: project + conversation CRUD via AgentService ──────────────────
+
+    #[tokio::test]
+    async fn project_and_conversation_crud_via_service() {
+        let env = TestEnv::new();
+        let p = env.svc.create_project("Repo", std::path::Path::new("/tmp/repo")).await.unwrap();
+        assert!(env.svc.list_projects().await.unwrap().iter().any(|x| x.id == p.id));
+        let c = env.svc.create_conversation(p.id.as_str(), None).await.unwrap();
+        assert_eq!(c.project_id, p.id);
+        env.svc.rename_conversation(c.id.as_str(), "renamed").await.unwrap();
+        assert_eq!(env.svc.get_conversation(c.id.as_str()).await.unwrap().unwrap().title, "renamed");
+        assert_eq!(env.svc.list_conversations(p.id.as_str()).await.unwrap().len(), 1);
+    }
+    // ── Task 7: send_message upserts the conversation index ──────────────────
+
+    #[tokio::test]
+    async fn send_message_upserts_conversation_index() {
+        let env = TestEnv::new();
+        let proj = env.cwd_str();
+        env.svc.send_message(proj, "chat-77", "hello world", None).await.unwrap();
+        let key_proj = env.svc.ensure_personal_or_for_cwd(proj).await.unwrap();
+        let convs = env.svc.list_conversations(key_proj.id.as_str()).await.unwrap();
+        assert!(
+            convs.iter().any(|c| c.id.as_str() == "chat-77" && c.title.starts_with("hello")),
+            "expected a conversation with id=chat-77 and title starting with 'hello'; got: {convs:#?}"
+        );
+    }
+
+    // ── Task 8: D-Bus wrappers — list_project_details returns JSON ──────────
+
+    #[tokio::test]
+    async fn dbus_list_project_details_returns_json() {
+        let env = TestEnv::new();
+        // Ensure a project exists so the JSON is non-trivially populated.
+        let _p = env
+            .svc
+            .create_project("personal", std::path::Path::new("/tmp"))
+            .await
+            .unwrap();
+        let iface = AgentInterface::new(env.svc.clone());
+        let json = iface.list_project_details().await.unwrap();
+        // The JSON must be a valid array and contain the project name we created.
+        let parsed: serde_json::Value = serde_json::from_str(&json)
+            .expect("list_project_details must return valid JSON");
+        assert!(parsed.is_array(), "expected a JSON array");
+        assert!(
+            json.contains("personal"),
+            "expected 'personal' in JSON; got: {json}"
+        );
+    }
+
+    // ── Task 9: migrate_on_start indexes pre-existing transcripts ────────────
+
+    #[tokio::test]
+    async fn migration_creates_personal_and_indexes_existing_transcripts() {
+        let env = TestEnv::new();
+
+        // Build the Personal project and compute its transcript dir using
+        // project_store_dir (same as migrate_on_start), so the transcript
+        // lands where the Personal-only scan will find it.
+        let personal = env.svc.project_store().ensure_personal();
+        let transcripts_dir = env.svc.project_store_dir(&personal).join("transcripts");
+
+        // Write a pre-existing transcript directly under Personal's dir.
+        let ts = crate::sessions::TranscriptStore::new(&transcripts_dir);
+        ts.append(
+            "chat-old",
+            &crate::sessions::TranscriptTurn {
+                role: "user".into(),
+                text: "old prompt".into(),
+                ts: 1_700_000_000_000,
+            },
+        ).unwrap();
+
+        // Simulate an upgrade: wipe the index, then run migration.
+        env.svc.debug_delete_conversation_index_files();
+        env.svc.migrate_on_start().await.unwrap();
+
+        let personal_after = env.svc.list_projects().await.unwrap()
+            .into_iter()
+            .find(|p| p.id.as_str() == "personal")
+            .unwrap();
+        let convs = env.svc.list_conversations(personal_after.id.as_str()).await.unwrap();
+        assert!(
+            convs.iter().any(|c| c.id.as_str() == "chat-old"),
+            "expected chat-old in Personal conversations after migration; got: {convs:#?}"
+        );
+        // Reviewer-required: project_id must be "personal" (not some other key).
+        let chat_old = convs.iter().find(|c| c.id.as_str() == "chat-old").unwrap();
+        assert_eq!(
+            chat_old.project_id.as_str(),
+            "personal",
+            "migrated conversation must carry project_id=personal; got: {:?}",
+            chat_old.project_id
+        );
+    }
+
+    // ── Test 7: remove_worktree respects dirty flag (Findings 2 + 3) ─────────
+
+    /// Builds an `AgentService` with a `MockGit` injected via `self.git`.
+    /// - Clean mock: `remove_worktree` clears the conversation record.
+    /// - Dirty mock: `remove_worktree` returns `Err` AND the record is untouched.
+    #[tokio::test]
+    async fn remove_worktree_respects_dirty_flag() {
+        use crate::worktree::MockGit;
+
+        // ── helpers to build a service with an injected MockGit ──────────────
+        fn build_svc_with_git(git: Arc<dyn crate::worktree::Git>) -> (Arc<AgentService>, tempfile::TempDir) {
+            let tmp = tempfile::tempdir().unwrap();
+            let store_base = tmp.path().join("store");
+            let emitter = Arc::new(crate::seams::RecordingEmitter::default());
+            let approver = Arc::new(crate::seams::Approver::new(emitter.clone()));
+            let stub_svc = Arc::new(StubLocalService::new());
+            let models = Arc::new(crate::models::ModelControls::new(stub_svc, emitter.clone()));
+            let active_runs = Arc::new(std::sync::Mutex::new(std::collections::HashMap::new()));
+            let run_statuses = Arc::new(std::sync::Mutex::new(std::collections::HashMap::new()));
+            let run_launcher = Arc::new(crate::run_launcher::ConductorRunLauncher::new(
+                active_runs.clone(),
+                run_statuses.clone(),
+                emitter.clone(),
+            ));
+            let runner = MockTurnRunner::new("mock reply");
+            let svc = Arc::new(AgentService {
+                projects: ProjectRegistry::with_store_base(store_base),
+                sessions: Arc::new(Sessions::new()),
+                models,
+                approver: approver.clone(),
+                emitter: emitter.clone(),
+                host: Arc::new(crate::seams::UnavailableHost),
+                turn_runner: Arc::new(runner),
+                active_runs,
+                run_statuses,
+                run_launcher,
+                git,
+            });
+            (svc, tmp)
+        }
+
+        // ── shared setup: create project + conversation ──────────────────────
+        async fn setup_conv(svc: &AgentService) -> (crate::model::Project, crate::model::Conversation) {
+            let p = svc.create_project("TestRepo", std::path::Path::new("/tmp/testgitrepo")).await.unwrap();
+            let c = svc.create_conversation(p.id.as_str(), None).await.unwrap();
+            (p, c)
+        }
+
+        // ── CLEAN path: worktree should be removed, record cleared ───────────
+        {
+            let clean_git = Arc::new(MockGit { clean: true, calls: Default::default() });
+            let (svc, _tmp) = build_svc_with_git(clean_git);
+            let (project, conv) = setup_conv(&svc).await;
+
+            // Inject a fake worktree record directly via the conversation index.
+            let mut conv_mut = conv.clone();
+            conv_mut.worktree = Some(crate::model::Worktree {
+                path: project.default_working_dir.join(".oxide").join("worktrees").join("test-wt"),
+                branch: "worktree-test-wt".into(),
+                base_ref: "head".into(),
+            });
+            conv_mut.working_dir = conv_mut.worktree.as_ref().unwrap().path.clone();
+            svc.conversation_index_for(&project).upsert(conv_mut);
+
+            // remove_worktree with a clean git should succeed.
+            svc.remove_worktree(conv.id.as_str()).await.unwrap();
+
+            // After removal the conversation record should have worktree cleared.
+            let after = svc.get_conversation(conv.id.as_str()).await.unwrap().unwrap();
+            assert!(after.worktree.is_none(), "clean remove: worktree should be None after removal");
+            assert_eq!(
+                after.working_dir,
+                project.default_working_dir,
+                "clean remove: working_dir should be reset to project default"
+            );
+        }
+
+        // ── DIRTY path: worktree should NOT be removed, record intact ────────
+        {
+            let dirty_git = Arc::new(MockGit { clean: false, calls: Default::default() });
+            let (svc, _tmp) = build_svc_with_git(dirty_git);
+            let (project, conv) = setup_conv(&svc).await;
+
+            // Inject a fake worktree record.
+            let wt_path = project.default_working_dir.join(".oxide").join("worktrees").join("dirty-wt");
+            let mut conv_mut = conv.clone();
+            conv_mut.worktree = Some(crate::model::Worktree {
+                path: wt_path.clone(),
+                branch: "worktree-dirty-wt".into(),
+                base_ref: "head".into(),
+            });
+            conv_mut.working_dir = wt_path.clone();
+            svc.conversation_index_for(&project).upsert(conv_mut);
+
+            // remove_worktree with a dirty git should return an Err.
+            let result = svc.remove_worktree(conv.id.as_str()).await;
+            assert!(result.is_err(), "dirty remove: expected Err, got Ok");
+
+            // The conversation record must still have its worktree (index not wiped).
+            let after = svc.get_conversation(conv.id.as_str()).await.unwrap().unwrap();
+            assert!(
+                after.worktree.is_some(),
+                "dirty remove: worktree should still be Some after failed remove"
+            );
+            assert_eq!(
+                after.working_dir,
+                wt_path,
+                "dirty remove: working_dir should NOT have been reset"
+            );
+        }
+    }
+
+    // ── Task 9 (final-review): real Personal-path — transcript+index+migration ─
+    //
+    // Drives the REAL Personal path end-to-end:
+    //   1. send_message with the overlay global-config cwd → transcript written
+    //      under the Personal key (oxidemx-<hash>) + index upserted there too.
+    //   2. list_conversations("personal") returns the thread.
+    //   3. debug_delete_conversation_index_files() + migrate_on_start() re-indexes
+    //      the thread from its transcript file.
+    //
+    // This test FAILS against the pre-fix code because:
+    //   - conversation_index_for used personal.default_working_dir (empty PathBuf
+    //     → key "root-<hash>"), not the global-config dir key.
+    //   - migrate_on_start scanned the wrong transcript dir (root-<hash>), so it
+    //     found nothing and the index remained empty after migration.
+    //
+    // store_base_override ensures no real ~/.config writes occur: the key is
+    // derived from the ug path string but the root is the temp store.
+
+    #[tokio::test]
+    async fn personal_project_transcript_index_and_migration_use_same_key() {
+        let env = TestEnv::new();
+
+        // The overlay global-config dir (the cwd string send_message receives
+        // for Personal conversations).
+        let ug = AgentService::user_global_config_dir();
+        let ug_str = ug.to_str().unwrap();
+
+        // Step 1: send_message with the Personal cwd. This writes the transcript
+        // and upserts the index, both under the oxidemx-<hash(ug)> key.
+        env.svc
+            .send_message(ug_str, "chat-personal", "hello personal", None)
+            .await
+            .unwrap();
+
+        // Step 2: list_conversations("personal") must return the thread.
+        let convs_after_send = env.svc.list_conversations("personal").await.unwrap();
+        assert!(
+            convs_after_send.iter().any(|c| c.id.as_str() == "chat-personal"),
+            "after send_message the personal index must contain chat-personal; got: {convs_after_send:#?}"
+        );
+
+        // Step 3: wipe the index files, then re-run migration. Migration must
+        // re-discover the transcript and re-populate the index under Personal.
+        env.svc.debug_delete_conversation_index_files();
+
+        // Confirm the index is empty after wipe.
+        let convs_after_wipe = env.svc.list_conversations("personal").await.unwrap();
+        assert!(
+            convs_after_wipe.iter().all(|c| c.id.as_str() != "chat-personal"),
+            "after wiping the index chat-personal should not be present; got: {convs_after_wipe:#?}"
+        );
+
+        env.svc.migrate_on_start().await.unwrap();
+
+        let convs_after_migration = env.svc.list_conversations("personal").await.unwrap();
+        assert!(
+            convs_after_migration.iter().any(|c| c.id.as_str() == "chat-personal"),
+            "after migrate_on_start chat-personal must be re-indexed under Personal; got: {convs_after_migration:#?}"
+        );
+    }
+
 }
