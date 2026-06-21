@@ -266,9 +266,8 @@ mod tests {
             branch: "worktree-x".into(),
             base_ref: "head".into(),
         };
-        assert_eq!(
-            remove_if_unchanged(&dirty, &wt, std::path::Path::new("/repo")).unwrap(),
-            false
+        assert!(
+            !remove_if_unchanged(&dirty, &wt, std::path::Path::new("/repo")).unwrap()
         );
         assert!(dirty.calls.lock().unwrap().is_empty());
     }
@@ -292,9 +291,7 @@ mod tests {
         fs::write(&sentinel, b"secret").unwrap();
 
         // .oxideinclude: one safe line, one absolute, one parent-dir.
-        let include = format!(
-            "keep.txt\n/etc/hostname\n../escape.txt\n"
-        );
+        let include = "keep.txt\n/etc/hostname\n../escape.txt\n";
         fs::write(repo.join(".oxideinclude"), include.as_bytes()).unwrap();
 
         copy_oxideinclude(&repo, &dst).unwrap();

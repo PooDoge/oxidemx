@@ -583,14 +583,26 @@ impl AgentService {
         ProjectStore::new(self.projects.projects_root())
     }
 
+    /// The store dir for a project. Personal resolves to the overlay global-config
+    /// cwd (the same string send_message receives), NOT its empty default_working_dir,
+    /// so Personal's transcripts (written by send_message) and its conversation index
+    /// share one key dir.
+    fn project_store_dir(&self, project: &Project) -> PathBuf {
+        let key = if project.id.as_str() == crate::model::PERSONAL_PROJECT_ID {
+            crate::projects::ProjectKey::from_cwd(&Self::user_global_config_dir())
+        } else {
+            crate::projects::ProjectKey::from_cwd(&project.default_working_dir)
+        };
+        self.projects.projects_root().join(key.as_str())
+    }
+
     /// Build a `ConversationIndex` scoped to the given project's store dir.
     ///
-    /// The per-project dir = `<projects_root>/<key>` where
-    /// `key = ProjectKey::from_cwd(&project.default_working_dir)`.
+    /// Personal resolves to the overlay global-config cwd key (same as
+    /// send_message) so transcript + index share one dir. Other projects
+    /// use their `default_working_dir`.
     fn conversation_index_for(&self, project: &Project) -> ConversationIndex {
-        let root = self.projects.projects_root();
-        let key = ProjectKey::from_cwd(&project.default_working_dir);
-        ConversationIndex::new(root.join(key.as_str()))
+        ConversationIndex::new(self.project_store_dir(project))
     }
 
     /// Scan every project's conversation index for `id`.
@@ -1101,12 +1113,12 @@ impl AgentService {
         let store = self.project_store();
         let personal = store.ensure_personal();
         let index = self.conversation_index_for(&personal);
-        let projects_root = self.projects.projects_root();
         let default_model = oxidemx_shared::config::AiConfig::default().model;
 
         // Scope the scan to Personal's transcript dir only.
-        let personal_key = ProjectKey::from_cwd(&personal.default_working_dir);
-        let transcripts_dir = projects_root.join(personal_key.as_str()).join("transcripts");
+        // project_store_dir resolves Personal to the overlay global-config key,
+        // which matches the dir send_message writes transcripts into.
+        let transcripts_dir = self.project_store_dir(&personal).join("transcripts");
         let ts = crate::sessions::TranscriptStore::new(&transcripts_dir);
         let threads = match ts.list_threads() {
             Ok(t) => t,
@@ -2236,13 +2248,11 @@ You are an echo agent. Repeat the task back.
     async fn migration_creates_personal_and_indexes_existing_transcripts() {
         let env = TestEnv::new();
 
-        // Build the Personal project and compute its transcript dir the same
-        // way migrate_on_start does, so the transcript lands where the
-        // Personal-only scan will find it.
+        // Build the Personal project and compute its transcript dir using
+        // project_store_dir (same as migrate_on_start), so the transcript
+        // lands where the Personal-only scan will find it.
         let personal = env.svc.project_store().ensure_personal();
-        let personal_key = ProjectKey::from_cwd(&personal.default_working_dir);
-        let projects_root = env.svc.projects.projects_root();
-        let transcripts_dir = projects_root.join(personal_key.as_str()).join("transcripts");
+        let transcripts_dir = env.svc.project_store_dir(&personal).join("transcripts");
 
         // Write a pre-existing transcript directly under Personal's dir.
         let ts = crate::sessions::TranscriptStore::new(&transcripts_dir);
@@ -2388,6 +2398,67 @@ You are an echo agent. Repeat the task back.
                 "dirty remove: working_dir should NOT have been reset"
             );
         }
+    }
+
+    // ── Task 9 (final-review): real Personal-path — transcript+index+migration ─
+    //
+    // Drives the REAL Personal path end-to-end:
+    //   1. send_message with the overlay global-config cwd → transcript written
+    //      under the Personal key (oxidemx-<hash>) + index upserted there too.
+    //   2. list_conversations("personal") returns the thread.
+    //   3. debug_delete_conversation_index_files() + migrate_on_start() re-indexes
+    //      the thread from its transcript file.
+    //
+    // This test FAILS against the pre-fix code because:
+    //   - conversation_index_for used personal.default_working_dir (empty PathBuf
+    //     → key "root-<hash>"), not the global-config dir key.
+    //   - migrate_on_start scanned the wrong transcript dir (root-<hash>), so it
+    //     found nothing and the index remained empty after migration.
+    //
+    // store_base_override ensures no real ~/.config writes occur: the key is
+    // derived from the ug path string but the root is the temp store.
+
+    #[tokio::test]
+    async fn personal_project_transcript_index_and_migration_use_same_key() {
+        let env = TestEnv::new();
+
+        // The overlay global-config dir (the cwd string send_message receives
+        // for Personal conversations).
+        let ug = AgentService::user_global_config_dir();
+        let ug_str = ug.to_str().unwrap();
+
+        // Step 1: send_message with the Personal cwd. This writes the transcript
+        // and upserts the index, both under the oxidemx-<hash(ug)> key.
+        env.svc
+            .send_message(ug_str, "chat-personal", "hello personal", None)
+            .await
+            .unwrap();
+
+        // Step 2: list_conversations("personal") must return the thread.
+        let convs_after_send = env.svc.list_conversations("personal").await.unwrap();
+        assert!(
+            convs_after_send.iter().any(|c| c.id.as_str() == "chat-personal"),
+            "after send_message the personal index must contain chat-personal; got: {convs_after_send:#?}"
+        );
+
+        // Step 3: wipe the index files, then re-run migration. Migration must
+        // re-discover the transcript and re-populate the index under Personal.
+        env.svc.debug_delete_conversation_index_files();
+
+        // Confirm the index is empty after wipe.
+        let convs_after_wipe = env.svc.list_conversations("personal").await.unwrap();
+        assert!(
+            convs_after_wipe.iter().all(|c| c.id.as_str() != "chat-personal"),
+            "after wiping the index chat-personal should not be present; got: {convs_after_wipe:#?}"
+        );
+
+        env.svc.migrate_on_start().await.unwrap();
+
+        let convs_after_migration = env.svc.list_conversations("personal").await.unwrap();
+        assert!(
+            convs_after_migration.iter().any(|c| c.id.as_str() == "chat-personal"),
+            "after migrate_on_start chat-personal must be re-indexed under Personal; got: {convs_after_migration:#?}"
+        );
     }
 
 }
