@@ -59,6 +59,8 @@ impl Transcript {
                 }
             }
             "final" => {
+                // ev.text() is canonical; accumulated live_assistant is intentionally
+                // discarded when the final event provides its own text field.
                 let text = ev
                     .text()
                     .map(str::to_string)
@@ -233,11 +235,15 @@ mod tests {
         );
     }
 
-    /// A mock with `healthy: false` represents an unreachable agentd.
-    #[test]
-    fn unreachable_health_sets_connection_state() {
+    /// An unhealthy `MockTransport` must return `Err` from `health()` — the
+    /// seam `AppState::bootstrap` relies on to transition to `Unreachable`.
+    #[tokio::test]
+    async fn unhealthy_transport_health_returns_err() {
         let mock = MockTransport { healthy: false, ..MockTransport::new() };
-        assert!(!mock.healthy);
+        assert!(
+            mock.health().await.is_err(),
+            "unhealthy mock must return Err from health()"
+        );
     }
 
     /// apply_user clears live_assistant; a second user turn appends.
