@@ -6,6 +6,8 @@ pub mod sse;            // Task 7
 pub mod routes_control; // Task 8
 pub mod server;         // Task 8
 
+pub use server::{serve, ServeConfig};
+
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
