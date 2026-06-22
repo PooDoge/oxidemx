@@ -9,7 +9,6 @@ use crate::dto::*;
 use crate::error::TransportError;
 use crate::transport::Transport;
 
-#[derive(Default)]
 pub struct MockTransport {
     pub projects: Vec<Project>,
     pub conversations: Vec<Conversation>,
@@ -20,7 +19,19 @@ pub struct MockTransport {
 }
 
 impl MockTransport {
-    pub fn new() -> Self { Self { healthy: true, ..Default::default() } }
+    pub fn new() -> Self {
+        Self {
+            projects: Vec::new(),
+            conversations: Vec::new(),
+            history: Vec::new(),
+            events: Mutex::new(Vec::new()),
+            healthy: true,
+        }
+    }
+}
+
+impl Default for MockTransport {
+    fn default() -> Self { Self::new() }
 }
 
 #[async_trait]
@@ -45,6 +56,12 @@ impl Transport for MockTransport {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn default_and_new_are_both_healthy() {
+        assert!(MockTransport::default().health().await.is_ok());
+        assert!(MockTransport::new().health().await.is_ok());
+    }
 
     #[tokio::test]
     async fn mock_subscribe_yields_scripted_events() {
