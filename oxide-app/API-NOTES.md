@@ -212,3 +212,99 @@ Through `freya::prelude::*`:
 - Launch: `launch`, `LaunchConfig`, `WindowConfig`
 - Component trait: `Component`, `IntoElement`, `Element`
 - Event types: `MouseEventData`, `KeyboardEventData`, etc.
+
+## Region nav decision (Task 2 spike)
+
+**Decision: page-enum fallback** — `use_state`-backed `RegionNav<P>` per region.
+`freya-router` is NOT used for per-region navigation.
+
+### Spike findings
+
+`freya-router`'s `RouterContext` is a concrete, non-generic type
+(`freya_router::contexts::router::RouterContext`). `provide_context` stores it
+keyed by `TypeId::of::<RouterContext>()` in the providing scope. Two sibling
+`Router<L>` and `Router<C>` each call `try_consume_own_context::<RouterContext>()`
+(checks only the calling scope), so they don't overwrite each other on init.
+
+At the context level, children of each router resolve their nearest
+`RouterContext` ancestor independently — so the two instances are isolated for
+read/subscribe purposes.
+
+**Why the router approach was rejected:**
+
+1. **Path namespace collision.** Both routers use URL paths (`/`, `/settings`,
+   `/b`, …). There is no route-enum namespacing — `LeftRoute::B` and
+   `CenterRoute::B` both serialize to `/b`. The same path string feeds into
+   different `Routable::from_str` impls, making cross-region navigation
+   ambiguous and brittle.
+
+2. **External navigation is broken.** Any button or gesture *above* both
+   `Router` trees calling `RouterContext::get()` (which walks up ancestors)
+   finds nothing — both contexts are below the caller. External navigation to a
+   specific region cannot be done without storing each `RouterContext`
+   out-of-band, which negates the router's ergonomics entirely.
+
+3. **`AnimatedRouter` is app-wide, not per-region.** The animated-router API
+   wraps a single layout root, not independent sibling subtrees.
+
+4. **The router is designed for URL-based app-wide navigation** (history,
+   back/forward, deep-linking). Forcing it into independent per-panel use
+   would fight the abstraction at every turn.
+
+### Chosen seam: `RegionNav<P>` + `use_region_nav`
+
+File: `oxide-app/crates/oxide-freya/src/nav.rs`
+
+```rust
+/// A page variant a region can display.
+pub trait RegionPage: Clone + PartialEq + 'static {}
+// Blanket impl: every Clone + PartialEq + 'static type satisfies it.
+
+/// Per-region navigation handle — cheaply cloneable (State is Copy).
+#[derive(Clone, Copy)]
+pub struct RegionNav<P: RegionPage> {
+    page: State<P>,
+}
+
+impl<P: RegionPage> RegionNav<P> {
+    pub fn current(&self) -> P { ... }
+    pub fn navigate(&mut self, to: P) { self.page.set(to); }
+}
+
+/// Hook: create a RegionNav for the calling component.
+pub fn use_region_nav<P: RegionPage>(initial: P) -> RegionNav<P> { ... }
+```
+
+### Task 11 usage pattern
+
+```rust
+// In a region component body:
+let mut nav: RegionNav<SidebarPage> = use_region_nav(SidebarPage::Home);
+
+match nav.current() {
+    SidebarPage::Home    => { /* render home panel */ }
+    SidebarPage::Profile => { /* render profile panel */ }
+}
+
+// On a button press — only this region re-renders:
+rect().on_mouse_up(move |_| nav.navigate(SidebarPage::Profile))
+```
+
+Each of the three regions (left / center / right) calls `use_region_nav`
+independently. Navigating one region triggers only that region's subtree to
+re-render; the others are unaffected — confirmed by the invariant test.
+
+### Animation note (Task 9 dependency)
+
+Animated transitions (FadeIn/SlideIn) are deferred to Task 9 (`oxide-ui::anim`).
+When Task 9 lands, wrap the `match` block in the animated wrapper from
+`oxide-ui::anim`. The `RegionNav` seam itself does not change.
+
+### Invariant test result
+
+`cargo test -p oxide-freya` — 2 tests, 0 failures (2026-06-22):
+
+- `nav::tests::region_nav_is_independent` — PASS
+  * Mounts two regions (left=A, center=X).
+  * Navigates left A→B via `left_state.write_unchecked()`.
+  * Asserts: left shows B, center still shows X, center-Y absent, left-A absent.
