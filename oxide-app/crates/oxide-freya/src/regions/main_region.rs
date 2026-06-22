@@ -28,7 +28,12 @@ impl Component for MainRegion {
             .direction(Direction::Vertical)
             .width(Size::fill())
             .height(Size::fill())
-            .child(ScrollView::new().child(thread))
+            .child(
+                rect()
+                    .width(Size::fill())
+                    .height(Size::flex(1.0))
+                    .child(ScrollView::new().child(thread)),
+            )
             .child(
                 PromptInput::new(input.into_writable())
                     .on_submit(move |text| send_state.send(text)),

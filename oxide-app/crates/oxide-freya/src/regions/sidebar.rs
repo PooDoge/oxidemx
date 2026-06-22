@@ -2,7 +2,7 @@
 //! placeholder second page, to prove the sidebar navigates without touching
 //! the center region.
 use freya::prelude::*;
-use oxide_ui::components::{CollapsiblePanel, ListItem};
+use oxide_ui::components::{CollapsiblePanel, ListItem, RailButton};
 
 use crate::nav::use_region_nav;
 use crate::state::AppState;
@@ -22,13 +22,22 @@ pub struct Sidebar {
 impl Component for Sidebar {
     fn render(&self) -> impl IntoElement {
         let nav = use_region_nav(SidebarPage::Conversations);
+        let collapsed = use_state(|| false);
         let state = self.state.clone();
         let mut nav_for_click = nav.clone();
+
+        // Each closure needs its own copy of the State handle (State is Copy).
+        let mut collapsed_for_collapse = collapsed;
+        let mut collapsed_for_expand = collapsed;
 
         let full = match nav.current() {
             SidebarPage::Conversations => {
                 let convs = state.conversations.read().clone();
-                let mut col = rect().direction(Direction::Vertical).spacing(4.0);
+                let mut col = rect()
+                    .direction(Direction::Vertical)
+                    .spacing(4.0)
+                    .width(Size::fill())
+                    .height(Size::fill());
                 // Nav button to switch to Placeholder page (proves independent nav).
                 col = col.child(
                     rect()
@@ -44,6 +53,13 @@ impl Component for Sidebar {
                             .on_press(move |_| st.open_conversation(id.clone())),
                     );
                 }
+                // Spacer to push the collapse button to the bottom.
+                col = col.child(rect().width(Size::fill()).height(Size::flex(1.0)));
+                // Collapse toggle: press "«" to collapse.
+                col = col.child(
+                    RailButton::new("«".into())
+                        .on_press(move |_: Event<PressEventData>| collapsed_for_collapse.set(true)),
+                );
                 col.into_element()
             }
             SidebarPage::Placeholder => {
@@ -54,9 +70,13 @@ impl Component for Sidebar {
             }
         };
 
+        // Rail: press "»" to expand.
+        let rail = RailButton::new("»".into())
+            .on_press(move |_: Event<PressEventData>| collapsed_for_expand.set(false));
+
         CollapsiblePanel::new()
-            .collapsed(self.collapsed)
+            .collapsed(*collapsed.read())
             .full(full)
-            .rail(label().text("≡"))
+            .rail(rail)
     }
 }
