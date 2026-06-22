@@ -1,0 +1,9 @@
+{
+  "theme": { "tokens": { "base": "#121418", "accent": "#00d4ff" } },
+  "components": [
+    { "name": "Toggle", "freya": "MiniSwitch", "tokens": ["accent", "ghost_token"], "action": "flip" },
+    { "freya": "Slider" }
+  ],
+  "layout": { "regions": [ { "kind": "sidebar" } ] },
+  "animations": [ { "name": "spin" } ]
+}
