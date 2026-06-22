@@ -1496,7 +1496,7 @@ impl AgentInterface {
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::seams::{RecordingEmitter, UnavailableHost};
     use async_trait::async_trait;
@@ -1784,6 +1784,47 @@ mod tests {
         pub fn last_history_len(&self) -> usize {
             *self.last_history_len.lock().unwrap_or_else(|e| e.into_inner())
         }
+    }
+
+    /// Reusable factory for tests outside this module (e.g. connector::http).
+    ///
+    /// Returns `(Arc<AgentService>, TempDir)`. The caller MUST keep the
+    /// `TempDir` alive for the duration of the test; dropping it removes the
+    /// backing store.
+    pub(crate) fn test_service() -> (Arc<AgentService>, tempfile::TempDir) {
+        let tmp = tempfile::tempdir().unwrap();
+        let store_base = tmp.path().join("store");
+
+        // Bootstrap the Personal project so list_projects() returns it.
+        let project_store = crate::project_store::ProjectStore::new(store_base.join("projects"));
+        project_store.ensure_personal();
+
+        let emitter = Arc::new(RecordingEmitter::default());
+        let approver = Arc::new(Approver::new(emitter.clone()));
+        let stub_svc = Arc::new(StubLocalService::new());
+        let models = Arc::new(ModelControls::new(stub_svc, emitter.clone()));
+        let active_runs = Arc::new(std::sync::Mutex::new(std::collections::HashMap::new()));
+        let run_statuses = Arc::new(std::sync::Mutex::new(std::collections::HashMap::new()));
+        let run_launcher = Arc::new(crate::run_launcher::ConductorRunLauncher::new(
+            active_runs.clone(),
+            run_statuses.clone(),
+            emitter.clone(),
+        ));
+        let runner = MockTurnRunner::new("mock assistant reply");
+        let svc = Arc::new(AgentService {
+            projects: ProjectRegistry::with_store_base(store_base),
+            sessions: Arc::new(Sessions::new()),
+            models,
+            approver,
+            emitter,
+            host: Arc::new(UnavailableHost),
+            turn_runner: Arc::new(runner),
+            active_runs,
+            run_statuses,
+            run_launcher,
+            git: Arc::new(RealGit),
+        });
+        (svc, tmp)
     }
 
     // ── Test 1: send_message appends transcript, emits, and journals ──────────
