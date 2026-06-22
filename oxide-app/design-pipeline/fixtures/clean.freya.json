@@ -1,0 +1,82 @@
+{
+  "design": "Fixture - Clean",
+  "theme": {
+    "tokens": {
+      "base": "#121418",
+      "accent": "#00d4ff",
+      "accent_15": "rgba(0,212,255,0.15)",
+      "surface0": "#1a1d24",
+      "crust": "#0a0c10",
+      "text": "#f0f4f8"
+    }
+  },
+  "components": [
+    {
+      "name": "Composer",
+      "freya": "custom",
+      "tokens": [
+        "crust"
+      ],
+      "children": [
+        {
+          "name": "Composer.send",
+          "freya": "Button",
+          "variant": "primary",
+          "tokens": [
+            "accent",
+            "crust"
+          ],
+          "action": "press"
+        },
+        {
+          "name": "Composer.input",
+          "freya": "Input",
+          "tokens": [
+            "surface0",
+            "text"
+          ],
+          "action": "input"
+        }
+      ]
+    },
+    {
+      "name": "PointerSpeed",
+      "freya": "Slider",
+      "tokens": [
+        "accent",
+        "surface0"
+      ],
+      "action": "input",
+      "anim": "pulse"
+    }
+  ],
+  "layout": {
+    "shell": "row",
+    "regions": [
+      {
+        "id": "left",
+        "kind": "rail",
+        "railWidth": [
+          274,
+          60
+        ]
+      },
+      {
+        "id": "center",
+        "kind": "flex",
+        "contains": [
+          "scroll-body",
+          "footer"
+        ]
+      }
+    ]
+  },
+  "animations": [
+    {
+      "name": "pulse",
+      "kind": "glow-loop",
+      "ms": 1800,
+      "ease": "out"
+    }
+  ]
+}

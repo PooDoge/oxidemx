@@ -1,0 +1,19 @@
+[package]
+name = "oxide-freya"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "oxide-freya"
+path = "src/main.rs"
+
+[dependencies]
+freya = { workspace = true }
+oxide-client = { path = "../oxide-client" }
+oxide-ui = { path = "../oxide-ui" }
+tokio = { workspace = true }
+futures-util = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+freya-testing = { workspace = true }

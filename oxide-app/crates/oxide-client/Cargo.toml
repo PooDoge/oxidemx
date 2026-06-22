@@ -1,0 +1,16 @@
+[package]
+name = "oxide-client"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+async-trait = { workspace = true }
+futures-util = { workspace = true }
+tokio = { workspace = true }
+hyper = { version = "1", features = ["client", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+http-body-util = "0.1"
+async-stream = "0.3"
