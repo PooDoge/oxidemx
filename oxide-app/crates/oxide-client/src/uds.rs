@@ -1,36 +1,143 @@
-//! Unix-domain-socket transport — stub; filled in Task 5.
+//! `UdsTransport` — agentd over a Unix domain socket using hyper 1.x. Each call
+//! opens a fresh connection (agentd closes per response). SSE uses a streaming
+//! body fed into `SseParser`, reconnecting with Last-Event-ID on drop.
+use std::path::PathBuf;
+
 use async_trait::async_trait;
 use futures_util::stream::BoxStream;
+use http_body_util::{BodyExt, Full};
+use hyper::body::Bytes;
+use hyper::{Method, Request};
+use hyper_util::rt::TokioIo;
+use tokio::net::UnixStream;
 
 use crate::dto::{AgentEvent, Conversation, MessageId, Project, Turn};
 use crate::error::TransportError;
+use crate::sse::SseParser;
 use crate::transport::Transport;
 
-/// Placeholder — will connect to agentd over UDS in Task 5.
-pub struct UdsTransport;
+pub struct UdsTransport {
+    sock: PathBuf,
+}
+
+impl UdsTransport {
+    pub fn new(sock: impl Into<PathBuf>) -> Self { Self { sock: sock.into() } }
+
+    /// `$XDG_RUNTIME_DIR/oxidemx/agentd.sock` (falls back to `/tmp`).
+    pub fn default_socket() -> PathBuf {
+        let base = std::env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| "/tmp".into());
+        PathBuf::from(base).join("oxidemx").join("agentd.sock")
+    }
+
+    async fn send(&self, method: Method, path: &str, body: Option<serde_json::Value>)
+        -> Result<(u16, Bytes), TransportError>
+    {
+        let stream = UnixStream::connect(&self.sock).await
+            .map_err(|e| TransportError::Unreachable(e.to_string()))?;
+        let (mut sender, conn) = hyper::client::conn::http1::handshake(TokioIo::new(stream)).await
+            .map_err(|e| TransportError::Stream(e.to_string()))?;
+        tokio::spawn(async move { let _ = conn.await; });
+
+        let payload = body.map(|v| v.to_string()).unwrap_or_default();
+        let req = Request::builder()
+            .method(method).uri(path)
+            .header("host", "localhost")
+            .header("content-type", "application/json")
+            .body(Full::new(Bytes::from(payload)))
+            .map_err(|e| TransportError::Stream(e.to_string()))?;
+        let resp = sender.send_request(req).await
+            .map_err(|e| TransportError::Stream(e.to_string()))?;
+        let status = resp.status().as_u16();
+        let bytes = resp.into_body().collect().await
+            .map_err(|e| TransportError::Stream(e.to_string()))?.to_bytes();
+        Ok((status, bytes))
+    }
+
+    async fn get_json<T: serde::de::DeserializeOwned>(&self, path: &str) -> Result<T, TransportError> {
+        let (status, bytes) = self.send(Method::GET, path, None).await?;
+        if !(200..300).contains(&status) { return Err(TransportError::Http(status)); }
+        serde_json::from_slice(&bytes).map_err(|e| TransportError::Decode(e.to_string()))
+    }
+}
 
 #[async_trait]
 impl Transport for UdsTransport {
     async fn health(&self) -> Result<(), TransportError> {
-        Err(TransportError::Unreachable("UdsTransport not yet implemented".into()))
+        let (status, bytes) = self.send(Method::GET, "/v1/health", None).await?;
+        if status == 200 && bytes.as_ref() == b"ok" { Ok(()) } else { Err(TransportError::Http(status)) }
     }
+
     async fn list_projects(&self) -> Result<Vec<Project>, TransportError> {
-        Err(TransportError::Unreachable("UdsTransport not yet implemented".into()))
+        self.get_json("/v1/projects").await
     }
-    async fn list_conversations(&self, _project_id: &str) -> Result<Vec<Conversation>, TransportError> {
-        Err(TransportError::Unreachable("UdsTransport not yet implemented".into()))
+
+    async fn list_conversations(&self, project_id: &str) -> Result<Vec<Conversation>, TransportError> {
+        self.get_json(&format!("/v1/projects/{project_id}/conversations")).await
     }
-    async fn create_conversation(&self, _project_id: &str, _working_dir: Option<&str>) -> Result<Conversation, TransportError> {
-        Err(TransportError::Unreachable("UdsTransport not yet implemented".into()))
+
+    async fn create_conversation(&self, project_id: &str, working_dir: Option<&str>)
+        -> Result<Conversation, TransportError>
+    {
+        let mut body = serde_json::json!({ "project_id": project_id });
+        if let Some(wd) = working_dir { body["working_dir"] = serde_json::json!(wd); }
+        let (status, bytes) = self.send(Method::POST, "/v1/conversations", Some(body)).await?;
+        if !(200..300).contains(&status) { return Err(TransportError::Http(status)); }
+        // Response is {"conversation_id": "..."}; fetch the full record.
+        #[derive(serde::Deserialize)] struct Created { conversation_id: String }
+        let created: Created = serde_json::from_slice(&bytes).map_err(|e| TransportError::Decode(e.to_string()))?;
+        self.get_json(&format!("/v1/conversations/{}", created.conversation_id)).await
     }
-    async fn get_history(&self, _conversation_id: &str) -> Result<Vec<Turn>, TransportError> {
-        Err(TransportError::Unreachable("UdsTransport not yet implemented".into()))
+
+    async fn get_history(&self, conversation_id: &str) -> Result<Vec<Turn>, TransportError> {
+        self.get_json(&format!("/v1/conversations/{conversation_id}/messages")).await
     }
-    async fn send_message(&self, _conversation_id: &str, _text: &str) -> Result<MessageId, TransportError> {
-        Err(TransportError::Unreachable("UdsTransport not yet implemented".into()))
+
+    async fn send_message(&self, conversation_id: &str, text: &str) -> Result<MessageId, TransportError> {
+        let body = serde_json::json!({ "text": text });
+        let (status, bytes) = self.send(Method::POST,
+            &format!("/v1/conversations/{conversation_id}/messages"), Some(body)).await?;
+        if !(200..300).contains(&status) { return Err(TransportError::Http(status)); }
+        #[derive(serde::Deserialize)] struct Sent { message_id: String }
+        let sent: Sent = serde_json::from_slice(&bytes).map_err(|e| TransportError::Decode(e.to_string()))?;
+        Ok(MessageId(sent.message_id))
     }
-    fn subscribe(&self, _conversation_id: &str) -> BoxStream<'static, Result<AgentEvent, TransportError>> {
-        use futures_util::stream;
-        Box::pin(stream::empty())
+
+    fn subscribe(&self, conversation_id: &str) -> BoxStream<'static, Result<AgentEvent, TransportError>> {
+        let sock = self.sock.clone();
+        let path = format!("/v1/conversations/{conversation_id}/events");
+        Box::pin(async_stream::try_stream! {
+            let mut last_id = 0u64;
+            loop {
+                let stream = UnixStream::connect(&sock).await
+                    .map_err(|e| TransportError::Unreachable(e.to_string()))?;
+                let (mut sender, conn) = hyper::client::conn::http1::handshake(TokioIo::new(stream)).await
+                    .map_err(|e| TransportError::Stream(e.to_string()))?;
+                tokio::spawn(async move { let _ = conn.await; });
+
+                let mut builder = Request::builder()
+                    .method(Method::GET).uri(&path)
+                    .header("host", "localhost")
+                    .header("accept", "text/event-stream");
+                if last_id > 0 { builder = builder.header("last-event-id", last_id.to_string()); }
+                let req = builder.body(Full::new(Bytes::new()))
+                    .map_err(|e| TransportError::Stream(e.to_string()))?;
+                let resp = sender.send_request(req).await
+                    .map_err(|e| TransportError::Stream(e.to_string()))?;
+
+                let mut body = resp.into_body();
+                let mut parser = SseParser::new();
+                while let Some(frame) = body.frame().await {
+                    let frame = frame.map_err(|e| TransportError::Stream(e.to_string()))?;
+                    if let Some(chunk) = frame.data_ref() {
+                        for ev in parser.push(chunk) {
+                            last_id = ev.seq;
+                            yield ev;
+                        }
+                    }
+                }
+                // Connection ended; back off then reconnect with Last-Event-ID.
+                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+            }
+        })
     }
 }
