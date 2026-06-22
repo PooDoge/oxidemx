@@ -258,7 +258,17 @@ fn agentd_panel(state: &State) -> Element<'_, Message> {
     ]
     .align_y(Alignment::Center);
 
-    column![intro, agentd_row].spacing(8).into()
+    // HTTP/SSE transport — remote access via tailnet or local HTTP.
+    let http_row = row![
+        text("Enable HTTP/SSE transport (remote access)").size(13),
+        Space::new().width(Length::Fill),
+        toggler(state.config.http.enabled)
+            .on_toggle(Message::HttpTransportToggled)
+            .style(style::toggler_style(pal)),
+    ]
+    .align_y(Alignment::Center);
+
+    column![intro, agentd_row, http_row].spacing(8).into()
 }
 
 // ============================================================================
