@@ -18,6 +18,7 @@ pub fn router(state: AppState) -> Router {
         .route("/v1/conversations/{id}", get(get_conversation))
         .route("/v1/conversations/{id}/messages", get(history).post(send_message))
         .route("/v1/conversations/{id}/approvals/{request_id}", post(respond_approval))
+        .route("/v1/conversations/{id}/events", get(super::sse::events_handler))
         .with_state(state)
 }
 
