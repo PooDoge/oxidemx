@@ -152,6 +152,7 @@ impl AppState {
         transcript.set(Transcript::default());
 
         let t = self.transport.clone();
+        let mut connection = self.connection;
         spawn(async move {
             // Fetch history, then merge so any turns `send()` appended locally
             // during the await are preserved AFTER the history turns.
@@ -164,8 +165,14 @@ impl AppState {
             let mut events = t.subscribe(id.as_str());
             use futures_util::StreamExt;
             while let Some(ev) = events.next().await {
-                if let Ok(ev) = ev {
-                    transcript.with_mut(|mut tx| tx.apply_event(&ev));
+                match ev {
+                    Ok(ev) => {
+                        connection.set(ConnState::Connected);
+                        transcript.with_mut(|mut tx| tx.apply_event(&ev));
+                    }
+                    Err(_) => {
+                        connection.set(ConnState::Reconnecting);
+                    }
                 }
             }
         });

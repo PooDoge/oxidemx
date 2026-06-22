@@ -108,13 +108,17 @@ impl Transport for UdsTransport {
     fn subscribe(&self, conversation_id: &str) -> BoxStream<'static, Result<AgentEvent, TransportError>> {
         let sock = self.sock.clone();
         let path = format!("/v1/conversations/{conversation_id}/events");
-        Box::pin(async_stream::try_stream! {
+        Box::pin(async_stream::stream! {
             let mut last_id = 0u64;
             loop {
-                let stream = UnixStream::connect(&sock).await
-                    .map_err(|e| TransportError::Unreachable(e.to_string()))?;
-                let (mut sender, conn) = hyper::client::conn::http1::handshake(TokioIo::new(stream)).await
-                    .map_err(|e| TransportError::Stream(e.to_string()))?;
+                let stream = match UnixStream::connect(&sock).await {
+                    Ok(s) => s,
+                    Err(e) => { yield Err(TransportError::Unreachable(e.to_string())); break; }
+                };
+                let (mut sender, conn) = match hyper::client::conn::http1::handshake(TokioIo::new(stream)).await {
+                    Ok(pair) => pair,
+                    Err(e) => { yield Err(TransportError::Stream(e.to_string())); break; }
+                };
                 tokio::spawn(async move { let _ = conn.await; });
 
                 let mut builder = Request::builder()
@@ -122,23 +126,34 @@ impl Transport for UdsTransport {
                     .header("host", "localhost")
                     .header("accept", "text/event-stream");
                 if last_id > 0 { builder = builder.header("last-event-id", last_id.to_string()); }
-                let req = builder.body(Full::new(Bytes::new()))
-                    .map_err(|e| TransportError::Stream(e.to_string()))?;
-                let resp = sender.send_request(req).await
-                    .map_err(|e| TransportError::Stream(e.to_string()))?;
+                let req = match builder.body(Full::new(Bytes::new())) {
+                    Ok(r) => r,
+                    Err(e) => { yield Err(TransportError::Stream(e.to_string())); break; }
+                };
+                let resp = match sender.send_request(req).await {
+                    Ok(r) => r,
+                    Err(e) => { yield Err(TransportError::Stream(e.to_string())); break; }
+                };
 
                 let mut body = resp.into_body();
                 let mut parser = SseParser::new();
                 while let Some(frame) = body.frame().await {
-                    let frame = frame.map_err(|e| TransportError::Stream(e.to_string()))?;
+                    let frame = match frame {
+                        Ok(f) => f,
+                        Err(e) => { yield Err(TransportError::Stream(e.to_string())); break; }
+                    };
                     if let Some(chunk) = frame.data_ref() {
                         for ev in parser.push(chunk) {
                             last_id = ev.seq;
-                            yield ev;
+                            yield Ok(ev);
                         }
                     }
                 }
-                // Connection ended; back off then reconnect with Last-Event-ID.
+                // Server closed / EOF — notify the consumer that a gap occurred before
+                // we sleep and reconnect. The consumer uses this to surface
+                // `ConnState::Reconnecting` in the UI (Rule 1).
+                yield Err(TransportError::Stream("reconnecting".into()));
+                // Back off then reconnect with Last-Event-ID.
                 tokio::time::sleep(std::time::Duration::from_millis(500)).await;
             }
         })
