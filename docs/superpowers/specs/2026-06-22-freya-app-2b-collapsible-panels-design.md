@@ -111,7 +111,17 @@ transport.
   seeded `MockTransport`; visually compare to the design. The existing 2a suite (29 tests) stays green.
 - Live run against agentd after each phase (rebuild + relaunch) for visual confirmation.
 
+## Phase 4 — Responsive desktop (added 2026-06-22)
+
+The design project gained a **`freya2-responsive.jsx`** (responsive desktop) — breakpoint reflow of the
+3-panel shell at narrow window widths (auto-collapse the side rails, reduce to fewer columns, etc.). This is
+a **shell-level** concern (it does not change P1 thread internals or P2 sidebar internals). P4: retrofit
+`freya2-responsive.jsx` via the authoring contract first (emit its `freya.json` of breakpoint rules), then
+translate the reflow behavior via the skill onto the P3 shell (window-size → which panels are full/rail).
+Built after P1–P3.
+
 ## Out of scope (later)
 
 The deferred surfaces above; markdown rich rendering in bubbles (use `MarkdownViewer` when added); the
-drag-to-resize handle physics (basic collapse only); Android (2c).
+drag-to-resize handle physics (basic collapse only); **mobile (`freya2-mobile.jsx`) → sub-project 2c
+(Android)**, deferred per the desktop-first decision.
