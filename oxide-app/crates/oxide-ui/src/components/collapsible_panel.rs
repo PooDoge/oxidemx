@@ -102,6 +102,10 @@ mod tests {
             Label::try_downcast(el).filter(|l| l.text.as_ref() == "FULL")
         });
         assert!(found.is_some(), "expanded panel should show FULL label");
+        let absent = t.find(|_, el| {
+            Label::try_downcast(el).filter(|l| l.text.as_ref() == "RAIL")
+        });
+        assert!(absent.is_none(), "expanded panel must NOT show RAIL label");
     }
 
     #[test]
@@ -118,5 +122,9 @@ mod tests {
             Label::try_downcast(el).filter(|l| l.text.as_ref() == "RAIL")
         });
         assert!(found.is_some(), "collapsed panel should show RAIL label");
+        let absent = t.find(|_, el| {
+            Label::try_downcast(el).filter(|l| l.text.as_ref() == "FULL")
+        });
+        assert!(absent.is_none(), "collapsed panel must NOT show FULL label");
     }
 }
