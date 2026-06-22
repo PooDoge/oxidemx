@@ -2,6 +2,7 @@
 use freya::prelude::*;
 
 pub mod nav;
+pub mod state;
 
 fn main() {
     let rt = tokio::runtime::Builder::new_multi_thread()
