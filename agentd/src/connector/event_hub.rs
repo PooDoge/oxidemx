@@ -52,20 +52,31 @@ impl EventHub {
     }
 
     pub fn publish(&self, ev: &AgentEvent) {
-        let seq = self.0.seq.fetch_add(1, Ordering::SeqCst) + 1;
+        // Resolve the owning conversation first (takes run_links lock), then
+        // drop that guard before taking the rings lock — no lock ordering risk.
         let conversation = self.owning_conversation(ev);
-        let item = SeqEvent { seq, conversation: conversation.clone(), ev: ev.clone() };
-        {
+        // Assign seq and insert into the ring together so ring order == seq
+        // order even under concurrent publishers.
+        let item = {
             let mut rings = self.0.rings.lock().unwrap_or_else(|e| e.into_inner());
+            let seq = self.0.seq.fetch_add(1, Ordering::SeqCst) + 1;
+            let item = SeqEvent { seq, conversation: conversation.clone(), ev: ev.clone() };
             let ring = rings.entry(conversation).or_default();
             ring.push_back(item.clone());
             while ring.len() > self.0.buffer_per_conv {
                 ring.pop_front();
             }
-        }
+            item
+        };
         let _ = self.0.tx.send(item); // Err only if no subscribers; fine.
     }
 
+    /// Subscribe to the live event stream.
+    ///
+    /// The returned receiver only carries events published **after** this call;
+    /// it has no history.  Callers that need catch-up for a conversation (e.g.
+    /// SSE reconnect) must call [`Self::replay`] first and then subscribe so
+    /// that no events are missed between the replay cut-off and the live stream.
     pub fn subscribe(&self) -> tokio::sync::broadcast::Receiver<SeqEvent> {
         self.0.tx.subscribe()
     }

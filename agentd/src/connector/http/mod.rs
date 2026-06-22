@@ -59,7 +59,6 @@ impl IntoResponse for ApiError {
             AgentdError::Project(_) => (StatusCode::BAD_REQUEST, "bad_request"),
             // Io, Dbus, and any future variants → 500. The wildcard handles
             // #[non_exhaustive] additions without a compile error.
-            #[allow(unreachable_patterns)]
             _ => (StatusCode::INTERNAL_SERVER_ERROR, "internal"),
         };
         let body = Json(serde_json::json!({ "error": { "code": code, "message": self.0.to_string() } }));

@@ -79,11 +79,11 @@ impl LocalModelService for NullLocalService {
     }
 }
 
-// ── unsafe_uid ───────────────────────────────────────────────────────────────
+// ── fallback_uid ──────────────────────────────────────────────────────────────
 
 /// Best-effort: parse `$UID` from the environment or default 1000.
 /// No libc; no unsafe.  Only used when `$XDG_RUNTIME_DIR` is unset.
-fn unsafe_uid() -> u32 {
+fn fallback_uid() -> u32 {
     std::env::var("UID").ok().and_then(|s| s.parse().ok()).unwrap_or(1000)
 }
 
@@ -202,7 +202,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .map(std::path::PathBuf::from)
             .filter(|p| p.is_absolute())
             .unwrap_or_else(|| {
-                std::path::PathBuf::from(format!("/run/user/{}", unsafe_uid()))
+                std::path::PathBuf::from(format!("/run/user/{}", fallback_uid()))
             })
             .join("oxidemx")
             .join("agentd.sock");

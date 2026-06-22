@@ -84,8 +84,10 @@ async fn send_message(
     let project = conv.working_dir.to_string_lossy().to_string();
     let message_id = next_message_id(&st);
 
-    // Spawn the turn; deltas stream via the emitter→hub→SSE. Publish a terminal
-    // `final`/`error` event so SSE carries the complete reply truthfully.
+    // Spawn the turn; deltas stream via the emitter→hub→SSE. The core
+    // AgentService already emits Turn + final on success via BroadcastEmitter,
+    // so we only publish a terminal `error` event on failure (the core emits
+    // no terminal event on error, so this is the only error signal).
     let svc = st.svc.clone();
     let hub = st.hub.clone();
     let conv_id = id.clone();
@@ -93,13 +95,17 @@ async fn send_message(
     let text = body.text.clone();
     let mid = message_id.clone();
     tokio::spawn(async move {
-        let payload = match svc.send_message(&project, &conv_id, &text, model.as_deref()).await {
-            Ok(reply) => serde_json::json!({ "kind": "final", "message_id": mid, "text": reply }),
-            Err(e) => serde_json::json!({ "kind": "error", "message_id": mid, "message": e.to_string() }),
-        };
-        hub.publish(&crate::seams::AgentEvent {
-            project: String::new(), thread_or_run: conv_id, ts: super::now_ms(), payload,
-        });
+        match svc.send_message(&project, &conv_id, &text, model.as_deref()).await {
+            Ok(_reply) => { /* core already emitted Turn + final via the emitter */ }
+            Err(e) => {
+                hub.publish(&crate::seams::AgentEvent {
+                    project: String::new(),
+                    thread_or_run: conv_id,
+                    ts: super::now_ms(),
+                    payload: serde_json::json!({ "kind": "error", "message_id": mid, "message": e.to_string() }),
+                });
+            }
+        }
     });
 
     Ok(Json(serde_json::json!({ "message_id": message_id })))
