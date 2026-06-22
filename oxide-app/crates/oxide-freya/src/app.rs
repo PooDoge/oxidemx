@@ -80,26 +80,6 @@ mod tests {
         })
     }
 
-    fn mock_with_reply() -> Arc<MockTransport> {
-        Arc::new(MockTransport {
-            conversations: vec![Conversation {
-                id: ConversationId::from("c1"),
-                project_id: ProjectId::from("personal"),
-                title: "Chat 1".into(),
-                working_dir: String::new(),
-                model: String::new(),
-                created_at: 0,
-                updated_at: 0,
-            }],
-            events: Mutex::new(vec![AgentEvent {
-                seq: 1,
-                kind: "final".into(),
-                payload: serde_json::json!({"text": "pong"}),
-            }]),
-            ..MockTransport::new()
-        })
-    }
-
     // ── Test harness apps ─────────────────────────────────────────────────
 
     /// Harness for test 1: sidebar + center sharing one AppState.
@@ -123,19 +103,6 @@ mod tests {
                         .height(Size::fill())
                         .child(MainRegion { state: state.clone() }),
                 )
-                .into()
-        }
-    }
-
-    /// Harness for test 2: AppState backed by a mock that emits "pong" on subscribe.
-    fn harness_with_reply(mock: Arc<MockTransport>) -> impl Fn() -> Element {
-        move || {
-            let transport = mock.clone() as Arc<dyn oxide_client::Transport>;
-            let state = AppState::new(transport);
-            rect()
-                .width(Size::fill())
-                .height(Size::fill())
-                .child(MainRegion { state })
                 .into()
         }
     }
@@ -192,40 +159,23 @@ mod tests {
 
     // ── Test 2: sending renders streamed reply ────────────────────────────
 
-    /// With a MockTransport scripted to yield a `final` (text "pong") on subscribe:
-    /// open a conversation, send a message, drive the stream, assert a "pong" bubble.
+    /// End-to-end send path:
+    ///   open_conversation (subscribes mock stream) → send("ping") → stream delivers
+    ///   final{text:"pong"} → assert BOTH the user "ping" bubble AND the assistant
+    ///   "pong" bubble are rendered by MainRegion.
+    ///
+    /// Harness approach: a nested component captures `AppState` and calls both
+    /// `open_conversation` and `send` from `use_side_effect` on mount, giving the
+    /// test full control without keyboard simulation.
     #[test]
     fn sending_renders_streamed_reply() {
-        let mock = mock_with_reply();
-        let app = harness_with_reply(mock);
-        let mut runner = launch_test(app);
-
-        // At this point the center is mounted but no conversation is open.
-        runner.sync_and_update();
-
-        // We need to trigger open_conversation + send via state.
-        // The harness exposes MainRegion which calls state internally.
-        // Since we cannot call state methods from outside the component easily,
-        // we use the TestingRunner::new hook pattern to get a handle on the state.
-        // Instead, re-run with a richer harness that auto-opens and checks.
-        //
-        // Alternate approach: use a harness that auto-opens c1 on mount
-        // and calls state.send() via use_side_effect, then drive the async loop.
-        // This is cleaner than simulating keyboard input for the prompt.
-        // Build a self-contained harness app that opens + sends on mount.
-        fn auto_send_app() -> Element {
-            // We need to capture the transport; use a thread-local for test isolation.
-            // Instead: embed the mock inline and test via Transcript directly.
-            //
-            // The Transcript reducer is already tested in state.rs.
-            // Here we verify the render path: given a Transcript with a "pong" turn,
-            // does MainRegion render a Bubble with text "pong"?
+        fn open_and_send_app() -> Element {
             let state = AppState::new(
                 Arc::new(MockTransport {
                     events: Mutex::new(vec![AgentEvent {
                         seq: 1,
                         kind: "final".into(),
-                        payload: serde_json::json!({"text":"pong"}),
+                        payload: serde_json::json!({"text": "pong"}),
                     }]),
                     conversations: vec![Conversation {
                         id: ConversationId::from("c1"),
@@ -240,11 +190,13 @@ mod tests {
                 }) as Arc<dyn oxide_client::Transport>,
             );
 
-            // Open the conversation on mount — this subscribes to the mock stream
-            // which immediately yields the "final"/"pong" event.
+            // Open conversation first (so the subscribe stream is live), then send.
+            // `apply_user` is synchronous — "ping" appears in the transcript immediately.
+            // The mock subscribe stream yields final{text:"pong"} once polled.
             let st = state.clone();
             use_side_effect(move || {
                 st.open_conversation(ConversationId::from("c1"));
+                st.send("ping".to_string());
             });
 
             rect()
@@ -254,17 +206,27 @@ mod tests {
                 .into()
         }
 
-        let mut runner2 = launch_test(auto_send_app);
-        // Drive async tasks: open_conversation spawns get_history + subscribe stream.
-        runner2.poll_n(Duration::from_millis(5), 10);
+        let mut runner = launch_test(open_and_send_app);
+        // Drive async tasks: open_conversation spawns get_history + subscribe stream;
+        // send() spawns send_message (fire-and-forget); stream events flush transcript.
+        runner.poll_n(Duration::from_millis(5), 12);
 
-        // Assert the "pong" bubble is rendered.
-        let found = runner2.find(|_, el| {
+        // Assert the user "ping" turn is rendered (apply_user path).
+        let ping_bubble = runner.find(|_, el| {
+            Label::try_downcast(el).filter(|l| l.text.as_ref().contains("ping"))
+        });
+        assert!(
+            ping_bubble.is_some(),
+            "after send('ping'), MainRegion must render a user 'ping' bubble (apply_user path)"
+        );
+
+        // Assert the assistant "pong" reply is rendered (streamed final event path).
+        let pong_bubble = runner.find(|_, el| {
             Label::try_downcast(el).filter(|l| l.text.as_ref().contains("pong"))
         });
         assert!(
-            found.is_some(),
-            "after subscribe stream delivers 'pong' final event, MainRegion should render a 'pong' bubble"
+            pong_bubble.is_some(),
+            "after subscribe stream delivers 'pong' final event, MainRegion must render an assistant 'pong' bubble"
         );
     }
 }
