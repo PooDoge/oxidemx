@@ -5,3 +5,6 @@ edition = "2021"
 
 [dependencies]
 freya = { workspace = true }
+
+[dev-dependencies]
+freya-testing = { workspace = true }
