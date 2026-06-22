@@ -143,16 +143,24 @@ impl AppState {
 
     /// Load history and subscribe to the SSE stream for `id`.
     pub fn open_conversation(&self, id: ConversationId) {
+        // Synchronously set active + reset transcript BEFORE the spawn so that
+        // `send()` calls during the `get_history` await window append to the
+        // fresh (empty) transcript, not the previous conversation's turns.
         let mut active = self.active;
         active.set(Some(id.clone()));
-        let t = self.transport.clone();
         let mut transcript = self.transcript;
+        transcript.set(Transcript::default());
+
+        let t = self.transport.clone();
         spawn(async move {
-            let mut tx = Transcript::default();
-            if let Ok(turns) = t.get_history(id.as_str()).await {
-                tx.turns = turns;
-            }
-            transcript.set(tx);
+            // Fetch history, then merge so any turns `send()` appended locally
+            // during the await are preserved AFTER the history turns.
+            let history = t.get_history(id.as_str()).await.unwrap_or_default();
+            transcript.with_mut(|mut tx| {
+                let locals = std::mem::take(&mut tx.turns);
+                tx.turns = history;
+                tx.turns.extend(locals);
+            });
             let mut events = t.subscribe(id.as_str());
             use futures_util::StreamExt;
             while let Some(ev) = events.next().await {
