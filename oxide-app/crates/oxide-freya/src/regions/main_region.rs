@@ -26,6 +26,7 @@ impl Component for MainRegion {
         let send_state = state.clone();
         rect()
             .direction(Direction::Vertical)
+            .content(Content::Flex)
             .width(Size::fill())
             .height(Size::fill())
             .child(

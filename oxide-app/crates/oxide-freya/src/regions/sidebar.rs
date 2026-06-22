@@ -35,6 +35,7 @@ impl Component for Sidebar {
                 let convs = state.conversations.read().clone();
                 let mut col = rect()
                     .direction(Direction::Vertical)
+                    .content(Content::Flex)
                     .spacing(4.0)
                     .width(Size::fill())
                     .height(Size::fill());
