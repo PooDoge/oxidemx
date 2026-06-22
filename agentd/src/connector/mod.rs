@@ -3,3 +3,4 @@
 
 pub mod auth;
 pub mod caps;
+pub mod tailnet;
