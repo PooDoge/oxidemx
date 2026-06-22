@@ -53,6 +53,7 @@ mod tests {
     use std::time::Duration;
 
     use freya::prelude::*;
+    use freya_testing::TestingRunner;
     use freya_testing::prelude::*;
     use oxide_client::{
         AgentEvent, Conversation, ConversationId, ProjectId, Turn, mock::MockTransport,
@@ -228,5 +229,80 @@ mod tests {
             pong_bubble.is_some(),
             "after subscribe stream delivers 'pong' final event, MainRegion must render an assistant 'pong' bubble"
         );
+    }
+
+    // ── Snapshot: render the full shell to PNGs for visual review ──────────
+
+    fn conv(id: &str, title: &str) -> Conversation {
+        Conversation {
+            id: ConversationId::from(id),
+            project_id: ProjectId::from("personal"),
+            title: title.into(),
+            working_dir: String::new(),
+            model: String::new(),
+            created_at: 0,
+            updated_at: 0,
+        }
+    }
+
+    fn snapshot_shell_app() -> Element {
+        use crate::regions::context::ContextRegion;
+        let mock = Arc::new(MockTransport {
+            conversations: vec![
+                conv("c1", "hi, what can you do?"),
+                conv("c2", "run the shell command git commit -m test"),
+                conv("c3", "research-digest on AutoAge"),
+                conv("c4", "Run research-digest on Microsoft Copilot Studio"),
+            ],
+            history: vec![
+                Turn { role: "user".into(), text: "What can you do?".into(), ts: 0 },
+                Turn {
+                    role: "assistant".into(),
+                    text: "I am Oxide, your desktop assistant. I can run shell commands, search the web, \
+                           remember facts across conversations, configure your radial menu, and launch \
+                           multi-agent flows like research-digest and system-doctor."
+                        .into(),
+                    ts: 0,
+                },
+            ],
+            events: Mutex::new(Vec::new()),
+            ..MockTransport::new()
+        }) as Arc<dyn oxide_client::Transport>;
+        let state = AppState::new(mock);
+        let st = state.clone();
+        use_side_effect(move || {
+            st.bootstrap();
+            st.open_conversation(ConversationId::from("c1"));
+        });
+        rect()
+            .direction(Direction::Horizontal)
+            .expanded()
+            .background((5u8, 7u8, 11u8))
+            .child(Sidebar { state: state.clone(), collapsed: false })
+            .child(
+                rect()
+                    .width(Size::flex(1.0))
+                    .height(Size::fill())
+                    .child(MainRegion { state: state.clone() }),
+            )
+            .child(ContextRegion { collapsed: true })
+            .into()
+    }
+
+    /// Renders the shell to /tmp PNGs at 1200x800 for visual review.
+    /// Run with: cargo test -p oxide-freya --lib snapshot_shell -- --ignored --nocapture
+    #[test]
+    #[ignore = "snapshot: writes PNGs to /tmp for visual review"]
+    fn snapshot_shell() {
+        let (mut runner, _) =
+            TestingRunner::new(snapshot_shell_app, (1200., 800.).into(), |_| {}, 1.);
+        runner.poll_n(Duration::from_millis(5), 12);
+        runner.sync_and_update();
+        runner.render_to_file("/tmp/oxide-shell-expanded.png");
+
+        // Click the "«" collapse button (bottom of the 274px sidebar) and re-render.
+        runner.click_cursor((24., 770.));
+        runner.sync_and_update();
+        runner.render_to_file("/tmp/oxide-shell-collapsed.png");
     }
 }
