@@ -52,6 +52,9 @@ use freya::prelude::*;
 pub trait RegionPage: Clone + PartialEq + 'static {}
 
 /// Blanket impl: every `Clone + PartialEq + 'static` enum is a `RegionPage`.
+// NOTE: this blanket impl makes the trait non-object-safe and prevents external
+// crates from adding their own bounded impls — if cross-crate extension is
+// needed later, convert to a manual per-type impl or move the trait to a lib crate.
 impl<T: Clone + PartialEq + 'static> RegionPage for T {}
 
 // ── Handle ─────────────────────────────────────────────────────────────────
@@ -111,59 +114,64 @@ mod tests {
         Y,
     }
 
-    // ---- two-region app fixture -------------------------------------------
+    // ---- region components ------------------------------------------------
     //
-    // The two navs need to cross the component boundary so the test can drive
-    // them.  We thread them via root-level `State<LeftPage>` and
-    // `State<CenterPage>` contexts that the app reads and the test mutates
-    // via `runner.run_in(|| ...)`.
+    // Each calls `use_region_nav` internally — the seam under test.
+    // `LeftRegion` renders a "nav-btn" rect; clicking it calls
+    // `RegionNav::navigate(LeftPage::B)` through the seam.
+    //
+    // Window layout (600 × 400): left region occupies x=0..300, center x=300..600.
+    // The nav button fills the left region so any click inside x<300 triggers it.
 
-    fn two_region_app() -> impl IntoElement {
-        // Consume the shared states injected by the test harness.
-        let left_page: State<LeftPage> = consume_root_context();
-        let center_page: State<CenterPage> = consume_root_context();
+    fn left_region() -> impl IntoElement {
+        let nav = use_region_nav(LeftPage::A);
+        let mut nav_for_click = nav.clone();
 
         rect()
-            .expanded()
-            .horizontal()
-            // Left region
+            .width(Size::flex(1.0))
+            .height(Size::fill())
+            // Navigate button — clicking anywhere in the left region calls navigate().
             .child(
                 rect()
-                    .width(Size::flex(1.0))
-                    .height(Size::fill())
-                    .child(match *left_page.read() {
+                    .expanded()
+                    .on_mouse_up(move |_| nav_for_click.navigate(LeftPage::B))
+                    .child(match nav.current() {
                         LeftPage::A => label().text("left-A").into_element(),
                         LeftPage::B => label().text("left-B").into_element(),
                     }),
             )
-            // Center region
-            .child(
-                rect()
-                    .width(Size::flex(1.0))
-                    .height(Size::fill())
-                    .child(match *center_page.read() {
-                        CenterPage::X => label().text("center-X").into_element(),
-                        CenterPage::Y => label().text("center-Y").into_element(),
-                    }),
-            )
+    }
+
+    fn center_region() -> impl IntoElement {
+        let nav = use_region_nav(CenterPage::X);
+
+        rect()
+            .width(Size::flex(1.0))
+            .height(Size::fill())
+            .child(match nav.current() {
+                CenterPage::X => label().text("center-X").into_element(),
+                CenterPage::Y => label().text("center-Y").into_element(),
+            })
+    }
+
+    fn two_region_app() -> impl IntoElement {
+        rect()
+            .expanded()
+            .direction(Direction::Horizontal)
+            .child(left_region().into_element())
+            .child(center_region().into_element())
     }
 
     // ---- invariant test ---------------------------------------------------
+    //
+    // Drives navigation THROUGH the seam: click_cursor fires on_mouse_up inside
+    // left_region, which calls RegionNav::navigate(LeftPage::B).  A broken seam
+    // (e.g. shared static State) would change center_region's output too.
 
-    /// Region A navigates A→B; region B must remain on its initial page.
+    /// Region A navigates A→B via `RegionNav::navigate`; region B must remain on its initial page.
     #[test]
     fn region_nav_is_independent() {
-        // Provide shared state at the root so both the app and test can access it.
-        let (mut runner, (left_state, _center_state)) = TestingRunner::new(
-            two_region_app,
-            Size2D::new(600., 400.),
-            |r| {
-                let left = r.provide_root_context(|| State::create(LeftPage::A));
-                let center = r.provide_root_context(|| State::create(CenterPage::X));
-                (left, center)
-            },
-            1.0,
-        );
+        let mut runner = launch_test(two_region_app);
 
         // Initial render: left=A, center=X.
         runner.sync_and_update();
@@ -178,10 +186,10 @@ mod tests {
         });
         assert!(found_center_x.is_some(), "initial: center region should show 'center-X'");
 
-        // Navigate left region A → B (center must stay on X).
-        // State::write_unchecked takes &self, no runner context needed.
-        *left_state.write_unchecked() = LeftPage::B;
-        runner.sync_and_update();
+        // Navigate left region A → B by clicking inside the left region.
+        // The on_mouse_up handler calls nav.navigate(LeftPage::B) through the seam.
+        // Left region occupies x=0..250, y=0..500 (500×500 default from launch_test).
+        runner.click_cursor((125., 250.));
 
         // Left is now B.
         let found_left_b = runner.find(|_, el| {
