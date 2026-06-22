@@ -38,11 +38,12 @@ impl UdsTransport {
             .map_err(|e| TransportError::Stream(e.to_string()))?;
         tokio::spawn(async move { let _ = conn.await; });
 
-        let payload = body.map(|v| v.to_string()).unwrap_or_default();
-        let req = Request::builder()
+        let payload = body.as_ref().map(|v| v.to_string()).unwrap_or_default();
+        let mut builder = Request::builder()
             .method(method).uri(path)
-            .header("host", "localhost")
-            .header("content-type", "application/json")
+            .header("host", "localhost");
+        if body.is_some() { builder = builder.header("content-type", "application/json"); }
+        let req = builder
             .body(Full::new(Bytes::from(payload)))
             .map_err(|e| TransportError::Stream(e.to_string()))?;
         let resp = sender.send_request(req).await
@@ -64,7 +65,9 @@ impl UdsTransport {
 impl Transport for UdsTransport {
     async fn health(&self) -> Result<(), TransportError> {
         let (status, bytes) = self.send(Method::GET, "/v1/health", None).await?;
-        if status == 200 && bytes.as_ref() == b"ok" { Ok(()) } else { Err(TransportError::Http(status)) }
+        if status != 200 { return Err(TransportError::Http(status)); }
+        if bytes.as_ref() == b"ok" || bytes.as_ref() == b"ok\n" { Ok(()) }
+        else { Err(TransportError::Decode(format!("unexpected health body: {:?}", String::from_utf8_lossy(&bytes)))) }
     }
 
     async fn list_projects(&self) -> Result<Vec<Project>, TransportError> {
