@@ -90,6 +90,18 @@ pub struct AppState {
     pub connection: State<ConnState>,
 }
 
+impl PartialEq for AppState {
+    /// Two `AppState` handles are equal when they share the same underlying
+    /// signals — i.e., they were created in the same component invocation.
+    fn eq(&self, other: &Self) -> bool {
+        self.projects == other.projects
+            && self.conversations == other.conversations
+            && self.active == other.active
+            && self.transcript == other.transcript
+            && self.connection == other.connection
+    }
+}
+
 impl AppState {
     /// Create `AppState`.  Must be called from inside a Freya component body
     /// (same restriction as `use_state`).

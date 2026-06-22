@@ -2753,6 +2753,10 @@ version = "0.1.0"
 dependencies = [
  "freya",
  "freya-testing",
+ "futures-util",
+ "oxide-client",
+ "oxide-ui",
+ "serde_json",
  "tokio",
 ]
 
