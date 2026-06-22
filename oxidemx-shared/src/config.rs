@@ -961,6 +961,26 @@ impl Default for LocalModelConfig {
 
 // ── End local-model configuration types ──────────────────────────────────
 
+/// HTTP/SSE transport (1b). Opt-in; the existing D-Bus path is unaffected when off.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct HttpConfig {
+    /// Master switch. When false, agentd starts no HTTP listeners (default).
+    pub enabled: bool,
+    /// TCP port for the tailnet listener.
+    pub port: u16,
+    /// Explicit bind IP override ("" = auto-detect the tailnet IP). Never 0.0.0.0.
+    pub bind_override: String,
+    /// Per-conversation SSE replay ring-buffer size.
+    pub event_buffer: usize,
+}
+
+impl Default for HttpConfig {
+    fn default() -> Self {
+        Self { enabled: false, port: 8765, bind_override: String::new(), event_buffer: 256 }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct AppConfig {
     #[serde(default)]
@@ -1011,6 +1031,10 @@ pub struct AppConfig {
     /// Absent = defaults.
     #[serde(default)]
     pub overlay: OverlayConfig,
+
+    /// HTTP/SSE transport settings. Absent = defaults (disabled).
+    #[serde(default)]
+    pub http: HttpConfig,
 
     /// Config schema version. Missing = 2 (pre-widget-store configs).
     /// Bumped to 3 by the one-shot migration in `migrate.rs`.
@@ -1642,5 +1666,22 @@ mod tests {
         ))
         .unwrap();
         assert_eq!(cfg.schema_version, CURRENT_SCHEMA_VERSION);
+    }
+
+    #[test]
+    fn http_config_defaults_off_and_roundtrips() {
+        let c = HttpConfig::default();
+        assert!(!c.enabled, "http transport is opt-in");
+        assert_eq!(c.port, 8765);
+        assert_eq!(c.event_buffer, 256);
+        assert!(c.bind_override.is_empty());
+        // Absent in JSON → defaults (serde default).
+        let app: AppConfig = serde_json::from_str("{}").unwrap();
+        assert!(!app.http.enabled);
+        assert_eq!(app.http.port, 8765);
+        // Round-trips.
+        let json = serde_json::to_string(&app).unwrap();
+        let back: AppConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.http.port, 8765);
     }
 }
