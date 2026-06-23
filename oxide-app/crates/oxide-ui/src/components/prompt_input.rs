@@ -45,19 +45,56 @@ impl PromptInput {
 
 impl Component for PromptInput {
     fn render(&self) -> impl IntoElement {
+        let th = self.theme;
         let mut input = Input::new(self.value.clone())
             .width(Size::fill())
-            .placeholder("Ask anything…");
+            .placeholder("Ask, or type / for a flow…")
+            .theme_colors(InputColorsThemePartial {
+                background: Some(Preference::Specific(th.bg_deep())),
+                focus_background: Some(Preference::Specific(th.bg_deep())),
+                border_fill: Some(Preference::Specific(th.surface_max())),
+                focus_border_fill: Some(Preference::Specific(th.accent())),
+                color: Some(Preference::Specific(th.text())),
+                placeholder_color: Some(Preference::Specific(th.faint())),
+            });
 
         if let Some(handler) = self.on_submit.clone() {
             input = input.on_submit(handler);
         }
 
         rect()
+            .direction(Direction::Horizontal)
+            .cross_align(Alignment::Center)
+            .spacing(9.)
             .width(Size::fill())
-            .padding(Gaps::new_all(8.))
-            .background(self.theme.surface())
-            .child(input)
+            .padding(Gaps::new(10., 16., 14., 16.))
+            .background(th.bg())
+            .border(
+                Border::new()
+                    .fill(th.hairline())
+                    .width(BorderWidth { top: 1., ..Default::default() }),
+            )
+            .child(
+                rect()
+                    .width(Size::flex(1.0))
+                    .corner_radius(CornerRadius::new_all(12.))
+                    .background(th.bg_deep())
+                    .border(Border::new().fill(th.surface_max()).width(1.))
+                    .padding(Gaps::new_all(4.))
+                    .child(input),
+            )
+            .child(
+                rect()
+                    .width(Size::px(42.))
+                    .height(Size::px(42.))
+                    .corner_radius(CornerRadius::new_all(12.))
+                    .main_align(Alignment::Center)
+                    .cross_align(Alignment::Center)
+                    .background(th.accent())
+                    .child(
+                        label().text("➤").font_size(17.).color(th.bg_deep()),
+                    ),
+            )
     }
 }
 
@@ -67,15 +104,17 @@ mod tests {
     use freya_testing::prelude::*;
 
     #[test]
-    fn prompt_input_renders() {
+    fn composer_shows_send_glyph() {
         fn app() -> impl IntoElement {
             let value = use_state(String::new);
             PromptInput::new(value.into_writable())
         }
         let mut t = launch_test(app);
         t.sync_and_update();
-        // The built-in Input renders a rect; assert some rect exists.
-        let found = t.find(|_, el| Rect::try_downcast(el));
-        assert!(found.is_some(), "prompt input should render");
+        // The send glyph is a stable, composer-specific marker.
+        let found = t.find(|_, el| {
+            Label::try_downcast(el).filter(|l| l.text.as_ref() == "➤")
+        });
+        assert!(found.is_some(), "composer must render the ➤ send glyph");
     }
 }
