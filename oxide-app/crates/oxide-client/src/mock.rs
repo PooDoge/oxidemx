@@ -43,7 +43,8 @@ impl Transport for MockTransport {
     async fn list_conversations(&self, _p: &str) -> Result<Vec<Conversation>, TransportError> { Ok(self.conversations.clone()) }
     async fn create_conversation(&self, project_id: &str, _wd: Option<&str>) -> Result<Conversation, TransportError> {
         Ok(Conversation { id: ConversationId::from("mock-conv"), project_id: ProjectId::from(project_id),
-            title: "New".into(), working_dir: String::new(), model: String::new(), created_at: 0, updated_at: 0 })
+            title: "New".into(), working_dir: String::new(), model: String::new(), created_at: 0, updated_at: 0,
+            worktree: None })
     }
     async fn get_history(&self, _c: &str) -> Result<Vec<Turn>, TransportError> { Ok(self.history.clone()) }
     async fn send_message(&self, _c: &str, _t: &str) -> Result<MessageId, TransportError> { Ok(MessageId::from("mock-msg")) }

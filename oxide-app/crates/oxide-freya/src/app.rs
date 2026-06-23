@@ -56,7 +56,7 @@ mod tests {
     use freya_testing::TestingRunner;
     use freya_testing::prelude::*;
     use oxide_client::{
-        AgentEvent, Conversation, ConversationId, ProjectId, Turn, mock::MockTransport,
+        AgentEvent, Conversation, ConversationId, ProjectId, Turn, Worktree, mock::MockTransport,
     };
 
     use crate::regions::{main_region::MainRegion, sidebar::Sidebar};
@@ -74,6 +74,7 @@ mod tests {
                 model: String::new(),
                 created_at: 0,
                 updated_at: 0,
+                worktree: None,
             }],
             history: vec![Turn { role: "user".into(), text: "seed-message".into(), ts: 0 }],
             events: Mutex::new(Vec::new()),
@@ -89,9 +90,10 @@ mod tests {
         move || {
             let transport = mock.clone() as Arc<dyn oxide_client::Transport>;
             let state = AppState::new(transport);
-            // Open the seeded conversation on mount to load history into transcript.
+            // Bootstrap to populate conversations list; open the seeded conversation.
             let st = state.clone();
             use_side_effect(move || {
+                st.bootstrap();
                 st.open_conversation(ConversationId::from("c1"));
             });
             rect()
@@ -108,53 +110,24 @@ mod tests {
         }
     }
 
-    // ── Test 1: sidebar nav does not clear center thread ──────────────────
+    // ── Test 1: sidebar renders conversation rows ─────────────────────────
 
-    /// Navigate the sidebar to its Placeholder page; assert the center thread's
-    /// bubble text ("seed-message") is STILL present.
+    /// Assert the styled sidebar renders a seeded conversation title as a row.
     ///
-    /// This fails if the center remounts and clears its transcript state.
+    /// The per-region-nav independence invariant is covered by the pure seam
+    /// test `nav::tests::region_nav_is_independent` which does not rely on
+    /// any sidebar page enum.
     #[test]
-    fn sidebar_nav_does_not_clear_center_thread() {
-        let mock = mock_with_history();
+    fn sidebar_renders_conversation_rows() {
+        let mock = mock_with_history(); // seeds a "Chat 1" conversation
         let app = harness_with_history(mock);
         let mut runner = launch_test(app);
-
-        // Drive async tasks so open_conversation + get_history complete.
         runner.poll_n(Duration::from_millis(5), 8);
-
-        // Assert the seed turn is visible in the center.
-        let before_nav = runner.find(|_, el| {
-            Label::try_downcast(el).filter(|l| l.text.as_ref().contains("seed-message"))
-        });
         assert!(
-            before_nav.is_some(),
-            "before sidebar nav: center should show 'seed-message' turn"
-        );
-
-        // Click the sidebar nav button (≡ Conversations header) to navigate to Placeholder.
-        // The sidebar occupies the left portion; the header button is near the top-left.
-        // In a 500×500 window the CollapsiblePanel is SIDEBAR_FULL_W=274px wide.
-        runner.click_cursor((30., 15.));
-        runner.sync_and_update();
-
-        // Assert the sidebar navigated to its placeholder page.
-        let placeholder = runner.find(|_, el| {
-            Label::try_downcast(el)
-                .filter(|l| l.text.as_ref().contains("Sidebar placeholder page"))
-        });
-        assert!(
-            placeholder.is_some(),
-            "after click: sidebar should show placeholder page"
-        );
-
-        // INVARIANT: center still shows the seed turn — it was NOT remounted.
-        let after_nav = runner.find(|_, el| {
-            Label::try_downcast(el).filter(|l| l.text.as_ref().contains("seed-message"))
-        });
-        assert!(
-            after_nav.is_some(),
-            "after sidebar nav: center thread MUST still show 'seed-message' (independence invariant)"
+            runner
+                .find(|_, el| Label::try_downcast(el).filter(|l| l.text.as_ref() == "Chat 1"))
+                .is_some(),
+            "sidebar should render the conversation row"
         );
     }
 
@@ -186,6 +159,7 @@ mod tests {
                         model: String::new(),
                         created_at: 0,
                         updated_at: 0,
+                        worktree: None,
                     }],
                     ..MockTransport::new()
                 }) as Arc<dyn oxide_client::Transport>,
@@ -242,6 +216,7 @@ mod tests {
             model: String::new(),
             created_at: 0,
             updated_at: 0,
+            worktree: None,
         }
     }
 
@@ -346,5 +321,62 @@ mod tests {
         runner.poll_n(Duration::from_millis(5), 12);
         runner.sync_and_update();
         runner.render_to_file("/tmp/oxide-thread-p1.png");
+    }
+
+    // ── Snapshot: styled sidebar (P2) ─────────────────────────────────────
+
+    fn snapshot_sidebar_p2_app() -> Element {
+        let mock = Arc::new(MockTransport {
+            conversations: vec![
+                conv("c1", "hi, what can you do?"),
+                conv("c2", "run the shell command git commit -m test"),
+                Conversation {
+                    id: ConversationId::from("c3"),
+                    project_id: ProjectId::from("personal"),
+                    title: "research-digest on AutoAge".into(),
+                    working_dir: String::new(),
+                    model: String::new(),
+                    created_at: 0,
+                    updated_at: 0,
+                    worktree: Some(Worktree {
+                        path: "/tmp/worktree-autoage".into(),
+                        branch: "feat/autoage".into(),
+                        base_ref: "main".into(),
+                    }),
+                },
+                conv("c4", "Run research-digest on Microsoft Copilot Studio"),
+            ],
+            events: Mutex::new(Vec::new()),
+            ..MockTransport::new()
+        }) as Arc<dyn oxide_client::Transport>;
+        let state = AppState::new(mock);
+        let st = state.clone();
+        use_side_effect(move || {
+            st.bootstrap();
+        });
+        rect()
+            .direction(Direction::Horizontal)
+            .expanded()
+            .background((5u8, 7u8, 11u8))
+            .child(Sidebar { state: state.clone(), collapsed: false })
+            .child(
+                rect()
+                    .width(Size::flex(1.0))
+                    .height(Size::fill())
+                    .background((10u8, 13u8, 20u8)),
+            )
+            .into()
+    }
+
+    /// Renders the styled sidebar (P2: header + conversation rows + rail) to a PNG.
+    /// Run with: cargo test -p oxide-freya --bin oxide-freya snapshot_sidebar_p2 -- --ignored
+    #[test]
+    #[ignore = "snapshot: writes PNG to /tmp for visual review"]
+    fn snapshot_sidebar_p2() {
+        let (mut runner, _) =
+            TestingRunner::new(snapshot_sidebar_p2_app, (900., 800.).into(), |_| {}, 1.);
+        runner.poll_n(Duration::from_millis(5), 12);
+        runner.sync_and_update();
+        runner.render_to_file("/tmp/oxide-sidebar-p2.png");
     }
 }

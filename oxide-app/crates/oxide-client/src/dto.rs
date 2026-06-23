@@ -31,6 +31,14 @@ pub struct Project {
     pub created_at: u64,
 }
 
+/// Active worktree associated with a conversation (agentd model).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Worktree {
+    pub path: String,
+    pub branch: String,
+    pub base_ref: String,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Conversation {
     pub id: ConversationId,
@@ -45,6 +53,8 @@ pub struct Conversation {
     pub created_at: u64,
     #[serde(default)]
     pub updated_at: u64,
+    #[serde(default)]
+    pub worktree: Option<Worktree>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

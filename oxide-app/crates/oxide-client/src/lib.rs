@@ -6,7 +6,7 @@ pub mod sse;
 pub mod transport;
 pub mod uds;
 
-pub use dto::{AgentEvent, Conversation, ConversationId, MessageId, Project, ProjectId, Turn};
+pub use dto::{AgentEvent, Conversation, ConversationId, MessageId, Project, ProjectId, Turn, Worktree};
 pub use error::TransportError;
 pub use transport::Transport;
 pub use uds::UdsTransport;
