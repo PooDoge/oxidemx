@@ -91,9 +91,10 @@ rail** variant (icon column). Wired to the existing `conversations` signal + `op
 
 ## Phase 3 — Chrome + right rail
 
-`freya.json: WindowFrame` + `RightPanel` (collapsed). **WindowFrame** (custom): frameless titlebar
-(wordmark gradient + project·conversation breadcrumb + min/max/close **Button**s) over a **DesktopBackdrop**
-(radial accent wash) — wraps the 3-region shell. **Right-panel collapsed rail** (the `ResizableContainer`
+`freya.json: WindowFrame` + `RightPanel` (collapsed). **WindowFrame** (DECISION 2026-06-22: **native** decorations — keep the OS titlebar; do NOT use
+`with_decorations(false)`): render the design's Adwaita-style inner top bar (project·conversation breadcrumb +
+status) beneath the native titlebar, over a **DesktopBackdrop** (radial accent wash). The frameless variant
+is deferred. **Right-panel collapsed rail** (the `ResizableContainer`
 rail at 60px, static): a column of **RailButton**s (icon + status ring, `Tooltip` on hover) + the collapse
 toggle. Static/placeholder content (no backing) — completes the 3-panel silhouette.
 
