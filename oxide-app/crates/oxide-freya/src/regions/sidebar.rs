@@ -59,7 +59,7 @@ impl Component for Sidebar {
                 .width(Size::fill())
                 .height(Size::flex(1.0))
                 .padding(Gaps::new(0., 8., 0., 8.))
-                .child(ScrollView::new().child(list)),
+                .child(ScrollView::new().show_scrollbar(false).child(list)),
         );
 
         col = col.child(

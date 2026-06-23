@@ -38,6 +38,7 @@ impl Component for SidebarHeader {
         // Project switcher pill: surface bg + hairline_strong border + radius 9
         let switcher = rect()
             .direction(Direction::Horizontal)
+            .content(Content::Flex)
             .cross_align(Alignment::Center)
             .spacing(8.)
             .width(Size::fill())

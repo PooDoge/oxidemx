@@ -91,6 +91,7 @@ impl Component for ListItem {
         };
         let row = rect()
             .direction(Direction::Horizontal)
+            .content(Content::Flex)
             .cross_align(Alignment::Center)
             .spacing(8.)
             .width(Size::fill())
