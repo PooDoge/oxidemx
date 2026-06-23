@@ -8,6 +8,7 @@ pub mod prompt_input;
 pub mod rail_button;
 pub mod status_dot;
 pub mod status_puck;
+pub mod thread_header;
 
 pub use avatar::Avatar;
 pub use bubble::Bubble;
@@ -18,3 +19,4 @@ pub use prompt_input::PromptInput;
 pub use rail_button::RailButton;
 pub use status_dot::StatusDot;
 pub use status_puck::StatusPuck;
+pub use thread_header::ThreadHeader;
