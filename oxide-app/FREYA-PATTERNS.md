@@ -5,11 +5,17 @@ crates/freya/src/_docs/). The developer's own best-practices skill is at
 `.claude/skills/freya-gui-framework/SKILL.md` — run it before UI work. This file is the project-specific
 distillation; cite the example, not memory.
 
-## THE layout rule (the bug we kept hitting)
+## THE layout rule (the bug we kept hitting — THREE times now)
 
 **`Size::flex(n)` is ONLY honoured when the parent container has `.content(Content::Flex)`.**
 Default content is `Content::Normal`, which stacks children at their measured size and *ignores* flex.
 A `ScrollView` (or any fill child) then takes its full measured height and pushes siblings off-screen.
+**This applies to ANY rect with a flex child, not just vertical scroll columns.** A HORIZONTAL row whose
+label uses `.width(Size::flex(1.0))` to right-push a trailing element (chip / chevron / status puck) ALSO
+needs `.content(Content::Flex)` on that row — otherwise the flex label collapses to auto-width, the trailing
+element detaches/escapes, and the row's height bloats. (Bit the composer, the sidebar conversation rows, AND
+the project-switcher pill.) Side note: a built-in `ScrollView` shows an **accent-colored scrollbar by
+default** — use `.show_scrollbar(false)` for side rails (or theme it to a faint hairline).
 
 - `Content::Normal` (default): children stack sequentially along the direction axis; flex ignored.
 - `Content::Flex`: children with `Size::flex(n)` split the *remaining* space proportionally. **Required for flex.**
