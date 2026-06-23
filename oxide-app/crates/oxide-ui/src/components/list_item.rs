@@ -1,7 +1,10 @@
 //! A conversation/project row for the sidebar list.
 //!
-//! Selected rows are highlighted with the accent color. Press the row to fire
-//! the optional `on_press` handler.
+//! Selected rows are highlighted with a tinted accent fill + border.
+//! A leading tone dot indicates the conversation state. An optional trailing
+//! `WorktreeChip` shows the active worktree branch.
+//!
+//! Press the row to fire the optional `on_press` handler.
 use freya::prelude::*;
 
 use crate::tokens::Theme;
@@ -12,23 +15,44 @@ use crate::tokens::Theme;
 /// ```ignore
 /// ListItem::new("My Project".into())
 ///     .selected(true)
+///     .state("working".into())
+///     .worktree(Some("main".into()))
 ///     .on_press(|_| println!("pressed"))
 /// ```
 #[derive(PartialEq, Clone)]
 pub struct ListItem {
     label: String,
     selected: bool,
+    state: String,
+    worktree: Option<String>,
     on_press: Option<EventHandler<Event<PressEventData>>>,
     theme: Theme,
 }
 
 impl ListItem {
     pub fn new(label: String) -> Self {
-        Self { label, selected: false, on_press: None, theme: Theme::default() }
+        Self {
+            label,
+            selected: false,
+            state: "idle".into(),
+            worktree: None,
+            on_press: None,
+            theme: Theme::default(),
+        }
     }
 
     pub fn selected(mut self, selected: bool) -> Self {
         self.selected = selected;
+        self
+    }
+
+    pub fn state(mut self, state: String) -> Self {
+        self.state = state;
+        self
+    }
+
+    pub fn worktree(mut self, worktree: Option<String>) -> Self {
+        self.worktree = worktree;
         self
     }
 
@@ -45,26 +69,58 @@ impl ListItem {
 
 impl Component for ListItem {
     fn render(&self) -> impl IntoElement {
-        let bg = if self.selected {
-            self.theme.accent()
-        } else {
-            self.theme.surface()
+        let th = self.theme;
+        let tone = match self.state.as_str() {
+            "working"   => th.yellow(),
+            "delivered" => th.green(),
+            "failed"    => th.red(),
+            _           => th.overlay(),
         };
-        let text_color = if self.selected {
-            self.theme.bg()
+        let (bg, txt, border) = if self.selected {
+            (
+                Theme::with_alpha(th.accent(), 0x14),
+                th.text(),
+                Theme::with_alpha(th.accent(), 0x3a),
+            )
         } else {
-            self.theme.text()
+            (
+                Color::from_argb(0, 0, 0, 0),
+                th.subtext_hi(),
+                Color::from_argb(0, 0, 0, 0),
+            )
         };
-        let base = rect()
+        let row = rect()
+            .direction(Direction::Horizontal)
+            .cross_align(Alignment::Center)
+            .spacing(8.)
             .width(Size::fill())
-            .padding(Gaps::new_all(10.))
+            .padding(Gaps::new(8., 10., 8., 10.))
+            .corner_radius(CornerRadius::new_all(9.))
             .background(bg)
-            .child(label().text(self.label.clone()).color(text_color));
-
+            .border(Border::new().fill(border).width(1.))
+            .child(
+                rect()
+                    .width(Size::px(6.))
+                    .height(Size::px(6.))
+                    .corner_radius(CornerRadius::new_all(3.))
+                    .background(tone),
+            )
+            .child(
+                label()
+                    .text(self.label.clone())
+                    .font_size(12.5)
+                    .color(txt)
+                    .width(Size::flex(1.0)),
+            )
+            .maybe_child(
+                self.worktree
+                    .clone()
+                    .map(|w| crate::components::chip::WorktreeChip::new(w).theme(th)),
+            );
         if let Some(handler) = self.on_press.clone() {
-            base.on_press(handler)
+            row.on_press(handler)
         } else {
-            base
+            row
         }
     }
 }
@@ -85,5 +141,26 @@ mod tests {
             Label::try_downcast(el).filter(|l| l.text.as_ref() == "Conversation A")
         });
         assert!(found.is_some(), "list item should render its label");
+    }
+
+    #[test]
+    fn list_item_with_worktree_renders_branch() {
+        fn app() -> impl IntoElement {
+            ListItem::new("Chat".into())
+                .state("working".into())
+                .worktree(Some("wt-x".into()))
+        }
+        let mut t = launch_test(app);
+        t.sync_and_update();
+        assert!(
+            t.find(|_, el| Label::try_downcast(el).filter(|l| l.text.as_ref() == "Chat"))
+                .is_some(),
+            "should render the title"
+        );
+        assert!(
+            t.find(|_, el| Label::try_downcast(el).filter(|l| l.text.as_ref() == "wt-x"))
+                .is_some(),
+            "should render the worktree chip label"
+        );
     }
 }
