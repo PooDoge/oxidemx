@@ -2,7 +2,8 @@
 //! transport-delivered content (Rule 1): committed turns + the live streaming
 //! assistant bubble; never fabricated text.
 use freya::prelude::*;
-use oxide_ui::components::{Bubble, PromptInput};
+use oxide_ui::Theme;
+use oxide_ui::components::{Bubble, PromptInput, ThreadHeader};
 
 use crate::state::AppState;
 
@@ -15,7 +16,15 @@ impl Component for MainRegion {
     fn render(&self) -> impl IntoElement {
         let state = self.state.clone();
         let tx = state.transcript.read().clone();
-        let mut thread = rect().direction(Direction::Vertical).spacing(8.0).width(Size::fill());
+        let convs = state.conversations.read().clone();
+        let active = state.active.read().clone();
+        let (title, wt) = active
+            .as_ref()
+            .and_then(|id| convs.iter().find(|c| &c.id == id))
+            .map(|c| (c.title.clone(), None))
+            .unwrap_or_else(|| ("OxideMX".to_string(), None));
+
+        let mut thread = rect().direction(Direction::Vertical).spacing(14.0).width(Size::fill());
         for turn in &tx.turns {
             thread = thread.child(Bubble::new(turn.role.clone(), turn.text.clone()));
         }
@@ -29,10 +38,13 @@ impl Component for MainRegion {
             .content(Content::Flex)
             .width(Size::fill())
             .height(Size::fill())
+            .background(Theme::default().bg())
+            .child(ThreadHeader::new(title, "idle".into(), wt))
             .child(
                 rect()
                     .width(Size::fill())
                     .height(Size::flex(1.0))
+                    .padding(Gaps::new(16., 18., 16., 18.))
                     .child(ScrollView::new().child(thread)),
             )
             .child(

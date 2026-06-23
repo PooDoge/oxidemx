@@ -305,4 +305,46 @@ mod tests {
         runner.sync_and_update();
         runner.render_to_file("/tmp/oxide-shell-collapsed.png");
     }
+
+    // ── Snapshot: styled thread (P1) ──────────────────────────────────────
+
+    fn snapshot_thread_p1_app() -> Element {
+        let mock = Arc::new(MockTransport {
+            conversations: vec![conv("c1", "hi, what can you do?")],
+            history: vec![
+                Turn { role: "user".into(), text: "What can you do?".into(), ts: 0 },
+                Turn {
+                    role: "assistant".into(),
+                    text: "I am Oxide, your desktop assistant. I can run shell commands, \
+                           search the web, and launch flows."
+                        .into(),
+                    ts: 0,
+                },
+            ],
+            events: Mutex::new(Vec::new()),
+            ..MockTransport::new()
+        }) as Arc<dyn oxide_client::Transport>;
+        let state = AppState::new(mock);
+        let st = state.clone();
+        use_side_effect(move || {
+            st.open_conversation(ConversationId::from("c1"));
+        });
+        rect()
+            .width(Size::fill())
+            .height(Size::fill())
+            .child(MainRegion { state })
+            .into()
+    }
+
+    /// Renders the styled thread (ThreadHeader + bubbles + composer) to a PNG.
+    /// Run with: cargo test -p oxide-freya --bin oxide-freya snapshot_thread_p1 -- --ignored
+    #[test]
+    #[ignore = "snapshot: writes PNG to /tmp for visual review"]
+    fn snapshot_thread_p1() {
+        let (mut runner, _) =
+            TestingRunner::new(snapshot_thread_p1_app, (820., 900.).into(), |_| {}, 1.);
+        runner.poll_n(Duration::from_millis(5), 12);
+        runner.sync_and_update();
+        runner.render_to_file("/tmp/oxide-thread-p1.png");
+    }
 }
