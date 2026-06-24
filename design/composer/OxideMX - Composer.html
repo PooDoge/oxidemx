@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OxideMX · Composer — feature study</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --font:"Inter",system-ui,-apple-system,sans-serif;
+    --mono:"JetBrains Mono",ui-monospace,monospace;
+  }
+  *{ box-sizing:border-box; }
+  html,body{ margin:0; min-height:100%; }
+  body{
+    background:#070b11; color:#f0f4f8;
+    font-family:var(--font); -webkit-font-smoothing:antialiased;
+  }
+  #root{ min-height:100vh; }
+
+  /* contenteditable editor — line blocks + inline markdown */
+  .cm-editor .cline{ min-height:1.45em; }
+  .cm-editor .cline.md-h1{ font-size:1.5em; font-weight:700; line-height:1.3; }
+  .cm-editor .cline.md-h2{ font-size:1.28em; font-weight:700; line-height:1.3; }
+  .cm-editor .cline.md-h3{ font-size:1.12em; font-weight:600; line-height:1.3; }
+  .cm-editor strong{ font-weight:700; }
+  .cm-editor em{ font-style:italic; }
+  .cm-editor s{ opacity:0.7; }
+  .cm-editor code{
+    font-family:var(--mono); font-size:0.88em;
+    background:rgba(255,255,255,0.07); border:1px solid rgba(255,255,255,0.10);
+    border-radius:5px; padding:0.5px 5px;
+  }
+  .cm-editor .ghost{ opacity:0.36; user-select:none; pointer-events:none; }
+
+  @keyframes fx-menu-pop{
+    from{ opacity:0; transform:translateY(6px) scale(0.985); }
+    to{ opacity:1; transform:translateY(0) scale(1); }
+  }
+  @keyframes fx-pulse{ 0%{ box-shadow:0 0 0 0 var(--glow,rgba(0,212,255,0.4)); }
+    70%{ box-shadow:0 0 0 7px transparent; } 100%{ box-shadow:0 0 0 0 transparent; } }
+  @media (prefers-reduced-motion: reduce){ *{ animation:none !important; } }
+
+  .noscroll::-webkit-scrollbar{ width:0; height:0; display:none; }
+  .noscroll{ scrollbar-width:none; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<script type="text/babel" src="icons.jsx"></script>
+<script type="text/babel" src="tweaks-panel.jsx"></script>
+<script type="text/babel" src="freya-data.jsx"></script>
+<script type="text/babel" src="composer-feature.jsx"></script>
+</body>
+</html>
