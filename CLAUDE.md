@@ -69,3 +69,27 @@ has one; back it with a guard. (Full design: `docs/superpowers/specs/2026-06-20-
   git worktrees (the user edits the main checkout concurrently).
 - Keep slices focused + connector-agnostic in the core; only the connector layer is
   channel-specific.
+
+## Rule 4 — Serena (semantic code index) + worktrees
+
+Use the **Serena MCP** server for semantic code understanding (symbol overview, find-symbol,
+find-referencing-symbols) over grep/Read when you need structure, not bytes — both for our
+code and for the **Freya source** (`/run/media/system/fastdrive/repos/freya`, registered as the
+`freya` project) so we reuse Freya's built-ins instead of reinventing them.
+
+Serena's model + worktree rules (researched 2026-06-24):
+- **A Serena project == one absolute directory root.** Each git worktree is a *separate* project
+  with its own `.serena/` (project.yml + symbol cache + memories). Serena does **NOT** auto-discover
+  worktrees — register each ONCE via `activate_project <abs-worktree-path>` (it creates `.serena/`
+  and appends to `~/.serena/serena_config.yml`). A fresh worktree is invisible to Serena until activated.
+- **One active project at a time** (global). "Searching across worktrees/repos" is **switching** the
+  active project with `activate_project`, not a federated query. Switch to `freya` to look up Freya
+  APIs; switch back to the worktree (e.g. `oxidemx-2b`) for our code.
+- **Never run a background agent that switches Serena's active project** while you're using Serena —
+  the active project is shared process-global; concurrent switches corrupt each other's results.
+  Background helpers that must read another repo should use plain Read/Grep, not Serena.
+- `.serena/` is **gitignored** (per-worktree machine-local state; symbol cache rebuilds cheaply).
+- The LSP backend (rust-analyzer) indexes per-project; respect Rule 3's target-dir separation so
+  indexing doesn't trigger toolchain-mismatch recompiles.
+- Registered projects live in `~/.serena/serena_config.yml`; current set includes `oxidemx-2b` and
+  `freya`. When you spin up a NEW worktree to work in, `activate_project` it before relying on Serena.

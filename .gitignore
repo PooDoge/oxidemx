@@ -20,6 +20,7 @@ target/
 
 # Local agent/tooling state
 .superpowers/
+.serena/
 
 # Scratch scripts
 *.py
