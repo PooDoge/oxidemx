@@ -17,7 +17,7 @@ pub use avatar::Avatar;
 pub use bubble::Bubble;
 pub use chip::WorktreeChip;
 pub use collapsible_panel::CollapsiblePanel;
-pub use composer::ComposerConfig;
+pub use composer::{Composer, ComposerConfig};
 pub use list_item::ListItem;
 pub use prompt_input::PromptInput;
 pub use rail_button::RailButton;
