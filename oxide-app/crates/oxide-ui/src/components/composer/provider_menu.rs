@@ -5,10 +5,19 @@
 //!   nav row to settings.
 //! - settings: back row, Send-on-Enter switch, optimizer switch, footer note.
 //!
-//! Menu chrome: radius 16, `panel()` background, deep shadow (0 22 52).
+//! Refactored (Task 3) onto shared menu primitives:
+//! - `MenuSurface` replaces the bespoke shadow-wrapper + `Menu::new().theme(...)` + `width(280px)`.
+//!   Width now hugs content within `[min_w=260, max_w=320]` (bug #3 fixed).
+//! - `MenuSection` replaces `provider_header`. Dark hover comes from `menu_theme` (bug #1 fixed).
+//! - `MenuRow` replaces `model_row`, `optimizer_row`, settings rows' `MenuButton` + bespoke layout.
+//!
+//! SubMenu deliberately NOT used: `SubMenu` opens on pointer-enter (hover-triggered), which
+//! does not fit our click-driven models↔settings page swap. The internal `View` enum is
+//! the correct pattern here — both views render through the new primitives.
 use freya::prelude::*;
 
 use crate::tokens::Theme;
+use crate::components::menu::{MenuRow, MenuSection, MenuSurface};
 use super::config::{MODELS, ProviderId, Thinking};
 use super::icons::icon;
 
@@ -101,26 +110,15 @@ impl Component for ProviderMenu {
         let view = use_state(|| View::Models);
         let th = self.theme;
 
-        let container_theme = MenuContainerThemePartial::new()
-            .background(th.panel())
-            .border_fill(th.hairline())
-            .shadow(Color::TRANSPARENT)
-            .corner_radius(CornerRadius::new_all(16.));
-
         let body: Element = match *view.read() {
-            View::Models  => self.models_view(th, view).into_element(),
+            View::Models   => self.models_view(th, view).into_element(),
             View::Settings => self.settings_view(th, view).into_element(),
         };
 
-        rect()
-            .corner_radius(CornerRadius::new_all(16.))
-            .shadow((0.0_f32, 22.0_f32, 52.0_f32, 0.0_f32, th.shadow_deep()))
-            .content(Content::fit())
-            .child(
-                Menu::new()
-                    .theme(container_theme)
-                    .child(body),
-            )
+        MenuSurface::new(th)
+            .min_w(260.)
+            .max_w(320.)
+            .child(body)
     }
 }
 
@@ -131,7 +129,11 @@ impl ProviderMenu {
         let mut rows: Vec<Element> = Vec::new();
 
         for provider in [ProviderId::Gemini, ProviderId::Claude, ProviderId::Local] {
-            rows.push(self.provider_header(provider, th));
+            rows.push(
+                MenuSection::new(th, provider.label(), Some(provider.tone()))
+                    .icon(provider.icon())
+                    .into_element(),
+            );
             for model in MODELS.iter().filter(|m| m.provider == provider) {
                 rows.push(self.model_row(model, th));
             }
@@ -188,52 +190,19 @@ impl ProviderMenu {
         rows.push(self.optimizer_row(th));
 
         // ── Composer settings nav row ──────────────────────────────────────
-        let settings_row = MenuButton::new()
-            .on_press(move |_: Event<PressEventData>| {
+        let settings_row = MenuRow::new(th)
+            .icon(Some("gear"))
+            .title("Composer settings")
+            .trailing(Some(icon("chevronDown", 14., th.faint())))
+            .on_press(move |_| {
                 view.set(View::Settings);
             })
-            .child(
-                rect()
-                    .direction(Direction::Horizontal)
-                    .content(Content::Flex)
-                    .cross_align(Alignment::Center)
-                    .spacing(10.)
-                    .width(Size::fill())
-                    .child(icon("gear", 16., th.subtext_hi()))
-                    .child(
-                        label()
-                            .text("Composer settings")
-                            .font_size(13.)
-                            .color(th.text())
-                            .width(Size::flex(1.0))
-                    )
-                    .child(icon("chevronDown", 14., th.faint()))
-            )
             .into_element();
         rows.push(settings_row);
 
         rect()
             .direction(Direction::Vertical)
-            .width(Size::px(280.))
             .children(rows)
-    }
-
-    fn provider_header(&self, provider: ProviderId, th: Theme) -> Element {
-        let tone_color = th.tone(provider.tone());
-        rect()
-            .direction(Direction::Horizontal)
-            .cross_align(Alignment::Center)
-            .spacing(6.)
-            .padding(Gaps::new(10., 14., 4., 14.))
-            .child(icon(provider.icon(), 14., tone_color))
-            .child(
-                label()
-                    .text(provider.label())
-                    .font_size(11.)
-                    .font_weight(FontWeight::BOLD)
-                    .color(tone_color)
-            )
-            .into_element()
     }
 
     fn model_row(&self, model: &'static crate::components::composer::config::Model, th: Theme) -> Element {
@@ -241,7 +210,17 @@ impl ProviderMenu {
         let on_select = self.on_select_model.clone();
         let model_id  = model.id;
 
-        // Text column: name (bold) + sub (faint), takes all remaining width.
+        // Leading radio indicator + optional check trailing for active model.
+        let radio_el = RadioItem::new().selected(is_active).into_element();
+        let check_el = is_active.then(|| icon("check", 14., th.accent()));
+
+        // Use MenuRow for the outer shell; prepend the RadioItem via a custom inner layout.
+        // The MenuButton + Content::Flex layout is handled inside MenuRow, so we host
+        // the radio as the leading icon slot alternative: build the inner manually and
+        // wrap in a plain MenuRow that carries the press handler + themed hover.
+        // Since MenuRow.icon() expects an icon name (string), we can't pass a RadioItem
+        // through it; use a custom child by composing MenuRow with a bespoke inner rect.
+        // This is the faithful mapping: RadioItem + name + sub + optional check.
         let text_col = rect()
             .direction(Direction::Vertical)
             .width(Size::flex(1.0))
@@ -262,25 +241,34 @@ impl ProviderMenu {
             )
             .into_element();
 
-        // Row: RadioItem + text + optional check
-        let row_inner = rect()
+        let mut inner = rect()
             .direction(Direction::Horizontal)
             .content(Content::Flex)
             .cross_align(Alignment::Center)
             .spacing(8.)
             .width(Size::fill())
-            .child(RadioItem::new().selected(is_active))
-            .child(text_col)
-            .maybe_child(is_active.then(|| icon("check", 14., th.accent())))
-            .into_element();
+            .child(radio_el)
+            .child(text_col);
+
+        if let Some(check) = check_el {
+            inner = inner.child(check);
+        }
+
+        // Wrap in MenuRow without icon/title/sub — use a raw child override via
+        // MenuRow's underlying MenuButton for the press handler + hover theming.
+        // Since MenuRow.child() is not exposed, we replicate just the MenuButton
+        // layer here (identical to what MenuRow does internally).
+        use crate::components::menu::theme::menu_theme;
+        let (_, item_theme) = menu_theme(th);
 
         MenuButton::new()
+            .theme(item_theme)
             .on_press(move |_: Event<PressEventData>| {
                 if let Some(h) = &on_select {
                     h.call(model_id);
                 }
             })
-            .child(row_inner)
+            .child(inner)
             .into_element()
     }
 
@@ -288,32 +276,19 @@ impl ProviderMenu {
         let optimizer = self.optimizer;
         let on_toggle = self.on_toggle_optimizer.clone();
 
-        MenuButton::new()
-            .child(
-                rect()
-                    .direction(Direction::Horizontal)
-                    .content(Content::Flex)
-                    .cross_align(Alignment::Center)
-                    .spacing(10.)
-                    .width(Size::fill())
-                    .child(icon("sparkle", 16., th.subtext_hi()))
-                    .child(
-                        label()
-                            .text("Prompt optimizer")
-                            .font_size(13.)
-                            .color(th.text())
-                            .width(Size::flex(1.0))
-                    )
-                    .child(
-                        Switch::new()
-                            .toggled(optimizer)
-                            .on_toggle(move |_| {
-                                if let Some(h) = &on_toggle {
-                                    h.call(!optimizer);
-                                }
-                            })
-                    )
-            )
+        let switch_el = Switch::new()
+            .toggled(optimizer)
+            .on_toggle(move |_| {
+                if let Some(h) = &on_toggle {
+                    h.call(!optimizer);
+                }
+            })
+            .into_element();
+
+        MenuRow::new(th)
+            .icon(Some("sparkle"))
+            .title("Prompt optimizer")
+            .trailing(Some(switch_el))
             .into_element()
     }
 }
@@ -323,110 +298,48 @@ impl ProviderMenu {
 impl ProviderMenu {
     fn settings_view(&self, th: Theme, mut view: State<View>) -> impl IntoElement {
         // Back row
-        let back_row = MenuButton::new()
-            .on_press(move |_: Event<PressEventData>| {
+        let back_row = MenuRow::new(th)
+            .icon(Some("chevronDown"))
+            .title("Composer settings")
+            .on_press(move |_| {
                 view.set(View::Models);
             })
-            .child(
-                rect()
-                    .direction(Direction::Horizontal)
-                    .cross_align(Alignment::Center)
-                    .spacing(8.)
-                    .child(icon("chevronDown", 14., th.subtext_hi()))
-                    .child(
-                        label()
-                            .text("Composer settings")
-                            .font_size(13.)
-                            .font_weight(FontWeight::BOLD)
-                            .color(th.text())
-                    )
-            )
             .into_element();
 
         // Send on Enter
         let send_on_enter = self.send_on_enter;
         let on_toggle_soe = self.on_toggle_send_on_enter.clone();
-        let soe_row = MenuButton::new()
-            .child(
-                rect()
-                    .direction(Direction::Horizontal)
-                    .content(Content::Flex)
-                    .cross_align(Alignment::Center)
-                    .spacing(10.)
-                    .width(Size::fill())
-                    .child(icon("send", 16., th.subtext_hi()))
-                    .child(
-                        rect()
-                            .direction(Direction::Vertical)
-                            .width(Size::flex(1.0))
-                            .child(
-                                label()
-                                    .text("Send on Enter")
-                                    .font_size(13.)
-                                    .color(th.text())
-                                    .max_lines(1_usize)
-                            )
-                            .child(
-                                label()
-                                    .text("Shift+Enter = newline")
-                                    .font_size(11.)
-                                    .color(th.subtext())
-                                    .max_lines(1_usize)
-                            )
-                    )
-                    .child(
-                        Switch::new()
-                            .toggled(send_on_enter)
-                            .on_toggle(move |_| {
-                                if let Some(h) = &on_toggle_soe {
-                                    h.call(!send_on_enter);
-                                }
-                            })
-                    )
-            )
+        let soe_switch = Switch::new()
+            .toggled(send_on_enter)
+            .on_toggle(move |_| {
+                if let Some(h) = &on_toggle_soe {
+                    h.call(!send_on_enter);
+                }
+            })
+            .into_element();
+        let soe_row = MenuRow::new(th)
+            .icon(Some("send"))
+            .title("Send on Enter")
+            .subtitle(Some("Shift+Enter = newline".to_string()))
+            .trailing(Some(soe_switch))
             .into_element();
 
         // Prompt optimizer
         let optimizer = self.optimizer;
         let on_toggle_opt = self.on_toggle_optimizer.clone();
-        let opt_row = MenuButton::new()
-            .child(
-                rect()
-                    .direction(Direction::Horizontal)
-                    .content(Content::Flex)
-                    .cross_align(Alignment::Center)
-                    .spacing(10.)
-                    .width(Size::fill())
-                    .child(icon("sparkle", 16., th.subtext_hi()))
-                    .child(
-                        rect()
-                            .direction(Direction::Vertical)
-                            .width(Size::flex(1.0))
-                            .child(
-                                label()
-                                    .text("Prompt optimizer")
-                                    .font_size(13.)
-                                    .color(th.text())
-                                    .max_lines(1_usize)
-                            )
-                            .child(
-                                label()
-                                    .text("rewrite before send")
-                                    .font_size(11.)
-                                    .color(th.subtext())
-                                    .max_lines(1_usize)
-                            )
-                    )
-                    .child(
-                        Switch::new()
-                            .toggled(optimizer)
-                            .on_toggle(move |_| {
-                                if let Some(h) = &on_toggle_opt {
-                                    h.call(!optimizer);
-                                }
-                            })
-                    )
-            )
+        let opt_switch = Switch::new()
+            .toggled(optimizer)
+            .on_toggle(move |_| {
+                if let Some(h) = &on_toggle_opt {
+                    h.call(!optimizer);
+                }
+            })
+            .into_element();
+        let opt_row = MenuRow::new(th)
+            .icon(Some("sparkle"))
+            .title("Prompt optimizer")
+            .subtitle(Some("rewrite before send".to_string()))
+            .trailing(Some(opt_switch))
             .into_element();
 
         // Footer note
@@ -443,13 +356,11 @@ impl ProviderMenu {
 
         rect()
             .direction(Direction::Vertical)
-            .width(Size::px(280.))
             .child(back_row)
             .child(soe_row)
             .child(opt_row)
             .child(footer)
     }
-
 }
 
 // ── Tests ──────────────────────────────────────────────────────────────────────
