@@ -44,6 +44,9 @@ impl Accent {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Tone { Accent, Blue, Green, Peach, Teal, Mauve }
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Theme {
     accent: Accent,
@@ -86,9 +89,26 @@ impl Theme {
     pub fn mauve(&self) -> Color { Color::from_rgb(179, 136, 255) }
     pub fn peach(&self) -> Color { Color::from_rgb(255, 171, 64) }
     pub fn teal(&self) -> Color { Color::from_rgb(10, 189, 198) }
+    // backdrop (radial wash behind the thread)
+    pub fn bg0(&self) -> Color { Color::from_rgb(6, 10, 18) }   // #060a12
+    pub fn bg1(&self) -> Color { Color::from_rgb(10, 16, 24) }  // #0a1018
+    pub fn bg2(&self) -> Color { Color::from_rgb(7, 11, 17) }   // #070b11
+    pub fn shadow_deep(&self) -> Color { Color::from_argb(158, 0, 0, 0) } // rgba(0,0,0,0.62)
     // hairlines (tinted white)
     pub fn hairline(&self) -> Color { Color::from_argb(15, 255, 255, 255) }        // ~.06
     pub fn hairline_strong(&self) -> Color { Color::from_argb(26, 255, 255, 255) } // ~.10
+
+    /// Resolve a per-attachment / per-model tone to its base color.
+    pub fn tone(&self, t: Tone) -> Color {
+        match t {
+            Tone::Accent => self.accent(),
+            Tone::Blue   => self.blue(),
+            Tone::Green  => self.green(),
+            Tone::Peach  => self.peach(),
+            Tone::Teal   => self.teal(),
+            Tone::Mauve  => self.mauve(),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -122,5 +142,23 @@ mod tests {
     fn with_alpha_sets_argb() {
         let c = Theme::with_alpha(Color::from_rgb(0, 212, 255), 0x1a);
         assert_eq!(c, Color::from_argb(0x1a, 0, 212, 255));
+    }
+
+    #[test]
+    fn backdrop_trio_and_shadow() {
+        let t = Theme::default();
+        assert_eq!(t.bg0(), Color::from_rgb(6, 10, 18));    // #060a12
+        assert_eq!(t.bg1(), Color::from_rgb(10, 16, 24));   // #0a1018
+        assert_eq!(t.bg2(), Color::from_rgb(7, 11, 17));    // #070b11
+        assert_eq!(t.shadow_deep(), Color::from_argb(158, 0, 0, 0)); // rgba(0,0,0,0.62)
+    }
+
+    #[test]
+    fn tone_resolves_and_tracks_accent() {
+        let t = Theme::default();
+        assert_eq!(t.tone(Tone::Blue), t.blue());
+        assert_eq!(t.tone(Tone::Accent), t.accent());
+        let v = Theme::with_accent(Accent::Violet);
+        assert_eq!(v.tone(Tone::Accent), v.accent()); // accent tone follows the accent
     }
 }
