@@ -41,6 +41,10 @@ memories `project_ai_chat_rewrite`, `reference_design_system`, `reference_freya_
   Run e.g. `LIBRARY_PATH=/tmp/oxidemx-lib-links cargo test -p oxide-freya --bin oxide-freya snapshot_shell -- --ignored`,
   then Read the PNG. **Use this to self-verify EVERY UI change before asking Jim.**
 - **Live app:** `cd oxidemx-2b/oxide-app && ./target/debug/oxide-freya` (connects to live agentd over the UDS).
+  **ALWAYS rebuild the binary first: `LIBRARY_PATH=/tmp/oxidemx-lib-links cargo build -p oxide-freya --bin
+  oxide-freya`.** `cargo test --bin oxide-freya` builds a SEPARATE test executable (`target/debug/deps/…`) and
+  does NOT update `target/debug/oxide-freya` — relaunching without `cargo build` runs a STALE binary (this bit
+  us: the composer fix worked in the snapshot but the live app showed the old bug until rebuilt).
 - SDD process: superpowers brainstorm→spec→plan→subagent-driven (fresh implementer per task; per-task or
   batched review; commit often). Ledger `.superpowers/sdd/progress.md`. Each phase = a plan; build via
   subagent-driven-development in this worktree.
