@@ -3,7 +3,8 @@
 //! assistant bubble; never fabricated text.
 use freya::prelude::*;
 use oxide_ui::Theme;
-use oxide_ui::components::{Bubble, PromptInput, ThreadHeader};
+use oxide_ui::components::{Bubble, Composer, ThreadHeader};
+use oxide_ui::components::composer::ComposerConfig;
 
 use crate::state::AppState;
 
@@ -48,7 +49,7 @@ impl Component for MainRegion {
                     .child(ScrollView::new().child(thread)),
             )
             .child(
-                PromptInput::new(input.into_writable())
+                Composer::new(input.into_writable(), ComposerConfig::default())
                     .on_submit(move |text| send_state.send(text)),
             )
     }
