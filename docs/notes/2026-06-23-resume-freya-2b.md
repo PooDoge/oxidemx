@@ -15,6 +15,26 @@ memories `project_ai_chat_rewrite`, `reference_design_system`, `reference_freya_
   Collapsible Panels.freya.json`** (92 components, validator-clean). Spec:
   `docs/superpowers/specs/2026-06-22-freya-app-2b-collapsible-panels-design.md`.
 
+## Composer slice (NEW — landed 2026-06-23, after P1/P2, before P3)
+- **Composer Slice 1 COMPLETE** on branch `2b-collapsible-panels` (16 commits `e6f598c..81227cd`,
+  final opus whole-slice review = **READY/CERTIFIED**). Replaced the single-line `PromptInput` with the
+  full **Composer** chassis from `design/composer/OxideMX - Composer.freya.json` (artifacts copied local in
+  `design/composer/`). New `oxide-ui/src/components/composer/` module: config (9-model registry) · icons (17
+  SVG) · predictor · PredictionStrip · attachment chips (6 sources) · ResizeGrip · **multiline ComposerEditor
+  on freya-edit `use_editable`** · AttachMenu · ProviderMenu (2 views) · Toolbar+send-state · ActivityLine ·
+  Composer orchestrator; mounted in `main_region.rs` footer. Spec
+  `docs/superpowers/specs/...composer prompt (CLAUDE_CODE_PROMPT_COMPOSER)`; arch plan `docs/plans/composer.md`;
+  task plan `docs/superpowers/plans/2026-06-23-composer-slice1.md`; ledger `.superpowers/sdd/progress.md`.
+  45 oxide-ui + 9 oxide-freya tests green; snapshots `/tmp/oxide-composer-{collapsed,full}.png` +
+  `/tmp/oxide-shell-expanded.png` (excellent design match; send button fully inside).
+- **Composer Slice 2 = NEXT (deferred):** editor rich-text — live markdown-on-space (consume `*x*`/`` `x` ``/`#`)
+  + ghost inline completion + Tab-accept. Seams already in `editor.rs` (SEAM comment) + PredictionStrip
+  `on_accept`. Also carry-forwards: menu slide-in 140ms animation; editor IME + scrolled-caret offset.
+- **THE Composer→Freya pipeline is proven end-to-end** (Claude Design `.freya.json` → skill → Rust). Reusable
+  Freya API facts captured in the ledger: `svg(bytes: impl Into<SvgBytes>)`; rect `.on_press` not on_click;
+  typed builder can't loop `.child()` (use `.maybe_child`/reassign-loop); MenuContainer themes shadow COLOR only
+  (deep shadow via rect wrapper); `use_editable` multiline = omit `max_lines(1)`, caret via `cursor_color`.
+
 ## Phasing + status
 - **P1 — theme + thread: DONE** (final review READY-TO-MERGE). Full-palette flat-named `Theme` +
   `Theme::with_alpha(base,u8)`; `Accent{Cyan,Violet,Amber,Lime}`; `StatusPuck`/`Avatar`(gradient)/`WorktreeChip`;
