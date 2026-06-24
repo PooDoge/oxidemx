@@ -1,4 +1,6 @@
-//! Canned gboard-style predictor, ported from composer-feature.jsx.
+//! Canned gboard-style predictor + PredictionStrip UI, ported from composer-feature.jsx.
+use freya::prelude::*;
+use crate::tokens::Theme;
 
 const COMPLETIONS: &[&str] = &[
     "refactor","function","component","implement","optimize","explain","generate","summarize",
@@ -66,6 +68,138 @@ pub fn predict(line_before_caret: &str) -> Suggestions {
     let prev = prev.split_whitespace().last().unwrap_or("");
     let items = next_for(prev).to_vec();
     Suggestions { mode: PredictMode::Next, partial: String::new(), items }
+}
+
+// ── PredictionStrip ──────────────────────────────────────────────────────────
+
+/// A horizontal strip of up to 3 prediction chips with a trailing tab hint.
+///
+/// Builder usage:
+/// ```ignore
+/// fn app() -> impl IntoElement {
+///     PredictionStrip::new(predict(""), Theme::default())
+///         .on_accept(|word: String| println!("accepted: {word}"))
+/// }
+/// ```
+#[derive(PartialEq, Clone)]
+pub struct PredictionStrip {
+    suggestions: Suggestions,
+    theme: Theme,
+    on_accept: Option<EventHandler<String>>,
+}
+
+impl PredictionStrip {
+    pub fn new(suggestions: Suggestions, theme: Theme) -> Self {
+        Self { suggestions, theme, on_accept: None }
+    }
+
+    pub fn on_accept(mut self, handler: impl Into<EventHandler<String>>) -> Self {
+        self.on_accept = Some(handler.into());
+        self
+    }
+}
+
+impl Component for PredictionStrip {
+    fn render(&self) -> impl IntoElement {
+        let th = self.theme;
+        let accent = th.accent();
+        // Cap at 3 items; pad to length 3 with None.
+        let items: Vec<Option<&'static str>> = {
+            let mut v: Vec<Option<&'static str>> =
+                self.suggestions.items.iter().copied().take(3).map(Some).collect();
+            while v.len() < 3 { v.push(None); }
+            v
+        };
+
+        // Build each chip as an Option<Element> so we can pass to maybe_child.
+        let make_chip = |item: &'static str, is_first: bool,
+                         handler: Option<EventHandler<String>>| -> Element {
+            let (bg, border_color, text_color) = if is_first {
+                (
+                    Theme::with_alpha(accent, 0x14),
+                    Theme::with_alpha(accent, 0x33),
+                    accent,
+                )
+            } else {
+                (th.surface(), th.hairline(), th.subtext_hi())
+            };
+            let item_owned = item.to_string();
+            let chip = rect()
+                .direction(Direction::Horizontal)
+                .cross_align(Alignment::Center)
+                .padding(Gaps::new(3., 10., 3., 10.))
+                .corner_radius(CornerRadius::new_all(999.))
+                .background(bg)
+                .border(Border::new().fill(border_color).width(1.))
+                .child(label().text(item).font_size(11.5).color(text_color));
+            if let Some(h) = handler {
+                chip.on_press(move |_: Event<PressEventData>| h.call(item_owned.clone()))
+                    .into_element()
+            } else {
+                chip.into_element()
+            }
+        };
+
+        let chip0: Option<Element> = items[0].map(|item| {
+            make_chip(item, true, self.on_accept.clone())
+        });
+        let chip1: Option<Element> = items[1].map(|item| {
+            make_chip(item, false, self.on_accept.clone())
+        });
+        let chip2: Option<Element> = items[2].map(|item| {
+            make_chip(item, false, self.on_accept.clone())
+        });
+
+        // Trailing hint fires on_accept with the first item.
+        let hint_handler = self.on_accept.clone();
+        let first_item: Option<String> = items[0].map(|s| s.to_string());
+        let hint = rect()
+            .direction(Direction::Horizontal)
+            .cross_align(Alignment::Center)
+            .on_press(move |_: Event<PressEventData>| {
+                if let (Some(h), Some(w)) = (&hint_handler, &first_item) {
+                    h.call(w.clone());
+                }
+            })
+            .child(label().text("⇥ tab").font_size(10.5).color(th.faint()));
+
+        // The spacer uses Size::flex(1.0), so the row MUST have Content::Flex.
+        rect()
+            .direction(Direction::Horizontal)
+            .content(Content::Flex)
+            .cross_align(Alignment::Center)
+            .spacing(6.)
+            .width(Size::fill())
+            .padding(Gaps::new(4., 8., 4., 8.))
+            .maybe_child(chip0)
+            .maybe_child(chip1)
+            .maybe_child(chip2)
+            .child(rect().width(Size::flex(1.0)).height(Size::px(1.)))
+            .child(hint)
+    }
+}
+
+// ── tests ─────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod ui_tests {
+    use super::*;
+    use freya_testing::prelude::*;
+    use crate::tokens::Theme;
+
+    #[test]
+    fn strip_shows_at_most_three_chips_and_hint() {
+        fn app() -> impl IntoElement {
+            PredictionStrip::new(predict(""), Theme::default())
+        }
+        let mut t = launch_test(app);
+        t.sync_and_update();
+        // The first starter label "Refactor" must be present.
+        let found = t.find(|_, el| {
+            Label::try_downcast(el).filter(|l| l.text.as_ref() == "Refactor")
+        });
+        assert!(found.is_some(), "first prediction chip renders");
+    }
 }
 
 #[cfg(test)]
