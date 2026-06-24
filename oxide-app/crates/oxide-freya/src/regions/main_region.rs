@@ -283,4 +283,58 @@ mod menu_snapshot_tests {
         runner.sync_and_update();
         runner.render_to_file("/tmp/oxide-menu-primitives.png");
     }
+
+    /// Renders a small trigger rect mid-canvas with an OPEN `Popover` placed
+    /// `Above` it, whose content is a `MenuSurface`. Confirms the popover renders
+    /// without panic and the menu sits ADJACENT to (directly above) the trigger.
+    ///
+    /// Run with:
+    ///   LIBRARY_PATH=/tmp/oxidemx-lib-links cargo test -p oxide-freya --bin oxide-freya snapshot_popover_anchored -- --ignored
+    #[test]
+    #[ignore = "snapshot: writes PNG to /tmp for visual review"]
+    fn snapshot_popover_anchored() {
+        use oxide_ui::components::{Placement, Popover};
+
+        fn app() -> Element {
+            let th = Theme::default();
+
+            let menu_body = rect()
+                .direction(Direction::Vertical)
+                .child(MenuSection::new(th, "Quick", Some(Tone::Accent)).icon("sparkle"))
+                .child(MenuRow::new(th).icon(Some("gear")).title("Settings"))
+                .child(MenuRow::new(th).icon(Some("folder")).title("Open folder"))
+                .into_element();
+
+            let trigger = rect()
+                .width(Size::px(120.))
+                .height(Size::px(36.))
+                .corner_radius(8.)
+                .background(th.tone(Tone::Accent))
+                .main_align(Alignment::Center)
+                .cross_align(Alignment::Center)
+                .child(label().text("Trigger").color(th.text()).font_size(13.))
+                .into_element();
+
+            rect()
+                .expanded()
+                .background(th.bg_deep())
+                .main_align(Alignment::Center)
+                .cross_align(Alignment::Center)
+                .child(
+                    Popover::new(trigger)
+                        .open(true)
+                        .placement(Placement::Above)
+                        .content(MenuSurface::new(th).child(menu_body)),
+                )
+                .into()
+        }
+
+        let (mut runner, _) =
+            TestingRunner::new(app, (480., 420.).into(), |_| {}, 1.);
+        // Poll past the ~125ms entrance animation so the content is fully
+        // measured + opaque before we render.
+        runner.poll_n(Duration::from_millis(10), 20);
+        runner.sync_and_update();
+        runner.render_to_file("/tmp/oxide-popover.png");
+    }
 }
