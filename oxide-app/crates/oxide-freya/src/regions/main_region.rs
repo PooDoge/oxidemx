@@ -222,3 +222,65 @@ mod composer_snapshot_tests {
         runner.render_to_file("/tmp/oxide-composer-full.png");
     }
 }
+
+#[cfg(test)]
+mod menu_snapshot_tests {
+    use std::time::Duration;
+
+    use freya::prelude::*;
+    use freya_testing::TestingRunner;
+    use oxide_ui::Theme;
+    use oxide_ui::components::{MenuRow, MenuSection, MenuSurface};
+    use oxide_ui::tokens::Tone;
+
+    /// Renders a `MenuSurface` with three `MenuRow`s (one selected) on a dark
+    /// background to `/tmp/oxide-menu-primitives.png` for visual inspection of
+    /// the dark hover/select tints.
+    ///
+    /// Run with:
+    ///   LIBRARY_PATH=/tmp/oxidemx-lib-links cargo test -p oxide-freya --bin oxide-freya snapshot_menu_hover -- --ignored
+    #[test]
+    #[ignore = "snapshot: writes PNG to /tmp for visual review"]
+    fn snapshot_menu_hover() {
+        fn app() -> Element {
+            let th = Theme::default();
+            let body = rect()
+                .direction(Direction::Vertical)
+                .child(MenuSection::new(th, "Actions", Some(Tone::Accent)).icon("sparkle"))
+                .child(
+                    MenuRow::new(th)
+                        .icon(Some("gear"))
+                        .title("Settings")
+                        .subtitle(Some("App preferences".to_string()))
+                        .selected(false),
+                )
+                .child(
+                    MenuRow::new(th)
+                        .icon(Some("check"))
+                        .title("Active item")
+                        .subtitle(Some("Currently selected".to_string()))
+                        .selected(true),
+                )
+                .child(
+                    MenuRow::new(th)
+                        .icon(Some("folder"))
+                        .title("Open folder")
+                        .selected(false),
+                )
+                .into_element();
+
+            rect()
+                .background(th.bg_deep())
+                .padding(Gaps::new_all(24.))
+                .content(Content::fit())
+                .child(MenuSurface::new(th).child(body))
+                .into()
+        }
+
+        let (mut runner, _) =
+            TestingRunner::new(app, (400., 320.).into(), |_| {}, 1.);
+        runner.poll_n(Duration::from_millis(5), 8);
+        runner.sync_and_update();
+        runner.render_to_file("/tmp/oxide-menu-primitives.png");
+    }
+}

@@ -1,0 +1,24 @@
+//! Reusable menu primitives for OxideMX floating menus.
+//!
+//! Fixes:
+//! - Light-on-light hover: `menu_theme()` sets `hover_background = surface_hi()`
+//!   (a dark mid-tone) so near-white text stays readable.
+//! - Full-width attach menu: `MenuSurface` wraps the `Menu` in a `Content::fit()`
+//!   rect that constrains width to `[min_w, max_w]`.
+//!
+//! Usage:
+//! ```ignore
+//! MenuSurface::new(theme)
+//!     .child(
+//!         rect().direction(Direction::Vertical)
+//!             .child(MenuSection::new(theme, "Files", Some(Tone::Blue)).icon("folder"))
+//!             .child(MenuRow::new(theme).icon(Some("folder")).title("Open…").on_press(…))
+//!     )
+//! ```
+pub mod row;
+pub mod surface;
+pub mod theme;
+
+pub use row::{MenuRow, MenuSection};
+pub use surface::MenuSurface;
+pub use theme::menu_theme;
