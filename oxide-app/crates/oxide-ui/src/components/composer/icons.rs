@@ -30,10 +30,12 @@ fn hex(c: Color) -> String { format!("#{:02x}{:02x}{:02x}", c.r(), c.g(), c.b())
 /// Full standalone SVG string with the stroke color injected.
 pub fn svg_string(name: &str, color: Color) -> String {
     let paths = svg_for(name).unwrap_or("");
-    format!(
+    let color_hex = hex(color);
+    let svg = format!(
         r#"<svg viewBox="0 0 24 24" fill="none" stroke="{}" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">{}</svg>"#,
-        hex(color), paths
-    )
+        &color_hex, paths
+    );
+    svg.replace("fill=\"currentColor\"", &format!("fill=\"{}\"", color_hex))
 }
 
 /// Render an icon as a Freya element at `size` px with the given stroke `color`.
@@ -61,5 +63,20 @@ mod tests {
         let s = svg_string("send", Color::from_rgb(0, 212, 255));
         assert!(s.contains("stroke=\"#00d4ff\"") || s.contains("rgb(0, 212, 255)"));
         assert!(!s.contains("currentColor"));
+    }
+
+    #[test]
+    fn fill_color_injected_for_fill_icons() {
+        let s = svg_string("stop", Color::from_rgb(0, 212, 255));
+        assert!(s.contains("fill=\"#00d4ff\""));
+        assert!(!s.contains("currentColor"));
+
+        let s2 = svg_string("sparkle", Color::from_rgb(100, 150, 200));
+        assert!(s2.contains("fill=\"#6496c8\""));
+        assert!(!s2.contains("currentColor"));
+
+        let s3 = svg_string("disk", Color::from_rgb(255, 100, 50));
+        assert!(s3.contains("fill=\"#ff6432\""));
+        assert!(!s3.contains("currentColor"));
     }
 }
