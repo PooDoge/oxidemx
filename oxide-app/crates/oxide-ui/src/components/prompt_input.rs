@@ -64,6 +64,10 @@ impl Component for PromptInput {
 
         rect()
             .direction(Direction::Horizontal)
+            // Content::Flex is REQUIRED for the input box's Size::flex(1.0) to be
+            // honored — without it the box takes the full row width and the fixed
+            // 42px send button overflows off the right edge. (FREYA-PATTERNS.md)
+            .content(Content::Flex)
             .cross_align(Alignment::Center)
             .spacing(9.)
             .width(Size::fill())
