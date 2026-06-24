@@ -53,3 +53,51 @@ impl Component for MainRegion {
             )
     }
 }
+
+#[cfg(test)]
+mod editor_snapshot_tests {
+    use std::time::Duration;
+
+    use freya::prelude::*;
+    use freya_testing::TestingRunner;
+    use oxide_ui::Theme;
+    use oxide_ui::components::composer::{ComposerConfig, ComposerEditor};
+
+    fn snapshot_editor_app() -> Element {
+        // Seed multi-line content so the snapshot exercises real newlines, the
+        // accent caret, and the auto-grown body.
+        let value = use_state(|| {
+            "Summarize the changes in this branch,\n\
+             then open a PR against main.\n\
+             Use the conventional-commit style."
+                .to_string()
+        });
+        rect()
+            .width(Size::fill())
+            .height(Size::fill())
+            .background(Theme::default().bg_deep())
+            .padding(Gaps::new_all(12.))
+            .child(
+                ComposerEditor::new(
+                    value.into_writable(),
+                    ComposerConfig::default(),
+                    Theme::default(),
+                )
+                .send_on_enter(true),
+            )
+            .into()
+    }
+
+    /// Renders the multiline `ComposerEditor` with seeded text to a PNG.
+    /// Run with:
+    ///   cargo test -p oxide-freya --bin oxide-freya snapshot_editor_multiline -- --ignored
+    #[test]
+    #[ignore = "snapshot: writes PNG to /tmp for visual review"]
+    fn snapshot_editor_multiline() {
+        let (mut runner, _) =
+            TestingRunner::new(snapshot_editor_app, (760., 240.).into(), |_| {}, 1.);
+        runner.poll_n(Duration::from_millis(5), 12);
+        runner.sync_and_update();
+        runner.render_to_file("/tmp/oxide-composer-editor.png");
+    }
+}
