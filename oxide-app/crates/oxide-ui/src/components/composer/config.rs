@@ -9,6 +9,8 @@ pub enum Thinking { Low, #[default] Medium, High }
 
 impl Thinking {
     pub fn badge(self) -> &'static str { match self { Thinking::Low => "L", Thinking::Medium => "M", Thinking::High => "H" } }
+    /// Lowercase word for the thinking level (used in the ActivityLine status text).
+    pub fn word(self) -> &'static str { match self { Thinking::Low => "low", Thinking::Medium => "medium", Thinking::High => "high" } }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -74,6 +76,13 @@ mod tests {
         assert!(c.markdown);
         assert!(c.activity);
         assert_eq!(c.cap_px(), 5.0 * 23.0 + 6.0); // 121.0
+    }
+
+    #[test]
+    fn thinking_word_is_lowercase() {
+        assert_eq!(Thinking::Low.word(), "low");
+        assert_eq!(Thinking::Medium.word(), "medium");
+        assert_eq!(Thinking::High.word(), "high");
     }
 
     #[test]
