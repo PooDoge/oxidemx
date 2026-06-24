@@ -29,13 +29,14 @@ pub struct AttachSource {
 }
 
 /// The six attachment sources surfaced in the attach menu.
+/// Labels and hints are verbatim from `design/composer/composer-feature.jsx` ATTACH_SOURCES.
 pub const ATTACH_SOURCES: [AttachSource; 6] = [
-    AttachSource { id: "upload", icon: "disk",      label: "Upload file",         hint: "PDF, image, CSV …"      },
-    AttachSource { id: "repo",   icon: "folder",    label: "Reference repo file", hint: "From the current worktree" },
-    AttachSource { id: "image",  icon: "camera",    label: "Attach image",        hint: "Screenshot or photo"    },
-    AttachSource { id: "paste",  icon: "clipboard", label: "Paste clipboard",     hint: "Text or image"          },
-    AttachSource { id: "code",   icon: "terminal",  label: "Attach code snippet", hint: "From editor selection"  },
-    AttachSource { id: "camera", icon: "camera",    label: "Capture screen",      hint: "Live screenshot"        },
+    AttachSource { id: "upload", icon: "disk",      label: "Upload file",         hint: "from disk"         },
+    AttachSource { id: "repo",   icon: "folder",    label: "Reference repo file", hint: "@ file in project" },
+    AttachSource { id: "image",  icon: "camera",    label: "Image / screenshot",  hint: "png · jpg"         },
+    AttachSource { id: "paste",  icon: "clipboard", label: "Paste from clipboard",hint: "current contents"  },
+    AttachSource { id: "code",   icon: "terminal",  label: "Code snippet",        hint: "fenced block"      },
+    AttachSource { id: "camera", icon: "camera",    label: "Camera",              hint: "capture now"       },
 ];
 
 /// Return a sample `Attachment` for the given `source_id`, or `None` if unknown.
@@ -208,21 +209,6 @@ impl Component for AttachmentRow {
     fn render(&self) -> impl IntoElement {
         let th = self.theme;
 
-        // Build each chip as an Option<Element> via into_element() + maybe_child.
-        // We pre-build up to 8 slots; for dynamic lists the brief allows
-        // Vec<Element> via children(vec) if the container supports it. We cap at
-        // 8 items which is plenty for practical composer use.
-        let chips: Vec<Element> = self.items.iter().enumerate().map(|(idx, att)| {
-            let handler = self.on_remove.clone();
-            let chip = AttachmentChip::new(att.clone(), th);
-            let chip = if let Some(h) = handler {
-                chip.on_remove(move |_: ()| h.call(idx))
-            } else {
-                chip
-            };
-            chip.render().into_element()
-        }).collect();
-
         let mut row = rect()
             .direction(Direction::Horizontal)
             .cross_align(Alignment::Center)
@@ -230,8 +216,15 @@ impl Component for AttachmentRow {
             .width(Size::fill())
             .padding(Gaps::new(6., 12., 6., 12.));
 
-        for el in chips {
-            row = row.child(el);
+        for (idx, att) in self.items.iter().enumerate() {
+            let handler = self.on_remove.clone();
+            let chip = AttachmentChip::new(att.clone(), th);
+            let chip = if let Some(h) = handler {
+                chip.on_remove(move |_: ()| h.call(idx))
+            } else {
+                chip
+            };
+            row = row.child(chip);
         }
 
         row
@@ -249,6 +242,29 @@ mod tests {
         assert_eq!(ATTACH_SOURCES.len(), 6);
         assert_eq!(ATTACH_SOURCES[0].label, "Upload file");
         assert_eq!(ATTACH_SOURCES[1].label, "Reference repo file");
+    }
+
+    /// Guard against copy drift vs. `design/composer/composer-feature.jsx` ATTACH_SOURCES.
+    #[test]
+    fn attach_source_verbatim_copy() {
+        // upload
+        assert_eq!(ATTACH_SOURCES[0].label, "Upload file");
+        assert_eq!(ATTACH_SOURCES[0].hint,  "from disk");
+        // repo
+        assert_eq!(ATTACH_SOURCES[1].label, "Reference repo file");
+        assert_eq!(ATTACH_SOURCES[1].hint,  "@ file in project");
+        // image
+        assert_eq!(ATTACH_SOURCES[2].label, "Image / screenshot");
+        assert_eq!(ATTACH_SOURCES[2].hint,  "png · jpg");
+        // paste
+        assert_eq!(ATTACH_SOURCES[3].label, "Paste from clipboard");
+        assert_eq!(ATTACH_SOURCES[3].hint,  "current contents");
+        // code
+        assert_eq!(ATTACH_SOURCES[4].label, "Code snippet");
+        assert_eq!(ATTACH_SOURCES[4].hint,  "fenced block");
+        // camera
+        assert_eq!(ATTACH_SOURCES[5].label, "Camera");
+        assert_eq!(ATTACH_SOURCES[5].hint,  "capture now");
     }
 
     #[test]
