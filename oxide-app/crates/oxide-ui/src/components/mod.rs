@@ -19,7 +19,7 @@ pub use avatar::Avatar;
 pub use bubble::Bubble;
 pub use chip::WorktreeChip;
 pub use collapsible_panel::CollapsiblePanel;
-pub use composer::{Composer, ComposerConfig};
+pub use composer::{Composer, ComposerConfig, SubmitPayload};
 pub use list_item::ListItem;
 pub use menu::{
     copy_only_menu, copy_selection, cut_selection, editor_clipboard_menu, menu_theme, paste_text,
