@@ -81,6 +81,19 @@ impl AgentEvent {
     }
 }
 
+/// An attachment passed alongside a user message.
+/// `kind` is one of `"image"`, `"text"`, `"file"`.
+/// `data_b64` carries the base64-encoded content when inline delivery is used;
+/// it is `None` when the agentd side resolves the content by other means.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct AttachmentPayload {
+    pub name:     String,
+    pub mime:     String,
+    /// `"image"` | `"text"` | `"file"`
+    pub kind:     String,
+    pub data_b64: Option<String>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -109,5 +122,31 @@ mod tests {
         let t: Turn = serde_json::from_str(j).unwrap();
         assert_eq!(t.role, "assistant");
         assert_eq!(t.text, "hello");
+    }
+
+    #[test]
+    fn attachment_payload_serde_round_trip() {
+        let orig = AttachmentPayload {
+            name:     "a.png".into(),
+            mime:     "image/png".into(),
+            kind:     "image".into(),
+            data_b64: Some("AAAA".into()),
+        };
+        let json = serde_json::to_string(&orig).unwrap();
+        let decoded: AttachmentPayload = serde_json::from_str(&json).unwrap();
+        assert_eq!(orig, decoded);
+    }
+
+    #[test]
+    fn attachment_payload_none_data_b64_round_trip() {
+        let orig = AttachmentPayload {
+            name:     "doc.txt".into(),
+            mime:     "text/plain".into(),
+            kind:     "text".into(),
+            data_b64: None,
+        };
+        let json = serde_json::to_string(&orig).unwrap();
+        let decoded: AttachmentPayload = serde_json::from_str(&json).unwrap();
+        assert_eq!(orig, decoded);
     }
 }

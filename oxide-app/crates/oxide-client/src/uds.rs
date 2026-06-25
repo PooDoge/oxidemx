@@ -11,7 +11,7 @@ use hyper::{Method, Request};
 use hyper_util::rt::TokioIo;
 use tokio::net::UnixStream;
 
-use crate::dto::{AgentEvent, Conversation, MessageId, Project, Turn};
+use crate::dto::{AgentEvent, AttachmentPayload, Conversation, MessageId, Project, Turn};
 use crate::error::TransportError;
 use crate::sse::SseParser;
 use crate::transport::Transport;
@@ -95,8 +95,8 @@ impl Transport for UdsTransport {
         self.get_json(&format!("/v1/conversations/{conversation_id}/messages")).await
     }
 
-    async fn send_message(&self, conversation_id: &str, text: &str) -> Result<MessageId, TransportError> {
-        let body = serde_json::json!({ "text": text });
+    async fn send_message(&self, conversation_id: &str, text: &str, attachments: &[AttachmentPayload]) -> Result<MessageId, TransportError> {
+        let body = serde_json::json!({ "text": text, "attachments": attachments });
         let (status, bytes) = self.send(Method::POST,
             &format!("/v1/conversations/{conversation_id}/messages"), Some(body)).await?;
         if !(200..300).contains(&status) { return Err(TransportError::Http(status)); }

@@ -1,6 +1,6 @@
 //! In-memory `Transport` for UI tests. Scripted projects/conversations/history
 //! and a scripted event stream per conversation.
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use futures_util::stream::{self, BoxStream, StreamExt};
@@ -16,6 +16,8 @@ pub struct MockTransport {
     /// Events the next `subscribe` will yield, in order.
     pub events: Mutex<Vec<AgentEvent>>,
     pub healthy: bool,
+    /// All attachments from every `send_message` call, in order of arrival.
+    recorded: Arc<Mutex<Vec<AttachmentPayload>>>,
 }
 
 impl MockTransport {
@@ -26,7 +28,13 @@ impl MockTransport {
             history: Vec::new(),
             events: Mutex::new(Vec::new()),
             healthy: true,
+            recorded: Arc::new(Mutex::new(Vec::new())),
         }
+    }
+
+    /// Returns a clone of all attachments received across every `send_message` call.
+    pub fn recorded_attachments(&self) -> Vec<AttachmentPayload> {
+        self.recorded.lock().unwrap().clone()
     }
 }
 
@@ -47,7 +55,10 @@ impl Transport for MockTransport {
             worktree: None })
     }
     async fn get_history(&self, _c: &str) -> Result<Vec<Turn>, TransportError> { Ok(self.history.clone()) }
-    async fn send_message(&self, _c: &str, _t: &str) -> Result<MessageId, TransportError> { Ok(MessageId::from("mock-msg")) }
+    async fn send_message(&self, _c: &str, _t: &str, attachments: &[AttachmentPayload]) -> Result<MessageId, TransportError> {
+        self.recorded.lock().unwrap().extend_from_slice(attachments);
+        Ok(MessageId::from("mock-msg"))
+    }
     fn subscribe(&self, _c: &str) -> BoxStream<'static, Result<AgentEvent, TransportError>> {
         let evs = self.events.lock().unwrap().clone();
         stream::iter(evs.into_iter().map(Ok)).boxed()
@@ -74,5 +85,41 @@ mod tests {
         let got: Vec<_> = m.subscribe("c").collect().await;
         assert_eq!(got.len(), 1);
         assert_eq!(got[0].as_ref().unwrap().text(), Some("hi"));
+    }
+
+    #[tokio::test]
+    async fn send_message_records_attachments() {
+        let m = MockTransport::new();
+        let att = AttachmentPayload {
+            name:     "a.png".into(),
+            mime:     "image/png".into(),
+            kind:     "image".into(),
+            data_b64: Some("AAAA".into()),
+        };
+        let result = m.send_message("c1", "hi", &[att.clone()]).await;
+        assert!(result.is_ok());
+        let recorded = m.recorded_attachments();
+        assert_eq!(recorded.len(), 1);
+        assert_eq!(recorded[0], att);
+    }
+
+    #[tokio::test]
+    async fn send_message_no_attachments_records_empty() {
+        let m = MockTransport::new();
+        m.send_message("c1", "hello", &[]).await.unwrap();
+        assert!(m.recorded_attachments().is_empty());
+    }
+
+    #[tokio::test]
+    async fn send_message_accumulates_across_calls() {
+        let m = MockTransport::new();
+        let a1 = AttachmentPayload { name: "a.png".into(), mime: "image/png".into(), kind: "image".into(), data_b64: Some("AAAA".into()) };
+        let a2 = AttachmentPayload { name: "b.txt".into(), mime: "text/plain".into(), kind: "text".into(), data_b64: None };
+        m.send_message("c1", "first", &[a1.clone()]).await.unwrap();
+        m.send_message("c1", "second", &[a2.clone()]).await.unwrap();
+        let recorded = m.recorded_attachments();
+        assert_eq!(recorded.len(), 2);
+        assert_eq!(recorded[0], a1);
+        assert_eq!(recorded[1], a2);
     }
 }

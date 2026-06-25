@@ -18,7 +18,7 @@ async fn health_projects_create_send_subscribe() {
 
     // Subscribe BEFORE sending so we catch the streamed reply.
     let mut events = t.subscribe(conv.id.as_str());
-    let _mid = t.send_message(conv.id.as_str(), "Reply with the single word: pong").await.expect("send_message");
+    let _mid = t.send_message(conv.id.as_str(), "Reply with the single word: pong", &[]).await.expect("send_message");
 
     // Await a terminal `final` event within a timeout.
     let got_final = tokio::time::timeout(std::time::Duration::from_secs(60), async {

@@ -186,7 +186,7 @@ impl AppState {
         transcript.with_mut(|mut tx| tx.apply_user(text.clone()));
         let t = self.transport.clone();
         spawn(async move {
-            let _ = t.send_message(id.as_str(), &text).await;
+            let _ = t.send_message(id.as_str(), &text, &[]).await;
         });
     }
 }
