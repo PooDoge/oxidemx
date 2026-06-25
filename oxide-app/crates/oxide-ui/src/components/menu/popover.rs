@@ -93,19 +93,26 @@ pub enum Placement {
 struct PopoverOverlay {
     content:     Element,
     parent_size: State<Option<Size2D>>,
+    offset_top:  f32,
+    offset_left: f32,
+    /// The parent has computed an edge-aware position (anchor + content measured).
+    positioned:  bool,
 }
 
 impl PopoverOverlay {
-    fn new(content: Element, parent_size: State<Option<Size2D>>) -> Self {
-        Self { content, parent_size }
+    fn new(
+        content: Element,
+        parent_size: State<Option<Size2D>>,
+        offset_top: f32,
+        offset_left: f32,
+        positioned: bool,
+    ) -> Self {
+        Self { content, parent_size, offset_top, offset_left, positioned }
     }
 }
 
 impl Component for PopoverOverlay {
     fn render(&self) -> impl IntoElement {
-        // Local measurement gate: 0.0 until this overlay rect has been measured.
-        let mut local_size: State<Option<Size2D>> = use_state(|| None);
-
         // Entrance fade: `OnCreation::Run` fires on mount.
         // Because `PopoverOverlay` is only mounted while `open=true`, this hook
         // is created fresh on every open → the fade plays every time.
@@ -116,17 +123,19 @@ impl Component for PopoverOverlay {
                 .ease(Ease::Out)
                 .function(Function::Quart)
         });
-        let fade_value    = entrance_anim.get().value();
-        let gated_opacity = if local_size().is_some() { 1.0_f32 } else { 0.0_f32 };
+        let fade_value = entrance_anim.get().value();
+        // Hidden until the parent has an edge-aware position (which needs this
+        // overlay's measured size) — avoids a flash at the un-positioned origin.
+        let opacity = if self.positioned { fade_value } else { 0.0_f32 };
 
         let mut parent_size = self.parent_size;
         let content         = self.content.clone();
 
         rect()
             .layer(Layer::Overlay)
-            .opacity(gated_opacity * fade_value)
+            .position(Position::new_absolute().top(self.offset_top).left(self.offset_left))
+            .opacity(opacity)
             .on_sized(move |e: Event<SizedEventData>| {
-                local_size.set_if_modified(Some(e.area.size));
                 parent_size.set_if_modified(Some(e.area.size));
             })
             .child(content)
@@ -217,32 +226,61 @@ impl Component for Popover {
             _ => placement,
         };
 
-        let attached_position = match effective_placement {
-            Placement::Above => AttachedPosition::Top,
-            Placement::Below => AttachedPosition::Bottom,
+        // ── Edge-aware absolute offset of the overlay (relative to the anchor) ──
+        // Replaces Freya's `Attached`, which centers the overlay on the anchor with
+        // no window-edge awareness — so a near-edge anchor (e.g. the `+` button with
+        // the sidebar collapsed) pushed the menu off-screen and clipped it.
+        //
+        // Horizontal: LEFT-ALIGN the menu to the anchor's left edge, then CLAMP it
+        // inside the window `[EDGE_MARGIN, root_w - menu_w - EDGE_MARGIN]` so it
+        // shifts in at either edge. Vertical: above/below per the flip
+        // (`-content_height` above the anchor top, or `anchor_height` below it).
+        // Offsets are relative to the anchor's top-left (the overlay is an absolutely
+        // positioned sibling of the anchor inside the wrapper rect, like `Attached`).
+        const EDGE_MARGIN: f32 = 8.0;
+        let (offset_top, offset_left, positioned) = match (anchor_area(), content_size()) {
+            (Some(a), Some(c)) => {
+                let root_w = Platform::get().root_size.peek().width;
+                let max_x = (root_w - c.width - EDGE_MARGIN).max(EDGE_MARGIN);
+                let clamped_x = a.min_x().clamp(EDGE_MARGIN, max_x);
+                let off_left = clamped_x - a.min_x();
+                let off_top = match effective_placement {
+                    Placement::Above => -c.height,
+                    Placement::Below => a.height(),
+                };
+                (off_top, off_left, true)
+            }
+            // Not yet measured — keep the overlay hidden (positioned = false).
+            _ => (0.0, 0.0, false),
         };
 
         let content_el = self.content.clone();
 
         // Overlay sub-component — only mounted while open.
         // `PopoverOverlay` owns the animation hook, so it fires fresh on every open.
-        // Pass `content_size` directly so the overlay can update it; `State<T>` is
-        // `Copy + PartialEq` and safe as a component field.
+        // Pass `content_size` so it reports its measured size back for positioning;
+        // `State<T>` is `Copy + PartialEq` and safe as a component field.
         let overlay: Option<Element> = (open && content_el.is_some()).then(|| {
-            let content = content_el.clone().unwrap();
-            PopoverOverlay::new(content, content_size).into_element()
+            PopoverOverlay::new(
+                content_el.clone().unwrap(),
+                content_size,
+                offset_top,
+                offset_left,
+                positioned,
+            )
+            .into_element()
         });
 
-        // The anchor wrapper — measures the anchor area for the auto-flip math.
+        // The anchor wrapper — measures the anchor area (window coords) for the
+        // flip + edge-clamp math. The overlay is an absolutely positioned sibling,
+        // so it does not affect the anchor's layout.
         let anchor_inner = rect()
             .on_sized(move |e: Event<SizedEventData>| {
                 anchor_area.set_if_modified(Some(e.area));
             })
             .child(self.anchor.clone());
 
-        Attached::new(anchor_inner)
-            .position(attached_position)
-            .maybe_child(overlay)
+        rect().child(anchor_inner).maybe_child(overlay)
     }
 }
 
