@@ -346,11 +346,19 @@ impl Component for Toolbar {
         // Replaces the old Size::flex(1.0) spacer.  When `attachments` is empty
         // the ScrollView still has width(Size::flex(1.0)) so it acts as the spacer
         // and keeps the send button pinned to the right edge.
+        //
+        // height(Size::Inner) ensures the strip never claims vertical fill.
+        // Without it, when the Toolbar is placed in a tall container the strip
+        // expands to fill the parent height, lifting the chips to the top of the
+        // card and making it appear as though they live in a separate row above
+        // the editor. Inner height keeps the strip content-hugging so the row's
+        // cross_align(Alignment::Center) always centers chips beside the model pill.
         let mut strip = ScrollView::new()
             .direction(Direction::Horizontal)
             .show_scrollbar(false)
             .spacing(6.)
-            .width(Size::flex(1.0));
+            .width(Size::flex(1.0))
+            .height(Size::Inner);
         for (i, att) in self.attachments.iter().enumerate() {
             let on_view   = self.on_attach_view.clone();
             let on_remove = self.on_attach_remove.clone();

@@ -530,11 +530,15 @@ mod tests {
             .padding(Gaps::new_all(16.))
             // flex spacer pushes the toolbar to the bottom (real-app layout)
             .child(rect().width(Size::px(1.)).height(Size::flex(1.0)))
-            // card wrapping the toolbar
+            // card wrapping the toolbar — NO Content::Flex, NO height:fill.
+            // The card must hug the toolbar's natural height (same as the real
+            // composer footer which uses a plain .child() that hugs content).
+            // A fill/flex card causes the toolbar's attachment ScrollView to
+            // expand vertically, floating chips to the top and making the
+            // snapshot look like chips are in a separate row above the editor.
             .child(
                 rect()
                     .direction(Direction::Vertical)
-                    .content(Content::Flex)
                     .width(Size::fill())
                     .corner_radius(CornerRadius::new_all(16.))
                     .background(th.bg_deep())
