@@ -4,9 +4,15 @@
 //! per-corner tail `{14,14,4,14}`.
 //! Assistant turns align left, preceded by an `Avatar`, with a surface bubble
 //! and per-corner tail `{14,14,14,4}`.
+//!
+//! Body text is rendered with `SelectableText` (drag-select + Ctrl+C built in).
+//! Right-clicking the bubble body opens a "Copy message" context menu via
+//! `ContextMenu::open_from_event`.  A `ContextMenuViewer` must be mounted in
+//! an ancestor scope (the shell already mounts one at its root).
 use freya::prelude::*;
 
 use crate::components::avatar::Avatar;
+use crate::components::menu::copy_only_menu;
 use crate::tokens::Theme;
 
 /// A chat message bubble that styles itself based on `role`.
@@ -37,7 +43,9 @@ impl Bubble {
 impl Component for Bubble {
     fn render(&self) -> impl IntoElement {
         let th = self.theme;
+        let body = self.text.clone();
         if self.role == "user" {
+            let body_for_menu = body.clone();
             rect()
                 .width(Size::fill())
                 .direction(Direction::Horizontal)
@@ -55,9 +63,27 @@ impl Component for Bubble {
                         })
                         .background(Theme::with_alpha(th.accent(), 0x1a))
                         .border(Border::new().fill(Theme::with_alpha(th.accent(), 0x33)).width(1.))
-                        .child(label().text(self.text.clone()).font_size(13.).color(th.text())),
+                        .on_secondary_down(move |e: Event<PressEventData>| {
+                            let text = body_for_menu.clone();
+                            ContextMenu::open_from_event(
+                                &e,
+                                copy_only_menu(
+                                    th,
+                                    "Copy message",
+                                    EventHandler::from(move |_: ()| {
+                                        let _ = Clipboard::set(text.clone());
+                                    }),
+                                ),
+                            );
+                        })
+                        .child(
+                            SelectableText::new(body.clone())
+                                .font_size(13.)
+                                .color(th.text()),
+                        ),
                 )
         } else {
+            let body_for_menu = body.clone();
             rect()
                 .width(Size::fill())
                 .direction(Direction::Horizontal)
@@ -77,8 +103,23 @@ impl Component for Bubble {
                         })
                         .background(th.surface())
                         .border(Border::new().fill(th.hairline()).width(1.))
+                        .on_secondary_down(move |e: Event<PressEventData>| {
+                            let text = body_for_menu.clone();
+                            ContextMenu::open_from_event(
+                                &e,
+                                copy_only_menu(
+                                    th,
+                                    "Copy message",
+                                    EventHandler::from(move |_: ()| {
+                                        let _ = Clipboard::set(text.clone());
+                                    }),
+                                ),
+                            );
+                        })
                         .child(
-                            label().text(self.text.clone()).font_size(13.).color(th.subtext_hi()),
+                            SelectableText::new(body.clone())
+                                .font_size(13.)
+                                .color(th.subtext_hi()),
                         ),
                 )
         }
@@ -97,10 +138,13 @@ mod tests {
         }
         let mut t = launch_test(app);
         t.sync_and_update();
+        // Body is now rendered by SelectableText, which emits a `paragraph` element
+        // with the content in its `spans` list.
         let found = t.find(|_, el| {
-            Label::try_downcast(el).filter(|l| l.text.as_ref() == "hi there")
+            Paragraph::try_downcast(el)
+                .filter(|p| p.spans.iter().any(|s| s.text == "hi there"))
         });
-        assert!(found.is_some(), "bubble should render its text");
+        assert!(found.is_some(), "bubble should render its text via SelectableText paragraph");
     }
 
     #[test]

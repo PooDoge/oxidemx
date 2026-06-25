@@ -193,8 +193,10 @@ mod tests {
         runner.poll_n(Duration::from_millis(5), 12);
 
         // Assert the user "ping" turn is rendered (apply_user path).
+        // Bubble body is now SelectableText → emits a `paragraph` element.
         let ping_bubble = runner.find(|_, el| {
-            Label::try_downcast(el).filter(|l| l.text.as_ref().contains("ping"))
+            Paragraph::try_downcast(el)
+                .filter(|p| p.spans.iter().any(|s| s.text.contains("ping")))
         });
         assert!(
             ping_bubble.is_some(),
@@ -203,7 +205,8 @@ mod tests {
 
         // Assert the assistant "pong" reply is rendered (streamed final event path).
         let pong_bubble = runner.find(|_, el| {
-            Label::try_downcast(el).filter(|l| l.text.as_ref().contains("pong"))
+            Paragraph::try_downcast(el)
+                .filter(|p| p.spans.iter().any(|s| s.text.contains("pong")))
         });
         assert!(
             pong_bubble.is_some(),
@@ -815,6 +818,61 @@ mod tests {
         runner.poll_n(Duration::from_millis(5), 8);
         runner.sync_and_update();
         runner.render_to_file("/tmp/oxide-editor-menu.png");
+    }
+
+    // ── Snapshot: selectable bubble + Copy message menu (T5) ─────────────────
+
+    fn snapshot_bubble_selectable_app() -> Element {
+        use oxide_ui::components::Bubble;
+        use oxide_ui::components::menu::copy_only_menu;
+        use oxide_ui::tokens::Theme;
+        use_init_theme(dark_theme);
+        let th = Theme::default();
+        let noop = EventHandler::from(|_: ()| {});
+
+        rect()
+            .width(Size::fill())
+            .height(Size::fill())
+            .background(th.bg_deep())
+            .direction(Direction::Vertical)
+            .spacing(16.)
+            .padding(Gaps::new_all(24.))
+            // Mount ContextMenuViewer so ContextMenu::open_from_event can find the context.
+            .child(ContextMenuViewer::new())
+            .child(
+                Bubble::new(
+                    "user".into(),
+                    "What is the meaning of life?".into(),
+                ),
+            )
+            .child(
+                Bubble::new(
+                    "assistant".into(),
+                    "The answer is 42, of course. Right-click this bubble to copy it.".into(),
+                ),
+            )
+            // Render the "Copy message" menu inline so the snapshot shows it open —
+            // same pragmatic approach used in T4 (editor_clipboard_menu rendered directly).
+            .child(copy_only_menu(th, "Copy message", noop))
+            .into()
+    }
+
+    /// Renders two chat bubbles (user + assistant) on a dark background alongside
+    /// an open "Copy message" context menu, to `/tmp/oxide-bubble-menu.png`.
+    ///
+    /// Verifies: body text legible, SelectableText paragraphs render correctly,
+    /// and the copy_only_menu is mounted.
+    ///
+    /// Run with:
+    ///   LIBRARY_PATH=/tmp/oxidemx-lib-links cargo test -p oxide-freya --bin oxide-freya snapshot_bubble_selectable -- --ignored
+    #[test]
+    #[ignore = "snapshot: writes PNG to /tmp for visual review"]
+    fn snapshot_bubble_selectable() {
+        let (mut runner, _) =
+            TestingRunner::new(snapshot_bubble_selectable_app, (600., 400.).into(), |_| {}, 1.);
+        runner.poll_n(Duration::from_millis(5), 8);
+        runner.sync_and_update();
+        runner.render_to_file("/tmp/oxide-bubble-menu.png");
     }
 
 }
