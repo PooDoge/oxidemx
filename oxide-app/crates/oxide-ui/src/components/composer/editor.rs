@@ -166,21 +166,14 @@ impl Component for ComposerEditor {
         // letting the editor insert the raw bytes.  If the clipboard holds text (or
         // no image is found), we fall through so the OS text-paste works normally.
         //
-        // The same precedence rule applies to the right-click menu Paste action,
-        // so the decision is factored into `do_image_aware_paste` and shared by both
-        // the keyboard path and the context-menu handler — avoiding duplication.
+        // The image-dispatch half is shared via `dispatch_clipboard_image` (a free fn
+        // defined below this component).  The two call sites differ only in their
+        // fallback: the keyboard path falls through to the OS text-paste (via
+        // `prevent_default` / `stop_propagation` + early return on image hit); the
+        // menu Paste handler calls `paste_text` explicitly when no image is found.
         //
         // Enter is intercepted BEFORE `editable.process_event` so a bare Enter can
         // submit (and NOT leave a stray `\n`) when `send_on_enter` is set.
-
-        // ── Shared image-aware paste helper ──────────────────────────────────
-        // Returns `true` if an image was found and dispatched (caller should not
-        // also do a text paste); returns `false` if the clipboard holds plain text
-        // (caller falls through to normal text paste / OS default).
-        //
-        // This closure is called from BOTH `on_key_down` (Ctrl/Cmd+V) and the
-        // right-click menu Paste handler.  UseEditable + Writable are both cheap
-        // to capture because UseEditable is Copy.
         let on_paste_attachment_kd = on_paste_attachment.clone(); // for on_key_down
         let on_paste_attachment_ctx = on_paste_attachment;        // for ctx-menu paste
 
@@ -189,20 +182,14 @@ impl Component for ComposerEditor {
             let modifiers = e.modifiers;
 
             // ── Image-paste intercept ─────────────────────────────────────────
+            // If the clipboard holds an image, dispatch it and let the OS text
+            // paste go; otherwise fall through so text paste works normally.
             let is_paste = (modifiers.ctrl() || modifiers.meta())
                 && matches!(&key, Key::Character(c) if c.eq_ignore_ascii_case("v"));
-            if is_paste {
-                if let Some(att) =
-                    crate::components::composer::clipboard::read_clipboard_image()
-                {
-                    e.prevent_default();
-                    e.stop_propagation();
-                    if let Some(h) = &on_paste_attachment_kd {
-                        h.call(att);
-                    }
-                    return;
-                }
-                // No image on clipboard — fall through so text paste works normally.
+            if is_paste && dispatch_clipboard_image(&on_paste_attachment_kd) {
+                e.prevent_default();
+                e.stop_propagation();
+                return;
             }
 
             if let Key::Named(NamedKey::Enter) = &key {
@@ -307,13 +294,7 @@ impl Component for ComposerEditor {
                         }),
                         EventHandler::from(move |_: ()| {
                             // Image-aware paste: same precedence as Ctrl+V.
-                            if let Some(att) =
-                                crate::components::composer::clipboard::read_clipboard_image()
-                            {
-                                if let Some(h) = &paste_att {
-                                    h.call(att);
-                                }
-                            } else {
+                            if !dispatch_clipboard_image(&paste_att) {
                                 paste_text(&mut ed_paste, &mut v_p);
                             }
                         }),
@@ -417,6 +398,25 @@ impl Component for ComposerEditor {
 
     fn render_key(&self) -> DiffKey {
         self.key.clone().or(self.default_key())
+    }
+}
+
+// ── Shared image-aware paste helper ──────────────────────────────────────────
+// Returns `true` if an image was found on the clipboard and dispatched as an
+// attachment (the caller should NOT also perform a text paste).  Returns `false`
+// when the clipboard holds plain text so the caller can fall through to its own
+// text-paste logic.
+//
+// Used by BOTH the `on_key_down` Ctrl+V path and the right-click menu Paste
+// handler, keeping the image-dispatch decision in a single place.
+fn dispatch_clipboard_image(handler: &Option<EventHandler<Attachment>>) -> bool {
+    if let Some(att) = crate::components::composer::clipboard::read_clipboard_image() {
+        if let Some(h) = handler {
+            h.call(att);
+        }
+        true
+    } else {
+        false
     }
 }
 
