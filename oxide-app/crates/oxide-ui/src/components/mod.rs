@@ -20,7 +20,10 @@ pub use chip::WorktreeChip;
 pub use collapsible_panel::CollapsiblePanel;
 pub use composer::{Composer, ComposerConfig};
 pub use list_item::ListItem;
-pub use menu::{menu_theme, MenuRow, MenuSection, MenuSurface, Placement, Popover};
+pub use menu::{
+    copy_only_menu, copy_selection, cut_selection, editor_clipboard_menu, menu_theme, paste_text,
+    select_all, MenuRow, MenuSection, MenuSurface, Placement, Popover,
+};
 pub use prompt_input::PromptInput;
 pub use rail_button::RailButton;
 pub use resize_grip::{ResizeGrip, clamp_height};

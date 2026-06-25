@@ -18,9 +18,13 @@
 pub mod popover;
 pub mod row;
 pub mod surface;
+pub mod text_menu;
 pub mod theme;
 
 pub use popover::{Placement, Popover};
 pub use row::{MenuRow, MenuSection};
 pub use surface::MenuSurface;
+pub use text_menu::{
+    copy_only_menu, copy_selection, cut_selection, editor_clipboard_menu, paste_text, select_all,
+};
 pub use theme::menu_theme;

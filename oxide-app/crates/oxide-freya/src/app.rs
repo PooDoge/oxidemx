@@ -19,6 +19,11 @@ pub fn shell() -> impl IntoElement {
         .direction(Direction::Horizontal)
         .expanded()
         .background((5u8, 7u8, 11u8))
+        // Mount ContextMenuViewer once as the first child of the shell root.
+        // It provides the global ContextMenu context (in ScopeId::ROOT) and
+        // renders the floating overlay when open.  Being layout-neutral when
+        // closed, it has no effect on the shell's horizontal flow.
+        .child(ContextMenuViewer::new())
         .maybe_child(connection_banner(conn))
         .child(Sidebar { state: state.clone(), collapsed: false })
         .child(
