@@ -84,6 +84,17 @@ impl AttachmentStore {
 
     // ── private helpers ───────────────────────────────────────────────────────
 
+    /// Reject thread ids that could escape `root` via path traversal.
+    ///
+    /// A valid thread id is a non-empty single path component: no `/`, no `\`,
+    /// and no `..` anywhere in the string.
+    fn validate_thread(thread: &str) -> Result<(), AttachmentError> {
+        if thread.is_empty() || thread.contains('/') || thread.contains('\\') || thread.contains("..") {
+            return Err(AttachmentError::Io(format!("invalid thread id: {thread:?}")));
+        }
+        Ok(())
+    }
+
     fn thread_dir(&self, thread: &str) -> PathBuf {
         self.root.join(thread)
     }
@@ -118,6 +129,7 @@ impl AttachmentStore {
         mime: &str,
         bytes: &[u8],
     ) -> Result<AttachmentRef, AttachmentError> {
+        Self::validate_thread(thread)?;
         if bytes.len() > MAX_ATTACHMENT_BYTES {
             return Err(AttachmentError::TooLarge { size: bytes.len() });
         }
@@ -136,14 +148,18 @@ impl AttachmentStore {
     ///
     /// Returns [`AttachmentError::NotFound`] if the blob does not exist.
     pub fn read(&self, thread: &str, id: &str) -> Result<Vec<u8>, AttachmentError> {
+        Self::validate_thread(thread)?;
         let path = self.blob_path(thread, id);
-        if !path.exists() {
-            return Err(AttachmentError::NotFound {
-                thread: thread.to_string(),
-                id: id.to_string(),
-            });
+        match fs::read(&path) {
+            Ok(bytes) => Ok(bytes),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                Err(AttachmentError::NotFound {
+                    thread: thread.to_string(),
+                    id: id.to_string(),
+                })
+            }
+            Err(e) => Err(AttachmentError::from(e)),
         }
-        fs::read(&path).map_err(AttachmentError::from)
     }
 
     /// Remove all attachments stored for `thread`, deleting the thread
@@ -151,6 +167,7 @@ impl AttachmentStore {
     ///
     /// Returns `Ok(())` if the directory does not exist (idempotent cleanup).
     pub fn remove_thread(&self, thread: &str) -> Result<(), AttachmentError> {
+        Self::validate_thread(thread)?;
         let dir = self.thread_dir(thread);
         if !dir.exists() {
             return Ok(());
@@ -285,5 +302,49 @@ mod tests {
         let json = serde_json::to_string(&r).unwrap();
         let back: AttachmentRef = serde_json::from_str(&json).unwrap();
         assert_eq!(r, back);
+    }
+
+    // ── traversal thread ids are rejected ─────────────────────────────────────
+
+    #[test]
+    fn rejects_traversal_thread() {
+        let d = tempfile::tempdir().unwrap();
+        let store = AttachmentStore::new(d.path().join("attachments"));
+
+        // write with a traversal id must fail
+        let w = store.write("../evil", "n", "image/png", b"x");
+        assert!(
+            matches!(w, Err(AttachmentError::Io(_))),
+            "expected Io error for traversal write, got {:?}", w
+        );
+
+        // read with a traversal id must fail
+        let r = store.read("../x", "0000000000000000");
+        assert!(
+            matches!(r, Err(AttachmentError::Io(_))),
+            "expected Io error for traversal read, got {:?}", r
+        );
+
+        // empty thread id must fail
+        let e = store.write("", "n", "text/plain", b"x");
+        assert!(
+            matches!(e, Err(AttachmentError::Io(_))),
+            "expected Io error for empty thread id, got {:?}", e
+        );
+    }
+
+    // ── direct read path still returns NotFound for a missing id ─────────────
+
+    #[test]
+    fn read_missing_id_returns_not_found_direct() {
+        let d = tempfile::tempdir().unwrap();
+        let store = AttachmentStore::new(d.path().join("attachments"));
+        // thread dir doesn't exist yet — exercises the NotFound branch in the
+        // new direct-read implementation (no exists() pre-check).
+        let err = store.read("t1", "deadbeefdeadbeef");
+        assert!(
+            matches!(err, Err(AttachmentError::NotFound { .. })),
+            "expected NotFound via direct read, got {:?}", err
+        );
     }
 }
