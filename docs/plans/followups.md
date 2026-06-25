@@ -387,3 +387,8 @@ From the "consolidate + tech-debt" slice scoping:
 - **Stale comment** (`agentd/src/harness/worker.rs:97`): `route_turn(.., vec![])` is labelled "Task 6 wires attachments through here" but T6 wired the chat/HTTP path (`interface.rs`), not the harness worker. Correct the comment.
 - **Image byte clones** (`interface.rs` ~454 + `runtime.rs` ~318): image bytes cloned into `images` then per ChatMessage. Cosmetic; only matters near the 20 MiB cap.
 - **LIVE (on-PC) verification needed:** real Gemini/Anthropic/OpenAI multimodal response describing a pasted image; GUI round-trip (paste→send→reply over the live UDS daemon, `tests/live_agentd.rs` is #[ignore]); degrade-note rendering for a local provider.
+
+## Live-test findings (2026-06-25, on-PC session)
+VERIFIED WORKING LIVE: image paste → chip → lightbox; clipboard right-click menu; selectable chat + Copy; (after fixes) single-click-to-focus + menu-paste→type.
+- FIXED (committed): composer click-to-focus (empty-state placeholder overlay swallowed the click → only Tab focused) + restore editor focus after right-click menu actions. `editor.rs` outer-box `on_press` + `a11y_id.request_focus()` in the menu handlers.
+- OPEN (Minor, cosmetic, self-corrects): the **model menu first open** shows excess space at the bottom; the 2nd+ opens are correct. Root: `Popover` auto-flip + `Attached` lay out with `content_size = None` on the first open (no prior measurement); the measured size caches in a persistent `use_state`, so reopen is right. Needs a focused live-iteration pass (only reproduces in the running compositor, not headless snapshots). Candidate directions: prime/persist `content_size` before first show, or gate the overlay's visibility until the flip has settled (one extra measured frame).
