@@ -270,13 +270,14 @@ impl Component for ComposerEditor {
                     .child(
                         rect()
                             .width(Size::fill())
+                            .padding(Gaps::new(8., 12., 8., 12.))
                             .child(editor_paragraph)
                             .maybe_child(display_placeholder.then(|| {
                                 label()
                                     .text(PLACEHOLDER)
                                     .color(th.faint())
                                     .line_height(1.35)
-                                    .position(Position::new_absolute().top(0.).left(0.))
+                                    .position(Position::new_absolute().top(8.).left(12.))
                             })),
                     ),
             )
