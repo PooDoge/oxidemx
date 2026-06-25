@@ -33,17 +33,25 @@ use super::attachment::ATTACH_SOURCES;
 /// Fires `on_pick(source.id)` when the user selects a row.
 #[derive(Clone, PartialEq)]
 pub struct AttachMenu {
-    theme:   Theme,
-    on_pick: Option<EventHandler<&'static str>>,
+    theme:    Theme,
+    on_pick:  Option<EventHandler<&'static str>>,
+    on_close: Option<EventHandler<()>>,
 }
 
 impl AttachMenu {
     pub fn new(theme: Theme) -> Self {
-        Self { theme, on_pick: None }
+        Self { theme, on_pick: None, on_close: None }
     }
 
     pub fn on_pick(mut self, handler: impl Into<EventHandler<&'static str>>) -> Self {
         self.on_pick = Some(handler.into());
+        self
+    }
+
+    /// Dismissal handler, threaded into the `MenuSurface` (Freya `Menu`'s
+    /// `on_close`): fires on outside-press + Escape.
+    pub fn on_close(mut self, handler: impl Into<EventHandler<()>>) -> Self {
+        self.on_close = Some(handler.into());
         self
     }
 }
@@ -77,10 +85,14 @@ impl Component for AttachMenu {
             .children(rows)
             .into_element();
 
-        MenuSurface::new(th)
+        let mut surface = MenuSurface::new(th)
             .min_w(200.)
             .max_w(280.)
-            .child(body)
+            .child(body);
+        if let Some(h) = self.on_close.clone() {
+            surface = surface.on_close(h);
+        }
+        surface
     }
 }
 

@@ -12,47 +12,26 @@
 //! and fits above, the content renders Above instead (and vice-versa). This
 //! mirrors `Select`'s flip math.
 //!
-//! ## Dismissal model — Select-style global-press (the subtle part)
+//! ## Dismissal — owned by the menu content, not the Popover
 //!
-//! The previous implementation painted a full-window backdrop on
-//! `Layer::Relative(-1)` and dismissed on a press to that backdrop. In a deeply
-//! nested anchor (the composer toolbar is composer → card → toolbar row, near
-//! the window bottom) `Relative(-1)` is *relative to the Popover's parent*, so
-//! the backdrop painted BELOW the rest of the app — outside presses landed on
-//! higher-layer app content and never reached it, so dismiss never fired (and
-//! the menu didn't reliably surface either). That model is wrong for a nested
-//! anchor and is removed.
+//! `Popover` is a pure anchor + animation wrapper: it has NO dismissal logic.
+//! Earlier revisions tried to dismiss here — first a full-window backdrop on
+//! `Layer::Relative(-1)` (wrong for a deeply nested anchor: the backdrop painted
+//! BELOW higher-layer app content so outside presses never reached it), then a
+//! Select-style `on_global_pointer_press` on the always-present Popover root.
+//! The latter self-closed on the OPENING click: the root global handler exists
+//! at the moment the trigger toggles `open`, so the very press that opens the
+//! menu also fires the global dismiss in the same cycle.
 //!
-//! We now use the model Freya's `Select`/`Menu` prove in production: a
-//! [`on_global_pointer_press`] handler on the Popover root that fires
-//! `on_dismiss(())`, reconciled so the OPENING trigger press does not also close
-//! the menu in the same cycle. The reconciliation rides on Freya's event
-//! cancellation rules (see `freya-core` `EventName::get_cancellable_events`):
-//! a targeted `PointerPress` whose handler calls `prevent_default()` cancels the
-//! pending `GlobalPointerPress` for that same cursor press. Concretely:
-//!
-//!   - **Opening trigger press.** We wrap the caller's `anchor` in a rect whose
-//!     own `on_press` calls `e.prevent_default()`. Targeted presses bubble up the
-//!     parent chain, so this wrapper handler runs *alongside* the caller's anchor
-//!     `on_press` (which toggles `open`). The `prevent_default()` cancels the
-//!     `GlobalPointerPress` that would otherwise fire `on_dismiss` on this very
-//!     click → no open→close flicker. This is exactly what `Select::on_press`
-//!     does (`prevent_default()` + `stop_propagation()`); we relocate it into the
-//!     Popover's anchor wrapper so it works for ANY caller-supplied anchor,
-//!     keeping the public API content-agnostic.
-//!   - **Press on the content.** The content overlay's `on_press` calls
-//!     `prevent_default()` (cancel the global → don't dismiss) and
-//!     `stop_propagation()` (don't disturb the anchor's bubble chain). A press on
-//!     the menu therefore never dismisses.
-//!   - **Press anywhere else.** No targeted `PointerPress` cancels the
-//!     `GlobalPointerPress`, so it reaches the root's
-//!     `on_global_pointer_press`, which fires `on_dismiss(())`.
-//!
-//! The root global handler additionally guards on `open` (it only acts while the
-//! popover is actually open), mirroring `Select`'s `set_if_modified(false)`
-//! idempotence: a stray global press while closed is a no-op.
-//!
-//! Escape is handled by a global key-down on the wrapper → `on_dismiss(())`.
+//! The correct model — proven by Freya's own `Menu` — puts the dismiss handler
+//! (`on_global_pointer_press` + Escape) on the `Menu` node, which is
+//! `Layer::Overlay` and only mounted while the menu is open. Because that
+//! handler does NOT exist at opening-click time, the opening click cannot
+//! self-close it; only a subsequent outside press dismisses. Our menus already
+//! wrap Freya's `Menu` (inside `MenuSurface`), so dismissal threads through
+//! `MenuSurface::on_close → Menu::on_close`. The Popover therefore only renders
+//! the anchor + (when open) the animated content; the caller wires dismissal via
+//! the menu's `on_close`.
 use freya::animation::*;
 use freya::prelude::*;
 
@@ -68,13 +47,15 @@ pub enum Placement {
 
 /// Anchors floating `content` to a trigger `anchor`.
 ///
+/// Pure anchor + entrance-animation wrapper — dismissal is owned by the menu
+/// content (Freya `Menu`'s `on_close`, threaded via `MenuSurface::on_close`).
+///
 /// Builder usage:
 /// ```ignore
 /// Popover::new(trigger_element)
 ///     .open(is_open)
 ///     .placement(Placement::Below)
-///     .on_dismiss(move |()| set_open(false))
-///     .content(MenuSurface::new(theme).child(body))
+///     .content(MenuSurface::new(theme).on_close(move |_| set_open(false)).child(body))
 /// ```
 #[derive(PartialEq)]
 pub struct Popover {
@@ -82,7 +63,6 @@ pub struct Popover {
     open: bool,
     placement: Placement,
     content: Option<Element>,
-    on_dismiss: Option<EventHandler<()>>,
 }
 
 impl Popover {
@@ -92,7 +72,6 @@ impl Popover {
             open: false,
             placement: Placement::default(),
             content: None,
-            on_dismiss: None,
         }
     }
 
@@ -110,22 +89,6 @@ impl Popover {
         self.content = Some(content.into_element());
         self
     }
-
-    pub fn on_dismiss(mut self, h: impl Into<EventHandler<()>>) -> Self {
-        self.on_dismiss = Some(h.into());
-        self
-    }
-}
-
-/// Predicate (pure, unit-testable) capturing the dismissal decision the
-/// `on_global_pointer_press` handler makes: a global press dismisses ONLY when
-/// the popover is open AND the press was not cancelled by a targeted handler
-/// (the anchor wrapper / the content both `prevent_default()`, which cancels the
-/// `GlobalPointerPress` so it never reaches the root handler at all). The
-/// `press_cancelled` flag models that cancellation for the test.
-#[doc(hidden)]
-pub fn global_press_dismisses(open: bool, press_cancelled: bool) -> bool {
-    open && !press_cancelled
 }
 
 impl Component for Popover {
@@ -207,32 +170,6 @@ impl Component for Popover {
             Placement::Below => slide,
         };
 
-        let on_dismiss_global = self.on_dismiss.clone();
-        let on_dismiss_key = self.on_dismiss.clone();
-
-        // Escape → dismiss (global key-down on the wrapper).
-        let on_global_key_down = move |e: Event<KeyboardEventData>| {
-            if e.key == Key::Named(NamedKey::Escape) {
-                if let Some(h) = &on_dismiss_key {
-                    h.call(());
-                }
-            }
-        };
-
-        // Outside-press → dismiss. Mirrors `Select`/`Menu`: a global pointer
-        // press that was NOT cancelled by a targeted `prevent_default()` (the
-        // anchor wrapper and the content both cancel) reaches this handler. We
-        // guard on `open` so a stray press while closed is a no-op (the
-        // idempotent counterpart of `Select`'s `set_if_modified(false)`), and so
-        // the OPENING press is never double-handled before the toggle lands.
-        let on_global_pointer_press = move |_: Event<PointerEventData>| {
-            if open {
-                if let Some(h) = &on_dismiss_global {
-                    h.call(());
-                }
-            }
-        };
-
         let attached_position = match effective_placement {
             Placement::Above => AttachedPosition::Top,
             Placement::Below => AttachedPosition::Bottom,
@@ -241,6 +178,9 @@ impl Component for Popover {
         let content_el = self.content.clone();
 
         // The animated content rect: scale + opacity + slide, measured on size.
+        // Dismissal lives INSIDE this subtree (Freya `Menu`'s `on_close`, via
+        // `MenuSurface`), so it only exists while the menu is open and the
+        // opening click can never reach it to self-close.
         let overlay: Option<Element> = (show_overlay && content_el.is_some()).then(|| {
             let content = content_el.clone().unwrap();
             rect()
@@ -251,41 +191,20 @@ impl Component for Popover {
                 .on_sized(move |e: Event<SizedEventData>| {
                     content_size.set_if_modified(Some(e.area.size));
                 })
-                // A press on the content must not dismiss: `prevent_default()`
-                // cancels the pending `GlobalPointerPress` (so the root's
-                // `on_global_pointer_press` never fires for this press), and
-                // `stop_propagation()` keeps it out of the anchor's bubble chain.
-                .on_press(move |e: Event<PressEventData>| {
-                    e.prevent_default();
-                    e.stop_propagation();
-                })
                 .child(content)
                 .into_element()
         });
 
-        // The anchor wrapper. Its `on_press` calls `prevent_default()` so the
-        // OPENING trigger press cancels the `GlobalPointerPress` that would
-        // otherwise dismiss in the same cycle (no open→close flicker). Targeted
-        // presses bubble up the parent chain, so the caller's own anchor
-        // `on_press` (which toggles `open`) still runs alongside this — we do NOT
-        // `stop_propagation` here, so we don't suppress the caller's handler.
+        // The anchor wrapper — measures the anchor area for the auto-flip math.
         let anchor_inner = rect()
             .on_sized(move |e: Event<SizedEventData>| {
                 anchor_area.set_if_modified(Some(e.area));
             })
-            .on_press(move |e: Event<PressEventData>| {
-                e.prevent_default();
-            })
             .child(self.anchor.clone());
 
-        rect()
-            .on_global_key_down(on_global_key_down)
-            .on_global_pointer_press(on_global_pointer_press)
-            .child(
-                Attached::new(anchor_inner)
-                    .position(attached_position)
-                    .maybe_child(overlay),
-            )
+        Attached::new(anchor_inner)
+            .position(attached_position)
+            .maybe_child(overlay)
     }
 }
 
@@ -335,23 +254,6 @@ mod tests {
         assert!(menu.is_some(), "content should render when open");
     }
 
-    /// Unit assertion of the dismissal predicate the `on_global_pointer_press`
-    /// handler encodes (mirrors `Select`): a global press dismisses ONLY when the
-    /// popover is open AND the press was not cancelled by a targeted
-    /// `prevent_default()` (anchor wrapper / content). This is the provably-correct
-    /// core of the reconciliation; the live event loop applies it via Freya's
-    /// `GlobalPointerPress` cancellation (see module docs).
-    #[test]
-    fn dismissal_predicate() {
-        // Closed → never dismiss (idempotent no-op, like set_if_modified(false)).
-        assert!(!global_press_dismisses(false, false));
-        assert!(!global_press_dismisses(false, true));
-        // Open + the press was cancelled (anchor-open / content) → suppressed.
-        assert!(!global_press_dismisses(true, true));
-        // Open + an outside press (not cancelled) → dismiss.
-        assert!(global_press_dismisses(true, false));
-    }
-
     /// Nested-context open: mount a `Popover` whose anchor is buried a few rects
     /// deep (mimicking composer → card → toolbar row), drive a `click_cursor` on
     /// the anchor, poll past the entrance animation, and assert the content
@@ -378,7 +280,6 @@ mod tests {
             let popover = Popover::new(trigger)
                 .open(open())
                 .placement(Placement::Above)
-                .on_dismiss(move |()| open.set(false))
                 .content(label().text("MENU").into_element())
                 .into_element();
 

@@ -73,16 +73,14 @@ pub struct Toolbar {
     pub provider_open: bool,
     pub theme:         Theme,
 
-    // Menu content (built by the orchestrator) + per-trigger dismiss handlers.
-    // The Toolbar wraps each trigger in a `Popover` so each menu anchors to ITS
-    // own button and dismisses on outside-press/Escape.
+    // Menu content (built by the orchestrator). The Toolbar wraps each trigger in
+    // a `Popover` so each menu anchors to ITS own button. Dismissal is owned by
+    // the menu content (Freya `Menu`'s `on_close`), wired by the orchestrator.
     attach_menu:   Option<Element>,
     provider_menu: Option<Element>,
 
     on_attach_toggle:   Option<EventHandler<()>>,
     on_provider_toggle: Option<EventHandler<()>>,
-    on_attach_dismiss:   Option<EventHandler<()>>,
-    on_provider_dismiss: Option<EventHandler<()>>,
     on_send:            Option<EventHandler<()>>,
 }
 
@@ -101,8 +99,6 @@ impl Toolbar {
             provider_menu:      None,
             on_attach_toggle:   None,
             on_provider_toggle: None,
-            on_attach_dismiss:   None,
-            on_provider_dismiss: None,
             on_send:            None,
         }
     }
@@ -149,16 +145,6 @@ impl Toolbar {
 
     pub fn provider_menu(mut self, menu: Option<Element>) -> Self {
         self.provider_menu = menu;
-        self
-    }
-
-    pub fn on_attach_dismiss(mut self, h: impl Into<EventHandler<()>>) -> Self {
-        self.on_attach_dismiss = Some(h.into());
-        self
-    }
-
-    pub fn on_provider_dismiss(mut self, h: impl Into<EventHandler<()>>) -> Self {
-        self.on_provider_dismiss = Some(h.into());
         self
     }
 
@@ -226,23 +212,18 @@ impl Component for Toolbar {
         };
 
         // Wrap the attach button in a Popover so the attach menu anchors to THIS
-        // button and dismisses on outside-press/Escape. The Popover renders the
-        // anchor (the button) always and shows `content` adjacent only when open.
-        let on_attach_dismiss = self.on_attach_dismiss.clone();
-        let attach_block: Element = {
-            let mut pop = Popover::new(attach_btn)
-                .open(self.attach_open)
-                .placement(Placement::Above)
-                .content(
-                    self.attach_menu
-                        .clone()
-                        .unwrap_or_else(|| rect().into_element()),
-                );
-            if let Some(h) = on_attach_dismiss {
-                pop = pop.on_dismiss(h);
-            }
-            pop.into_element()
-        };
+        // button. The Popover renders the anchor (the button) always and shows
+        // `content` adjacent only when open; dismissal is owned by the menu
+        // content (Freya `Menu`'s `on_close`, wired by the orchestrator).
+        let attach_block: Element = Popover::new(attach_btn)
+            .open(self.attach_open)
+            .placement(Placement::Above)
+            .content(
+                self.attach_menu
+                    .clone()
+                    .unwrap_or_else(|| rect().into_element()),
+            )
+            .into_element();
 
         // ── ProviderPill ─────────────────────────────────────────────────────
         // Resolve model from the registry (fall back to empty strings if unknown).
@@ -299,22 +280,17 @@ impl Component for Toolbar {
         };
 
         // Wrap the provider pill in a Popover so the provider menu anchors to THIS
-        // pill and dismisses on outside-press/Escape.
-        let on_provider_dismiss = self.on_provider_dismiss.clone();
-        let provider_block: Element = {
-            let mut pop = Popover::new(provider_pill)
-                .open(self.provider_open)
-                .placement(Placement::Above)
-                .content(
-                    self.provider_menu
-                        .clone()
-                        .unwrap_or_else(|| rect().into_element()),
-                );
-            if let Some(h) = on_provider_dismiss {
-                pop = pop.on_dismiss(h);
-            }
-            pop.into_element()
-        };
+        // pill. Dismissal is owned by the menu content (Freya `Menu`'s
+        // `on_close`, wired by the orchestrator).
+        let provider_block: Element = Popover::new(provider_pill)
+            .open(self.provider_open)
+            .placement(Placement::Above)
+            .content(
+                self.provider_menu
+                    .clone()
+                    .unwrap_or_else(|| rect().into_element()),
+            )
+            .into_element();
 
         // ── OptimizerChip (only when optimizer_on) ────────────────────────────
         let optimizer_chip: Option<Element> = self.optimizer_on.then(|| {

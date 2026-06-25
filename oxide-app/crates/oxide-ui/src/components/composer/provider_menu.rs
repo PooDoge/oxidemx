@@ -45,6 +45,7 @@ pub struct ProviderMenu {
     on_thinking:            Option<EventHandler<Thinking>>,
     on_toggle_optimizer:    Option<EventHandler<bool>>,
     on_toggle_send_on_enter: Option<EventHandler<bool>>,
+    on_close:               Option<EventHandler<()>>,
 }
 
 impl ProviderMenu {
@@ -59,6 +60,7 @@ impl ProviderMenu {
             on_thinking: None,
             on_toggle_optimizer: None,
             on_toggle_send_on_enter: None,
+            on_close: None,
         }
     }
 
@@ -101,6 +103,13 @@ impl ProviderMenu {
         self.on_toggle_send_on_enter = Some(h.into());
         self
     }
+
+    /// Dismissal handler, threaded into the `MenuSurface` (Freya `Menu`'s
+    /// `on_close`): fires on outside-press + Escape.
+    pub fn on_close(mut self, h: impl Into<EventHandler<()>>) -> Self {
+        self.on_close = Some(h.into());
+        self
+    }
 }
 
 // ── Component impl ────────────────────────────────────────────────────────────
@@ -115,10 +124,14 @@ impl Component for ProviderMenu {
             View::Settings => self.settings_view(th, view).into_element(),
         };
 
-        MenuSurface::new(th)
+        let mut surface = MenuSurface::new(th)
             .min_w(260.)
             .max_w(320.)
-            .child(body)
+            .child(body);
+        if let Some(h) = self.on_close.clone() {
+            surface = surface.on_close(h);
+        }
+        surface
     }
 }
 

@@ -197,6 +197,8 @@ impl Component for Composer {
                     }
                     attach_open.set(false);
                 })
+                // Outside-press / Escape dismissal, via Freya `Menu`'s `on_close`.
+                .on_close(move |_| attach_open.set(false))
                 .into_element()
         };
 
@@ -212,6 +214,8 @@ impl Component for Composer {
             .on_thinking(move |t: Thinking| thinking.set(t))
             .on_toggle_optimizer(move |v: bool| optimizer.set(v))
             .on_toggle_send_on_enter(move |v: bool| send_on_enter.set(v))
+            // Outside-press / Escape dismissal, via Freya `Menu`'s `on_close`.
+            .on_close(move |_| provider_open.set(false))
             .into_element();
 
         // The Toolbar wraps each trigger (attach button / provider pill) in a
@@ -238,8 +242,6 @@ impl Component for Composer {
                     provider_open.toggle();
                     attach_open.set(false);
                 })
-                .on_attach_dismiss(move |_| attach_open.set(false))
-                .on_provider_dismiss(move |_| provider_open.set(false))
                 .on_send(move |_| {
                     let text = value.peek().clone();
                     submit(text);
