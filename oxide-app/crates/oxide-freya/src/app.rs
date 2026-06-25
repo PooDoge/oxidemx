@@ -773,4 +773,48 @@ mod tests {
         runner.render_to_file("/tmp/oxide-sidebar-search.png");
     }
 
+    // ── Snapshot: composer editor right-click menu (Task 4) ──────────────────
+
+    /// Renders the `editor_clipboard_menu` over a dark backdrop with the
+    /// `ComposerEditor`'s dark theme initialised.  The same menu appears when
+    /// the user right-clicks the composer editor (`on_secondary_down`).
+    ///
+    /// Cut / Copy / Paste / Select All must be legible over the dark surface.
+    ///
+    /// Run with:
+    ///   LIBRARY_PATH=/tmp/oxidemx-lib-links cargo test -p oxide-freya --bin oxide-freya snapshot_composer_editor_menu -- --ignored
+    fn snapshot_composer_editor_menu_app() -> Element {
+        use oxide_ui::components::editor_clipboard_menu;
+        use oxide_ui::tokens::Theme;
+        use_init_theme(dark_theme);
+        let th = Theme::default();
+        let noop = EventHandler::from(|_: ()| {});
+        rect()
+            .width(Size::fill())
+            .height(Size::fill())
+            .background(th.bg_deep())
+            .main_align(Alignment::Center)
+            .cross_align(Alignment::Center)
+            .child(
+                editor_clipboard_menu(
+                    th,
+                    noop.clone(),
+                    noop.clone(),
+                    noop.clone(),
+                    noop,
+                ),
+            )
+            .into()
+    }
+
+    #[test]
+    #[ignore = "snapshot: writes PNG to /tmp for visual review"]
+    fn snapshot_composer_editor_menu() {
+        let (mut runner, _) =
+            TestingRunner::new(snapshot_composer_editor_menu_app, (240., 200.).into(), |_| {}, 1.);
+        runner.poll_n(Duration::from_millis(5), 8);
+        runner.sync_and_update();
+        runner.render_to_file("/tmp/oxide-editor-menu.png");
+    }
+
 }
