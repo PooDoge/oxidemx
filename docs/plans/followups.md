@@ -361,3 +361,23 @@ priority order, with deferral reasons verified in-code:
 ## truthful-visible-runs backend (2026-06-20) follow-ups
 - M1: ConductorRunLauncher.launch inputs_json — non-string JSON values silently coerce to "" (run_launcher.rs ~144). Validate/reject instead (inherited; deferred as gold-plating).
 - M2: run_flow tool description (mode.rs ~203) still mentions a 'Watch button to Mission Control' card — trim/realign when the activity-UI slice lands.
+
+---
+
+## Consolidation decisions (2026-06-25)
+
+From the "consolidate + tech-debt" slice scoping:
+
+- **pill → Freya `Select`: DEFERRED (not a clean fit).** The composer model "pill" opens `ProviderMenu`
+  (`composer/provider_menu.rs`), which has **grouped models by provider** (3 collapsible sections),
+  a **thinking-level segmented control**, and a **settings sub-page** (modal view stack). Freya
+  `Select` (`freya-components/src/select.rs`) is a **flat `MenuItem` list** with no group headers and
+  no sub-views. Forcing the migration would flatten the groups + drop the settings sub-page = UX
+  regression. Revisit only if Freya `Select` gains grouped/section + sub-view support. The current
+  `Popover` + grouped-`Menu` pattern is the right abstraction.
+- **attach → Freya `Menu`: ALREADY DONE (no-op).** `AttachMenu` (`composer/attach_menu.rs`) already
+  renders on Freya `Menu` via `MenuSurface`/`MenuRow` — the same primitives `menu/text_menu.rs` uses.
+  No migration needed.
+- **Popover entrance animation: DONE** (commits `1e3dbb6`/`dbbc92b`). Re-added a saga-safe fade via a
+  per-open-mounted `PopoverOverlay` sub-component (`OnCreation::Run`, composed `gated_opacity*fade`).
+  Plays on every open; cannot get stuck at 0. Fade *smoothness* pending a live visual check.
