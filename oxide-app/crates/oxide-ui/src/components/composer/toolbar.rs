@@ -12,6 +12,7 @@ use freya::animation::*;
 use freya::prelude::*;
 
 use crate::tokens::Theme;
+use crate::components::menu::{Placement, Popover};
 use super::config::{Thinking, model_by_id};
 use super::icons::icon;
 
@@ -69,10 +70,19 @@ pub struct Toolbar {
     pub line_count:    usize,
     pub send:          SendState,
     pub attach_open:   bool,
+    pub provider_open: bool,
     pub theme:         Theme,
+
+    // Menu content (built by the orchestrator) + per-trigger dismiss handlers.
+    // The Toolbar wraps each trigger in a `Popover` so each menu anchors to ITS
+    // own button and dismisses on outside-press/Escape.
+    attach_menu:   Option<Element>,
+    provider_menu: Option<Element>,
 
     on_attach_toggle:   Option<EventHandler<()>>,
     on_provider_toggle: Option<EventHandler<()>>,
+    on_attach_dismiss:   Option<EventHandler<()>>,
+    on_provider_dismiss: Option<EventHandler<()>>,
     on_send:            Option<EventHandler<()>>,
 }
 
@@ -85,9 +95,14 @@ impl Toolbar {
             line_count:         1,
             send:               SendState::Disabled,
             attach_open:        false,
+            provider_open:      false,
             theme,
+            attach_menu:        None,
+            provider_menu:      None,
             on_attach_toggle:   None,
             on_provider_toggle: None,
+            on_attach_dismiss:   None,
+            on_provider_dismiss: None,
             on_send:            None,
         }
     }
@@ -119,6 +134,31 @@ impl Toolbar {
 
     pub fn attach_open(mut self, v: bool) -> Self {
         self.attach_open = v;
+        self
+    }
+
+    pub fn provider_open(mut self, v: bool) -> Self {
+        self.provider_open = v;
+        self
+    }
+
+    pub fn attach_menu(mut self, menu: Option<Element>) -> Self {
+        self.attach_menu = menu;
+        self
+    }
+
+    pub fn provider_menu(mut self, menu: Option<Element>) -> Self {
+        self.provider_menu = menu;
+        self
+    }
+
+    pub fn on_attach_dismiss(mut self, h: impl Into<EventHandler<()>>) -> Self {
+        self.on_attach_dismiss = Some(h.into());
+        self
+    }
+
+    pub fn on_provider_dismiss(mut self, h: impl Into<EventHandler<()>>) -> Self {
+        self.on_provider_dismiss = Some(h.into());
         self
     }
 
@@ -185,6 +225,25 @@ impl Component for Toolbar {
             }
         };
 
+        // Wrap the attach button in a Popover so the attach menu anchors to THIS
+        // button and dismisses on outside-press/Escape. The Popover renders the
+        // anchor (the button) always and shows `content` adjacent only when open.
+        let on_attach_dismiss = self.on_attach_dismiss.clone();
+        let attach_block: Element = {
+            let mut pop = Popover::new(attach_btn)
+                .open(self.attach_open)
+                .placement(Placement::Above)
+                .content(
+                    self.attach_menu
+                        .clone()
+                        .unwrap_or_else(|| rect().into_element()),
+                );
+            if let Some(h) = on_attach_dismiss {
+                pop = pop.on_dismiss(h);
+            }
+            pop.into_element()
+        };
+
         // ── ProviderPill ─────────────────────────────────────────────────────
         // Resolve model from the registry (fall back to empty strings if unknown).
         let model_name = model_by_id(&self.model_id)
@@ -237,6 +296,24 @@ impl Component for Toolbar {
                 .into_element()
         } else {
             pill_inner.into_element()
+        };
+
+        // Wrap the provider pill in a Popover so the provider menu anchors to THIS
+        // pill and dismisses on outside-press/Escape.
+        let on_provider_dismiss = self.on_provider_dismiss.clone();
+        let provider_block: Element = {
+            let mut pop = Popover::new(provider_pill)
+                .open(self.provider_open)
+                .placement(Placement::Above)
+                .content(
+                    self.provider_menu
+                        .clone()
+                        .unwrap_or_else(|| rect().into_element()),
+                );
+            if let Some(h) = on_provider_dismiss {
+                pop = pop.on_dismiss(h);
+            }
+            pop.into_element()
         };
 
         // ── OptimizerChip (only when optimizer_on) ────────────────────────────
@@ -344,8 +421,8 @@ impl Component for Toolbar {
             .spacing(6.)
             .width(Size::fill())
             .padding(Gaps::new(6., 12., 6., 10.))
-            .child(attach_btn)
-            .child(provider_pill);
+            .child(attach_block)
+            .child(provider_block);
 
         if let Some(chip) = optimizer_chip {
             row = row.child(chip);

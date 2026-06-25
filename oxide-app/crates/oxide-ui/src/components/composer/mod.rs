@@ -184,35 +184,11 @@ impl Component for Composer {
             !attachments.read().is_empty(),
             working,
         );
-        let toolbar: Element = {
-            let mut submit = submit.clone();
-            let value = value.clone();
-            Toolbar::new(th)
-                .model_id(model_id.read().clone())
-                .thinking(*thinking.read())
-                .optimizer_on(*optimizer.read())
-                .line_count(line_count)
-                .send(send)
-                .attach_open(*attach_open.read())
-                .on_attach_toggle(move |_| {
-                    attach_open.toggle();
-                    provider_open.set(false);
-                })
-                .on_provider_toggle(move |_| {
-                    provider_open.toggle();
-                    attach_open.set(false);
-                })
-                .on_send(move |_| {
-                    let text = value.peek().clone();
-                    submit(text);
-                })
-                .into_element()
-        };
-
-        // ── Floating menus, anchored above the toolbar via `Attached.top()` ───
-        // The menu is the `Attached` child; it floats above the toolbar region
-        // without displacing the card's vertical layout.
-        let attach_menu: Option<Element> = attach_open.read().then(|| {
+        // ── Menus, anchored to their own trigger via the Toolbar's `Popover`s ──
+        // Built unconditionally: each `Popover.open(flag)` (inside the Toolbar)
+        // controls its own visibility, so the menus no longer gate on the open
+        // flag here. Their handlers still `set(false)` on pick/select.
+        let attach_menu: Element = {
             let mut attachments = attachments;
             AttachMenu::new(th)
                 .on_pick(move |id: &'static str| {
@@ -222,32 +198,54 @@ impl Component for Composer {
                     attach_open.set(false);
                 })
                 .into_element()
-        });
+        };
 
-        let provider_menu: Option<Element> = provider_open.read().then(|| {
-            ProviderMenu::new(th)
-                .selected_id(model_id.read().clone())
+        let provider_menu: Element = ProviderMenu::new(th)
+            .selected_id(model_id.read().clone())
+            .thinking(*thinking.read())
+            .optimizer(*optimizer.read())
+            .send_on_enter(*send_on_enter.read())
+            .on_select_model(move |id: &'static str| {
+                model_id.set(id.to_string());
+                provider_open.set(false);
+            })
+            .on_thinking(move |t: Thinking| thinking.set(t))
+            .on_toggle_optimizer(move |v: bool| optimizer.set(v))
+            .on_toggle_send_on_enter(move |v: bool| send_on_enter.set(v))
+            .into_element();
+
+        // The Toolbar wraps each trigger (attach button / provider pill) in a
+        // `Popover` driven by these open-flags + dismiss handlers, so each menu
+        // anchors to ITS button and dismisses on outside-press/Escape.
+        let toolbar_block: Element = {
+            let mut submit = submit.clone();
+            let value = value.clone();
+            Toolbar::new(th)
+                .model_id(model_id.read().clone())
                 .thinking(*thinking.read())
-                .optimizer(*optimizer.read())
-                .send_on_enter(*send_on_enter.read())
-                .on_select_model(move |id: &'static str| {
-                    model_id.set(id.to_string());
+                .optimizer_on(*optimizer.read())
+                .line_count(line_count)
+                .send(send)
+                .attach_open(*attach_open.read())
+                .provider_open(*provider_open.read())
+                .attach_menu(Some(attach_menu))
+                .provider_menu(Some(provider_menu))
+                .on_attach_toggle(move |_| {
+                    attach_open.toggle();
                     provider_open.set(false);
                 })
-                .on_thinking(move |t: Thinking| thinking.set(t))
-                .on_toggle_optimizer(move |v: bool| optimizer.set(v))
-                .on_toggle_send_on_enter(move |v: bool| send_on_enter.set(v))
+                .on_provider_toggle(move |_| {
+                    provider_open.toggle();
+                    attach_open.set(false);
+                })
+                .on_attach_dismiss(move |_| attach_open.set(false))
+                .on_provider_dismiss(move |_| provider_open.set(false))
+                .on_send(move |_| {
+                    let text = value.peek().clone();
+                    submit(text);
+                })
                 .into_element()
-        });
-
-        // Toolbar wrapped so the open menu floats above it. Only one of the two
-        // menus is open at a time (the toggles are mutually exclusive), so a
-        // single `Attached` child slot is enough.
-        let open_menu: Option<Element> = attach_menu.or(provider_menu);
-        let toolbar_block: Element = Attached::new(toolbar)
-            .top()
-            .maybe_child(open_menu)
-            .into_element();
+        };
 
         // ── Card: vertical stack ──────────────────────────────────────────────
         // Content::Flex is REQUIRED — the editor body uses Size::px/Inner but the

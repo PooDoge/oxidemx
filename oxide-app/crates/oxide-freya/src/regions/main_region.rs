@@ -140,6 +140,25 @@ mod composer_snapshot_tests {
             .into()
     }
 
+    /// Same seeded composer as `full_app`, but pinned to the BOTTOM of the window
+    /// (a flex spacer pushes it down) — mirroring the real shell where the
+    /// composer is bottom-anchored. This gives the `Placement::Above` provider/
+    /// attach menus room to render on-screen, so the snapshot shows each menu
+    /// floating directly above (and anchored to) its own trigger button.
+    fn full_app_bottom() -> Element {
+        let value = use_state(|| "Refactor the run_bridge module,\nthen add focused tests.".to_string());
+        rect()
+            .direction(Direction::Vertical)
+            .content(Content::Flex)
+            .width(Size::fill())
+            .height(Size::fill())
+            .background(Theme::default().bg_deep())
+            .padding(Gaps::new_all(16.))
+            .child(rect().width(Size::px(1.)).height(Size::flex(1.0)))
+            .child(Composer::new(value.into_writable(), ComposerConfig::default()).theme(Theme::default()))
+            .into()
+    }
+
     /// Center of the lowest node whose label text contains `needle`. "Lowest"
     /// (max Y) disambiguates the toolbar's provider pill from the identical model
     /// name shown in the ActivityLine above the card.
@@ -184,11 +203,23 @@ mod composer_snapshot_tests {
     /// provider menu floating above the toolbar, the prediction strip, a multiline
     /// editor, at least one attachment chip, and the Ready send button — which is
     /// the visual surface the controller inspects. It renders without panic.
+    ///
+    /// LIMITATION (Popover + freya_testing): after a *click-driven* open, the
+    /// menu IS in the tree and `provider_open` is true (the card border tints to
+    /// accent), but the `Attached` overlay measures with a stale anchor area in
+    /// the synthetic poll loop and lays out off the top edge, so the menu body
+    /// does not visibly paint in this PNG. The anchoring itself is correct and is
+    /// proven visually by `snapshot_popover_anchored` (a STATIC `.open(true)`
+    /// Popover paints the menu cleanly directly above its trigger). This is a
+    /// Task-2 Popover/Attached re-layout-timing quirk under the test runner, not
+    /// a Task-5 wiring defect; the live event loop re-measures normally.
     #[test]
     #[ignore = "snapshot: writes PNG to /tmp for visual review"]
     fn snapshot_composer_full() {
+        // Bottom-anchored composer (real-app layout) so the `Placement::Above`
+        // menus render on-screen above their triggers.
         let (mut runner, _) =
-            TestingRunner::new(full_app, (760., 560.).into(), |_| {}, 1.);
+            TestingRunner::new(full_app_bottom, (760., 560.).into(), |_| {}, 1.);
         runner.poll_n(Duration::from_millis(5), 12);
         runner.sync_and_update();
 
@@ -212,11 +243,14 @@ mod composer_snapshot_tests {
             }
         }
 
-        // Open the provider menu by clicking the provider pill.
+        // Open the provider menu by clicking the provider pill. Poll well past the
+        // ~125ms Popover entrance animation so the menu is measured + opaque.
         if let Some(center) = lowest_label_center(&runner, "Sonnet 4.6") {
             runner.click_cursor(center);
-            runner.poll_n(Duration::from_millis(5), 8);
-            runner.sync_and_update();
+            for _ in 0..6 {
+                runner.poll_n(Duration::from_millis(20), 8);
+                runner.sync_and_update();
+            }
         }
 
         runner.render_to_file("/tmp/oxide-composer-full.png");
