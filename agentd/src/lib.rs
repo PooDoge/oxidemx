@@ -2,6 +2,7 @@
 #![forbid(unsafe_code)]
 
 pub mod agent;
+pub mod attachments;
 pub mod connector;
 pub mod conversations_index;
 pub mod error;
