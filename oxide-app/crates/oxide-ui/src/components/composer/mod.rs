@@ -17,10 +17,7 @@ pub mod provider_menu;
 pub mod toolbar;
 pub use activity_line::ActivityLine;
 pub use attach_menu::AttachMenu;
-pub use attachment::{Attachment, AttachSource, AttachmentChip, AttachmentRow, ATTACH_SOURCES, sample_attachment};
-// NOTE: AttachmentRow is no longer used inside the Composer orchestrator (chips live
-// in the Toolbar strip). It remains exported for any external callers that may
-// reference it from tests or other modules.
+pub use attachment::{Attachment, AttachSource, AttachmentChip, ATTACH_SOURCES, sample_attachment};
 pub use attachment_viewer::AttachmentViewer;
 pub use config::{ComposerConfig, Model, Prediction, ProviderId, Thinking, DEFAULT_MODEL_ID, MODELS, model_by_id};
 pub use editor::ComposerEditor;
@@ -74,6 +71,22 @@ impl Composer {
     pub fn on_submit(mut self, handler: impl Into<EventHandler<String>>) -> Self {
         self.on_submit = Some(handler.into());
         self
+    }
+}
+
+/// Pure helper: given the currently-viewed attachment index and the index of the
+/// attachment that was just removed, return the new viewing state.
+///
+/// - `viewing == Some(i)` → the viewed item was removed → `None`
+/// - `viewing == Some(v)` where `v > i` → items shifted down → `Some(v - 1)`
+/// - `viewing == Some(v)` where `v < i` → unaffected → `Some(v)`
+/// - `viewing == None` → still `None`
+pub fn adjust_viewing(viewing: Option<usize>, removed: usize) -> Option<usize> {
+    match viewing {
+        None => None,
+        Some(v) if v == removed => None,
+        Some(v) if v > removed  => Some(v - 1),
+        Some(v)                 => Some(v),
     }
 }
 
@@ -241,13 +254,14 @@ impl Component for Composer {
                 .provider_menu(Some(provider_menu))
                 .attachments(attachments.read().clone())
                 .on_attach_remove(move |i: usize| {
-                    let mut w = attachments_remove.write();
-                    if i < w.len() {
-                        w.remove(i);
-                    }
-                    if viewing_remove.peek().is_some_and(|v| v == i) {
-                        viewing_remove.set(None);
-                    }
+                    {
+                        let mut w = attachments_remove.write();
+                        if i < w.len() {
+                            w.remove(i);
+                        }
+                    } // drop write guard before touching `viewing_remove`
+                    let next = adjust_viewing(*viewing_remove.peek(), i);
+                    viewing_remove.set(next);
                 })
                 .on_attach_view(move |i: usize| viewing_view.set(Some(i)))
                 .on_attach_toggle(move |_| {
@@ -316,6 +330,14 @@ impl Component for Composer {
 mod composer_tests {
     use super::*;
     use freya_testing::prelude::*;
+
+    #[test]
+    fn viewing_index_adjusts_on_remove() {
+        assert_eq!(adjust_viewing(Some(2), 2), None);     // viewed item removed
+        assert_eq!(adjust_viewing(Some(3), 1), Some(2));  // lower removed → shift down
+        assert_eq!(adjust_viewing(Some(1), 3), Some(1));  // higher removed → unchanged
+        assert_eq!(adjust_viewing(None, 0), None);
+    }
 
     /// Step 1 (brief): mount the Composer; assert the send button (send glyph) and
     /// the activity line both render.

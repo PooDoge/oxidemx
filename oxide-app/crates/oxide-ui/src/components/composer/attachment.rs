@@ -3,7 +3,6 @@
 //! `ATTACH_SOURCES` lists the six attachment types a user can pick from.
 //! `sample_attachment(source_id)` returns a pre-filled `Attachment` for each.
 //! `AttachmentChip` renders a single tone-tinted pill with a remove button.
-//! `AttachmentRow` renders a horizontal row of chips (caller only emits it when non-empty).
 use freya::prelude::*;
 use crate::tokens::{Theme, Tone};
 use super::icons::icon;
@@ -316,61 +315,6 @@ impl Component for AttachmentChip {
             .child(text_col)
             .child(remove_btn)
             .into_element()
-    }
-}
-
-// ── AttachmentRow ─────────────────────────────────────────────────────────────
-
-/// A horizontal row of `AttachmentChip`s.
-///
-/// The caller is responsible for only rendering this when `items` is non-empty.
-///
-/// Builder usage:
-/// ```ignore
-/// AttachmentRow::new(attachments, theme)
-///     .on_remove(|idx: usize| println!("remove attachment at {idx}"))
-/// ```
-#[derive(Clone, PartialEq)]
-pub struct AttachmentRow {
-    items:     Vec<Attachment>,
-    theme:     Theme,
-    on_remove: Option<EventHandler<usize>>,
-}
-
-impl AttachmentRow {
-    pub fn new(items: Vec<Attachment>, theme: Theme) -> Self {
-        Self { items, theme, on_remove: None }
-    }
-
-    pub fn on_remove(mut self, handler: impl Into<EventHandler<usize>>) -> Self {
-        self.on_remove = Some(handler.into());
-        self
-    }
-}
-
-impl Component for AttachmentRow {
-    fn render(&self) -> impl IntoElement {
-        let th = self.theme;
-
-        let mut row = rect()
-            .direction(Direction::Horizontal)
-            .cross_align(Alignment::Center)
-            .spacing(6.)
-            .width(Size::fill())
-            .padding(Gaps::new(6., 12., 6., 12.));
-
-        for (idx, att) in self.items.iter().enumerate() {
-            let handler = self.on_remove.clone();
-            let chip = AttachmentChip::new(att.clone(), th);
-            let chip = if let Some(h) = handler {
-                chip.on_remove(move |_: ()| h.call(idx))
-            } else {
-                chip
-            };
-            row = row.child(chip);
-        }
-
-        row
     }
 }
 
