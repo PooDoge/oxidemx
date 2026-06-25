@@ -4,6 +4,12 @@
 //! This component renders ONLY the menu body. The trigger/anchor is supplied by
 //! the Toolbar (Task 11) via `Attached`; do not build the anchor here.
 //!
+//! Refactored (Task 4) onto shared menu primitives:
+//! - `MenuSurface` replaces the bespoke shadow-wrapper + `Menu::new().theme(...)`.
+//!   Width now hugs content within `[min_w=200, max_w=280]` (bug #3 fixed).
+//! - `MenuRow` replaces the bespoke `MenuButton` + `rect().content(Content::Flex)...`
+//!   row layout (bug #1: dark hover from `menu_theme`).
+//!
 //! Builder usage:
 //! ```ignore
 //! fn app() -> impl IntoElement {
@@ -15,15 +21,15 @@
 use freya::prelude::*;
 
 use crate::tokens::Theme;
+use crate::components::menu::{MenuRow, MenuSurface};
 use super::attachment::ATTACH_SOURCES;
-use super::icons::icon;
 
 // ── AttachMenu ────────────────────────────────────────────────────────────────
 
 /// Floating menu body listing the six attachment sources.
 ///
-/// Renders a `Menu` styled to the design spec: radius 14, `panel()` background,
-/// deep drop shadow. Each row shows the source icon, label, and faint hint.
+/// Renders a `MenuSurface` styled to the design spec with deep drop shadow.
+/// Each row shows the source icon, label, and faint hint via `MenuRow`.
 /// Fires `on_pick(source.id)` when the user selects a row.
 #[derive(Clone, PartialEq)]
 pub struct AttachMenu {
@@ -46,79 +52,35 @@ impl Component for AttachMenu {
     fn render(&self) -> impl IntoElement {
         let th = self.theme;
 
-        // Build menu items for each attach source.
-        // Each row: icon (16 px) | label (text) + hint (subtext) stacked.
-        // The label column uses Size::flex so the row rect needs Content::Flex.
-        let items: Vec<Element> = ATTACH_SOURCES.iter().map(|source| {
+        // Build one MenuRow per attach source.
+        let mut rows: Vec<Element> = Vec::new();
+        for source in ATTACH_SOURCES.iter() {
             let on_pick = self.on_pick.clone();
             let id = source.id;
 
-            // Label + hint stacked vertically
-            let text_col = rect()
-                .direction(Direction::Vertical)
-                .width(Size::flex(1.0))
-                .child(
-                    label()
-                        .text(source.label)
-                        .font_size(13.)
-                        .color(th.text())
-                        .max_lines(1_usize),
-                )
-                .child(
-                    label()
-                        .text(source.hint)
-                        .font_size(11.)
-                        .color(th.subtext())
-                        .max_lines(1_usize),
-                )
-                .into_element();
-
-            // Row: icon + text_col side by side
-            let row = rect()
-                .direction(Direction::Horizontal)
-                // Content::Flex required — text_col has Size::flex(1.0)
-                .content(Content::Flex)
-                .cross_align(Alignment::Center)
-                .spacing(10.)
-                .width(Size::fill())
-                .child(icon(source.icon, 16., th.subtext_hi()))
-                .child(text_col)
-                .into_element();
-
-            MenuButton::new()
-                .on_press(move |_: Event<PressEventData>| {
+            let row = MenuRow::new(th)
+                .icon(Some(source.icon))
+                .title(source.label)
+                .subtitle(Some(source.hint.to_string()))
+                .on_press(move |_| {
                     if let Some(h) = &on_pick {
                         h.call(id);
                     }
                 })
-                .child(row)
-                .into_element()
-        }).collect();
+                .into_element();
 
-        // The MenuContainer's theme only controls the shadow *color*; the
-        // offsets (x, y, blur, spread) are hardcoded to (0, 4, 10, 0) inside
-        // freya's MenuContainer render.  To achieve the spec's "0 18 44" deep
-        // shadow we wrap the Menu in a rect that carries the full shadow, and
-        // suppress the container's own shadow by setting its color to
-        // transparent.  The corner_radius of 14 IS exposed via the container
-        // theme, so it is threaded through the partial.
-        let container_theme = MenuContainerThemePartial::new()
-            .background(th.panel())
-            .border_fill(th.hairline())
-            .shadow(Color::TRANSPARENT)
-            .corner_radius(CornerRadius::new_all(14.));
+            rows.push(row);
+        }
 
-        // Wrapper provides the deep drop-shadow (spec: 0 18 44 shadow_deep).
-        // corner_radius matches the menu so the shadow clips correctly.
-        rect()
-            .corner_radius(CornerRadius::new_all(14.))
-            .shadow((0.0_f32, 18.0_f32, 44.0_f32, 0.0_f32, th.shadow_deep()))
-            .content(Content::fit())
-            .child(
-                Menu::new()
-                    .theme(container_theme)
-                    .children(items),
-            )
+        let body = rect()
+            .direction(Direction::Vertical)
+            .children(rows)
+            .into_element();
+
+        MenuSurface::new(th)
+            .min_w(200.)
+            .max_w(280.)
+            .child(body)
     }
 }
 
@@ -159,5 +121,26 @@ mod tests {
             });
             assert!(found.is_some(), "Missing label: {label_text}");
         }
+    }
+
+    /// Snapshot: renders the attach menu at 760px canvas width (menu stays narrow).
+    /// Run with: LIBRARY_PATH=/tmp/oxidemx-lib-links cargo test -p oxide-ui composer::attach_menu::tests::snapshot_attach_menu -- --ignored
+    #[test]
+    #[ignore = "snapshot: writes PNG to /tmp for visual review"]
+    fn snapshot_attach_menu() {
+        fn app() -> impl IntoElement {
+            rect()
+                .background(Theme::default().bg_deep())
+                .padding(Gaps::new_all(16.))
+                .content(Content::fit())
+                .child(
+                    AttachMenu::new(Theme::default())
+                        .on_pick(|id| { let _ = id; }),
+                )
+        }
+        let (mut runner, _) =
+            TestingRunner::new(app, (760., 500.).into(), |_| {}, 1.);
+        runner.sync_and_update();
+        runner.render_to_file("/tmp/oxide-attach-menu.png");
     }
 }

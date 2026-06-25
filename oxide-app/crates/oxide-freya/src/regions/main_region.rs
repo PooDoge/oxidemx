@@ -337,4 +337,34 @@ mod menu_snapshot_tests {
         runner.sync_and_update();
         runner.render_to_file("/tmp/oxide-popover.png");
     }
+
+    /// Renders AttachMenu on a 760px-wide dark canvas.
+    /// The menu must be NARROW (content width ~200–280px, not 760px canvas-wide).
+    ///
+    /// Run with:
+    ///   LIBRARY_PATH=/tmp/oxidemx-lib-links cargo test -p oxide-freya --bin oxide-freya snapshot_attach_menu -- --ignored
+    #[test]
+    #[ignore = "snapshot: writes PNG to /tmp for visual review"]
+    fn snapshot_attach_menu() {
+        use oxide_ui::components::composer::AttachMenu;
+
+        fn app() -> Element {
+            let th = Theme::default();
+            rect()
+                .background(th.bg_deep())
+                .padding(Gaps::new_all(16.))
+                .content(Content::fit())
+                .child(
+                    AttachMenu::new(th)
+                        .on_pick(|_id| {}),
+                )
+                .into()
+        }
+
+        let (mut runner, _) =
+            TestingRunner::new(app, (760., 500.).into(), |_| {}, 1.);
+        runner.poll_n(Duration::from_millis(5), 8);
+        runner.sync_and_update();
+        runner.render_to_file("/tmp/oxide-attach-menu.png");
+    }
 }
