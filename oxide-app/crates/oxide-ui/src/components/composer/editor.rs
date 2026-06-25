@@ -119,6 +119,15 @@ impl Component for ComposerEditor {
         let mut content_h = use_state(|| 0.0_f32);
         let mut value = self.value.clone();
 
+        // ScrollController for the inner body: drives scroll-to-End when the editor
+        // content overflows the cap and the user is typing (follow-the-caret).
+        // Default position is End so the initial render of a pre-filled editor
+        // also shows the bottom of the content.
+        let mut scroll_ctrl = use_scroll_controller(|| ScrollConfig {
+            default_vertical_position: ScrollPosition::End,
+            default_horizontal_position: ScrollPosition::Start,
+        });
+
         // Pull external edits (e.g. the value was cleared after a submit) back into
         // the editor so the two stay in sync in both directions.
         if *value.read() != editable.editor().read().to_string() {
@@ -160,6 +169,14 @@ impl Component for ComposerEditor {
             let text = editable.editor().read().to_string();
             if *value.peek() != text {
                 *value.write() = text;
+            }
+
+            // Follow the caret: when the body is scrollable (content taller than
+            // cap), scroll to End so the current line stays visible after every
+            // keystroke.  We only do this when scrollable to avoid disturbing
+            // short editors that never overflow.
+            if *content_h.peek() > cap {
+                scroll_ctrl.scroll_to(ScrollPosition::End, Direction::Vertical);
             }
 
             // SEAM (Slice 2): live markdown-on-space rendering + ghost inline
@@ -263,7 +280,7 @@ impl Component for ComposerEditor {
                 Size::Inner
             })
             .child(
-                ScrollView::new()
+                ScrollView::new_controlled(scroll_ctrl)
                     .width(Size::fill())
                     .height(Size::fill())
                     .show_scrollbar(false)

@@ -65,12 +65,18 @@ mod editor_snapshot_tests {
     use oxide_ui::components::composer::{ComposerConfig, ComposerEditor};
 
     fn snapshot_editor_app() -> Element {
-        // Seed multi-line content so the snapshot exercises real newlines, the
-        // accent caret, and the auto-grown body.
+        // Seed content that exceeds the default 5-line cap (cap_px = 121 px) so
+        // the editor is in the scrollable state and the scroll-to-End fix is
+        // exercised.  8 lines ensures content_h > cap.
         let value = use_state(|| {
             "Summarize the changes in this branch,\n\
              then open a PR against main.\n\
-             Use the conventional-commit style."
+             Use the conventional-commit style.\n\
+             Link the relevant issue numbers.\n\
+             Add a short description for the changelog.\n\
+             Run the full test suite before pushing.\n\
+             Squash fixup commits before requesting review.\n\
+             Tag the release once the PR is merged."
                 .to_string()
         });
         rect()
@@ -90,6 +96,10 @@ mod editor_snapshot_tests {
     }
 
     /// Renders the multiline `ComposerEditor` with seeded text to a PNG.
+    /// The editor has 8 lines (> the default 5-line cap) so it is in the
+    /// scrollable state.  We click to focus then type a character so that
+    /// the `on_key_down` path fires `scroll_to(End)` — the rendered image
+    /// should show the LAST line of the seeded text, confirming caret-follow.
     /// Run with:
     ///   cargo test -p oxide-freya --bin oxide-freya snapshot_editor_multiline -- --ignored
     #[test]
@@ -97,7 +107,14 @@ mod editor_snapshot_tests {
     fn snapshot_editor_multiline() {
         let (mut runner, _) =
             TestingRunner::new(snapshot_editor_app, (760., 240.).into(), |_| {}, 1.);
+        // Let the initial layout settle.
         runner.poll_n(Duration::from_millis(5), 12);
+        runner.sync_and_update();
+        // Click the editor body to focus it, then type a space so that
+        // `on_key_down` fires and triggers scroll_to(End, Vertical).
+        runner.press_cursor((100., 60.));
+        runner.release_cursor((100., 60.));
+        runner.write_text(" ");
         runner.sync_and_update();
         runner.render_to_file("/tmp/oxide-composer-editor.png");
     }
