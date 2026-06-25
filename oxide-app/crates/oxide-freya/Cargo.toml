@@ -7,6 +7,12 @@ edition = "2021"
 name = "oxide-freya"
 path = "src/main.rs"
 
+[features]
+# Opt-in Freya devtools (real-time component-tree inspector inside the window).
+# Run with: LIBRARY_PATH=/tmp/oxidemx-lib-links cargo run -p oxide-freya --bin oxide-freya --features devtools
+# Kept off by default so the normal build is unaffected.
+devtools = ["freya/devtools"]
+
 [dependencies]
 freya = { workspace = true }
 oxide-client = { path = "../oxide-client" }
