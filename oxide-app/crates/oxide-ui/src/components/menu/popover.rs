@@ -29,6 +29,23 @@
 //! `MenuSurface::on_close → Menu::on_close`. The Popover therefore only renders
 //! the anchor + (when open) the animated content; the caller wires dismissal via
 //! the menu's `on_close`.
+//!
+//! ## Entrance animation — why `OnCreation::Run`, not `OnChange::Rerun`
+//!
+//! The overlay subtree is only mounted while `open=true`. Mounting IS the open
+//! event. `OnCreation::Run` fires on mount and runs the tween from 0→1.
+//! Because the tween factory does NOT read `open()`, there is no reactive
+//! dependency and the animation cannot get stuck at its start frame.
+//!
+//! The prior breakage used `OnChange::Rerun` with `open()` in the factory.
+//! On click-driven open the tween restarted at frame-0 (opacity 0) but the
+//! overlay rect rendered before the animation clock advanced, leaving menus
+//! invisible. `OnCreation::Run` sidesteps this entirely.
+//!
+//! The fade composes with `gated_opacity` (measurement gate) as:
+//!   `final_opacity = gated_opacity * fade_value`
+//! Both must be 1.0 for content to be visible.
+use freya::animation::*;
 use freya::prelude::*;
 
 /// Where the popover content is placed relative to its anchor.
@@ -130,6 +147,21 @@ impl Component for Popover {
         let measured = content_size().is_some();
         let gated_opacity = if measured { 1.0_f32 } else { 0.0_f32 };
 
+        // Entrance fade: plays once when the overlay mounts (open event).
+        // `OnCreation::Run` fires on mount — mounting IS the open event because
+        // the overlay subtree is only built while `open=true`.  No `OnChange::Rerun`
+        // + `open()` dependency needed (that pattern caused the stuck-at-0 saga bug).
+        // Hoisted here (unconditional hook call) so Freya's hook rules are satisfied;
+        // `fade_value` is captured into the overlay closure below.
+        let entrance_anim = use_animation(|conf| {
+            conf.on_creation(OnCreation::Run);
+            AnimNum::new(0.0_f32, 1.0_f32)
+                .time(120)
+                .ease(Ease::Out)
+                .function(Function::Quart)
+        });
+        let fade_value = entrance_anim.get().value();
+
         let attached_position = match effective_placement {
             Placement::Above => AttachedPosition::Top,
             Placement::Below => AttachedPosition::Bottom,
@@ -137,7 +169,10 @@ impl Component for Popover {
 
         let content_el = self.content.clone();
 
-        // The overlay content rect: opacity-gated until measured, then fully opaque.
+        // The overlay content rect: opacity-gated until measured, then fades in.
+        // `final_opacity = gated_opacity * fade_value` — both gates compose:
+        //   gated_opacity: 0 until measured, then 1 (prevents unsized flash)
+        //   fade_value: 0→1 over 120ms on mount (entrance animation)
         // Dismissal lives INSIDE this subtree (Freya `Menu`'s `on_close`, via
         // `MenuSurface`), so it only exists while the menu is open and the
         // opening click can never reach it to self-close.
@@ -145,7 +180,7 @@ impl Component for Popover {
             let content = content_el.clone().unwrap();
             rect()
                 .layer(Layer::Overlay)
-                .opacity(gated_opacity)
+                .opacity(gated_opacity * fade_value)
                 .on_sized(move |e: Event<SizedEventData>| {
                     content_size.set_if_modified(Some(e.area.size));
                 })
