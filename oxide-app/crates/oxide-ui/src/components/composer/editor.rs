@@ -288,18 +288,25 @@ impl Component for ComposerEditor {
                         th,
                         EventHandler::from(move |_: ()| {
                             cut_selection(&mut ed_cut, &mut v_c);
+                            // Opening the context menu moves a11y focus onto the
+                            // menu overlay; restore it to the editor so the user
+                            // can keep typing (and Enter-submit) afterwards.
+                            a11y_id.request_focus();
                         }),
                         EventHandler::from(move |_: ()| {
                             copy_selection(&ed_copy);
+                            a11y_id.request_focus();
                         }),
                         EventHandler::from(move |_: ()| {
                             // Image-aware paste: same precedence as Ctrl+V.
                             if !dispatch_clipboard_image(&paste_att) {
                                 paste_text(&mut ed_paste, &mut v_p);
                             }
+                            a11y_id.request_focus();
                         }),
                         EventHandler::from(move |_: ()| {
                             select_all(&mut ed_sel);
+                            a11y_id.request_focus();
                         }),
                     ),
                 );
@@ -372,9 +379,20 @@ impl Component for ComposerEditor {
 
         // Placeholder overlay: only the placeholder label is shown when empty; it
         // sits in the same box (a Stack) so the caret still renders over it.
+        //
+        // Click-to-focus: the placeholder label sits ON TOP of the paragraph when
+        // the editor is empty, so a single click on an empty composer lands on the
+        // label (no focus handler) instead of the paragraph's `on_focus_press` —
+        // leaving the editor unfocusable by mouse (only Tab worked). Catching the
+        // press on the outer box focuses the paragraph regardless of which child is
+        // hit (paragraph clicks stop propagation and focus themselves; placeholder
+        // / empty-area clicks bubble here).
         rect()
             .width(Size::fill())
             .height(Size::px(body_height))
+            .on_press(move |_: Event<PressEventData>| {
+                a11y_id.request_focus();
+            })
             .child(
                 ScrollView::new_controlled(scroll_ctrl)
                     .width(Size::fill())
