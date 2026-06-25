@@ -236,7 +236,7 @@ impl Component for TextInput {
             .height(Size::px(36.))
             .corner_radius(CornerRadius::new_all(8.))
             .background(th.surface())
-            .border(Border::new().fill(th.surface_max()).width(1.))
+            .border(Border::new().fill(if focus() != Focus::Not { th.accent() } else { th.surface_max() }).width(1.))
             .padding(Gaps::new(0., 10., 0., 10.))
             .main_align(Alignment::Center)
             .on_secondary_down(on_secondary_down)
