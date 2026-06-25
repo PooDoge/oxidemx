@@ -471,4 +471,36 @@ mod tests {
         runner.sync_and_update();
         runner.render_to_file("/tmp/oxide-chip-solo.png");
     }
+
+    // ── Snapshot: AttachmentViewer info card (T3) ─────────────────────────────
+
+    fn snapshot_viewer_infocard_app() -> Element {
+        use oxide_ui::components::composer::{sample_attachment, AttachmentViewer};
+        use oxide_ui::tokens::Theme;
+        let th = Theme::default();
+        let att = sample_attachment("repo").unwrap();
+        rect()
+            .background(th.bg_deep())
+            .width(Size::fill())
+            .height(Size::fill())
+            .main_align(Alignment::Center)
+            .cross_align(Alignment::Center)
+            .child(
+                AttachmentViewer::new(att, th)
+                    .on_dismiss(|()| {}),
+            )
+            .into()
+    }
+
+    /// Info-card viewer for a File attachment on a dark backdrop.
+    /// Run with: cargo test -p oxide-freya snapshot_viewer_infocard -- --ignored --nocapture
+    #[test]
+    #[ignore = "snapshot: writes PNG to /tmp for visual review"]
+    fn snapshot_viewer_infocard() {
+        let (mut runner, _) =
+            TestingRunner::new(snapshot_viewer_infocard_app, (600., 400.).into(), |_| {}, 1.);
+        runner.poll_n(Duration::from_millis(5), 12);
+        runner.sync_and_update();
+        runner.render_to_file("/tmp/oxide-viewer-infocard.png");
+    }
 }
