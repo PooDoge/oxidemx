@@ -211,6 +211,7 @@ impl Component for AttachmentChip {
                 .font_size(11.5)
                 .color(th.text())
                 .max_lines(1_usize)
+                .max_width(Size::px(160.))   // ← give text measurer a bound (Content::Fit gives none)
                 .into_element();
 
             let remove_btn: Element = {
@@ -441,6 +442,25 @@ mod tests {
         let c = sample_attachment("repo").unwrap();
         assert_eq!(c.kind, AttachKind::File);
         assert_eq!(c.data, AttachData::None);
+    }
+
+    #[test]
+    fn compact_chip_name_label_has_nonzero_width() {
+        use freya_testing::prelude::*;
+        fn app() -> impl IntoElement {
+            let att = sample_attachment("repo").unwrap();
+            AttachmentChip::new(att, Theme::default()).compact(true)
+        }
+        let mut t = launch_test(app);
+        t.sync_and_update();
+        let width = t.find(|node, el| {
+            Label::try_downcast(el)
+                .filter(|l| l.text.as_ref().contains("run_bridge.rs"))
+                .map(|_| node.layout().visible_area().width())
+        });
+        let w = width.unwrap_or(0.0);
+        eprintln!("compact name label width = {w}");
+        assert!(w > 1.0, "compact chip name label must have nonzero width (got {w}); sizing bug present");
     }
 
     #[test]
