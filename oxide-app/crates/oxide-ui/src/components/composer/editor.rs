@@ -23,6 +23,7 @@
 use freya::prelude::*;
 use freya::text_edit::*;
 
+use crate::components::composer::attachment::Attachment;
 use crate::components::composer::ComposerConfig;
 use crate::components::resize_grip::clamp_height;
 use crate::tokens::Theme;
@@ -46,11 +47,12 @@ pub struct ComposerEditor {
     value: Writable<String>,
     config: ComposerConfig,
     theme: Theme,
-    send_on_enter: bool,
-    on_submit: Option<EventHandler<String>>,
-    on_height: Option<EventHandler<f32>>,
-    manual_height: Option<f32>,
-    key: DiffKey,
+    send_on_enter:       bool,
+    on_submit:           Option<EventHandler<String>>,
+    on_height:           Option<EventHandler<f32>>,
+    on_paste_attachment: Option<EventHandler<Attachment>>,
+    manual_height:       Option<f32>,
+    key:                 DiffKey,
 }
 
 impl KeyExt for ComposerEditor {
@@ -65,11 +67,12 @@ impl ComposerEditor {
             value,
             config,
             theme,
-            send_on_enter: true,
-            on_submit: None,
-            on_height: None,
-            manual_height: None,
-            key: DiffKey::default(),
+            send_on_enter:       true,
+            on_submit:           None,
+            on_height:           None,
+            on_paste_attachment: None,
+            manual_height:       None,
+            key:                 DiffKey::default(),
         }
     }
 
@@ -98,6 +101,13 @@ impl ComposerEditor {
         self.manual_height = manual_height;
         self
     }
+
+    /// Called when the user pastes an image (Ctrl/Cmd+V with image data on the
+    /// clipboard).  Text paste falls through to the editor's normal handling.
+    pub fn on_paste_attachment(mut self, handler: impl Into<EventHandler<Attachment>>) -> Self {
+        self.on_paste_attachment = Some(handler.into());
+        self
+    }
 }
 
 impl Component for ComposerEditor {
@@ -105,8 +115,9 @@ impl Component for ComposerEditor {
         let th = self.theme;
         let cap = self.config.cap_px();
         let send_on_enter = self.send_on_enter;
-        let on_submit = self.on_submit.clone();
-        let on_height = self.on_height.clone();
+        let on_submit           = self.on_submit.clone();
+        let on_height           = self.on_height.clone();
+        let on_paste_attachment = self.on_paste_attachment.clone();
 
         let a11y_id = use_hook(AccessibilityId::new_unique);
         let focus = use_focus(a11y_id);
@@ -140,11 +151,33 @@ impl Component for ComposerEditor {
         let display_placeholder = value.read().is_empty();
 
         // ── Edit / key handling ───────────────────────────────────────────────
+        // Paste (Ctrl/Cmd+V) is intercepted FIRST: if the clipboard holds an image,
+        // we convert it to an Attachment and call `on_paste_attachment` instead of
+        // letting the editor insert the raw bytes.  If the clipboard holds text (or
+        // no image is found), we fall through so the OS text-paste works normally.
+        //
         // Enter is intercepted BEFORE `editable.process_event` so a bare Enter can
         // submit (and NOT leave a stray `\n`) when `send_on_enter` is set.
         let on_key_down = move |e: Event<KeyboardEventData>| {
             let key = e.key.clone();
             let modifiers = e.modifiers;
+
+            // ── Image-paste intercept ─────────────────────────────────────────
+            let is_paste = (modifiers.ctrl() || modifiers.meta())
+                && matches!(&key, Key::Character(c) if c.eq_ignore_ascii_case("v"));
+            if is_paste {
+                if let Some(att) =
+                    crate::components::composer::clipboard::read_clipboard_image()
+                {
+                    e.prevent_default();
+                    e.stop_propagation();
+                    if let Some(h) = &on_paste_attachment {
+                        h.call(att);
+                    }
+                    return;
+                }
+                // No image on clipboard — fall through so text paste works normally.
+            }
 
             if let Key::Named(NamedKey::Enter) = &key {
                 let insert_newline = modifiers.shift() || !send_on_enter;

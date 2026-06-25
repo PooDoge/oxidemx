@@ -8,6 +8,7 @@ pub mod activity_line;
 pub mod attach_menu;
 pub mod attachment;
 pub mod attachment_viewer;
+pub mod clipboard;
 pub mod config;
 pub mod editor;
 pub mod icons;

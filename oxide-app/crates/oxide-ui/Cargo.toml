@@ -4,7 +4,9 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-freya = { workspace = true }
+freya   = { workspace = true }
+arboard = { workspace = true }
+image   = { workspace = true }
 
 [dev-dependencies]
 freya-testing = { workspace = true }
