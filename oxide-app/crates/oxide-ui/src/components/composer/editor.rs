@@ -230,30 +230,23 @@ impl Component for ComposerEditor {
             }
         };
 
-        // The body grows with content up to `cap`, then `ScrollView` scrolls it.
-        // `manual_height` (if set) overrides, clamped against the cap.
+        // The body is an EXPLICIT px height that grows with content up to `cap`,
+        // then the inner `ScrollView` scrolls. `manual_height` (if set) overrides,
+        // clamped against the cap.
         //
-        // V_PAD accounts for the 8px top + 8px bottom padding (`Gaps::new(8., 12.,
-        // 8., 12.)`) around the paragraph inside the ScrollView.  Without it the outer
-        // rect is 16px too short and descenders on the bottom line are clipped.
+        // The outer rect must NOT use `Size::Inner` here: its child `ScrollView`
+        // uses `Size::fill()`, and Inner-parent + fill-child is a circular sizing
+        // constraint that makes the editor expand to fill the whole pane. Always
+        // resolve to a concrete `Size::px(..)`.
         //
-        // Strategy:
-        // - While the padded content (paragraph + V_PAD) still fits within the cap,
-        //   use `Size::Inner` — the box sizes itself to exactly the paragraph + padding,
-        //   no clipping and no fixed height needed.
-        // - Once the paragraph alone would exceed the cap, pin the outer rect to `cap`
-        //   and let the inner ScrollView scroll the overflowing content.
-        const V_PAD: f32 = 16.0; // 8px top + 8px bottom
-        let body_height: Option<f32> = match self.manual_height {
-            Some(h) => Some(clamp_height(h, cap)),
-            None => {
-                let c = content_h();
-                if c <= 0.0 || c + V_PAD <= cap {
-                    None // → Size::Inner: box sizes to padding + paragraph, no clip
-                } else {
-                    Some(cap) // text alone exceeds the cap → fixed cap, ScrollView scrolls
-                }
-            }
+        // V_PAD adds the 8px top + 8px bottom padding (`Gaps::new(8., 12., 8., 12.)`)
+        // around the paragraph; without it the box is 16px too short and the bottom
+        // line's descenders clip. MIN_BODY keeps a single line comfortably visible.
+        const V_PAD: f32 = 16.0;
+        const MIN_BODY: f32 = 38.0;
+        let body_height: f32 = match self.manual_height {
+            Some(h) => clamp_height(h, cap),
+            None => (content_h() + V_PAD).min(cap).max(MIN_BODY),
         };
 
         let (cursor_index, text_selection) = if focus() != Focus::Not {
@@ -293,10 +286,7 @@ impl Component for ComposerEditor {
         // sits in the same box (a Stack) so the caret still renders over it.
         rect()
             .width(Size::fill())
-            .height(match body_height {
-                Some(h) => Size::px(h),
-                None    => Size::Inner,
-            })
+            .height(Size::px(body_height))
             .child(
                 ScrollView::new_controlled(scroll_ctrl)
                     .width(Size::fill())
