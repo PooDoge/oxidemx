@@ -1,10 +1,14 @@
-//! A text prompt box that wraps the built-in `Input` component.
+//! A text prompt box that wraps `TextInput`.
 //!
 //! Call `.on_submit(|text: String| { ... })` to handle the user pressing Enter.
 //! The `value` prop is a `Writable<String>` so it accepts either `State<String>`
 //! (via `state.into_writable()`) or a radio slice.
+//!
+//! Migrated from Freya `Input` to `TextInput` (Task 3) — gains theming and
+//! the right-click clipboard menu; public builder API is unchanged.
 use freya::prelude::*;
 
+use crate::components::TextInput;
 use crate::tokens::Theme;
 
 /// A prompt text-entry box.
@@ -46,17 +50,8 @@ impl PromptInput {
 impl Component for PromptInput {
     fn render(&self) -> impl IntoElement {
         let th = self.theme;
-        let mut input = Input::new(self.value.clone())
-            .width(Size::fill())
-            .placeholder("Ask, or type / for a flow…")
-            .theme_colors(InputColorsThemePartial {
-                background: Some(Preference::Specific(th.bg_deep())),
-                focus_background: Some(Preference::Specific(th.bg_deep())),
-                border_fill: Some(Preference::Specific(th.surface_max())),
-                focus_border_fill: Some(Preference::Specific(th.accent())),
-                color: Some(Preference::Specific(th.text())),
-                placeholder_color: Some(Preference::Specific(th.faint())),
-            });
+        let mut input = TextInput::new(self.value.clone(), th)
+            .placeholder("Ask, or type / for a flow…");
 
         if let Some(handler) = self.on_submit.clone() {
             input = input.on_submit(handler);

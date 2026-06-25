@@ -4,6 +4,7 @@
 //! is wired to local state only — search wiring is future.
 use freya::prelude::*;
 
+use crate::components::TextInput;
 use crate::tokens::Theme;
 
 /// Top-of-sidebar header: project switcher row + search + new conversation button.
@@ -65,18 +66,11 @@ impl Component for SidebarHeader {
             // chevron
             .child(label().text("⌄").font_size(12.).color(th.faint()));
 
-        // Search input — local state, non-functional search (wiring is future)
-        let search = Input::new(value.into_writable())
-            .width(Size::fill())
-            .placeholder("Search…")
-            .theme_colors(InputColorsThemePartial {
-                background: Some(Preference::Specific(th.bg_deep())),
-                focus_background: Some(Preference::Specific(th.bg_deep())),
-                border_fill: Some(Preference::Specific(th.surface_max())),
-                focus_border_fill: Some(Preference::Specific(th.surface_max())),
-                color: Some(Preference::Specific(th.text())),
-                placeholder_color: Some(Preference::Specific(th.faint())),
-            });
+        // Search input — local state, non-functional search (wiring is future).
+        // Migrated from Freya `Input` to our themed `TextInput` (Task 3) so it
+        // gains design-token colouring and the right-click clipboard menu.
+        let search = TextInput::new(value.into_writable(), th)
+            .placeholder("Search…");
 
         // New conversation button — filled, accent background
         let new_btn = Button::new()
@@ -127,6 +121,14 @@ mod tests {
             })
             .is_some(),
             "SidebarHeader should render the '+ New' button label"
+        );
+        // Verify the migrated TextInput renders its placeholder label.
+        assert!(
+            t.find(|_, el| {
+                Label::try_downcast(el).filter(|l| l.text.as_ref().contains("Search"))
+            })
+            .is_some(),
+            "SidebarHeader search TextInput should render the 'Search…' placeholder"
         );
     }
 }
