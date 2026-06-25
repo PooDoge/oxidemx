@@ -441,4 +441,34 @@ mod tests {
         runner.sync_and_update();
         runner.render_to_file("/tmp/oxide-toolbar-overflow.png");
     }
+
+    fn snapshot_chip_solo_app() -> Element {
+        use oxide_ui::components::composer::{sample_attachment, AttachmentChip};
+        use oxide_ui::tokens::Theme;
+        let att = sample_attachment("repo").unwrap();
+        rect()
+            .width(Size::fill())
+            .height(Size::fill())
+            .background(Color::from_rgb(5, 7, 11))
+            .main_align(Alignment::Center)
+            .cross_align(Alignment::Center)
+            .child(
+                AttachmentChip::new(att, Theme::default())
+                    .compact(true),
+            )
+            .into()
+    }
+
+    /// A single compact chip rendered on dark background — confirms the filename
+    /// "run_bridge.rs" is visibly painted.
+    /// Run with: cargo test -p oxide-freya snapshot_chip_solo -- --ignored --nocapture
+    #[test]
+    #[ignore = "snapshot: writes PNG to /tmp for visual review"]
+    fn snapshot_chip_solo() {
+        let (mut runner, _) =
+            TestingRunner::new(snapshot_chip_solo_app, (360., 90.).into(), |_| {}, 1.);
+        runner.poll_n(Duration::from_millis(5), 12);
+        runner.sync_and_update();
+        runner.render_to_file("/tmp/oxide-chip-solo.png");
+    }
 }

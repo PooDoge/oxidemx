@@ -211,7 +211,7 @@ impl Component for AttachmentChip {
                 .font_size(11.5)
                 .color(th.text())
                 .max_lines(1_usize)
-                .max_width(Size::px(160.))   // ← give text measurer a bound (Content::Fit gives none)
+                .max_width(Size::px(160.))
                 .into_element();
 
             let remove_btn: Element = {
