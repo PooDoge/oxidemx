@@ -90,6 +90,15 @@ pub fn provider_from_config_with_endpoint(
     })
 }
 
+/// Returns `true` when `provider` can accept image attachments in a chat turn.
+///
+/// Vision-capable cloud providers (Gemini, OpenAI, Anthropic) accept
+/// `MessageType::Image` parts; local runners (Ollama, mistral.rs, Claude Code
+/// CLI) do not expose a vision endpoint through the AutoAgents seam.
+pub fn supports_images(provider: &AiProvider) -> bool {
+    matches!(provider, AiProvider::Gemini | AiProvider::OpenAi | AiProvider::Anthropic)
+}
+
 /// Ensure a base URL ends with `/` so `reqwest::Url::join` appends rather
 /// than replaces the final path segment.
 fn normalize_base_url(url: &str) -> String {
@@ -137,5 +146,17 @@ mod tests {
     fn base_url_gets_trailing_slash() {
         assert_eq!(normalize_base_url("http://x/v1"), "http://x/v1/");
         assert_eq!(normalize_base_url("http://x/v1/"), "http://x/v1/");
+    }
+
+    #[test]
+    fn supports_images_truth_table() {
+        // Vision-capable cloud providers.
+        assert!(supports_images(&AiProvider::Gemini),    "Gemini must support images");
+        assert!(supports_images(&AiProvider::OpenAi),    "OpenAi must support images");
+        assert!(supports_images(&AiProvider::Anthropic), "Anthropic must support images");
+        // Local / CLI providers do NOT support images through our seam.
+        assert!(!supports_images(&AiProvider::Ollama),    "Ollama must NOT support images");
+        assert!(!supports_images(&AiProvider::MistralRs), "MistralRs must NOT support images");
+        assert!(!supports_images(&AiProvider::ClaudeCode),"ClaudeCode must NOT support images");
     }
 }

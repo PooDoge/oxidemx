@@ -172,7 +172,7 @@ impl TurnRunner for CoreTurnRunner {
             text,
             Some(sink),   // stream deltas to bridge
             history,
-            None,         // no image
+            vec![],       // images: Task 6 wires attachments through here
             &session_id,
             &exec,
         )

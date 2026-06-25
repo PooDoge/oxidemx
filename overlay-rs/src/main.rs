@@ -62,7 +62,7 @@ fn main() -> iced::Result {
                 &prompt,
                 None,
                 &[],
-                None,
+                vec![],
                 "selftest",
             )
             .await

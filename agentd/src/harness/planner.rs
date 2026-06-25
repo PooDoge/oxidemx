@@ -116,7 +116,7 @@ impl CloudComplete for RealCloudComplete {
                 &prompt,
                 None,   // no stream sink
                 &[],    // no history
-                None,   // no image
+                vec![], // no images
                 &session_id,
                 &exec,
             )

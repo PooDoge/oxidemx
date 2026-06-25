@@ -234,7 +234,7 @@ pub async fn run(
     prompt: &str,
     sink: Option<StreamSink>,
     history: &[(bool, String)],
-    image: Option<(String, Vec<u8>)>,
+    images: Vec<(String, Vec<u8>)>,
     session_id: &str,
     exec: &Arc<dyn crate::tool::ToolExecutor>,
 ) -> Result<(String, Option<String>), BoxError> {
@@ -298,10 +298,13 @@ pub async fn run(
                 .await;
         }
 
-        // Seed an attached image as the latest user turn so the model
-        // SEES it (vision) alongside the text prompt. Providers that
-        // support image parts (Gemini) include it; others ignore it.
-        if let Some((mime, bytes)) = &image {
+        // Seed attached images as user turns so the model SEES them
+        // (vision) alongside the text prompt. Each image becomes one
+        // ChatMessage so the memory ordering is preserved. Providers that
+        // support image parts (Gemini, OpenAI, Anthropic) include them;
+        // others ignore them. An empty `images` vec is a no-op (identical
+        // to the old `None` path).
+        for (mime, bytes) in &images {
             use autoagents::llm::chat::ImageMime;
             let im = match mime.as_str() {
                 "image/jpeg" | "image/jpg" => ImageMime::JPEG,
@@ -675,7 +678,7 @@ pub async fn route_turn(
     prompt: &str,
     sink: Option<StreamSink>,
     history: &[(bool, String)],
-    image: Option<(String, Vec<u8>)>,
+    images: Vec<(String, Vec<u8>)>,
     session_id: &str,
     exec: &Arc<dyn crate::tool::ToolExecutor>,
 ) -> Result<(String, Option<String>), BoxError> {
@@ -684,10 +687,10 @@ pub async fn route_turn(
         .map(|c| c.overlay.ai)
         .unwrap_or_default();
 
-    // Routing off, or an image attachment (vision → needs the capable cloud
-    // model): straight to the smart agentic path.
-    if !ai.routing_enabled || image.is_some() {
-        return run(mode, model_hint, prompt, sink, history, image, session_id, exec).await;
+    // Routing off, or image attachments present (vision → needs the capable
+    // cloud model): straight to the smart agentic path.
+    if !ai.routing_enabled || !images.is_empty() {
+        return run(mode, model_hint, prompt, sink, history, images, session_id, exec).await;
     }
 
     let route = classify_route(session_id, prompt).await;
@@ -696,7 +699,7 @@ pub async fn route_turn(
             s.send(StreamEvent::Activity("↳ complex — escalating to cloud".into()))
                 .await;
         }
-        return run(mode, model_hint, prompt, None, history, image, session_id, exec).await;
+        return run(mode, model_hint, prompt, None, history, images, session_id, exec).await;
     }
 
     // SIMPLE → answer locally (chat-only). The system prompt gives the model a
@@ -721,7 +724,7 @@ pub async fn route_turn(
                 s.send(StreamEvent::Activity("↳ needs tools — escalating to cloud".into()))
                     .await;
             }
-            run(mode, model_hint, prompt, None, history, image, session_id, exec).await
+            run(mode, model_hint, prompt, None, history, images, session_id, exec).await
         }
     }
 }
@@ -870,7 +873,7 @@ mod tests {
             "Describe this image in one short sentence.",
             None,
             &[],
-            Some(("image/png".to_string(), png)),
+            vec![("image/png".to_string(), png)],
             "test-vision",
             &exec,
         )

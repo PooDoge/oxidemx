@@ -879,7 +879,9 @@ pub(super) fn update(state: &mut RadialState, message: Message) -> Task<Message>
                 Task::perform(
                     async move {
                         crate::ai_client::ask_ai(
-                            mode, &model, &prompt, sink, &history, image, &session_id,
+                            mode, &model, &prompt, sink, &history,
+                            image.into_iter().collect(),
+                            &session_id,
                         )
                         .await
                         .map_err(|e| e.to_string())
