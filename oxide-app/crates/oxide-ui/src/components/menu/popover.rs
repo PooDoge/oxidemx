@@ -1,11 +1,8 @@
 //! `Popover` — anchors floating `content` to a trigger `anchor`.
 //!
 //! Built on Freya's [`Attached`] (positions an overlay above/below the inner
-//! element by measuring both) plus a Select-style 3-part entrance animation
-//! (scale 0.9→1, opacity 0→1, slide ∓8→0, ~125ms `Ease::Out` `Function::Quart`,
-//! reversed on close). The overlay subtree is only built while `open` or the
-//! close animation is still running, and is opacity-gated until measured so it
-//! never flashes unsized.
+//! element by measuring both). The overlay subtree is only built while `open`,
+//! and is opacity-gated until measured so it never flashes unsized.
 //!
 //! Auto-flip: when `placement == Below` but the measured content height exceeds
 //! the space below the anchor (`Platform::get().root_size.height − anchor.max_y`)
@@ -14,7 +11,7 @@
 //!
 //! ## Dismissal — owned by the menu content, not the Popover
 //!
-//! `Popover` is a pure anchor + animation wrapper: it has NO dismissal logic.
+//! `Popover` is a pure anchor wrapper: it has NO dismissal logic.
 //! Earlier revisions tried to dismiss here — first a full-window backdrop on
 //! `Layer::Relative(-1)` (wrong for a deeply nested anchor: the backdrop painted
 //! BELOW higher-layer app content so outside presses never reached it), then a
@@ -32,7 +29,6 @@
 //! `MenuSurface::on_close → Menu::on_close`. The Popover therefore only renders
 //! the anchor + (when open) the animated content; the caller wires dismissal via
 //! the menu's `on_close`.
-use freya::animation::*;
 use freya::prelude::*;
 
 /// Where the popover content is placed relative to its anchor.
@@ -47,8 +43,8 @@ pub enum Placement {
 
 /// Anchors floating `content` to a trigger `anchor`.
 ///
-/// Pure anchor + entrance-animation wrapper — dismissal is owned by the menu
-/// content (Freya `Menu`'s `on_close`, threaded via `MenuSurface::on_close`).
+/// Pure anchor wrapper — dismissal is owned by the menu content (Freya
+/// `Menu`'s `on_close`, threaded via `MenuSurface::on_close`).
 ///
 /// Builder usage:
 /// ```ignore
@@ -100,38 +96,7 @@ impl Component for Popover {
         let mut anchor_area: State<Option<Area>> = use_state(|| None);
         let mut content_size: State<Option<Size2D>> = use_state(|| None);
 
-        // 3-part entrance animation, reversed on close (mirrors `Select`).
-        let animation = use_animation(move |conf| {
-            conf.on_change(OnChange::Rerun);
-            conf.on_creation(OnCreation::Finish);
-
-            let scale = AnimNum::new(0.9, 1.)
-                .time(125)
-                .ease(Ease::Out)
-                .function(Function::Quart);
-            let opacity = AnimNum::new(0., 1.)
-                .time(125)
-                .ease(Ease::Out)
-                .function(Function::Quart);
-            let slide = AnimNum::new(-8., 0.)
-                .time(125)
-                .ease(Ease::Out)
-                .function(Function::Quart);
-            if open {
-                (scale, opacity, slide)
-            } else {
-                (
-                    scale.into_reversed(),
-                    opacity.into_reversed(),
-                    slide.into_reversed(),
-                )
-            }
-        });
-
-        let is_animating = *animation.is_running().read();
-        let show_overlay = open || is_animating;
-
-        let (scale, opacity, slide) = animation.read().value();
+        let show_overlay = open;
 
         // Auto-flip: resolve the effective placement from measured geometry.
         let effective_placement = match (anchor_area(), content_size()) {
@@ -161,14 +126,9 @@ impl Component for Popover {
         };
 
         // Opacity-gate until the content has been measured (no unsized flash).
-        // The slide direction follows the effective placement: content above
-        // slides up (negative), content below slides down (positive offset).
+        // Show at full opacity once the content has a measured size.
         let measured = content_size().is_some();
-        let gated_opacity = if measured { opacity } else { 0. };
-        let offset_y = match effective_placement {
-            Placement::Above => -slide,
-            Placement::Below => slide,
-        };
+        let gated_opacity = if measured { 1.0_f32 } else { 0.0_f32 };
 
         let attached_position = match effective_placement {
             Placement::Above => AttachedPosition::Top,
@@ -177,7 +137,7 @@ impl Component for Popover {
 
         let content_el = self.content.clone();
 
-        // The animated content rect: scale + opacity + slide, measured on size.
+        // The overlay content rect: opacity-gated until measured, then fully opaque.
         // Dismissal lives INSIDE this subtree (Freya `Menu`'s `on_close`, via
         // `MenuSurface`), so it only exists while the menu is open and the
         // opening click can never reach it to self-close.
@@ -185,8 +145,6 @@ impl Component for Popover {
             let content = content_el.clone().unwrap();
             rect()
                 .layer(Layer::Overlay)
-                .offset_y(offset_y)
-                .scale(scale)
                 .opacity(gated_opacity)
                 .on_sized(move |e: Event<SizedEventData>| {
                     content_size.set_if_modified(Some(e.area.size));
@@ -256,8 +214,8 @@ mod tests {
 
     /// Nested-context open: mount a `Popover` whose anchor is buried a few rects
     /// deep (mimicking composer → card → toolbar row), drive a `click_cursor` on
-    /// the anchor, poll past the entrance animation, and assert the content
-    /// renders. Proves opening works in a deep layout (the regression).
+    /// the anchor, poll for measurement, and assert the content renders. Proves
+    /// opening works in a deep layout (the original regression).
     ///
     /// Drives the OPEN path through the caller's anchor `on_press` (which toggles
     /// a `use_state`), exercising the same wiring the toolbar uses.
@@ -318,7 +276,7 @@ mod tests {
 
         let center = center.unwrap();
         t.click_cursor(center);
-        // Poll past the ~125ms entrance animation so the content mounts + measures.
+        // Poll a few frames so the content mounts and measures (no animation).
         t.poll(
             std::time::Duration::from_millis(10),
             std::time::Duration::from_millis(300),
