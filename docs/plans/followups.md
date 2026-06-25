@@ -381,3 +381,9 @@ From the "consolidate + tech-debt" slice scoping:
 - **Popover entrance animation: DONE** (commits `1e3dbb6`/`dbbc92b`). Re-added a saga-safe fade via a
   per-open-mounted `PopoverOverlay` sub-component (`OnCreation::Run`, composed `gated_opacity*fade`).
   Plays on every open; cannot get stuck at 0. Fade *smoothness* pending a live visual check.
+
+## Attachments-transport follow-ups (2026-06-25, from final review — all Minor/non-blocking)
+- **active_provider() config drift** (`agentd/src/interface.rs` ~379): the capability gate resolves the provider via an independent config read, separate from how `route_turn` resolves it. If a model_hint/per-turn override selects a different provider, the gate could disagree with the executor. Low risk (default path consistent). Fix: single source of truth for provider resolution shared by the gate + route_turn.
+- **Stale comment** (`agentd/src/harness/worker.rs:97`): `route_turn(.., vec![])` is labelled "Task 6 wires attachments through here" but T6 wired the chat/HTTP path (`interface.rs`), not the harness worker. Correct the comment.
+- **Image byte clones** (`interface.rs` ~454 + `runtime.rs` ~318): image bytes cloned into `images` then per ChatMessage. Cosmetic; only matters near the 20 MiB cap.
+- **LIVE (on-PC) verification needed:** real Gemini/Anthropic/OpenAI multimodal response describing a pasted image; GUI round-trip (paste→send→reply over the live UDS daemon, `tests/live_agentd.rs` is #[ignore]); degrade-note rendering for a local provider.
