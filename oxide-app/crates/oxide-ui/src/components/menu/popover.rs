@@ -30,21 +30,40 @@
 //! the anchor + (when open) the animated content; the caller wires dismissal via
 //! the menu's `on_close`.
 //!
-//! ## Entrance animation — why `OnCreation::Run`, not `OnChange::Rerun`
+//! ## Entrance animation — per-open-mounted overlay subcomponent
 //!
-//! The overlay subtree is only mounted while `open=true`. Mounting IS the open
-//! event. `OnCreation::Run` fires on mount and runs the tween from 0→1.
-//! Because the tween factory does NOT read `open()`, there is no reactive
-//! dependency and the animation cannot get stuck at its start frame.
+//! The overlay content is rendered by a private `PopoverOverlay` sub-component
+//! that is only mounted while `open=true`. Because it is only mounted while the
+//! popover is open, its hooks are created fresh on each open:
+//! `use_animation(OnCreation::Run)` fires on every open → the 0→1 fade plays
+//! every time. On close the sub-component unmounts; on re-open it remounts and
+//! the animation restarts.
 //!
-//! The prior breakage used `OnChange::Rerun` with `open()` in the factory.
-//! On click-driven open the tween restarted at frame-0 (opacity 0) but the
-//! overlay rect rendered before the animation clock advanced, leaving menus
-//! invisible. `OnCreation::Run` sidesteps this entirely.
+//! The prior implementation hoisted `use_animation` into the always-mounted
+//! `Popover` component body. Because `Popover` is always mounted (the anchor
+//! always renders), the hook was created at the very first composer-mount — the
+//! 120ms tween ran to 1.0 immediately, so by the time the user opened the menu
+//! `fade_value` was already 1.0 and the fade was a no-op on every subsequent open.
 //!
-//! The fade composes with `gated_opacity` (measurement gate) as:
+//! Do NOT revert to hoisting `use_animation` into `Popover::render` or using
+//! `OnChange::Rerun` + `open()` in the factory — both defeat the per-open replay.
+//!
+//! ## Animation + measurement composition
+//!
+//! `PopoverOverlay` owns both gates:
 //!   `final_opacity = gated_opacity * fade_value`
+//!
+//! - `gated_opacity`: 0.0 until content is measured (prevents unsized flash), then 1.0
+//! - `fade_value`: 0.0→1.0 over 120ms on mount (`OnCreation::Run`)
+//!
 //! Both must be 1.0 for content to be visible.
+//!
+//! ## Auto-flip measurement
+//!
+//! `PopoverOverlay` reports its measured size to the parent via a `State` handle
+//! stored as a field. `State<T>` is `Copy + PartialEq`, so it is a safe component
+//! field. The parent's `content_size: State<Option<Size2D>>` is updated via this
+//! handle and drives the flip decision exactly as before.
 use freya::animation::*;
 use freya::prelude::*;
 
@@ -57,6 +76,64 @@ pub enum Placement {
     #[default]
     Below,
 }
+
+// ── Private overlay sub-component ─────────────────────────────────────────────
+
+/// Private overlay sub-component, only mounted while the popover is open.
+///
+/// Owns `use_animation(OnCreation::Run)` — because this component is only
+/// mounted while `open=true`, the hook is created fresh on each open and the
+/// 120ms entrance fade plays on every open. On close it unmounts; on re-open
+/// it remounts and replays.
+///
+/// `parent_size` is the parent's `State<Option<Size2D>>` handle. `State<T>` is
+/// `Copy + PartialEq`, so it is a safe component field and can be captured by
+/// `FnMut` closures for mutation.
+#[derive(PartialEq, Clone)]
+struct PopoverOverlay {
+    content:     Element,
+    parent_size: State<Option<Size2D>>,
+}
+
+impl PopoverOverlay {
+    fn new(content: Element, parent_size: State<Option<Size2D>>) -> Self {
+        Self { content, parent_size }
+    }
+}
+
+impl Component for PopoverOverlay {
+    fn render(&self) -> impl IntoElement {
+        // Local measurement gate: 0.0 until this overlay rect has been measured.
+        let mut local_size: State<Option<Size2D>> = use_state(|| None);
+
+        // Entrance fade: `OnCreation::Run` fires on mount.
+        // Because `PopoverOverlay` is only mounted while `open=true`, this hook
+        // is created fresh on every open → the fade plays every time.
+        let entrance_anim = use_animation(|conf| {
+            conf.on_creation(OnCreation::Run);
+            AnimNum::new(0.0_f32, 1.0_f32)
+                .time(120)
+                .ease(Ease::Out)
+                .function(Function::Quart)
+        });
+        let fade_value    = entrance_anim.get().value();
+        let gated_opacity = if local_size().is_some() { 1.0_f32 } else { 0.0_f32 };
+
+        let mut parent_size = self.parent_size;
+        let content         = self.content.clone();
+
+        rect()
+            .layer(Layer::Overlay)
+            .opacity(gated_opacity * fade_value)
+            .on_sized(move |e: Event<SizedEventData>| {
+                local_size.set_if_modified(Some(e.area.size));
+                parent_size.set_if_modified(Some(e.area.size));
+            })
+            .child(content)
+    }
+}
+
+// ── Public component ──────────────────────────────────────────────────────────
 
 /// Anchors floating `content` to a trigger `anchor`.
 ///
@@ -72,19 +149,19 @@ pub enum Placement {
 /// ```
 #[derive(PartialEq)]
 pub struct Popover {
-    anchor: Element,
-    open: bool,
+    anchor:    Element,
+    open:      bool,
     placement: Placement,
-    content: Option<Element>,
+    content:   Option<Element>,
 }
 
 impl Popover {
     pub fn new(anchor: impl IntoElement) -> Self {
         Self {
-            anchor: anchor.into_element(),
-            open: false,
+            anchor:    anchor.into_element(),
+            open:      false,
             placement: Placement::default(),
-            content: None,
+            content:   None,
         }
     }
 
@@ -106,14 +183,12 @@ impl Popover {
 
 impl Component for Popover {
     fn render(&self) -> impl IntoElement {
-        let open = self.open;
+        let open      = self.open;
         let placement = self.placement;
 
-        // Measured areas drive both the opacity gate and the auto-flip decision.
-        let mut anchor_area: State<Option<Area>> = use_state(|| None);
-        let mut content_size: State<Option<Size2D>> = use_state(|| None);
-
-        let show_overlay = open;
+        // Measured areas drive the auto-flip decision.
+        let mut anchor_area:  State<Option<Area>>   = use_state(|| None);
+        let content_size: State<Option<Size2D>>     = use_state(|| None);
 
         // Auto-flip: resolve the effective placement from measured geometry.
         let effective_placement = match (anchor_area(), content_size()) {
@@ -142,26 +217,6 @@ impl Component for Popover {
             _ => placement,
         };
 
-        // Opacity-gate until the content has been measured (no unsized flash).
-        // Show at full opacity once the content has a measured size.
-        let measured = content_size().is_some();
-        let gated_opacity = if measured { 1.0_f32 } else { 0.0_f32 };
-
-        // Entrance fade: plays once when the overlay mounts (open event).
-        // `OnCreation::Run` fires on mount — mounting IS the open event because
-        // the overlay subtree is only built while `open=true`.  No `OnChange::Rerun`
-        // + `open()` dependency needed (that pattern caused the stuck-at-0 saga bug).
-        // Hoisted here (unconditional hook call) so Freya's hook rules are satisfied;
-        // `fade_value` is captured into the overlay closure below.
-        let entrance_anim = use_animation(|conf| {
-            conf.on_creation(OnCreation::Run);
-            AnimNum::new(0.0_f32, 1.0_f32)
-                .time(120)
-                .ease(Ease::Out)
-                .function(Function::Quart)
-        });
-        let fade_value = entrance_anim.get().value();
-
         let attached_position = match effective_placement {
             Placement::Above => AttachedPosition::Top,
             Placement::Below => AttachedPosition::Bottom,
@@ -169,23 +224,13 @@ impl Component for Popover {
 
         let content_el = self.content.clone();
 
-        // The overlay content rect: opacity-gated until measured, then fades in.
-        // `final_opacity = gated_opacity * fade_value` — both gates compose:
-        //   gated_opacity: 0 until measured, then 1 (prevents unsized flash)
-        //   fade_value: 0→1 over 120ms on mount (entrance animation)
-        // Dismissal lives INSIDE this subtree (Freya `Menu`'s `on_close`, via
-        // `MenuSurface`), so it only exists while the menu is open and the
-        // opening click can never reach it to self-close.
-        let overlay: Option<Element> = (show_overlay && content_el.is_some()).then(|| {
+        // Overlay sub-component — only mounted while open.
+        // `PopoverOverlay` owns the animation hook, so it fires fresh on every open.
+        // Pass `content_size` directly so the overlay can update it; `State<T>` is
+        // `Copy + PartialEq` and safe as a component field.
+        let overlay: Option<Element> = (open && content_el.is_some()).then(|| {
             let content = content_el.clone().unwrap();
-            rect()
-                .layer(Layer::Overlay)
-                .opacity(gated_opacity * fade_value)
-                .on_sized(move |e: Event<SizedEventData>| {
-                    content_size.set_if_modified(Some(e.area.size));
-                })
-                .child(content)
-                .into_element()
+            PopoverOverlay::new(content, content_size).into_element()
         });
 
         // The anchor wrapper — measures the anchor area for the auto-flip math.
@@ -324,6 +369,99 @@ mod tests {
         assert!(
             menu.is_some(),
             "content should render after a click-driven open in a nested context"
+        );
+    }
+
+    /// Proves the per-open-mount idiom: open → close → open must still show content.
+    /// Guards against hook state persisting across mount/unmount cycles.
+    #[test]
+    fn popover_content_visible_after_reopen() {
+        use freya_testing::TestingRunner;
+
+        fn app() -> Element {
+            let mut open = use_state(|| false);
+            let trigger = rect()
+                .width(Size::px(80.))
+                .height(Size::px(32.))
+                .on_press(move |_: Event<PressEventData>| open.toggle())
+                .child(label().text("anchor").font_size(12.))
+                .into_element();
+
+            Popover::new(trigger)
+                .open(open())
+                .content(label().text("MENU").into_element())
+                .into_element()
+        }
+
+        let (mut t, _) = TestingRunner::new(app, (400., 320.).into(), |_| {}, 1.);
+        t.poll(
+            std::time::Duration::from_millis(5),
+            std::time::Duration::from_millis(40),
+        );
+        t.sync_and_update();
+
+        // First open — re-find anchor center each time in case layout shifts.
+        let center = t.find(|node, el| {
+            Label::try_downcast(el)
+                .filter(|l| l.text.as_ref().contains("anchor"))
+                .map(|_| {
+                    let c = node.layout().visible_area().center();
+                    (c.x as f64, c.y as f64)
+                })
+        });
+        assert!(center.is_some(), "anchor should render");
+        t.click_cursor(center.unwrap());
+        t.poll(
+            std::time::Duration::from_millis(10),
+            std::time::Duration::from_millis(200),
+        );
+        t.sync_and_update();
+        let after_first_open = t.find(|_, el| {
+            Label::try_downcast(el).filter(|l| l.text.as_ref().contains("MENU"))
+        });
+        assert!(after_first_open.is_some(), "content should render after first open");
+
+        // Close — re-find anchor center because layout may have shifted.
+        let center = t.find(|node, el| {
+            Label::try_downcast(el)
+                .filter(|l| l.text.as_ref().contains("anchor"))
+                .map(|_| {
+                    let c = node.layout().visible_area().center();
+                    (c.x as f64, c.y as f64)
+                })
+        }).unwrap();
+        t.click_cursor(center);
+        t.poll(
+            std::time::Duration::from_millis(5),
+            std::time::Duration::from_millis(40),
+        );
+        t.sync_and_update();
+        let after_close = t.find(|_, el| {
+            Label::try_downcast(el).filter(|l| l.text.as_ref().contains("MENU"))
+        });
+        assert!(after_close.is_none(), "content should NOT render after close");
+
+        // Re-open: proves per-open-mount remount works.
+        let center = t.find(|node, el| {
+            Label::try_downcast(el)
+                .filter(|l| l.text.as_ref().contains("anchor"))
+                .map(|_| {
+                    let c = node.layout().visible_area().center();
+                    (c.x as f64, c.y as f64)
+                })
+        }).unwrap();
+        t.click_cursor(center);
+        t.poll(
+            std::time::Duration::from_millis(10),
+            std::time::Duration::from_millis(200),
+        );
+        t.sync_and_update();
+        let after_reopen = t.find(|_, el| {
+            Label::try_downcast(el).filter(|l| l.text.as_ref().contains("MENU"))
+        });
+        assert!(
+            after_reopen.is_some(),
+            "content should render after re-open (per-open-mount remount)"
         );
     }
 }
