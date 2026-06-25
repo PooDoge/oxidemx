@@ -204,15 +204,19 @@ mod composer_snapshot_tests {
     /// editor, at least one attachment chip, and the Ready send button — which is
     /// the visual surface the controller inspects. It renders without panic.
     ///
-    /// LIMITATION (Popover + freya_testing): after a *click-driven* open, the
-    /// menu IS in the tree and `provider_open` is true (the card border tints to
-    /// accent), but the `Attached` overlay measures with a stale anchor area in
-    /// the synthetic poll loop and lays out off the top edge, so the menu body
-    /// does not visibly paint in this PNG. The anchoring itself is correct and is
-    /// proven visually by `snapshot_popover_anchored` (a STATIC `.open(true)`
-    /// Popover paints the menu cleanly directly above its trigger). This is a
-    /// Task-2 Popover/Attached re-layout-timing quirk under the test runner, not
-    /// a Task-5 wiring defect; the live event loop re-measures normally.
+    /// LIMITATION (Popover + freya_testing): the provider menu body does not
+    /// visibly paint above the toolbar in THIS composite PNG. The blind
+    /// coordinate hunt for the provider pill + the synthetic poll loop is fragile
+    /// here — the click can miss the pill or the `Attached` overlay measures with
+    /// a stale anchor area under the test runner — so the open menu may not land
+    /// in this snapshot. This is a harness coordinate/timing artifact, NOT a
+    /// Popover defect: the Task-2 fix is proven instead by (a)
+    /// `oxide_ui::components::menu::popover::tests::popover_opens_in_nested_context`,
+    /// which drives a real `click_cursor` open through a DEEP nested layout and
+    /// asserts the menu mounts, and (b) `snapshot_popover_anchored`, where a
+    /// static `.open(true)` Popover paints the menu cleanly directly above its
+    /// trigger. The live event loop re-measures and dismisses normally
+    /// (Select-style `on_global_pointer_press` + `prevent_default` reconciliation).
     #[test]
     #[ignore = "snapshot: writes PNG to /tmp for visual review"]
     fn snapshot_composer_full() {

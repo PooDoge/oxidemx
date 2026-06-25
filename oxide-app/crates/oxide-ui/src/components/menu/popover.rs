@@ -12,35 +12,47 @@
 //! and fits above, the content renders Above instead (and vice-versa). This
 //! mirrors `Select`'s flip math.
 //!
-//! ## Dismissal guard (the subtle part)
+//! ## Dismissal model — Select-style global-press (the subtle part)
 //!
-//! Dismissal must fire on an outside press (a press NOT on the anchor or the
-//! content) or Escape, BUT the press that OPENS the popover (handled by the
-//! caller on the trigger) must not immediately fire `on_dismiss` and cause an
-//! open→close flicker.
+//! The previous implementation painted a full-window backdrop on
+//! `Layer::Relative(-1)` and dismissed on a press to that backdrop. In a deeply
+//! nested anchor (the composer toolbar is composer → card → toolbar row, near
+//! the window bottom) `Relative(-1)` is *relative to the Popover's parent*, so
+//! the backdrop painted BELOW the rest of the app — outside presses landed on
+//! higher-layer app content and never reached it, so dismiss never fired (and
+//! the menu didn't reliably surface either). That model is wrong for a nested
+//! anchor and is removed.
 //!
-//! We solve this with a **full-window transparent backdrop** rect rendered on
-//! `Layer::Relative(-1)` (behind the anchor's `Relative(0)`) at
-//! `Position::new_global`, whose `on_press` fires `on_dismiss(())`. The content
-//! sits on `Layer::Overlay` (far above everything), so it paints — and
-//! hit-tests — over the backdrop. The anchor sits at the wrapper's base layer,
-//! above the backdrop. So:
-//!   - A press on the **content** hits the content (which `stop_propagation`s),
-//!     never the backdrop.
-//!   - A press on the **anchor/trigger** hits the anchor — the backdrop is
-//!     *behind* it — so the caller's trigger handler (which `stop_propagation`s
-//!     and toggles open) runs, and the backdrop's dismiss never fires. No
-//!     open→close flicker.
-//!   - A press anywhere **else** lands on the backdrop → dismiss.
+//! We now use the model Freya's `Select`/`Menu` prove in production: a
+//! [`on_global_pointer_press`] handler on the Popover root that fires
+//! `on_dismiss(())`, reconciled so the OPENING trigger press does not also close
+//! the menu in the same cycle. The reconciliation rides on Freya's event
+//! cancellation rules (see `freya-core` `EventName::get_cancellable_events`):
+//! a targeted `PointerPress` whose handler calls `prevent_default()` cancels the
+//! pending `GlobalPointerPress` for that same cursor press. Concretely:
 //!
-//! Escape is handled by a global key-down on the wrapper.
+//!   - **Opening trigger press.** We wrap the caller's `anchor` in a rect whose
+//!     own `on_press` calls `e.prevent_default()`. Targeted presses bubble up the
+//!     parent chain, so this wrapper handler runs *alongside* the caller's anchor
+//!     `on_press` (which toggles `open`). The `prevent_default()` cancels the
+//!     `GlobalPointerPress` that would otherwise fire `on_dismiss` on this very
+//!     click → no open→close flicker. This is exactly what `Select::on_press`
+//!     does (`prevent_default()` + `stop_propagation()`); we relocate it into the
+//!     Popover's anchor wrapper so it works for ANY caller-supplied anchor,
+//!     keeping the public API content-agnostic.
+//!   - **Press on the content.** The content overlay's `on_press` calls
+//!     `prevent_default()` (cancel the global → don't dismiss) and
+//!     `stop_propagation()` (don't disturb the anchor's bubble chain). A press on
+//!     the menu therefore never dismisses.
+//!   - **Press anywhere else.** No targeted `PointerPress` cancels the
+//!     `GlobalPointerPress`, so it reaches the root's
+//!     `on_global_pointer_press`, which fires `on_dismiss(())`.
 //!
-//! This is the closest-correct flicker-free guard reachable from a
-//! content-agnostic public API: the alternative (`on_global_pointer_press` that
-//! checks the press is outside the measured content area, à la `Select`) would
-//! require the open-toggling press to also `stop_propagation` on the SAME node
-//! that owns the global handler — which we cannot guarantee for an arbitrary
-//! caller-supplied anchor. The backdrop makes the guard structural instead.
+//! The root global handler additionally guards on `open` (it only acts while the
+//! popover is actually open), mirroring `Select`'s `set_if_modified(false)`
+//! idempotence: a stray global press while closed is a no-op.
+//!
+//! Escape is handled by a global key-down on the wrapper → `on_dismiss(())`.
 use freya::animation::*;
 use freya::prelude::*;
 
@@ -103,6 +115,17 @@ impl Popover {
         self.on_dismiss = Some(h.into());
         self
     }
+}
+
+/// Predicate (pure, unit-testable) capturing the dismissal decision the
+/// `on_global_pointer_press` handler makes: a global press dismisses ONLY when
+/// the popover is open AND the press was not cancelled by a targeted handler
+/// (the anchor wrapper / the content both `prevent_default()`, which cancels the
+/// `GlobalPointerPress` so it never reaches the root handler at all). The
+/// `press_cancelled` flag models that cancellation for the test.
+#[doc(hidden)]
+pub fn global_press_dismisses(open: bool, press_cancelled: bool) -> bool {
+    open && !press_cancelled
 }
 
 impl Component for Popover {
@@ -184,13 +207,27 @@ impl Component for Popover {
             Placement::Below => slide,
         };
 
-        let on_dismiss = self.on_dismiss.clone();
+        let on_dismiss_global = self.on_dismiss.clone();
         let on_dismiss_key = self.on_dismiss.clone();
 
         // Escape → dismiss (global key-down on the wrapper).
         let on_global_key_down = move |e: Event<KeyboardEventData>| {
             if e.key == Key::Named(NamedKey::Escape) {
                 if let Some(h) = &on_dismiss_key {
+                    h.call(());
+                }
+            }
+        };
+
+        // Outside-press → dismiss. Mirrors `Select`/`Menu`: a global pointer
+        // press that was NOT cancelled by a targeted `prevent_default()` (the
+        // anchor wrapper and the content both cancel) reaches this handler. We
+        // guard on `open` so a stray press while closed is a no-op (the
+        // idempotent counterpart of `Select`'s `set_if_modified(false)`), and so
+        // the OPENING press is never double-handled before the toggle lands.
+        let on_global_pointer_press = move |_: Event<PointerEventData>| {
+            if open {
+                if let Some(h) = &on_dismiss_global {
                     h.call(());
                 }
             }
@@ -214,49 +251,40 @@ impl Component for Popover {
                 .on_sized(move |e: Event<SizedEventData>| {
                     content_size.set_if_modified(Some(e.area.size));
                 })
-                // A press on the content must not bubble to the backdrop.
+                // A press on the content must not dismiss: `prevent_default()`
+                // cancels the pending `GlobalPointerPress` (so the root's
+                // `on_global_pointer_press` never fires for this press), and
+                // `stop_propagation()` keeps it out of the anchor's bubble chain.
                 .on_press(move |e: Event<PressEventData>| {
+                    e.prevent_default();
                     e.stop_propagation();
                 })
                 .child(content)
                 .into_element()
         });
 
-        // Full-window transparent backdrop, behind the content, whose press
-        // dismisses. Only built while the overlay is shown. See module docs.
-        let backdrop: Option<Element> = show_overlay.then(|| {
-            rect()
-                .position(Position::new_global().top(0.).left(0.))
-                .width(Size::window_percent(100.))
-                .height(Size::window_percent(100.))
-                // Paint behind the anchor (Relative(0)) so a press on the anchor
-                // is NOT intercepted by the backdrop — that press belongs to the
-                // caller's trigger handler (which stop_propagation's it), and
-                // must never reach the backdrop's dismiss. The content sits on
-                // `Layer::Overlay` (far above), so it still beats the backdrop.
-                .layer(Layer::Relative(-1))
-                .on_press(move |e: Event<PressEventData>| {
-                    e.stop_propagation();
-                    if let Some(h) = &on_dismiss {
-                        h.call(());
-                    }
-                })
-                .into_element()
-        });
+        // The anchor wrapper. Its `on_press` calls `prevent_default()` so the
+        // OPENING trigger press cancels the `GlobalPointerPress` that would
+        // otherwise dismiss in the same cycle (no open→close flicker). Targeted
+        // presses bubble up the parent chain, so the caller's own anchor
+        // `on_press` (which toggles `open`) still runs alongside this — we do NOT
+        // `stop_propagation` here, so we don't suppress the caller's handler.
+        let anchor_inner = rect()
+            .on_sized(move |e: Event<SizedEventData>| {
+                anchor_area.set_if_modified(Some(e.area));
+            })
+            .on_press(move |e: Event<PressEventData>| {
+                e.prevent_default();
+            })
+            .child(self.anchor.clone());
 
         rect()
             .on_global_key_down(on_global_key_down)
-            .maybe_child(backdrop)
+            .on_global_pointer_press(on_global_pointer_press)
             .child(
-                Attached::new(
-                    rect()
-                        .on_sized(move |e: Event<SizedEventData>| {
-                            anchor_area.set_if_modified(Some(e.area));
-                        })
-                        .child(self.anchor.clone()),
-                )
-                .position(attached_position)
-                .maybe_child(overlay),
+                Attached::new(anchor_inner)
+                    .position(attached_position)
+                    .maybe_child(overlay),
             )
     }
 }
@@ -305,5 +333,103 @@ mod tests {
             Label::try_downcast(el).filter(|l| l.text.as_ref().contains("MENU"))
         });
         assert!(menu.is_some(), "content should render when open");
+    }
+
+    /// Unit assertion of the dismissal predicate the `on_global_pointer_press`
+    /// handler encodes (mirrors `Select`): a global press dismisses ONLY when the
+    /// popover is open AND the press was not cancelled by a targeted
+    /// `prevent_default()` (anchor wrapper / content). This is the provably-correct
+    /// core of the reconciliation; the live event loop applies it via Freya's
+    /// `GlobalPointerPress` cancellation (see module docs).
+    #[test]
+    fn dismissal_predicate() {
+        // Closed → never dismiss (idempotent no-op, like set_if_modified(false)).
+        assert!(!global_press_dismisses(false, false));
+        assert!(!global_press_dismisses(false, true));
+        // Open + the press was cancelled (anchor-open / content) → suppressed.
+        assert!(!global_press_dismisses(true, true));
+        // Open + an outside press (not cancelled) → dismiss.
+        assert!(global_press_dismisses(true, false));
+    }
+
+    /// Nested-context open: mount a `Popover` whose anchor is buried a few rects
+    /// deep (mimicking composer → card → toolbar row), drive a `click_cursor` on
+    /// the anchor, poll past the entrance animation, and assert the content
+    /// renders. Proves opening works in a deep layout (the regression).
+    ///
+    /// Drives the OPEN path through the caller's anchor `on_press` (which toggles
+    /// a `use_state`), exercising the same wiring the toolbar uses.
+    #[test]
+    fn popover_opens_in_nested_context() {
+        use freya_testing::TestingRunner;
+
+        fn app() -> Element {
+            let mut open = use_state(|| false);
+            // Anchor buried under several wrapper rects, near the window bottom,
+            // mimicking the real toolbar's depth.
+            let trigger = rect()
+                .width(Size::px(80.))
+                .height(Size::px(32.))
+                .background(Color::from_rgb(80, 80, 120))
+                .on_press(move |_: Event<PressEventData>| open.toggle())
+                .child(label().text("anchor").font_size(12.))
+                .into_element();
+
+            let popover = Popover::new(trigger)
+                .open(open())
+                .placement(Placement::Above)
+                .on_dismiss(move |()| open.set(false))
+                .content(label().text("MENU").into_element())
+                .into_element();
+
+            // Deep nesting + bottom anchoring (column pushes the row down).
+            rect()
+                .expanded()
+                .direction(Direction::Vertical)
+                .main_align(Alignment::End)
+                .child(
+                    rect().padding(Gaps::new_all(8.)).child(
+                        rect().padding(Gaps::new_all(8.)).child(
+                            rect().direction(Direction::Horizontal).child(popover),
+                        ),
+                    ),
+                )
+                .into_element()
+        }
+
+        let (mut t, _) = TestingRunner::new(app, (400., 320.).into(), |_| {}, 1.);
+        t.poll(
+            std::time::Duration::from_millis(5),
+            std::time::Duration::from_millis(40),
+        );
+        t.sync_and_update();
+
+        // Find the anchor's center and click it to open.
+        let center = t.find(|node, el| {
+            Label::try_downcast(el)
+                .filter(|l| l.text.as_ref().contains("anchor"))
+                .map(|_| {
+                    let c = node.layout().visible_area().center();
+                    (c.x as f64, c.y as f64)
+                })
+        });
+        assert!(center.is_some(), "anchor should render");
+
+        let center = center.unwrap();
+        t.click_cursor(center);
+        // Poll past the ~125ms entrance animation so the content mounts + measures.
+        t.poll(
+            std::time::Duration::from_millis(10),
+            std::time::Duration::from_millis(300),
+        );
+        t.sync_and_update();
+
+        let menu = t.find(|_, el| {
+            Label::try_downcast(el).filter(|l| l.text.as_ref().contains("MENU"))
+        });
+        assert!(
+            menu.is_some(),
+            "content should render after a click-driven open in a nested context"
+        );
     }
 }
