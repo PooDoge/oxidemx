@@ -666,4 +666,80 @@ mod tests {
         runner.sync_and_update();
         runner.render_to_file("/tmp/oxide-composer-full.png");
     }
+    // ── Snapshot: TextInput with seeded text (Task 2) ────────────────────────
+
+    fn snapshot_text_input_app() -> Element {
+        use oxide_ui::components::TextInput;
+        use oxide_ui::tokens::Theme;
+        use_init_theme(dark_theme);
+        let th = Theme::default();
+        let v = use_state(|| "Hello, OxideMX".to_string());
+        rect()
+            .width(Size::fill())
+            .height(Size::fill())
+            .background(th.bg_deep())
+            .main_align(Alignment::Center)
+            .cross_align(Alignment::Center)
+            .padding(Gaps::new_all(32.))
+            .child(
+                TextInput::new(v.into_writable(), th)
+                    .placeholder("Search…"),
+            )
+            .into()
+    }
+
+    /// TextInput with seeded text "Hello, OxideMX" on dark backdrop.
+    /// Confirms: themed surface border, cyan caret colour, readable text.
+    /// Run with:
+    ///   LIBRARY_PATH=/tmp/oxidemx-lib-links cargo test -p oxide-freya --bin oxide-freya snapshot_text_input -- --ignored
+    #[test]
+    #[ignore = "snapshot: writes PNG to /tmp for visual review"]
+    fn snapshot_text_input() {
+        let (mut runner, _) =
+            TestingRunner::new(snapshot_text_input_app, (480., 120.).into(), |_| {}, 1.);
+        runner.poll_n(Duration::from_millis(5), 8);
+        runner.sync_and_update();
+        runner.render_to_file("/tmp/oxide-textinput.png");
+    }
+
+    // ── Snapshot: editor_clipboard_menu on dark backdrop (Task 2) ────────────
+
+    fn snapshot_text_input_menu_app() -> Element {
+        use oxide_ui::components::{editor_clipboard_menu};
+        use oxide_ui::tokens::Theme;
+        use_init_theme(dark_theme);
+        let th = Theme::default();
+        let noop = EventHandler::from(|_: ()| {});
+        rect()
+            .width(Size::fill())
+            .height(Size::fill())
+            .background(th.bg_deep())
+            .main_align(Alignment::Center)
+            .cross_align(Alignment::Center)
+            .child(
+                editor_clipboard_menu(
+                    th,
+                    noop.clone(),
+                    noop.clone(),
+                    noop.clone(),
+                    noop,
+                ),
+            )
+            .into()
+    }
+
+    /// Renders the editor_clipboard_menu directly on a dark backdrop.
+    /// Confirms: 4 items (Cut / Copy / Paste / Select All) are legible.
+    /// Run with:
+    ///   LIBRARY_PATH=/tmp/oxidemx-lib-links cargo test -p oxide-freya --bin oxide-freya snapshot_text_input_menu -- --ignored
+    #[test]
+    #[ignore = "snapshot: writes PNG to /tmp for visual review"]
+    fn snapshot_text_input_menu() {
+        let (mut runner, _) =
+            TestingRunner::new(snapshot_text_input_menu_app, (240., 200.).into(), |_| {}, 1.);
+        runner.poll_n(Duration::from_millis(5), 8);
+        runner.sync_and_update();
+        runner.render_to_file("/tmp/oxide-textinput-menu.png");
+    }
+
 }
