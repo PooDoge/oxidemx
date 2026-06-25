@@ -503,4 +503,61 @@ mod tests {
         runner.sync_and_update();
         runner.render_to_file("/tmp/oxide-viewer-infocard.png");
     }
+
+    // ── Snapshot: full composer with 2 seeded attachment chips (T5) ──────────────
+
+    /// Renders the Toolbar seeded with 2 attachment chips on a dark card backdrop —
+    /// confirms chips sit in the toolbar strip beside the model pill (NOT in a
+    /// full-width row above the editor), send button is pinned right, and the dark
+    /// backdrop makes the chips legible.
+    ///
+    /// Chips are seeded directly into the Toolbar builder (.attachments([…])) so
+    /// the snapshot is deterministic regardless of freya_testing interaction timing.
+    ///
+    /// Run with:
+    ///   LIBRARY_PATH=/tmp/oxidemx-lib-links cargo test -p oxide-freya --bin oxide-freya snapshot_composer_full -- --ignored --nocapture
+    fn snapshot_composer_full_app() -> Element {
+        use oxide_ui::components::composer::{sample_attachment, Toolbar, SendState};
+        use oxide_ui::tokens::Theme;
+        use_init_theme(dark_theme);
+        let th = Theme::default();
+        rect()
+            .direction(Direction::Vertical)
+            .content(Content::Flex)
+            .width(Size::fill())
+            .height(Size::fill())
+            .background(th.bg_deep())
+            .padding(Gaps::new_all(16.))
+            // flex spacer pushes the toolbar to the bottom (real-app layout)
+            .child(rect().width(Size::px(1.)).height(Size::flex(1.0)))
+            // card wrapping the toolbar
+            .child(
+                rect()
+                    .direction(Direction::Vertical)
+                    .content(Content::Flex)
+                    .width(Size::fill())
+                    .corner_radius(CornerRadius::new_all(16.))
+                    .background(th.bg_deep())
+                    .border(Border::new().fill(th.surface_max()).width(1.))
+                    .child(
+                        Toolbar::new(th)
+                            .attachments(vec![
+                                sample_attachment("repo").unwrap(),
+                                sample_attachment("image").unwrap(),
+                            ])
+                            .send(SendState::Ready),
+                    ),
+            )
+            .into()
+    }
+
+    #[test]
+    #[ignore = "snapshot: writes PNG to /tmp for visual review"]
+    fn snapshot_composer_full() {
+        let (mut runner, _) =
+            TestingRunner::new(snapshot_composer_full_app, (760., 300.).into(), |_| {}, 1.);
+        runner.poll_n(Duration::from_millis(5), 12);
+        runner.sync_and_update();
+        runner.render_to_file("/tmp/oxide-composer-full.png");
+    }
 }

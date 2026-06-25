@@ -18,6 +18,9 @@ pub mod toolbar;
 pub use activity_line::ActivityLine;
 pub use attach_menu::AttachMenu;
 pub use attachment::{Attachment, AttachSource, AttachmentChip, AttachmentRow, ATTACH_SOURCES, sample_attachment};
+// NOTE: AttachmentRow is no longer used inside the Composer orchestrator (chips live
+// in the Toolbar strip). It remains exported for any external callers that may
+// reference it from tests or other modules.
 pub use attachment_viewer::AttachmentViewer;
 pub use config::{ComposerConfig, Model, Prediction, ProviderId, Thinking, DEFAULT_MODEL_ID, MODELS, model_by_id};
 pub use editor::ComposerEditor;
@@ -33,8 +36,8 @@ use crate::tokens::Theme;
 // ── Composer ────────────────────────────────────────────────────────────────────
 
 /// The chat-input chassis: assembles `ActivityLine` · `ComposerCard` { `ResizeGrip`
-/// · `PredictionStrip` · `AttachmentRow` · `ComposerEditor` · `Toolbar` } and the
-/// floating `AttachMenu` / `ProviderMenu`. Owns all local UI state.
+/// · `PredictionStrip` · `ComposerEditor` · `Toolbar` } and the floating `AttachMenu`
+/// / `ProviderMenu` / `AttachmentViewer`. Owns all local UI state.
 ///
 /// Builder usage:
 /// ```ignore
@@ -91,6 +94,9 @@ impl Component for Composer {
         let mut send_on_enter = use_state(|| true);
         let mut manual_height = use_state(|| None::<f32>);
         let mut content_height = use_state(|| 0.0_f32);
+        // Index of the attachment currently shown in the viewer popup.
+        // `None` means the viewer is closed.
+        let mut viewing = use_state(|| None::<usize>);
         // `working` is always false in Slice 1 (no in-flight send flow yet). It is
         // threaded only so the send button can render its three states.
         let working = false;
@@ -112,6 +118,7 @@ impl Component for Composer {
                 value.set(String::new());
                 attachments.write().clear();
                 manual_height.set(None);
+                viewing.set(None);
             }
         };
 
@@ -155,28 +162,18 @@ impl Component for Composer {
                         .into_element()
                 });
 
-        // ── AttachmentRow (only when non-empty) ───────────────────────────────
-        let attachment_row: Option<Element> = (!attachments.read().is_empty()).then(|| {
-            let items = attachments.read().clone();
-            let mut attachments = attachments;
-            AttachmentRow::new(items, th)
-                .on_remove(move |i: usize| {
-                    let mut w = attachments.write();
-                    if i < w.len() {
-                        w.remove(i);
-                    }
-                })
-                .into_element()
-        });
-
         // ── Editor ────────────────────────────────────────────────────────────
         let editor: Element = {
             let mut submit = submit.clone();
+            let mut attachments_paste = attachments;
             ComposerEditor::new(value.clone(), config, th)
                 .send_on_enter(*send_on_enter.read())
                 .manual_height(*manual_height.read())
                 .on_height(move |h: f32| content_height.set(h))
                 .on_submit(move |text: String| submit(text))
+                .on_paste_attachment(move |a: Attachment| {
+                    attachments_paste.write().push(a);
+                })
                 .into_element()
         };
 
@@ -227,6 +224,11 @@ impl Component for Composer {
         let toolbar_block: Element = {
             let mut submit = submit.clone();
             let value = value.clone();
+            // Clone state handles for the toolbar's three attachment closures.
+            // `State<T>` is Copy, so each closure gets its own copy of the handle.
+            let mut attachments_remove = attachments;
+            let mut viewing_remove     = viewing;
+            let mut viewing_view       = viewing;
             Toolbar::new(th)
                 .model_id(model_id.read().clone())
                 .thinking(*thinking.read())
@@ -237,6 +239,17 @@ impl Component for Composer {
                 .provider_open(*provider_open.read())
                 .attach_menu(Some(attach_menu))
                 .provider_menu(Some(provider_menu))
+                .attachments(attachments.read().clone())
+                .on_attach_remove(move |i: usize| {
+                    let mut w = attachments_remove.write();
+                    if i < w.len() {
+                        w.remove(i);
+                    }
+                    if viewing_remove.peek().is_some_and(|v| v == i) {
+                        viewing_remove.set(None);
+                    }
+                })
+                .on_attach_view(move |i: usize| viewing_view.set(Some(i)))
                 .on_attach_toggle(move |_| {
                     attach_open.toggle();
                     provider_open.set(false);
@@ -265,9 +278,28 @@ impl Component for Composer {
             .border(Border::new().fill(card_border).width(1.))
             .maybe_child(grip)
             .maybe_child(strip)
-            .maybe_child(attachment_row)
             .child(editor)
             .child(toolbar_block);
+
+        // ── AttachmentViewer overlay ──────────────────────────────────────────
+        // Mounted as a sibling on the outer container only when viewing is Some(i)
+        // and the index is in range. `AttachmentViewer` wraps Freya's `Popup` so it
+        // paints on its own overlay layer regardless of DOM position.
+        let viewer: Option<Element> = viewing.read().and_then(|i| {
+            let guard = attachments.read();
+            if i < guard.len() {
+                let att = guard[i].clone();
+                drop(guard);
+                let mut viewing_dismiss = viewing;
+                Some(
+                    AttachmentViewer::new(att, th)
+                        .on_dismiss(move |_| viewing_dismiss.set(None))
+                        .into_element(),
+                )
+            } else {
+                None
+            }
+        });
 
         // ── Outer column: ActivityLine above the card ─────────────────────────
         rect()
@@ -276,6 +308,7 @@ impl Component for Composer {
             .width(Size::fill())
             .maybe_child(activity_line)
             .child(card)
+            .maybe_child(viewer)
     }
 }
 
