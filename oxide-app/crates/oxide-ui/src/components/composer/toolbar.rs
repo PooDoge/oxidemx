@@ -3,16 +3,17 @@
 //! Contains:
 //! - Pure `send_state` logic + `SendState` enum (fully testable without a runtime).
 //! - `Toolbar` component: a `Content::Flex` horizontal row with:
-//!   AttachButton · ProviderPill · OptimizerChip · [spacer] · LineHint · SendButton.
+//!   AttachButton · ProviderPill · strip(flex) · OptimizerChip · LineHint · SendButton.
 //!
-//! The `Content::Flex` on the row is mandatory — the spacer before LineHint uses
-//! `Size::flex(1.0)` to push the send button to the right edge; omitting it would
-//! cause the send button to overflow off-screen.
+//! The `Content::Flex` on the row is mandatory — the attachment strip uses
+//! `Size::flex(1.0)` to occupy the middle and push the send button to the right
+//! edge; omitting it would cause the send button to overflow off-screen.
 use freya::animation::*;
 use freya::prelude::*;
 
 use crate::tokens::Theme;
 use crate::components::menu::{Placement, Popover};
+use super::attachment::{Attachment, AttachmentChip};
 use super::config::{Thinking, model_by_id};
 use super::icons::icon;
 
@@ -58,6 +59,9 @@ pub fn send_state(text_empty: bool, has_attachments: bool, working: bool) -> Sen
 ///     .line_count(3)
 ///     .send(SendState::Ready)
 ///     .attach_open(false)
+///     .attachments(vec![att_a, att_b])
+///     .on_attach_remove(|idx: usize| println!("remove {idx}"))
+///     .on_attach_view(|idx: usize| println!("view {idx}"))
 ///     .on_attach_toggle(|_| println!("attach toggled"))
 ///     .on_provider_toggle(|_| println!("provider toggled"))
 ///     .on_send(|_| println!("send!"))
@@ -73,6 +77,9 @@ pub struct Toolbar {
     pub provider_open: bool,
     pub theme:         Theme,
 
+    /// Attachments displayed as compact chips in the flex-middle strip.
+    pub attachments: Vec<Attachment>,
+
     // Menu content (built by the orchestrator). The Toolbar wraps each trigger in
     // a `Popover` so each menu anchors to ITS own button. Dismissal is owned by
     // the menu content (Freya `Menu`'s `on_close`), wired by the orchestrator.
@@ -82,6 +89,8 @@ pub struct Toolbar {
     on_attach_toggle:   Option<EventHandler<()>>,
     on_provider_toggle: Option<EventHandler<()>>,
     on_send:            Option<EventHandler<()>>,
+    on_attach_remove:   Option<EventHandler<usize>>,
+    on_attach_view:     Option<EventHandler<usize>>,
 }
 
 impl Toolbar {
@@ -95,11 +104,14 @@ impl Toolbar {
             attach_open:        false,
             provider_open:      false,
             theme,
+            attachments:        Vec::new(),
             attach_menu:        None,
             provider_menu:      None,
             on_attach_toggle:   None,
             on_provider_toggle: None,
             on_send:            None,
+            on_attach_remove:   None,
+            on_attach_view:     None,
         }
     }
 
@@ -160,6 +172,24 @@ impl Toolbar {
 
     pub fn on_send(mut self, h: impl Into<EventHandler<()>>) -> Self {
         self.on_send = Some(h.into());
+        self
+    }
+
+    /// Attachments to display as compact chips in the flex-middle scroll strip.
+    pub fn attachments(mut self, atts: Vec<Attachment>) -> Self {
+        self.attachments = atts;
+        self
+    }
+
+    /// Called with the index of the chip whose × was pressed.
+    pub fn on_attach_remove(mut self, h: impl Into<EventHandler<usize>>) -> Self {
+        self.on_attach_remove = Some(h.into());
+        self
+    }
+
+    /// Called with the index of the chip whose body was clicked (compact view).
+    pub fn on_attach_view(mut self, h: impl Into<EventHandler<usize>>) -> Self {
+        self.on_attach_view = Some(h.into());
         self
     }
 }
@@ -312,14 +342,31 @@ impl Component for Toolbar {
                 .into_element()
         });
 
-        // ── Spacer + LineHint (only when line_count > 1) ──────────────────────
-        // The spacer MUST be Size::flex(1.0) — this is what pushes the send button
-        // to the right.  The parent row MUST have Content::Flex for this to work.
-        let spacer: Element = rect()
-            .width(Size::flex(1.0))
-            .height(Size::px(1.))
-            .into_element();
+        // ── Attachment strip (flex-middle) ────────────────────────────────────
+        // Replaces the old Size::flex(1.0) spacer.  When `attachments` is empty
+        // the ScrollView still has width(Size::flex(1.0)) so it acts as the spacer
+        // and keeps the send button pinned to the right edge.
+        let mut strip = ScrollView::new()
+            .direction(Direction::Horizontal)
+            .show_scrollbar(false)
+            .spacing(6.)
+            .width(Size::flex(1.0));
+        for (i, att) in self.attachments.iter().enumerate() {
+            let on_view   = self.on_attach_view.clone();
+            let on_remove = self.on_attach_remove.clone();
+            strip = strip.child(
+                AttachmentChip::new(att.clone(), th)
+                    .compact(true)
+                    .on_view(move |_: ()| {
+                        if let Some(h) = &on_view { h.call(i); }
+                    })
+                    .on_remove(move |_: ()| {
+                        if let Some(h) = &on_remove { h.call(i); }
+                    }),
+            );
+        }
 
+        // ── LineHint (only when line_count > 1) ───────────────────────────────
         let line_hint: Option<Element> = (self.line_count > 1).then(|| {
             let text = format!("{} lines · ⇧⏎ newline", self.line_count);
             label()
@@ -386,8 +433,11 @@ impl Component for Toolbar {
         };
 
         // ── Row assembly ──────────────────────────────────────────────────────
-        // Content::Flex is REQUIRED here — the spacer child uses Size::flex(1.0).
-        // Without it the spacer collapses to zero and the send button is not pushed
+        // Order: AttachButton(Popover) · ProviderPill(Popover) · strip(flex) ·
+        //        OptimizerChip(when on) · LineHint(when >1) · SendButton.
+        //
+        // Content::Flex is REQUIRED here — the strip child uses Size::flex(1.0).
+        // Without it the strip collapses to zero and the send button is not pushed
         // to the right (or overflows off-screen).
         let mut row = rect()
             .direction(Direction::Horizontal)
@@ -398,14 +448,13 @@ impl Component for Toolbar {
             .width(Size::fill())
             .padding(Gaps::new(6., 12., 6., 10.))
             .child(attach_block)
-            .child(provider_block);
+            .child(provider_block)
+            // Strip always present — flex(1.0) keeps send pinned right.
+            .child(strip);
 
         if let Some(chip) = optimizer_chip {
             row = row.child(chip);
         }
-
-        // Spacer always present — pushes right side to the edge.
-        row = row.child(spacer);
 
         if let Some(hint) = line_hint {
             row = row.child(hint);
@@ -420,6 +469,7 @@ impl Component for Toolbar {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use super::super::attachment::sample_attachment;
 
     #[test]
     fn send_state_resolves() {
@@ -427,5 +477,30 @@ mod tests {
         assert_eq!(send_state(true, true, false),   SendState::Ready);   // attachment alone enables
         assert_eq!(send_state(false, false, false), SendState::Ready);
         assert_eq!(send_state(false, false, true),  SendState::Working);
+    }
+
+    /// Toolbar with two attachments renders both chip names in the strip.
+    #[test]
+    fn toolbar_attachment_strip_renders_chip_names() {
+        use freya_testing::prelude::*;
+        fn app() -> impl IntoElement {
+            Toolbar::new(Theme::default())
+                .attachments(vec![
+                    sample_attachment("repo").unwrap(),
+                    sample_attachment("image").unwrap(),
+                ])
+        }
+        let mut t = launch_test(app);
+        t.sync_and_update();
+
+        let found_repo = t.find(|_, el| {
+            Label::try_downcast(el).filter(|l| l.text.as_ref().contains("run_bridge.rs"))
+        });
+        assert!(found_repo.is_some(), "toolbar strip should render 'run_bridge.rs' chip");
+
+        let found_image = t.find(|_, el| {
+            Label::try_downcast(el).filter(|l| l.text.as_ref().contains("screenshot.png"))
+        });
+        assert!(found_image.is_some(), "toolbar strip should render 'screenshot.png' chip");
     }
 }

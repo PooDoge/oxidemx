@@ -380,4 +380,65 @@ mod tests {
         runner.sync_and_update();
         runner.render_to_file("/tmp/oxide-sidebar-p2.png");
     }
+
+    // ── Snapshot: toolbar attachment strip (T2) ───────────────────────────────
+
+    fn snapshot_toolbar_chips_app() -> Element {
+        use oxide_ui::components::composer::{
+            Toolbar, SendState, sample_attachment,
+        };
+        use oxide_ui::tokens::Theme;
+        Toolbar::new(Theme::default())
+            .attachments(vec![
+                sample_attachment("repo").unwrap(),
+                sample_attachment("image").unwrap(),
+                sample_attachment("code").unwrap(),
+            ])
+            .send(SendState::Ready)
+            .into()
+    }
+
+    /// Toolbar with 3 attachment chips beside the model pill, send button pinned right.
+    /// Run with: cargo test -p oxide-freya snapshot_toolbar_chips -- --ignored --nocapture
+    #[test]
+    #[ignore = "snapshot: writes PNG to /tmp for visual review"]
+    fn snapshot_toolbar_chips() {
+        let (mut runner, _) =
+            TestingRunner::new(snapshot_toolbar_chips_app, (760., 60.).into(), |_| {}, 1.);
+        runner.poll_n(Duration::from_millis(5), 6);
+        runner.sync_and_update();
+        runner.render_to_file("/tmp/oxide-toolbar-chips.png");
+    }
+
+    fn snapshot_toolbar_overflow_app() -> Element {
+        use oxide_ui::components::composer::{
+            Toolbar, SendState, sample_attachment,
+        };
+        use oxide_ui::tokens::Theme;
+        Toolbar::new(Theme::default())
+            .attachments(vec![
+                sample_attachment("repo").unwrap(),
+                sample_attachment("image").unwrap(),
+                sample_attachment("code").unwrap(),
+                sample_attachment("upload").unwrap(),
+                sample_attachment("paste").unwrap(),
+                sample_attachment("camera").unwrap(),
+                sample_attachment("repo").unwrap(),
+                sample_attachment("image").unwrap(),
+            ])
+            .send(SendState::Ready)
+            .into()
+    }
+
+    /// Toolbar with 8 chips — strip overflows horizontally, send button still visible.
+    /// Run with: cargo test -p oxide-freya snapshot_toolbar_overflow -- --ignored --nocapture
+    #[test]
+    #[ignore = "snapshot: writes PNG to /tmp for visual review"]
+    fn snapshot_toolbar_overflow() {
+        let (mut runner, _) =
+            TestingRunner::new(snapshot_toolbar_overflow_app, (760., 60.).into(), |_| {}, 1.);
+        runner.poll_n(Duration::from_millis(5), 6);
+        runner.sync_and_update();
+        runner.render_to_file("/tmp/oxide-toolbar-overflow.png");
+    }
 }
