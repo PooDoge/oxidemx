@@ -131,7 +131,8 @@ impl Component for MainRegion {
             )
             .child(
                 Composer::new(input.into_writable(), ComposerConfig::default())
-                    .on_submit(move |text| send_state.send(text)),
+                    // Task 3 replaces vec![] with the real composer attachments.
+                    .on_submit(move |text| send_state.send(text, vec![])),
             )
     }
 }

@@ -2947,6 +2947,7 @@ dependencies = [
 name = "oxide-freya"
 version = "0.1.0"
 dependencies = [
+ "base64",
  "freya",
  "freya-testing",
  "futures-util",

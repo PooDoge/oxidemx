@@ -17,7 +17,7 @@ pub struct MockTransport {
     pub events: Mutex<Vec<AgentEvent>>,
     pub healthy: bool,
     /// All attachments from every `send_message` call, in order of arrival.
-    recorded: Arc<Mutex<Vec<AttachmentPayload>>>,
+    pub recorded: Arc<Mutex<Vec<AttachmentPayload>>>,
 }
 
 impl MockTransport {

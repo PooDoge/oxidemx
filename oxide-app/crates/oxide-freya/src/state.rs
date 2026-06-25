@@ -11,6 +11,7 @@ use std::sync::Arc;
 
 use freya::prelude::*;
 use oxide_client::{AgentEvent, Conversation, ConversationId, Project, Transport, Turn};
+use oxide_client::dto::AttachmentPayload;
 
 // ── Connection state ────────────────────────────────────────────────────────
 
@@ -180,13 +181,17 @@ impl AppState {
 
     /// Append the user turn immediately, then fire `send_message` to the
     /// transport.  The assistant reply streams back via the open subscription.
-    pub fn send(&self, text: String) {
+    ///
+    /// `attachments` are forwarded verbatim to the transport; callers are
+    /// responsible for mapping `Attachment → AttachmentPayload` via
+    /// [`crate::attachment_payload::to_payload`] before calling this.
+    pub fn send(&self, text: String, attachments: Vec<AttachmentPayload>) {
         let Some(id) = self.active.peek().clone() else { return };
         let mut transcript = self.transcript;
         transcript.with_mut(|mut tx| tx.apply_user(text.clone()));
         let t = self.transport.clone();
         spawn(async move {
-            let _ = t.send_message(id.as_str(), &text, &[]).await;
+            let _ = t.send_message(id.as_str(), &text, &attachments).await;
         });
     }
 }

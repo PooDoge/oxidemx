@@ -177,7 +177,7 @@ mod tests {
             let st = state.clone();
             use_side_effect(move || {
                 st.open_conversation(ConversationId::from("c1"));
-                st.send("ping".to_string());
+                st.send("ping".to_string(), vec![]);
             });
 
             rect()
