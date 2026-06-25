@@ -504,6 +504,103 @@ mod tests {
         runner.render_to_file("/tmp/oxide-viewer-infocard.png");
     }
 
+    // ── Snapshot: image lightbox with real PNG bytes, dark theme (T4a) ──────────
+
+    fn snapshot_viewer_lightbox_app() -> Element {
+        use oxide_ui::components::composer::{
+            attachment::{AttachData, AttachKind},
+            clipboard::image_data_to_attachment,
+            AttachmentViewer,
+        };
+        use oxide_ui::tokens::Theme;
+        use_init_theme(dark_theme);
+        let th = Theme::default();
+
+        // 96×64 RGBA gradient: R varies across width, G varies across height.
+        let width: usize = 96;
+        let height: usize = 64;
+        let mut rgba = Vec::with_capacity(width * height * 4);
+        for row in 0..height {
+            for col in 0..width {
+                let r = ((col as f32 / (width - 1) as f32) * 255.0) as u8;
+                let g = ((row as f32 / (height - 1) as f32) * 255.0) as u8;
+                rgba.push(r);
+                rgba.push(g);
+                rgba.push(120u8);
+                rgba.push(255u8);
+            }
+        }
+
+        let mut att = image_data_to_attachment(width, height, &rgba)
+            .expect("gradient image encodes to PNG");
+        // Override the name so it reads as a recognizable test image in the caption.
+        att.name = "gradient-test.png".into();
+        att.kind = AttachKind::Image;
+        // Confirm data came through as Image bytes (image_data_to_attachment sets this).
+        debug_assert!(matches!(att.data, AttachData::Image(_)));
+
+        rect()
+            .width(Size::fill())
+            .height(Size::fill())
+            .background(th.bg_deep())
+            .main_align(Alignment::Center)
+            .cross_align(Alignment::Center)
+            .child(
+                AttachmentViewer::new(att, th)
+                    .on_dismiss(|()| {}),
+            )
+            .into()
+    }
+
+    /// Image lightbox with a real 96×64 RGBA gradient encoded as PNG, dark theme.
+    /// Confirms: dark Popup, image renders, caption "gradient-test.png" legible.
+    /// Run with:
+    ///   LIBRARY_PATH=/tmp/oxidemx-lib-links cargo test -p oxide-freya --bin oxide-freya snapshot_viewer_lightbox -- --ignored
+    #[test]
+    #[ignore = "snapshot: writes PNG to /tmp for visual review"]
+    fn snapshot_viewer_lightbox() {
+        let (mut runner, _) =
+            TestingRunner::new(snapshot_viewer_lightbox_app, (900., 640.).into(), |_| {}, 1.);
+        runner.poll_n(Duration::from_millis(5), 12);
+        runner.sync_and_update();
+        runner.render_to_file("/tmp/oxide-viewer-lightbox.png");
+    }
+
+    // ── Snapshot: info-card on dark theme (T4b) ───────────────────────────────────
+
+    fn snapshot_viewer_infocard_dark_app() -> Element {
+        use oxide_ui::components::composer::{sample_attachment, AttachmentViewer};
+        use oxide_ui::tokens::Theme;
+        use_init_theme(dark_theme);
+        let th = Theme::default();
+        let att = sample_attachment("repo").unwrap();
+        rect()
+            .width(Size::fill())
+            .height(Size::fill())
+            .background(th.bg_deep())
+            .main_align(Alignment::Center)
+            .cross_align(Alignment::Center)
+            .child(
+                AttachmentViewer::new(att, th)
+                    .on_dismiss(|()| {}),
+            )
+            .into()
+    }
+
+    /// Info-card viewer for a File attachment with dark theme properly initialized.
+    /// The Popup card is dark and name/meta/type text is legible (white-on-dark).
+    /// Run with:
+    ///   LIBRARY_PATH=/tmp/oxidemx-lib-links cargo test -p oxide-freya --bin oxide-freya snapshot_viewer_infocard_dark -- --ignored
+    #[test]
+    #[ignore = "snapshot: writes PNG to /tmp for visual review"]
+    fn snapshot_viewer_infocard_dark() {
+        let (mut runner, _) =
+            TestingRunner::new(snapshot_viewer_infocard_dark_app, (720., 400.).into(), |_| {}, 1.);
+        runner.poll_n(Duration::from_millis(5), 12);
+        runner.sync_and_update();
+        runner.render_to_file("/tmp/oxide-viewer-infocard-dark.png");
+    }
+
     // ── Snapshot: full composer with 2 seeded attachment chips (T5) ──────────────
 
     /// Renders the Toolbar seeded with 2 attachment chips on a dark card backdrop —
