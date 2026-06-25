@@ -8,6 +8,10 @@ use oxide_ui::components::composer::ComposerConfig;
 
 use crate::state::AppState;
 
+/// Pixels from the bottom within which we consider the user "at the bottom"
+/// and auto-scroll should fire.
+const AT_BOTTOM_THRESHOLD: f32 = 24.0;
+
 #[derive(PartialEq, Clone)]
 pub struct MainRegion {
     pub state: AppState,
@@ -25,7 +29,83 @@ impl Component for MainRegion {
             .map(|c| (c.title.clone(), None))
             .unwrap_or_else(|| ("OxideMX".to_string(), None));
 
-        let mut thread = rect().direction(Direction::Vertical).spacing(14.0).width(Size::fill());
+        // ── Scroll-to-bottom controller ───────────────────────────────────────
+        // `ScrollPosition::End` means the initial render starts at the bottom.
+        let mut scroll_ctrl = use_scroll_controller(|| ScrollConfig {
+            default_vertical_position: ScrollPosition::End,
+            default_horizontal_position: ScrollPosition::Start,
+        });
+
+        // Measured heights for at-bottom detection.
+        // `content_h`  — full unclipped height of the thread rect.
+        // `viewport_h` — rendered height of the scroll wrapper (the padding rect).
+        let mut content_h  = use_state(|| 0.0_f32);
+        let mut viewport_h = use_state(|| 0.0_f32);
+
+        // Whether the user was at (or near) the bottom on the previous render.
+        // Defaults to true so the very first batch of content triggers scroll.
+        let mut stick_to_bottom = use_state(|| true);
+
+        // The content key changes whenever committed turns or streaming text grows.
+        let content_key = tx.turns.len() + tx.live_assistant.len();
+
+        // Last content key seen — used to detect new content arriving.
+        let mut last_key = use_state(|| 0usize);
+
+        // ── At-bottom detection (render-time) ─────────────────────────────────
+        // The scroll controller stores the raw Y offset: 0 at the top, negative
+        // as the user scrolls down.  The fully-scrolled-to-bottom position is
+        //   max_scroll_y = -(content_h - viewport_h)   (a negative number)
+        // "At bottom" ≈ scroll_y ≤ max_scroll_y + threshold.
+        //
+        // We read the offset BEFORE potential new content shifts the layout, so
+        // the stale-but-correct "were we at bottom before new content?" check
+        // works naturally: the next render's offset still reflects the old position.
+        let (_, raw_scroll_y) = scroll_ctrl.into();
+        let ch = *content_h.read();
+        let vh = *viewport_h.read();
+        let max_scroll_y = -((ch - vh).max(0.0));
+        let is_at_bottom =
+            vh == 0.0 // not yet measured → assume at bottom
+            || raw_scroll_y as f32 <= max_scroll_y + AT_BOTTOM_THRESHOLD;
+
+        // Update stick_to_bottom each render so it tracks the user's scroll intent.
+        if *stick_to_bottom.read() != is_at_bottom {
+            stick_to_bottom.set(is_at_bottom);
+        }
+
+        // ── Trigger scroll when new content arrives ────────────────────────────
+        // If the content key grew AND we were at the bottom, snap to End.
+        // If the user scrolled up (stick_to_bottom == false), leave them alone.
+        if content_key > *last_key.read() {
+            last_key.set(content_key);
+            if *stick_to_bottom.read() {
+                scroll_ctrl.scroll_to(ScrollPosition::End, Direction::Vertical);
+            }
+        }
+
+        // ── on_sized callbacks ────────────────────────────────────────────────
+        // Thread content: measure the unclipped height of all bubbles.
+        let on_thread_sized = move |e: Event<SizedEventData>| {
+            let h = e.area.height();
+            if (*content_h.peek() - h).abs() > 0.5 {
+                content_h.set(h);
+            }
+        };
+
+        // Scroll wrapper: measure the viewport height (the padding rect).
+        let on_viewport_sized = move |e: Event<SizedEventData>| {
+            let h = e.area.height();
+            if (*viewport_h.peek() - h).abs() > 0.5 {
+                viewport_h.set(h);
+            }
+        };
+
+        let mut thread = rect()
+            .direction(Direction::Vertical)
+            .spacing(14.0)
+            .width(Size::fill())
+            .on_sized(on_thread_sized);
         for turn in &tx.turns {
             thread = thread.child(Bubble::new(turn.role.clone(), turn.text.clone()));
         }
@@ -46,7 +126,8 @@ impl Component for MainRegion {
                     .width(Size::fill())
                     .height(Size::flex(1.0))
                     .padding(Gaps::new(16., 18., 16., 18.))
-                    .child(ScrollView::new().child(thread)),
+                    .on_sized(on_viewport_sized)
+                    .child(ScrollView::new_controlled(scroll_ctrl).child(thread)),
             )
             .child(
                 Composer::new(input.into_writable(), ComposerConfig::default())
