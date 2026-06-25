@@ -22,13 +22,17 @@ use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
 
+use crate::attachments::AttachmentRef;
 use crate::error::AgentdError;
 use crate::projects::ProjectKey;
 
 // ── TranscriptTurn ────────────────────────────────────────────────────────────
 
 /// One turn in a conversation transcript, serialised as a single JSON line.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+///
+/// `PartialEq` (not `Eq`) because `AttachmentRef` is only `PartialEq`; `Eq`
+/// isn't required anywhere `TranscriptTurn` is used.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct TranscriptTurn {
     /// `"user"` or `"assistant"` (open-ended for tool turns etc.).
     pub role: String,
@@ -36,6 +40,14 @@ pub struct TranscriptTurn {
     pub text: String,
     /// Unix timestamp (milliseconds since epoch) when the turn was appended.
     pub ts: u64,
+    /// Handles to attachments persisted for this turn (images, files).
+    ///
+    /// `#[serde(default)]` keeps back-compat: transcript JSONL lines written
+    /// before this field existed (no `attachments` key) deserialize to an
+    /// empty vec rather than failing. `skip_serializing_if` keeps the common
+    /// no-attachment line byte-identical to the legacy format.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub attachments: Vec<AttachmentRef>,
 }
 
 // ── TranscriptStore ───────────────────────────────────────────────────────────
@@ -273,6 +285,39 @@ mod tests {
         assert_eq!(sm.len(), 2);
         sm.end(&key, "t1");
         assert_eq!(sm.len(), 1);
+    }
+
+    #[test]
+    fn transcript_turn_without_attachments_field_deserializes() {
+        // A legacy JSONL line written before the `attachments` field existed
+        // must still parse (back-compat) → empty attachments vec.
+        let line = r#"{"role":"user","text":"hello","ts":42}"#;
+        let turn: TranscriptTurn = serde_json::from_str(line).unwrap();
+        assert_eq!(turn.role, "user");
+        assert_eq!(turn.text, "hello");
+        assert_eq!(turn.ts, 42);
+        assert!(
+            turn.attachments.is_empty(),
+            "missing `attachments` field must default to an empty vec"
+        );
+    }
+
+    #[test]
+    fn transcript_turn_with_attachments_round_trips() {
+        let turn = TranscriptTurn {
+            role: "user".into(),
+            text: "look at this".into(),
+            ts: 7,
+            attachments: vec![AttachmentRef {
+                id: "abc123".into(),
+                mime: "image/png".into(),
+                name: "shot.png".into(),
+            }],
+        };
+        let json = serde_json::to_string(&turn).unwrap();
+        assert!(json.contains("attachments"), "json should carry the field: {json}");
+        let back: TranscriptTurn = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, turn);
     }
 
     #[test]

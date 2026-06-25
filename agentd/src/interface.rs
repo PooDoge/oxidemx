@@ -78,6 +78,10 @@ pub trait TurnRunner: Send + Sync {
     /// - `thread` — the conversation thread id
     /// - `text` — the user's message text
     /// - `history` — prior turns for this thread as `(is_user, text)` pairs
+    /// - `images` — decoded image attachments as `(mime, bytes)` to route to
+    ///   the multimodal LLM. Empty when there are none, or when the active
+    ///   provider can't read images (the caller degrades + appends a note to
+    ///   `text` before calling).
     /// - `approver` — gate for tool-call approvals (may be awaited inside)
     /// - `emitter` — side-channel for streaming events
     /// - `paths` — project paths (for tool executor scoping)
@@ -91,6 +95,7 @@ pub trait TurnRunner: Send + Sync {
         thread: &str,
         text: &str,
         history: &[(bool, String)],
+        images: Vec<(String, Vec<u8>)>,
         approver: &Arc<Approver>,
         emitter: &Arc<dyn EventEmitter>,
         paths: &crate::projects::ProjectPaths,
@@ -119,6 +124,7 @@ impl TurnRunner for CoreTurnRunner {
         thread: &str,
         text: &str,
         history: &[(bool, String)],
+        images: Vec<(String, Vec<u8>)>,
         approver: &Arc<Approver>,
         emitter: &Arc<dyn EventEmitter>,
         paths: &crate::projects::ProjectPaths,
@@ -172,7 +178,7 @@ impl TurnRunner for CoreTurnRunner {
             text,
             Some(sink),   // stream deltas to bridge
             history,
-            vec![],       // images: Task 6 wires attachments through here
+            images,       // Task 6: image attachments routed to the multimodal LLM
             &session_id,
             &exec,
         )
@@ -323,6 +329,12 @@ pub struct AgentService {
     pub run_launcher: Arc<crate::run_launcher::ConductorRunLauncher>,
     /// Injectable git seam — production uses `RealGit`; tests inject `MockGit`.
     pub git: Arc<dyn Git>,
+    /// Optional override for the active LLM provider used by the image-capability
+    /// gate in `send_message`. `None` (production) resolves the provider from the
+    /// on-disk config (`~/.config/oxidemx/config.json`), falling back to
+    /// `AiConfig::default().provider`. Tests set this to drive the degrade path
+    /// deterministically without writing a config file.
+    pub provider_override: Option<oxidemx_shared::config::AiProvider>,
 }
 
 impl AgentService {
@@ -354,7 +366,25 @@ impl AgentService {
             run_statuses,
             run_launcher,
             git: Arc::new(RealGit),
+            provider_override: None,
         }
+    }
+
+    /// Resolve the active LLM provider for the image-capability gate.
+    ///
+    /// Honors `provider_override` (tests) first; otherwise mirrors how
+    /// `runtime::route_turn` resolves config — loads
+    /// `~/.config/oxidemx/config.json` and reads `overlay.ai.provider`,
+    /// falling back to `AiConfig::default().provider` when no config is found.
+    fn active_provider(&self) -> oxidemx_shared::config::AiProvider {
+        if let Some(p) = self.provider_override {
+            return p;
+        }
+        oxidemx_shared::config::default_config_path()
+            .and_then(|p| std::fs::read_to_string(p).ok())
+            .and_then(|s| serde_json::from_str::<oxidemx_shared::config::AppConfig>(&s).ok())
+            .map(|c| c.overlay.ai.provider)
+            .unwrap_or_else(|| oxidemx_shared::config::AiConfig::default().provider)
     }
 
     // ── send_message ──────────────────────────────────────────────────────────
@@ -371,12 +401,23 @@ impl AgentService {
     /// 7. Record a `JournalEntry::Turn`.
     /// 8. Emit an `AgentEvent`.
     /// 9. Return a new turn id.
+    ///
+    /// `attachments` are inbound `(name, mime, kind, bytes)` tuples already
+    /// decoded by the HTTP route handler. Image-kind attachments are persisted
+    /// to the [`crate::attachments::AttachmentStore`], their refs stored on the
+    /// user transcript turn, and their bytes routed to the multimodal LLM —
+    /// unless the active provider can't read images, in which case they are
+    /// omitted from the model call and a note is appended to the user text
+    /// (graceful degradation). Per-attachment store/decode failures are skipped
+    /// and logged; they never fail the turn.
+    #[allow(clippy::too_many_arguments)]
     pub async fn send_message(
         &self,
         project: &str,
         thread: &str,
         text: &str,
         _model_hint: Option<&str>,
+        attachments: Vec<(String, String, String, Vec<u8>)>,
     ) -> Result<String, AgentdError> {
         let cwd = PathBuf::from(project);
         let paths = self.projects.resolve(&cwd);
@@ -399,7 +440,44 @@ impl AgentService {
             .map(|t| (t.role == "user", t.text.clone()))
             .collect();
 
-        // Append user turn.
+        // ── Persist image attachments + build the multimodal image list ───────
+        // Only "image" kind attachments are routed to the LLM. Each is written
+        // to the per-thread AttachmentStore (rooted beside the transcripts);
+        // a store failure skips that attachment + logs, never failing the turn.
+        let attach_store = crate::attachments::AttachmentStore::new(paths.attachments_dir());
+        let mut turn_refs: Vec<crate::attachments::AttachmentRef> = Vec::new();
+        let mut images: Vec<(String, Vec<u8>)> = Vec::new();
+        for (name, mime, kind, bytes) in &attachments {
+            match attach_store.write(thread, name, mime, bytes) {
+                Ok(r) => {
+                    if kind == "image" {
+                        images.push((mime.clone(), bytes.clone()));
+                    }
+                    turn_refs.push(r);
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        "send_message: skipping attachment {name:?} ({mime}): store failed: {e}"
+                    );
+                }
+            }
+        }
+
+        // ── Provider-capability gate: degrade for image-incapable providers ───
+        // If the active provider can't read images, drop them from the model
+        // call and append a note to the user text so the model knows images
+        // were attached but omitted. The refs still persist on the transcript.
+        let provider = self.active_provider();
+        let n_images = images.len();
+        let mut effective_text = text.to_string();
+        if n_images > 0 && !oxidemx_agent::factory::supports_images(&provider) {
+            images.clear();
+            effective_text.push_str(&format!(
+                "\n\n[{n_images} image attachment(s) omitted — the current model can't read images]"
+            ));
+        }
+
+        // Append user turn (with its attachment refs).
         let ts_ms = now_ms();
         ts.append(
             thread,
@@ -407,6 +485,7 @@ impl AgentService {
                 role: "user".into(),
                 text: text.into(),
                 ts: ts_ms,
+                attachments: turn_refs.clone(),
             },
         )?;
 
@@ -418,8 +497,9 @@ impl AgentService {
             .run_turn(
                 &paths.key,
                 thread,
-                text,
+                &effective_text,
                 &history,
+                images,
                 &self.approver,
                 &self.emitter,
                 &paths,
@@ -435,6 +515,7 @@ impl AgentService {
                 role: "assistant".into(),
                 text: reply.clone(),
                 ts: now_ms(),
+                attachments: Vec::new(),
             },
         )?;
 
@@ -463,6 +544,7 @@ impl AgentService {
                 "turn_id": turn_id,
                 "thread": thread,
                 "reply_preview": preview,
+                "attachments": turn_refs,
             }),
         });
 
@@ -1223,8 +1305,10 @@ impl AgentInterface {
         } else {
             Some(model_hint)
         };
+        // The D-Bus chat path does not carry attachments (the HTTP connector
+        // does); pass an empty list.
         self.svc
-            .send_message(project, thread, text, hint)
+            .send_message(project, thread, text, hint, Vec::new())
             .await
             .map_err(to_fdo)
     }
@@ -1505,6 +1589,9 @@ pub(crate) mod tests {
     use oxidemx_agent_local::Verdict as LocalVerdict;
     use std::sync::{Arc, Mutex};
 
+    /// Shared recorder for the images (`(mime, bytes)`) a `MockTurnRunner` saw.
+    type ImagesRec = Arc<Mutex<Vec<(String, Vec<u8>)>>>;
+
     // ── StubLocalService (from models.rs tests, replicated here) ─────────────
 
     struct StubLocalService {
@@ -1584,6 +1671,12 @@ pub(crate) mod tests {
         stream_and_exec: bool,
         /// Records the history length received on the most recent call.
         last_history_len: Arc<Mutex<usize>>,
+        /// Records the images (`(mime, bytes)`) received on the most recent
+        /// call, so attachment-routing + degrade tests can assert on them.
+        last_images: ImagesRec,
+        /// Records the (possibly degrade-annotated) user text received on the
+        /// most recent call, so the degrade test can assert the omitted-note.
+        last_text: Arc<Mutex<String>>,
     }
 
     impl MockTurnRunner {
@@ -1593,6 +1686,8 @@ pub(crate) mod tests {
                 request_approval: false,
                 stream_and_exec: false,
                 last_history_len: Arc::new(Mutex::new(0)),
+                last_images: Arc::new(Mutex::new(Vec::new())),
+                last_text: Arc::new(Mutex::new(String::new())),
             }
         }
 
@@ -1602,6 +1697,8 @@ pub(crate) mod tests {
                 request_approval: true,
                 stream_and_exec: false,
                 last_history_len: Arc::new(Mutex::new(0)),
+                last_images: Arc::new(Mutex::new(Vec::new())),
+                last_text: Arc::new(Mutex::new(String::new())),
             }
         }
 
@@ -1614,6 +1711,8 @@ pub(crate) mod tests {
                 request_approval: false,
                 stream_and_exec: true,
                 last_history_len: last_history_len.clone(),
+                last_images: Arc::new(Mutex::new(Vec::new())),
+                last_text: Arc::new(Mutex::new(String::new())),
             };
             (runner, last_history_len)
         }
@@ -1625,8 +1724,9 @@ pub(crate) mod tests {
             &self,
             _project: &ProjectKey,
             thread: &str,
-            _text: &str,
+            text: &str,
             history: &[(bool, String)],
+            images: Vec<(String, Vec<u8>)>,
             approver: &Arc<Approver>,
             emitter: &Arc<dyn EventEmitter>,
             paths: &crate::projects::ProjectPaths,
@@ -1636,6 +1736,10 @@ pub(crate) mod tests {
             let _ = run_launcher;
             // Record history length for multi-turn assertion.
             *self.last_history_len.lock().unwrap_or_else(|e| e.into_inner()) = history.len();
+            // Record the images received so attachment-routing tests can assert.
+            *self.last_images.lock().unwrap_or_else(|e| e.into_inner()) = images;
+            // Record the (possibly degrade-annotated) user text.
+            *self.last_text.lock().unwrap_or_else(|e| e.into_inner()) = text.to_string();
 
             if self.request_approval {
                 approver
@@ -1702,29 +1806,57 @@ pub(crate) mod tests {
         cwd: PathBuf,
         /// Shared handle to the last history length seen by `MockTurnRunner`.
         last_history_len: Arc<Mutex<usize>>,
+        /// Shared handle to the last images seen by `MockTurnRunner`.
+        last_images: ImagesRec,
+        /// Shared handle to the last user text seen by `MockTurnRunner`.
+        last_text: Arc<Mutex<String>>,
     }
 
     impl TestEnv {
         pub fn new() -> Self {
             let runner = MockTurnRunner::new("mock assistant reply");
             let last_history_len = runner.last_history_len.clone();
-            Self::build(runner, last_history_len)
+            let last_images = runner.last_images.clone();
+            let last_text = runner.last_text.clone();
+            // Default provider is image-capable (Gemini) so the common path routes
+            // images; the degrade test uses `with_provider` to pick an incapable one.
+            Self::build(runner, last_history_len, last_images, last_text, None)
+        }
+
+        /// Like [`Self::new`] but pins the active LLM provider for the
+        /// image-capability gate (drives the degrade path deterministically).
+        pub fn with_provider(provider: oxidemx_shared::config::AiProvider) -> Self {
+            let runner = MockTurnRunner::new("mock assistant reply");
+            let last_history_len = runner.last_history_len.clone();
+            let last_images = runner.last_images.clone();
+            let last_text = runner.last_text.clone();
+            Self::build(runner, last_history_len, last_images, last_text, Some(provider))
         }
 
         pub fn with_approval_runner() -> Self {
             let runner = MockTurnRunner::with_approval("mock reply after approval");
             let last_history_len = runner.last_history_len.clone();
-            Self::build(runner, last_history_len)
+            let last_images = runner.last_images.clone();
+            let last_text = runner.last_text.clone();
+            Self::build(runner, last_history_len, last_images, last_text, None)
         }
 
         /// Builds a `TestEnv` whose mock runner streams 2 deltas and calls
         /// `read_file` via the real `AgentToolExecutor`.
         pub fn with_tool_mock() -> Self {
             let (runner, last_history_len) = MockTurnRunner::tool_mock("mock streamed reply");
-            Self::build(runner, last_history_len)
+            let last_images = runner.last_images.clone();
+            let last_text = runner.last_text.clone();
+            Self::build(runner, last_history_len, last_images, last_text, None)
         }
 
-        fn build(runner: MockTurnRunner, last_history_len: Arc<Mutex<usize>>) -> Self {
+        fn build(
+            runner: MockTurnRunner,
+            last_history_len: Arc<Mutex<usize>>,
+            last_images: ImagesRec,
+            last_text: Arc<Mutex<String>>,
+            provider_override: Option<oxidemx_shared::config::AiProvider>,
+        ) -> Self {
             let tmp = tempfile::tempdir().unwrap();
             let store_base = tmp.path().join("store");
             let cwd = tmp.path().join("project");
@@ -1755,6 +1887,7 @@ pub(crate) mod tests {
                 run_statuses,
                 run_launcher,
                 git: Arc::new(RealGit),
+                provider_override,
             });
 
             TestEnv {
@@ -1764,6 +1897,8 @@ pub(crate) mod tests {
                 _tmp: tmp,
                 cwd,
                 last_history_len,
+                last_images,
+                last_text,
             }
         }
 
@@ -1783,6 +1918,18 @@ pub(crate) mod tests {
         /// recent `run_turn` call.
         pub fn last_history_len(&self) -> usize {
             *self.last_history_len.lock().unwrap_or_else(|e| e.into_inner())
+        }
+
+        /// Returns the images seen by the mock runner on its most recent
+        /// `run_turn` call, as `(mime, bytes)` pairs.
+        pub fn last_images(&self) -> Vec<(String, Vec<u8>)> {
+            self.last_images.lock().unwrap_or_else(|e| e.into_inner()).clone()
+        }
+
+        /// Returns the (possibly degrade-annotated) user text seen by the mock
+        /// runner on its most recent `run_turn` call.
+        pub fn last_text(&self) -> String {
+            self.last_text.lock().unwrap_or_else(|e| e.into_inner()).clone()
         }
     }
 
@@ -1823,6 +1970,7 @@ pub(crate) mod tests {
             run_statuses,
             run_launcher,
             git: Arc::new(RealGit),
+            provider_override: None,
         });
         (svc, tmp)
     }
@@ -1834,7 +1982,7 @@ pub(crate) mod tests {
         let env = TestEnv::new();
         let turn_id = env
             .svc
-            .send_message(env.cwd_str(), "t1", "hello", None)
+            .send_message(env.cwd_str(), "t1", "hello", None, Vec::new())
             .await
             .unwrap();
         assert!(!turn_id.is_empty(), "turn_id should not be empty");
@@ -1898,7 +2046,7 @@ pub(crate) mod tests {
         let svc2 = svc.clone();
         let cwd2 = cwd_str.clone();
         let handle = tokio::spawn(async move {
-            svc2.send_message(&cwd2, "t-approval", "do the thing", None)
+            svc2.send_message(&cwd2, "t-approval", "do the thing", None, Vec::new())
                 .await
         });
 
@@ -1934,7 +2082,7 @@ pub(crate) mod tests {
     async fn list_projects_and_threads_reflect_activity() {
         let env = TestEnv::new();
         env.svc
-            .send_message(env.cwd_str(), "t1", "hi", None)
+            .send_message(env.cwd_str(), "t1", "hi", None, Vec::new())
             .await
             .unwrap();
 
@@ -2186,13 +2334,13 @@ You are an echo agent. Repeat the task back.
 
         // Turn 1 — history is empty going in.
         env.svc
-            .send_message(env.cwd_str(), "stream-thread", "first message", None)
+            .send_message(env.cwd_str(), "stream-thread", "first message", None, Vec::new())
             .await
             .unwrap();
 
         // Turn 2 — history should contain the 2 turns from turn 1.
         env.svc
-            .send_message(env.cwd_str(), "stream-thread", "second message", None)
+            .send_message(env.cwd_str(), "stream-thread", "second message", None, Vec::new())
             .await
             .unwrap();
 
@@ -2251,7 +2399,7 @@ You are an echo agent. Repeat the task back.
     async fn send_message_upserts_conversation_index() {
         let env = TestEnv::new();
         let proj = env.cwd_str();
-        env.svc.send_message(proj, "chat-77", "hello world", None).await.unwrap();
+        env.svc.send_message(proj, "chat-77", "hello world", None, Vec::new()).await.unwrap();
         let key_proj = env.svc.ensure_personal_or_for_cwd(proj).await.unwrap();
         let convs = env.svc.list_conversations(key_proj.id.as_str()).await.unwrap();
         assert!(
@@ -2303,6 +2451,7 @@ You are an echo agent. Repeat the task back.
                 role: "user".into(),
                 text: "old prompt".into(),
                 ts: 1_700_000_000_000,
+                attachments: Vec::new(),
             },
         ).unwrap();
 
@@ -2366,6 +2515,7 @@ You are an echo agent. Repeat the task back.
                 run_statuses,
                 run_launcher,
                 git,
+                provider_override: None,
             });
             (svc, tmp)
         }
@@ -2471,7 +2621,7 @@ You are an echo agent. Repeat the task back.
         // Step 1: send_message with the Personal cwd. This writes the transcript
         // and upserts the index, both under the oxidemx-<hash(ug)> key.
         env.svc
-            .send_message(ug_str, "chat-personal", "hello personal", None)
+            .send_message(ug_str, "chat-personal", "hello personal", None, Vec::new())
             .await
             .unwrap();
 
@@ -2500,6 +2650,96 @@ You are an echo agent. Repeat the task back.
             convs_after_migration.iter().any(|c| c.id.as_str() == "chat-personal"),
             "after migrate_on_start chat-personal must be re-indexed under Personal; got: {convs_after_migration:#?}"
         );
+    }
+
+    // ── Task 6: image attachment is persisted, ref'd, and routed ──────────────
+    //
+    // Image-capable provider (Gemini, the TestEnv default). One image
+    // attachment → (a) blob lands in the AttachmentStore, (b) an AttachmentRef
+    // is stored on the user transcript turn, (c) the MockTurnRunner received
+    // exactly one image.
+    #[tokio::test]
+    async fn send_message_with_image_persists_and_routes() {
+        let env = TestEnv::new(); // default provider = Gemini (image-capable)
+        let bytes = vec![0x89, 0x50, 0x4e, 0x47, 1, 2, 3, 4]; // PNG-ish header + payload
+        let attachments = vec![(
+            "shot.png".to_string(),
+            "image/png".to_string(),
+            "image".to_string(),
+            bytes.clone(),
+        )];
+
+        env.svc
+            .send_message(env.cwd_str(), "img-thread", "what is this?", None, attachments)
+            .await
+            .unwrap();
+
+        // (c) The runner received exactly one image with the right mime+bytes.
+        let imgs = env.last_images();
+        assert_eq!(imgs.len(), 1, "expected 1 image routed; got {}", imgs.len());
+        assert_eq!(imgs[0].0, "image/png");
+        assert_eq!(imgs[0].1, bytes);
+
+        // (b) The user transcript turn carries an AttachmentRef.
+        let turns = env.svc.get_transcript(env.cwd_str(), "img-thread").await.unwrap();
+        let user = turns.iter().find(|t| t.role == "user").expect("user turn");
+        assert_eq!(user.attachments.len(), 1, "user turn should carry 1 attachment ref");
+        let aref = &user.attachments[0];
+        assert_eq!(aref.mime, "image/png");
+        assert_eq!(aref.name, "shot.png");
+
+        // (a) The blob is readable from the AttachmentStore at that ref id.
+        let paths = env.svc.projects.resolve(env.cwd());
+        let store = crate::attachments::AttachmentStore::new(paths.attachments_dir());
+        let read_back = store.read("img-thread", &aref.id).expect("blob present in store");
+        assert_eq!(read_back, bytes, "stored blob bytes must match");
+    }
+
+    // ── Task 6: degrade for an image-incapable provider ───────────────────────
+    //
+    // Image-incapable provider (Ollama) → the MockTurnRunner receives 0 images
+    // AND the user text passed to the runner contains the omitted-note. The
+    // refs still persist on the transcript (the user attached them).
+    #[tokio::test]
+    async fn send_message_degrades_for_image_incapable_provider() {
+        use oxidemx_shared::config::AiProvider;
+        let env = TestEnv::with_provider(AiProvider::Ollama); // local, no vision
+
+        // A runner that records the text it received, so we can assert the note.
+        // (MockTurnRunner records images; we read effective text via a custom
+        // recording runner below.)
+        let bytes = vec![1u8, 2, 3, 4];
+        let attachments = vec![(
+            "p.png".to_string(),
+            "image/png".to_string(),
+            "image".to_string(),
+            bytes.clone(),
+        )];
+
+        env.svc
+            .send_message(env.cwd_str(), "degrade-thread", "describe", None, attachments)
+            .await
+            .unwrap();
+
+        // 0 images routed to the model.
+        let imgs = env.last_images();
+        assert!(imgs.is_empty(), "incapable provider must route 0 images; got {}", imgs.len());
+
+        // The omitted-note reached the runner as part of the user text.
+        let seen_text = env.last_text();
+        assert!(
+            seen_text.contains("image attachment(s) omitted"),
+            "runner text must contain the omitted-note; got: {seen_text:?}"
+        );
+        assert!(
+            seen_text.starts_with("describe"),
+            "the note must be appended to the original text; got: {seen_text:?}"
+        );
+
+        // The ref still persists on the transcript (the user did attach it).
+        let turns = env.svc.get_transcript(env.cwd_str(), "degrade-thread").await.unwrap();
+        let user = turns.iter().find(|t| t.role == "user").expect("user turn");
+        assert_eq!(user.attachments.len(), 1, "ref still persists even when degraded");
     }
 
 }

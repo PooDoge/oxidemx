@@ -71,18 +71,56 @@ async fn history(
     Ok(Json(serde_json::to_value(turns).unwrap_or_default()))
 }
 
+/// Inbound attachment payload — the SAME JSON shape the client sends
+/// (`oxide-client`'s `AttachmentPayload`). Field names MUST stay
+/// `name`/`mime`/`kind`/`data_b64` so the wire contract holds.
 #[derive(serde::Deserialize)]
-struct SendBody { text: String, model: Option<String> }
+struct AttachmentPayload {
+    name: String,
+    mime: String,
+    /// `"image"` | `"text"` | `"file"`.
+    kind: String,
+    /// Base64-encoded inline content (STANDARD engine, matching the client's
+    /// encoder). `None` when content is resolved out-of-band.
+    data_b64: Option<String>,
+}
+
+#[derive(serde::Deserialize)]
+struct SendBody {
+    text: String,
+    model: Option<String>,
+    #[serde(default)]
+    attachments: Vec<AttachmentPayload>,
+}
 
 async fn send_message(
     State(st): State<AppState>,
     AxPath(id): AxPath<String>,
     Json(body): Json<SendBody>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
+    use base64::Engine as _;
+
     let conv = st.svc.get_conversation(&id).await?
         .ok_or_else(|| crate::error::AgentdError::NotFound(format!("conversation {id}")))?;
     let project = conv.working_dir.to_string_lossy().to_string();
     let message_id = next_message_id(&st);
+
+    // Decode inline attachments into `(name, mime, kind, bytes)`. A missing /
+    // empty `data_b64` or a decode failure SKIPS that attachment (logged) and
+    // never fails the request.
+    let mut decoded: Vec<(String, String, String, Vec<u8>)> = Vec::new();
+    for att in &body.attachments {
+        let Some(b64) = att.data_b64.as_deref().filter(|s| !s.is_empty()) else {
+            tracing::warn!("send_message: skipping attachment {:?}: empty data_b64", att.name);
+            continue;
+        };
+        match base64::engine::general_purpose::STANDARD.decode(b64) {
+            Ok(bytes) => decoded.push((att.name.clone(), att.mime.clone(), att.kind.clone(), bytes)),
+            Err(e) => {
+                tracing::warn!("send_message: skipping attachment {:?}: base64 decode failed: {e}", att.name);
+            }
+        }
+    }
 
     // Spawn the turn; deltas stream via the emitter→hub→SSE. The core
     // AgentService already emits Turn + final on success via BroadcastEmitter,
@@ -95,7 +133,7 @@ async fn send_message(
     let text = body.text.clone();
     let mid = message_id.clone();
     tokio::spawn(async move {
-        match svc.send_message(&project, &conv_id, &text, model.as_deref()).await {
+        match svc.send_message(&project, &conv_id, &text, model.as_deref(), decoded).await {
             Ok(_reply) => { /* core already emitted Turn + final via the emitter */ }
             Err(e) => {
                 hub.publish(&crate::seams::AgentEvent {

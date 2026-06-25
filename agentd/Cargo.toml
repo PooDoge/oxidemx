@@ -31,6 +31,9 @@ async-trait = "0.1"
 thiserror = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# Decode inline attachment payloads (`data_b64`). MUST match the client's
+# encoder: `base64::engine::general_purpose::STANDARD` (oxide-freya base64 0.22).
+base64 = "0.22"
 toml = "0.8"
 tracing = "0.1"
 tracing-subscriber = "0.3"

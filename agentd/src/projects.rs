@@ -162,6 +162,14 @@ impl ProjectPaths {
         self.store.join("runs")
     }
 
+    /// Directory where conversation attachment blobs are persisted.
+    /// `<store>/attachments/` — the [`crate::attachments::AttachmentStore`] root.
+    /// Mirrors [`Self::transcripts_dir`] so attachments live beside the
+    /// transcripts that reference them.
+    pub fn attachments_dir(&self) -> PathBuf {
+        self.store.join("attachments")
+    }
+
     /// Path to the rolling journal JSONL file.
     /// `<store>/journal.jsonl`
     pub fn journal_path(&self) -> PathBuf {

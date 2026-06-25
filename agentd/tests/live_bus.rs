@@ -104,6 +104,7 @@ impl TurnRunner for LiveMock {
         _thread: &str,
         _text: &str,
         _history: &[(bool, String)],
+        _images: Vec<(String, Vec<u8>)>,
         _approver: &Arc<Approver>,
         _emitter: &Arc<dyn EventEmitter>,
         _paths: &agentd::projects::ProjectPaths,

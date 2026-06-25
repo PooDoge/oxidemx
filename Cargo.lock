@@ -149,6 +149,7 @@ version = "0.0.1"
 dependencies = [
  "async-trait",
  "axum",
+ "base64 0.22.1",
  "futures-util",
  "oxidemx-agent",
  "oxidemx-agent-core",
