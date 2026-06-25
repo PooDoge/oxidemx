@@ -282,7 +282,7 @@ impl Component for ComposerEditor {
                 let mut v_p       = v_paste.clone();
                 let paste_att     = on_paste_attachment_ctx.clone();
 
-                ContextMenu::open_from_event(
+                crate::components::menu::open_context_menu(
                     &e,
                     editor_clipboard_menu(
                         th,

@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use freya::prelude::*;
 use oxide_client::{Transport, UdsTransport};
+use oxide_ui::components::menu::OxideContextMenuViewer;
 
 use crate::regions::{context::ContextRegion, main_region::MainRegion, sidebar::Sidebar};
 use crate::state::{AppState, ConnState};
@@ -23,7 +24,7 @@ pub fn shell() -> impl IntoElement {
         // It provides the global ContextMenu context (in ScopeId::ROOT) and
         // renders the floating overlay when open.  Being layout-neutral when
         // closed, it has no effect on the shell's horizontal flow.
-        .child(ContextMenuViewer::new())
+        .child(OxideContextMenuViewer::new())
         .maybe_child(connection_banner(conn))
         .child(Sidebar { state: state.clone(), collapsed: false })
         .child(
@@ -837,8 +838,8 @@ mod tests {
             .direction(Direction::Vertical)
             .spacing(16.)
             .padding(Gaps::new_all(24.))
-            // Mount ContextMenuViewer so ContextMenu::open_from_event can find the context.
-            .child(ContextMenuViewer::new())
+            // Mount the context-menu host so open_context_menu can find the context.
+            .child(oxide_ui::components::menu::OxideContextMenuViewer::new())
             .child(
                 Bubble::new(
                     "user".into(),

@@ -65,7 +65,7 @@ impl Component for Bubble {
                         .border(Border::new().fill(Theme::with_alpha(th.accent(), 0x33)).width(1.))
                         .on_secondary_down(move |e: Event<PressEventData>| {
                             let text = body_for_menu.clone();
-                            ContextMenu::open_from_event(
+                            crate::components::menu::open_context_menu(
                                 &e,
                                 copy_only_menu(
                                     th,
@@ -105,7 +105,7 @@ impl Component for Bubble {
                         .border(Border::new().fill(th.hairline()).width(1.))
                         .on_secondary_down(move |e: Event<PressEventData>| {
                             let text = body_for_menu.clone();
-                            ContextMenu::open_from_event(
+                            crate::components::menu::open_context_menu(
                                 &e,
                                 copy_only_menu(
                                     th,

@@ -15,12 +15,14 @@
 //!             .child(MenuRow::new(theme).icon(Some("folder")).title("Open…").on_press(…))
 //!     )
 //! ```
+pub mod context_menu;
 pub mod popover;
 pub mod row;
 pub mod surface;
 pub mod text_menu;
 pub mod theme;
 
+pub use context_menu::{close_context_menu, open_context_menu, OxideContextMenuViewer};
 pub use popover::{Placement, Popover};
 pub use row::{MenuRow, MenuSection};
 pub use surface::MenuSurface;

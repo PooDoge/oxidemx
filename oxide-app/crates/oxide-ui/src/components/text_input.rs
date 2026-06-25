@@ -184,7 +184,7 @@ impl Component for TextInput {
                 let mut v_c = v_cut.clone();
                 let mut v_p = v_paste.clone();
 
-                ContextMenu::open_from_event(
+                crate::components::menu::open_context_menu(
                     &e,
                     editor_clipboard_menu(
                         th,
