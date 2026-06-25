@@ -1589,6 +1589,10 @@ pub(crate) mod tests {
     use oxidemx_agent_local::Verdict as LocalVerdict;
     use std::sync::{Arc, Mutex};
 
+    /// Serializes tests that mutate the process-global OXIDEMX_FLOWS_DIR / OXIDEMX_AGENTS_DIR /
+    /// OXIDEMX_TEST_MOCK_FLOW env vars — without this they race under the parallel test runner.
+    static FLOW_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     /// Shared recorder for the images (`(mime, bytes)`) a `MockTurnRunner` saw.
     type ImagesRec = Arc<Mutex<Vec<(String, Vec<u8>)>>>;
 
@@ -2146,6 +2150,7 @@ You are an echo agent. Repeat the task back.
 
     #[tokio::test]
     async fn run_flow_streams_run_events_and_status() {
+        let _env_guard = FLOW_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let tmp = tempfile::tempdir().unwrap();
         let flows_dir = tmp.path().join("flows");
         let agents_dir = tmp.path().join("agents");
@@ -2199,6 +2204,7 @@ You are an echo agent. Repeat the task back.
 
     #[tokio::test]
     async fn run_flow_emits_run_finished_with_handoff() {
+        let _env_guard = FLOW_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let tmp = tempfile::tempdir().unwrap();
         let flows_dir = tmp.path().join("flows");
         let agents_dir = tmp.path().join("agents");
@@ -2288,6 +2294,7 @@ You are an echo agent. Repeat the task back.
 
     #[tokio::test]
     async fn cancel_run_cancels_token() {
+        let _env_guard = FLOW_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let tmp = tempfile::tempdir().unwrap();
         let flows_dir = tmp.path().join("flows");
         let agents_dir = tmp.path().join("agents");
