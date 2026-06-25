@@ -474,6 +474,80 @@ mod menu_snapshot_tests {
         runner.render_to_file("/tmp/oxide-popover.png");
     }
 
+    /// Proves the Popover content is VISIBLE (fully opaque) after the entrance
+    /// animation settles.  This is the opacity-regression guard: the prior
+    /// `OnChange::Rerun` bug left menus present in the tree but stuck at
+    /// opacity 0.  Poll 12 × 16ms = 192ms > 120ms fade, then check visible_area
+    /// and render to file.
+    ///
+    /// Run with:
+    ///   LIBRARY_PATH=/tmp/oxidemx-lib-links cargo test -p oxide-freya --bin oxide-freya snapshot_popover_settled -- --ignored
+    #[test]
+    #[ignore = "snapshot: writes PNG to /tmp for visual review"]
+    fn snapshot_popover_settled() {
+        use oxide_ui::components::{Placement, Popover};
+
+        fn app() -> Element {
+            let th = Theme::default();
+
+            // A clearly-visible labelled box — bright background so the PNG
+            // reviewer can instantly tell "opaque" from "stuck invisible".
+            let content_box = rect()
+                .width(Size::px(200.))
+                .height(Size::px(80.))
+                .background(Color::from_rgb(60, 200, 100))
+                .corner_radius(8.)
+                .main_align(Alignment::Center)
+                .cross_align(Alignment::Center)
+                .child(label().text("POPOVER SETTLED").font_size(13.).color(Color::BLACK))
+                .into_element();
+
+            let trigger = rect()
+                .width(Size::px(120.))
+                .height(Size::px(36.))
+                .background(Color::from_rgb(80, 80, 200))
+                .main_align(Alignment::Center)
+                .cross_align(Alignment::Center)
+                .child(label().text("Trigger").font_size(13.))
+                .into_element();
+
+            rect()
+                .expanded()
+                .background(Color::from_rgb(20, 20, 30))
+                .main_align(Alignment::Center)
+                .cross_align(Alignment::Center)
+                .child(
+                    Popover::new(trigger)
+                        .open(true)
+                        .placement(Placement::Above)
+                        .content(content_box),
+                )
+                .into()
+        }
+
+        let (mut runner, _) =
+            TestingRunner::new(app, (480., 420.).into(), |_| {}, 1.);
+        // Poll 12 × 16ms = 192ms, which exceeds the 120ms fade duration.
+        // After this the entrance animation must have reached opacity 1.0.
+        runner.poll_n(Duration::from_millis(16), 12);
+        runner.sync_and_update();
+
+        // Assert the content label has non-zero visible area (layout guard).
+        let area = runner.find(|node, el| {
+            Label::try_downcast(el)
+                .filter(|l| l.text.as_ref().contains("POPOVER SETTLED"))
+                .map(|_| node.layout().visible_area().area())
+        });
+        assert!(
+            area.is_some_and(|a| a > 0.0),
+            "POPOVER SETTLED label must have non-zero visible area after animation settles \
+             (opacity-stuck regression: element present but invisible would still have area, \
+             so check the snapshot PNG too)"
+        );
+
+        runner.render_to_file("/tmp/oxide-popover-settled.png");
+    }
+
     /// Renders AttachMenu on a 760px-wide dark canvas.
     /// The menu must be NARROW (content width ~200–280px, not 760px canvas-wide).
     ///
