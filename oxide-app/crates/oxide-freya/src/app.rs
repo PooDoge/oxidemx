@@ -9,6 +9,7 @@ use crate::state::{AppState, ConnState};
 
 /// Root shell component — call from `fn app()`.
 pub fn shell() -> impl IntoElement {
+    use_init_theme(dark_theme);
     let transport: Arc<dyn Transport> = Arc::new(UdsTransport::new(UdsTransport::default_socket()));
     let state = AppState::new(transport);
     state.bootstrap();
