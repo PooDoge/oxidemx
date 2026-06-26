@@ -23,6 +23,7 @@ pub struct CollapsiblePanel {
     full: Option<Element>,
     rail: Option<Element>,
     theme: Theme,
+    override_width: Option<f32>,
 }
 
 impl CollapsiblePanel {
@@ -33,6 +34,7 @@ impl CollapsiblePanel {
             full: None,
             rail: None,
             theme: Theme::default(),
+            override_width: None,
         }
     }
 
@@ -60,6 +62,11 @@ impl CollapsiblePanel {
         self.theme = t;
         self
     }
+
+    pub fn override_width(mut self, w: Option<f32>) -> Self {
+        self.override_width = w;
+        self
+    }
 }
 
 impl Default for CollapsiblePanel {
@@ -70,11 +77,12 @@ impl Default for CollapsiblePanel {
 
 impl Component for CollapsiblePanel {
     fn render(&self) -> impl IntoElement {
-        let (w, body) = if self.collapsed {
+        let (collapsed_w, body) = if self.collapsed {
             (SIDEBAR_RAIL_W, self.rail.clone())
         } else {
             (self.width, self.full.clone())
         };
+        let w = self.override_width.unwrap_or(collapsed_w);
         rect()
             .width(Size::px(w))
             .height(Size::fill())
@@ -126,5 +134,29 @@ mod tests {
             Label::try_downcast(el).filter(|l| l.text.as_ref() == "FULL")
         });
         assert!(absent.is_none(), "collapsed panel must NOT show FULL label");
+    }
+
+    #[test]
+    fn override_width_sets_panel_width_but_body_follows_collapsed() {
+        fn app() -> impl IntoElement {
+            CollapsiblePanel::new()
+                .collapsed(true)
+                .override_width(Some(120.))
+                .full(label().text("FULL"))
+                .rail(label().text("RAIL"))
+        }
+        let mut t = launch_test(app);
+        t.sync_and_update();
+        // collapsed=true still shows the RAIL body...
+        let rail = t.find(|_, el| {
+            Label::try_downcast(el).filter(|l| l.text.as_ref() == "RAIL")
+        });
+        assert!(rail.is_some(), "override_width panel should still show RAIL when collapsed=true");
+        // ...and the outer panel node measured 120px wide (the override), not 60.
+        let node = t.find(|node, _| {
+            let w = node.layout().area.width();
+            if (w - 120.).abs() < 0.5 { Some(()) } else { None }
+        });
+        assert!(node.is_some(), "override_width should force a 120px panel width");
     }
 }

@@ -18,7 +18,7 @@ pub struct Sidebar {
 
 impl Component for Sidebar {
     fn render(&self) -> impl IntoElement {
-        let collapsed = use_state(|| false);
+        let collapsed = self.state.sidebar_collapsed;
         let mut c_collapse = collapsed;
         let mut c_expand = collapsed;
         let state = self.state.clone();
