@@ -24,25 +24,20 @@ impl Component for ContextRegion {
         let collapsed = *state.context_collapsed.read();
         let active = *state.active_direction.read();
 
-        // Hooks must be unconditional — compute both before the if/else branch.
-        // Width tween: RAIL ↔ FULL, 180 ms Quart/Out, keyed on `collapsed`.
+        // Width tween: RAIL ↔ FULL, 180 ms Quart/Out.
+        // Read `ctx_collapsed` (a State<bool>) INSIDE the closure so the Effect
+        // subscribes to it and only re-fires when the collapsed signal changes,
+        // not on every unrelated re-render.
+        let ctx_collapsed = state.context_collapsed;
         let width_anim = use_animation(move |conf| {
             conf.on_change(OnChange::Rerun);
             let w = AnimNum::new(CONTEXT_FULL_W, CONTEXT_RAIL_W)
                 .time(180)
                 .ease(Ease::Out)
                 .function(Function::Quart);
-            if collapsed { w } else { w.into_reversed() }
+            if *ctx_collapsed.read() { w } else { w.into_reversed() }
         });
         let anim_w = width_anim.get().value();
-
-        // Direction body cross-fade: opacity 0→1 whenever `active` changes.
-        let fade_anim = use_animation(move |conf| {
-            conf.on_change(OnChange::Rerun);
-            conf.on_creation(OnCreation::Run);
-            AnimNum::new(0.0, 1.0).time(120).ease(Ease::Out)
-        });
-        let fade = fade_anim.get().value();
 
         if collapsed {
             // Rail: 4 direction icons + expand toggle.
@@ -117,11 +112,7 @@ impl Component for ContextRegion {
                                 .on_press(move |_: Event<PressEventData>| coll.set(true)),
                         ),
                 )
-                .child(
-                    rect()
-                        .opacity(fade)
-                        .child(DirectionPanel { state: state.clone(), direction: active }),
-                )
+                .child(DirectionPanel { state: state.clone(), direction: active })
                 .into_element()
         }
     }
@@ -263,8 +254,7 @@ mod context_snapshot_tests {
     fn snapshot_context_rail() {
         let (mut runner, _) =
             TestingRunner::new(snapshot_rail_app, (60., 400.).into(), |_| {}, 1.);
-        runner.poll_n(Duration::from_millis(5), 8);
-        runner.sync_and_update();
+        runner.poll(Duration::from_millis(1), Duration::from_millis(200));
         runner.render_to_file("/tmp/oxide-context-rail.png");
     }
 
@@ -275,8 +265,7 @@ mod context_snapshot_tests {
     fn snapshot_context_spec_expanded() {
         let (mut runner, _) =
             TestingRunner::new(snapshot_spec_expanded_app, (300., 600.).into(), |_| {}, 1.);
-        runner.poll_n(Duration::from_millis(5), 8);
-        runner.sync_and_update();
+        runner.poll(Duration::from_millis(1), Duration::from_millis(200));
         runner.render_to_file("/tmp/oxide-context-spec-expanded.png");
     }
 
@@ -287,8 +276,7 @@ mod context_snapshot_tests {
     fn snapshot_dir_spec() {
         let (mut runner, _) =
             TestingRunner::new(snapshot_dir_spec_app, (300., 600.).into(), |_| {}, 1.);
-        runner.poll_n(Duration::from_millis(5), 8);
-        runner.sync_and_update();
+        runner.poll(Duration::from_millis(1), Duration::from_millis(200));
         runner.render_to_file("/tmp/shell-dir-spec.png");
     }
 
@@ -299,8 +287,7 @@ mod context_snapshot_tests {
     fn snapshot_dir_mission() {
         let (mut runner, _) =
             TestingRunner::new(snapshot_dir_mission_app, (300., 600.).into(), |_| {}, 1.);
-        runner.poll_n(Duration::from_millis(5), 8);
-        runner.sync_and_update();
+        runner.poll(Duration::from_millis(1), Duration::from_millis(200));
         runner.render_to_file("/tmp/shell-dir-mission.png");
     }
 
@@ -311,8 +298,7 @@ mod context_snapshot_tests {
     fn snapshot_dir_workbench() {
         let (mut runner, _) =
             TestingRunner::new(snapshot_dir_workbench_app, (300., 600.).into(), |_| {}, 1.);
-        runner.poll_n(Duration::from_millis(5), 8);
-        runner.sync_and_update();
+        runner.poll(Duration::from_millis(1), Duration::from_millis(200));
         runner.render_to_file("/tmp/shell-dir-workbench.png");
     }
 
@@ -323,8 +309,7 @@ mod context_snapshot_tests {
     fn snapshot_dir_ambient() {
         let (mut runner, _) =
             TestingRunner::new(snapshot_dir_ambient_app, (300., 600.).into(), |_| {}, 1.);
-        runner.poll_n(Duration::from_millis(5), 8);
-        runner.sync_and_update();
+        runner.poll(Duration::from_millis(1), Duration::from_millis(200));
         runner.render_to_file("/tmp/shell-dir-ambient.png");
     }
 }

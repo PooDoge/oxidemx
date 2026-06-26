@@ -33,7 +33,9 @@ impl Component for Sidebar {
                 .time(180)
                 .ease(Ease::Out)
                 .function(Function::Quart);
-            if is_collapsed { w } else { w.into_reversed() }
+            // Read `collapsed` (State<bool>) inside the closure so the Effect
+            // subscribes to it and re-fires only on collapse-toggle.
+            if *collapsed.read() { w } else { w.into_reversed() }
         });
         let anim_w = width_anim.get().value();
 
