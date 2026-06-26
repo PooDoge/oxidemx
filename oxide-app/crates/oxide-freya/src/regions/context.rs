@@ -1,4 +1,5 @@
 //! Right region: a 60px direction rail (collapsed) or a segmented expanded panel.
+use freya::animation::*;
 use freya::prelude::*;
 use oxide_ui::{
     Theme,
@@ -23,6 +24,26 @@ impl Component for ContextRegion {
         let collapsed = *state.context_collapsed.read();
         let active = *state.active_direction.read();
 
+        // Hooks must be unconditional — compute both before the if/else branch.
+        // Width tween: RAIL ↔ FULL, 180 ms Quart/Out, keyed on `collapsed`.
+        let width_anim = use_animation(move |conf| {
+            conf.on_change(OnChange::Rerun);
+            let w = AnimNum::new(CONTEXT_FULL_W, CONTEXT_RAIL_W)
+                .time(180)
+                .ease(Ease::Out)
+                .function(Function::Quart);
+            if collapsed { w } else { w.into_reversed() }
+        });
+        let anim_w = width_anim.get().value();
+
+        // Direction body cross-fade: opacity 0→1 whenever `active` changes.
+        let fade_anim = use_animation(move |conf| {
+            conf.on_change(OnChange::Rerun);
+            conf.on_creation(OnCreation::Run);
+            AnimNum::new(0.0, 1.0).time(120).ease(Ease::Out)
+        });
+        let fade = fade_anim.get().value();
+
         if collapsed {
             // Rail: 4 direction icons + expand toggle.
             let mut rail = rect()
@@ -30,7 +51,7 @@ impl Component for ContextRegion {
                 .cross_align(Alignment::Center)
                 .spacing(6.)
                 .padding(Gaps::new_all(8.))
-                .width(Size::px(CONTEXT_RAIL_W))
+                .width(Size::px(anim_w))
                 .height(Size::fill())
                 .background(th.panel());
             for d in StatusDirection::ALL {
@@ -82,7 +103,7 @@ impl Component for ContextRegion {
             let mut coll = state.context_collapsed;
             rect()
                 .direction(Direction::Vertical)
-                .width(Size::px(CONTEXT_FULL_W))
+                .width(Size::px(anim_w))
                 .height(Size::fill())
                 .background(th.panel())
                 .child(
@@ -96,7 +117,11 @@ impl Component for ContextRegion {
                                 .on_press(move |_: Event<PressEventData>| coll.set(true)),
                         ),
                 )
-                .child(DirectionPanel { state: state.clone(), direction: active })
+                .child(
+                    rect()
+                        .opacity(fade)
+                        .child(DirectionPanel { state: state.clone(), direction: active }),
+                )
                 .into_element()
         }
     }
