@@ -92,7 +92,20 @@ impl Component for SidebarHeader {
             })
             .collect();
 
-        let switcher = Select::new().selected_item(pill).children(options);
+        let switcher = Select::new()
+            .theme(SelectThemePartial {
+                width: None,
+                margin: None,
+                select_background: Some(Preference::Specific(th.surface())),
+                background_button: Some(Preference::Specific(th.surface())),
+                hover_background: Some(Preference::Specific(th.surface_hi())),
+                border_fill: Some(Preference::Specific(th.hairline_strong())),
+                focus_border_fill: Some(Preference::Specific(th.accent())),
+                arrow_fill: Some(Preference::Specific(th.faint())),
+                color: Some(Preference::Specific(th.text())),
+            })
+            .selected_item(pill)
+            .children(options);
 
         // Search input — local state, non-functional search (wiring is future).
         // Migrated from Freya `Input` to our themed `TextInput` (Task 3) so it
