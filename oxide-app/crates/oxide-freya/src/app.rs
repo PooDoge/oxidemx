@@ -757,7 +757,10 @@ mod tests {
             .height(Size::fill())
             .background(th.bg_deep())
             .main_align(Alignment::Start)
-            .child(SidebarHeader::new("oxidemx-phase1".into()).theme(th))
+            .child(SidebarHeader::new(
+                vec![("personal".into(), "oxidemx-phase1".into())],
+                "personal".into(),
+            ).theme(th))
             .into()
     }
 

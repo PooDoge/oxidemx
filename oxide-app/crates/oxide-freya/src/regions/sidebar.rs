@@ -34,7 +34,25 @@ impl Component for Sidebar {
             .width(Size::fill())
             .height(Size::fill())
             .background(th.panel())
-            .child(SidebarHeader::new("oxidemx-phase1".into()).theme(th));
+            .child({
+                let st = state.clone();
+                let projects: Vec<(String, String)> = st
+                    .projects
+                    .read()
+                    .iter()
+                    .map(|p| (p.id.0.clone(), p.name.clone()))
+                    .collect();
+                let current_id = st
+                    .current_project
+                    .read()
+                    .as_ref()
+                    .map(|p| p.0.clone())
+                    .unwrap_or_default();
+                let on_st = state.clone();
+                SidebarHeader::new(projects, current_id)
+                    .on_select(move |id: String| on_st.open_project(id.into()))
+                    .theme(th)
+            });
 
         let mut list = rect()
             .direction(Direction::Vertical)
