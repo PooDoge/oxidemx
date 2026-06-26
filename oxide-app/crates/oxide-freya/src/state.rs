@@ -51,10 +51,10 @@ impl StatusDirection {
 
     pub fn icon(self) -> &'static str {
         match self {
-            Self::Spec => "📋",
-            Self::Mission => "🎯",
-            Self::Workbench => "🔧",
-            Self::Ambient => "〰️",
+            Self::Spec => "S",
+            Self::Mission => "M",
+            Self::Workbench => "W",
+            Self::Ambient => "A",
         }
     }
 }

@@ -94,7 +94,7 @@ impl Component for SidebarHeader {
 
         let switcher = Select::new()
             .theme(SelectThemePartial {
-                width: None,
+                width: Some(Preference::Specific(Size::fill())),
                 margin: None,
                 select_background: Some(Preference::Specific(th.surface())),
                 background_button: Some(Preference::Specific(th.surface())),

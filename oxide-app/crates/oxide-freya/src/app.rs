@@ -18,6 +18,7 @@ pub fn shell() -> impl IntoElement {
 
     rect()
         .direction(Direction::Horizontal)
+        .content(Content::Flex)
         .expanded()
         .background((5u8, 7u8, 11u8))
         // Mount ContextMenuViewer once as the first child of the shell root.
@@ -261,6 +262,7 @@ mod tests {
         });
         rect()
             .direction(Direction::Horizontal)
+            .content(Content::Flex)
             .expanded()
             .background((5u8, 7u8, 11u8))
             .child(Sidebar { state: state.clone() })
