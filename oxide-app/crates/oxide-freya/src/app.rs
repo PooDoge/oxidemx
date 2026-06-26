@@ -26,7 +26,7 @@ pub fn shell() -> impl IntoElement {
         // closed, it has no effect on the shell's horizontal flow.
         .child(OxideContextMenuViewer::new())
         .maybe_child(connection_banner(conn))
-        .child(Sidebar { state: state.clone(), collapsed: false })
+        .child(Sidebar { state: state.clone() })
         .child(
             rect()
                 .width(Size::flex(1.0))
@@ -106,7 +106,7 @@ mod tests {
             rect()
                 .direction(Direction::Horizontal)
                 .expanded()
-                .child(Sidebar { state: state.clone(), collapsed: false })
+                .child(Sidebar { state: state.clone() })
                 .child(
                     rect()
                         .width(Size::flex(1.0))
@@ -263,7 +263,7 @@ mod tests {
             .direction(Direction::Horizontal)
             .expanded()
             .background((5u8, 7u8, 11u8))
-            .child(Sidebar { state: state.clone(), collapsed: false })
+            .child(Sidebar { state: state.clone() })
             .child(
                 rect()
                     .width(Size::flex(1.0))
@@ -368,7 +368,7 @@ mod tests {
             .direction(Direction::Horizontal)
             .expanded()
             .background((5u8, 7u8, 11u8))
-            .child(Sidebar { state: state.clone(), collapsed: false })
+            .child(Sidebar { state: state.clone() })
             .child(
                 rect()
                     .width(Size::flex(1.0))

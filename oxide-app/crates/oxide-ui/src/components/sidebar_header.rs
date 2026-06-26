@@ -69,8 +69,7 @@ impl Component for SidebarHeader {
             .child(
                 label().text(current_name).font_size(12.5).color(th.text())
                     .width(Size::flex(1.0)),
-            )
-            .child(label().text("⌄").font_size(12.).color(th.faint()));
+            );
 
         let on_select = self.on_select.clone();
         let current_id = self.current_id.clone();

@@ -15,7 +15,6 @@ use crate::state::AppState;
 #[derive(PartialEq, Clone)]
 pub struct Sidebar {
     pub state: AppState,
-    pub collapsed: bool,
 }
 
 impl Component for Sidebar {
