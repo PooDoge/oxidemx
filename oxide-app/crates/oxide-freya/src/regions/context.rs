@@ -112,8 +112,9 @@ mod context_snapshot_tests {
     use freya::prelude::*;
     use freya_testing::TestingRunner;
     use oxide_client::mock::MockTransport;
+    use oxide_client::dto::{Conversation, ConversationId, Project, ProjectId, Worktree};
 
-    use crate::state::{AppState, StatusDirection};
+    use crate::state::{AppState, ConnState, StatusDirection};
     use super::ContextRegion;
 
     fn make_state(collapsed: bool, direction: StatusDirection) -> AppState {
@@ -121,6 +122,42 @@ mod context_snapshot_tests {
         let mut state = AppState::new(mock);
         state.context_collapsed.set(collapsed);
         state.active_direction.set(direction);
+        state
+    }
+
+    /// `make_state` with seeded projects + conversations so direction bodies show real data.
+    fn make_rich_state(direction: StatusDirection) -> AppState {
+        let pid = ProjectId::from("personal");
+        let cid = ConversationId::from("conv-1");
+        let mock = Arc::new(MockTransport {
+            projects: vec![Project {
+                id: pid.clone(),
+                name: "OxideMX".into(),
+                default_working_dir: "/run/media/system/fastdrive/Games/mx-master-4-linux/oxidemx-2b".into(),
+                created_at: 0,
+            }],
+            conversations: vec![Conversation {
+                id: cid.clone(),
+                project_id: pid.clone(),
+                title: "Collapsible panels".into(),
+                working_dir: "/run/media/system/fastdrive/Games/mx-master-4-linux/oxidemx-2b".into(),
+                model: "gemini-2.5-flash".into(),
+                created_at: 0,
+                updated_at: 0,
+                worktree: Some(Worktree {
+                    path: "/run/media/system/fastdrive/Games/mx-master-4-linux/oxidemx-2b".into(),
+                    branch: "2b-collapsible-panels".into(),
+                    base_ref: "main".into(),
+                }),
+            }],
+            ..MockTransport::new()
+        }) as Arc<dyn oxide_client::Transport>;
+        let mut state = AppState::new(mock);
+        state.context_collapsed.set(false);
+        state.active_direction.set(direction);
+        state.current_project.set(Some(pid));
+        state.active.set(Some(cid));
+        state.connection.set(ConnState::Connected);
         state
     }
 
@@ -140,6 +177,54 @@ mod context_snapshot_tests {
         use_init_theme(dark_theme);
         let th = oxide_ui::tokens::Theme::default();
         let state = make_state(false, StatusDirection::Spec);
+        rect()
+            .width(Size::fill())
+            .height(Size::fill())
+            .background(th.bg_deep())
+            .child(ContextRegion { state })
+            .into()
+    }
+
+    fn snapshot_dir_spec_app() -> Element {
+        use_init_theme(dark_theme);
+        let th = oxide_ui::tokens::Theme::default();
+        let state = make_rich_state(StatusDirection::Spec);
+        rect()
+            .width(Size::fill())
+            .height(Size::fill())
+            .background(th.bg_deep())
+            .child(ContextRegion { state })
+            .into()
+    }
+
+    fn snapshot_dir_mission_app() -> Element {
+        use_init_theme(dark_theme);
+        let th = oxide_ui::tokens::Theme::default();
+        let state = make_rich_state(StatusDirection::Mission);
+        rect()
+            .width(Size::fill())
+            .height(Size::fill())
+            .background(th.bg_deep())
+            .child(ContextRegion { state })
+            .into()
+    }
+
+    fn snapshot_dir_workbench_app() -> Element {
+        use_init_theme(dark_theme);
+        let th = oxide_ui::tokens::Theme::default();
+        let state = make_rich_state(StatusDirection::Workbench);
+        rect()
+            .width(Size::fill())
+            .height(Size::fill())
+            .background(th.bg_deep())
+            .child(ContextRegion { state })
+            .into()
+    }
+
+    fn snapshot_dir_ambient_app() -> Element {
+        use_init_theme(dark_theme);
+        let th = oxide_ui::tokens::Theme::default();
+        let state = make_rich_state(StatusDirection::Ambient);
         rect()
             .width(Size::fill())
             .height(Size::fill())
@@ -170,5 +255,53 @@ mod context_snapshot_tests {
         runner.poll_n(Duration::from_millis(5), 8);
         runner.sync_and_update();
         runner.render_to_file("/tmp/oxide-context-spec-expanded.png");
+    }
+
+    /// Renders the Spec direction body with live project data.
+    /// Run with: cargo test -p oxide-freya directions -- --ignored --nocapture
+    #[test]
+    #[ignore = "snapshot: writes PNG to /tmp for visual review"]
+    fn snapshot_dir_spec() {
+        let (mut runner, _) =
+            TestingRunner::new(snapshot_dir_spec_app, (300., 600.).into(), |_| {}, 1.);
+        runner.poll_n(Duration::from_millis(5), 8);
+        runner.sync_and_update();
+        runner.render_to_file("/tmp/shell-dir-spec.png");
+    }
+
+    /// Renders the Mission direction body with live conversation data.
+    /// Run with: cargo test -p oxide-freya directions -- --ignored --nocapture
+    #[test]
+    #[ignore = "snapshot: writes PNG to /tmp for visual review"]
+    fn snapshot_dir_mission() {
+        let (mut runner, _) =
+            TestingRunner::new(snapshot_dir_mission_app, (300., 600.).into(), |_| {}, 1.);
+        runner.poll_n(Duration::from_millis(5), 8);
+        runner.sync_and_update();
+        runner.render_to_file("/tmp/shell-dir-mission.png");
+    }
+
+    /// Renders the Workbench direction body with worktree data.
+    /// Run with: cargo test -p oxide-freya directions -- --ignored --nocapture
+    #[test]
+    #[ignore = "snapshot: writes PNG to /tmp for visual review"]
+    fn snapshot_dir_workbench() {
+        let (mut runner, _) =
+            TestingRunner::new(snapshot_dir_workbench_app, (300., 600.).into(), |_| {}, 1.);
+        runner.poll_n(Duration::from_millis(5), 8);
+        runner.sync_and_update();
+        runner.render_to_file("/tmp/shell-dir-workbench.png");
+    }
+
+    /// Renders the Ambient direction body with connection state.
+    /// Run with: cargo test -p oxide-freya directions -- --ignored --nocapture
+    #[test]
+    #[ignore = "snapshot: writes PNG to /tmp for visual review"]
+    fn snapshot_dir_ambient() {
+        let (mut runner, _) =
+            TestingRunner::new(snapshot_dir_ambient_app, (300., 600.).into(), |_| {}, 1.);
+        runner.poll_n(Duration::from_millis(5), 8);
+        runner.sync_and_update();
+        runner.render_to_file("/tmp/shell-dir-ambient.png");
     }
 }
