@@ -5,7 +5,7 @@
 use freya::prelude::*;
 use oxide_ui::{
     Theme,
-    components::{CollapsiblePanel, ListItem, RailButton, SidebarHeader},
+    components::{CollapsiblePanel, ListItem, RailButton, SidebarHeader, StatusDot},
 };
 
 use crate::state::AppState;
@@ -89,9 +89,54 @@ impl Component for Sidebar {
                 ),
         );
 
-        // Rail: just the expand button.
-        let rail = RailButton::new("»".into())
-            .on_press(move |_: Event<PressEventData>| c_expand.set(false));
+        // Collapsed rail: project dot, one icon per conversation, expand button.
+        let convs_rail = state.conversations.read().clone();
+        let active_rail = state.active.read().clone();
+        let mut rail = rect()
+            .direction(Direction::Vertical)
+            .cross_align(Alignment::Center)
+            .spacing(6.)
+            .padding(Gaps::new_all(8.))
+            .width(Size::fill())
+            .height(Size::fill())
+            // project dot at top — press expands.
+            .child(
+                rect()
+                    .width(Size::px(10.)).height(Size::px(10.))
+                    .corner_radius(CornerRadius::new_all(5.))
+                    .background(th.accent())
+                    .on_press({
+                        let mut e = c_expand;
+                        move |_: Event<PressEventData>| e.set(false)
+                    }),
+            );
+        for c in convs_rail {
+            let st = state.clone();
+            let id = c.id.clone();
+            let sel = active_rail.as_ref() == Some(&c.id);
+            let mut e = c_expand;
+            rail = rail.child(
+                rect()
+                    .width(Size::px(28.)).height(Size::px(28.))
+                    .corner_radius(CornerRadius::new_all(8.))
+                    .center()
+                    .background(if sel { th.surface_hi() } else { th.surface() })
+                    .on_press(move |_: Event<PressEventData>| {
+                        st.open_conversation(id.clone());
+                        e.set(false);
+                    })
+                    .child(StatusDot::new(true)),
+            );
+        }
+        let rail = rail.child(
+            rect()
+                .height(Size::flex(1.0))
+                .cross_align(Alignment::Center)
+                .child(
+                    RailButton::new("»".into())
+                        .on_press(move |_: Event<PressEventData>| c_expand.set(false)),
+                ),
+        );
 
         CollapsiblePanel::new()
             .collapsed(*collapsed.read())
