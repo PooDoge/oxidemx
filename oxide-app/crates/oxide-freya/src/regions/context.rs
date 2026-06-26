@@ -31,6 +31,10 @@ impl Component for ContextRegion {
         let ctx_collapsed = state.context_collapsed;
         let width_anim = use_animation(move |conf| {
             conf.on_change(OnChange::Rerun);
+            // Settle to the resting target on mount (no startup animation); without
+            // this the never-triggered tween sits at the AnimNum origin (FULL),
+            // so the collapsed rail renders at 300px instead of 60px.
+            conf.on_creation(OnCreation::Finish);
             let w = AnimNum::new(CONTEXT_FULL_W, CONTEXT_RAIL_W)
                 .time(180)
                 .ease(Ease::Out)
