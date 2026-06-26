@@ -10,7 +10,7 @@
 use std::sync::Arc;
 
 use freya::prelude::*;
-use oxide_client::{AgentEvent, Conversation, ConversationId, Project, Transport, Turn};
+use oxide_client::{AgentEvent, Conversation, ConversationId, Project, ProjectId, Transport, Turn};
 use oxide_client::dto::AttachmentPayload;
 
 // ── Connection state ────────────────────────────────────────────────────────
@@ -21,6 +21,42 @@ pub enum ConnState {
     Connected,
     Reconnecting,
     Unreachable,
+}
+
+// ── Status directions (right-panel facets) ──────────────────────────────────
+
+/// The four right-panel "directions". Named `StatusDirection` to avoid colliding
+/// with Freya's layout `Direction`.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum StatusDirection {
+    #[default]
+    Spec,
+    Mission,
+    Workbench,
+    Ambient,
+}
+
+impl StatusDirection {
+    pub const ALL: [StatusDirection; 4] =
+        [Self::Spec, Self::Mission, Self::Workbench, Self::Ambient];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Spec => "Spec",
+            Self::Mission => "Mission",
+            Self::Workbench => "Workbench",
+            Self::Ambient => "Ambient",
+        }
+    }
+
+    pub fn icon(self) -> &'static str {
+        match self {
+            Self::Spec => "📋",
+            Self::Mission => "🎯",
+            Self::Workbench => "🔧",
+            Self::Ambient => "〰️",
+        }
+    }
 }
 
 // ── Pure streaming reducer ──────────────────────────────────────────────────
@@ -89,6 +125,10 @@ pub struct AppState {
     pub active: State<Option<ConversationId>>,
     pub transcript: State<Transcript>,
     pub connection: State<ConnState>,
+    pub current_project: State<Option<ProjectId>>,
+    pub sidebar_collapsed: State<bool>,
+    pub context_collapsed: State<bool>,
+    pub active_direction: State<StatusDirection>,
 }
 
 impl PartialEq for AppState {
@@ -100,6 +140,10 @@ impl PartialEq for AppState {
             && self.active == other.active
             && self.transcript == other.transcript
             && self.connection == other.connection
+            && self.current_project == other.current_project
+            && self.sidebar_collapsed == other.sidebar_collapsed
+            && self.context_collapsed == other.context_collapsed
+            && self.active_direction == other.active_direction
     }
 }
 
@@ -114,6 +158,10 @@ impl AppState {
             active: use_state(|| None),
             transcript: use_state(Transcript::default),
             connection: use_state(|| ConnState::Unknown),
+            current_project: use_state(|| None),
+            sidebar_collapsed: use_state(|| false),
+            context_collapsed: use_state(|| true),
+            active_direction: use_state(StatusDirection::default),
         }
     }
 
@@ -125,6 +173,7 @@ impl AppState {
         let mut projects = self.projects;
         let mut conversations = self.conversations;
         let mut connection = self.connection;
+        let mut current_project = self.current_project;
         spawn(async move {
             match t.health().await {
                 Ok(()) => connection.set(ConnState::Connected),
@@ -134,9 +183,29 @@ impl AppState {
                 }
             }
             if let Ok(ps) = t.list_projects().await {
+                let first = ps.first().map(|p| p.id.clone());
                 projects.set(ps);
+                let pid = first.unwrap_or_else(|| ProjectId::from("personal"));
+                current_project.set(Some(pid.clone()));
+                if let Ok(cs) = t.list_conversations(pid.as_str()).await {
+                    conversations.set(cs);
+                }
             }
-            if let Ok(cs) = t.list_conversations("personal").await {
+        });
+    }
+
+    /// Select a project: record it, clear the active conversation, and load the
+    /// project's conversations. Transport errors leave `conversations` unchanged
+    /// (same tolerant pattern as `bootstrap`).
+    pub fn open_project(&self, id: ProjectId) {
+        let mut current = self.current_project;
+        let mut active = self.active;
+        let mut conversations = self.conversations;
+        current.set(Some(id.clone()));
+        active.set(None);
+        let t = self.transport.clone();
+        spawn(async move {
+            if let Ok(cs) = t.list_conversations(id.as_str()).await {
                 conversations.set(cs);
             }
         });
@@ -320,5 +389,16 @@ mod tests {
         });
         assert_eq!(tx.turns.last().unwrap().text, "acc");
         assert_eq!(tx.live_assistant, "");
+    }
+
+    #[test]
+    fn status_direction_all_has_four_with_labels_and_icons() {
+        assert_eq!(StatusDirection::ALL.len(), 4);
+        assert_eq!(StatusDirection::ALL[0], StatusDirection::Spec);
+        let labels: Vec<_> = StatusDirection::ALL.iter().map(|d| d.label()).collect();
+        assert_eq!(labels, ["Spec", "Mission", "Workbench", "Ambient"]);
+        // Every direction has a non-empty icon glyph.
+        assert!(StatusDirection::ALL.iter().all(|d| !d.icon().is_empty()));
+        assert_eq!(StatusDirection::default(), StatusDirection::Spec);
     }
 }
