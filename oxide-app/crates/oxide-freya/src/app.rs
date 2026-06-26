@@ -33,7 +33,7 @@ pub fn shell() -> impl IntoElement {
                 .height(Size::fill())
                 .child(MainRegion { state: state.clone() }),
         )
-        .child(ContextRegion { collapsed: true })
+        .child(ContextRegion { state: state.clone() })
 }
 
 fn connection_banner(conn: ConnState) -> Option<impl IntoElement> {
@@ -270,7 +270,7 @@ mod tests {
                     .height(Size::fill())
                     .child(MainRegion { state: state.clone() }),
             )
-            .child(ContextRegion { collapsed: true })
+            .child(ContextRegion { state: state.clone() })
             .into()
     }
 
