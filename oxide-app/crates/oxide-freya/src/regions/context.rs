@@ -129,30 +129,28 @@ mod context_snapshot_tests {
     fn make_rich_state(direction: StatusDirection) -> AppState {
         let pid = ProjectId::from("personal");
         let cid = ConversationId::from("conv-1");
-        let mock = Arc::new(MockTransport {
-            projects: vec![Project {
-                id: pid.clone(),
-                name: "OxideMX".into(),
-                default_working_dir: "/run/media/system/fastdrive/Games/mx-master-4-linux/oxidemx-2b".into(),
-                created_at: 0,
-            }],
-            conversations: vec![Conversation {
-                id: cid.clone(),
-                project_id: pid.clone(),
-                title: "Collapsible panels".into(),
-                working_dir: "/run/media/system/fastdrive/Games/mx-master-4-linux/oxidemx-2b".into(),
-                model: "gemini-2.5-flash".into(),
-                created_at: 0,
-                updated_at: 0,
-                worktree: Some(Worktree {
-                    path: "/run/media/system/fastdrive/Games/mx-master-4-linux/oxidemx-2b".into(),
-                    branch: "2b-collapsible-panels".into(),
-                    base_ref: "main".into(),
-                }),
-            }],
-            ..MockTransport::new()
-        }) as Arc<dyn oxide_client::Transport>;
+        let mock = Arc::new(MockTransport::new()) as Arc<dyn oxide_client::Transport>;
         let mut state = AppState::new(mock);
+        state.projects.set(vec![Project {
+            id: pid.clone(),
+            name: "OxideMX".into(),
+            default_working_dir: "/home/jim/oxidemx".into(),
+            created_at: 0,
+        }]);
+        state.conversations.set(vec![Conversation {
+            id: cid.clone(),
+            project_id: pid.clone(),
+            title: "Build the shell".into(),
+            working_dir: "/home/jim/oxidemx".into(),
+            model: "claude-sonnet-4-6".into(),
+            created_at: 0,
+            updated_at: 0,
+            worktree: Some(Worktree {
+                path: "/home/jim/oxidemx".into(),
+                branch: "feat/shell".into(),
+                base_ref: "main".into(),
+            }),
+        }]);
         state.context_collapsed.set(false);
         state.active_direction.set(direction);
         state.current_project.set(Some(pid));
