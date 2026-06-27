@@ -1,4 +1,7 @@
 //! Right region: a 60px direction rail (collapsed) or a segmented expanded panel.
+mod run;
+mod worktree;
+mod settings;
 use freya::animation::*;
 use freya::prelude::*;
 use oxide_ui::{
@@ -315,5 +318,76 @@ mod context_snapshot_tests {
             TestingRunner::new(snapshot_dir_ambient_app, (300., 600.).into(), |_| {}, 1.);
         runner.poll(Duration::from_millis(1), Duration::from_millis(200));
         runner.render_to_file("/tmp/shell-dir-ambient.png");
+    }
+
+    // ── Tab-body snapshots (Task 2) ──────────────────────────────────────────
+
+    fn right_tab_run_app() -> Element {
+        use_init_theme(dark_theme);
+        let th = oxide_ui::tokens::Theme::default();
+        let state = make_rich_state(StatusDirection::Spec);
+        rect()
+            .width(Size::fill())
+            .height(Size::fill())
+            .background(th.bg_deep())
+            .child(super::run::RunTab { state })
+            .into()
+    }
+
+    fn right_tab_worktree_app() -> Element {
+        use_init_theme(dark_theme);
+        let th = oxide_ui::tokens::Theme::default();
+        let state = make_rich_state(StatusDirection::Spec);
+        rect()
+            .width(Size::fill())
+            .height(Size::fill())
+            .background(th.bg_deep())
+            .child(super::worktree::WorktreeTab { state })
+            .into()
+    }
+
+    fn right_tab_settings_app() -> Element {
+        use_init_theme(dark_theme);
+        let th = oxide_ui::tokens::Theme::default();
+        let state = make_rich_state(StatusDirection::Spec);
+        rect()
+            .width(Size::fill())
+            .height(Size::fill())
+            .background(th.bg_deep())
+            .child(super::settings::SettingsTab { state })
+            .into()
+    }
+
+    /// Renders the Run tab body to a PNG.
+    /// Run with: cargo test -p oxide-freya right_tab -- --ignored --nocapture
+    #[test]
+    #[ignore = "snapshot: writes PNG to /tmp for visual review"]
+    fn right_tab_run() {
+        let (mut runner, _) =
+            TestingRunner::new(right_tab_run_app, (348., 600.).into(), |_| {}, 1.);
+        runner.poll(Duration::from_millis(1), Duration::from_millis(200));
+        runner.render_to_file("/tmp/right-tab-run.png");
+    }
+
+    /// Renders the Worktree tab body to a PNG.
+    /// Run with: cargo test -p oxide-freya right_tab -- --ignored --nocapture
+    #[test]
+    #[ignore = "snapshot: writes PNG to /tmp for visual review"]
+    fn right_tab_worktree() {
+        let (mut runner, _) =
+            TestingRunner::new(right_tab_worktree_app, (348., 600.).into(), |_| {}, 1.);
+        runner.poll(Duration::from_millis(1), Duration::from_millis(200));
+        runner.render_to_file("/tmp/right-tab-worktree.png");
+    }
+
+    /// Renders the Settings tab body to a PNG.
+    /// Run with: cargo test -p oxide-freya right_tab -- --ignored --nocapture
+    #[test]
+    #[ignore = "snapshot: writes PNG to /tmp for visual review"]
+    fn right_tab_settings() {
+        let (mut runner, _) =
+            TestingRunner::new(right_tab_settings_app, (348., 600.).into(), |_| {}, 1.);
+        runner.poll(Duration::from_millis(1), Duration::from_millis(200));
+        runner.render_to_file("/tmp/right-tab-settings.png");
     }
 }
