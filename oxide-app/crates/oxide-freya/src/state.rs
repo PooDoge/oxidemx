@@ -59,6 +59,44 @@ impl StatusDirection {
     }
 }
 
+/// Which right-panel tab is active (Run / Worktree / .oxide settings).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum RightTab {
+    #[default]
+    Run,
+    Worktree,
+    Settings,
+}
+
+/// Responsive size class derived from the LOGICAL window width (design's four
+/// breakpoints). `Compact` and narrower force both side panels to icon rails.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum SizeClass {
+    #[default]
+    Wide,
+    Compact,
+    Tablet,
+    Phone,
+}
+
+impl SizeClass {
+    pub fn from_logical_width(w: f32) -> SizeClass {
+        if w >= 1180.0 {
+            SizeClass::Wide
+        } else if w >= 920.0 {
+            SizeClass::Compact
+        } else if w >= 600.0 {
+            SizeClass::Tablet
+        } else {
+            SizeClass::Phone
+        }
+    }
+
+    pub fn is_compact_or_narrower(self) -> bool {
+        !matches!(self, SizeClass::Wide)
+    }
+}
+
 // ── Pure streaming reducer ──────────────────────────────────────────────────
 
 /// Pure streaming reducer — the single place assistant text is assembled.
@@ -129,6 +167,8 @@ pub struct AppState {
     pub sidebar_collapsed: State<bool>,
     pub context_collapsed: State<bool>,
     pub active_direction: State<StatusDirection>,
+    pub right_tab: State<RightTab>,
+    pub size_class: State<SizeClass>,
 }
 
 impl PartialEq for AppState {
@@ -144,6 +184,8 @@ impl PartialEq for AppState {
             && self.sidebar_collapsed == other.sidebar_collapsed
             && self.context_collapsed == other.context_collapsed
             && self.active_direction == other.active_direction
+            && self.right_tab == other.right_tab
+            && self.size_class == other.size_class
     }
 }
 
@@ -162,6 +204,8 @@ impl AppState {
             sidebar_collapsed: use_state(|| false),
             context_collapsed: use_state(|| true),
             active_direction: use_state(StatusDirection::default),
+            right_tab: use_state(RightTab::default),
+            size_class: use_state(SizeClass::default),
         }
     }
 
@@ -389,6 +433,22 @@ mod tests {
         });
         assert_eq!(tx.turns.last().unwrap().text, "acc");
         assert_eq!(tx.live_assistant, "");
+    }
+
+    #[test]
+    fn size_class_thresholds_and_right_tab_default() {
+        use super::{SizeClass, RightTab};
+        assert_eq!(SizeClass::from_logical_width(1280.0), SizeClass::Wide);
+        assert_eq!(SizeClass::from_logical_width(1000.0), SizeClass::Compact);
+        assert_eq!(SizeClass::from_logical_width(700.0), SizeClass::Tablet);
+        assert_eq!(SizeClass::from_logical_width(420.0), SizeClass::Phone);
+        // boundaries (inclusive lower)
+        assert_eq!(SizeClass::from_logical_width(1180.0), SizeClass::Wide);
+        assert_eq!(SizeClass::from_logical_width(920.0), SizeClass::Compact);
+        assert!(!SizeClass::Wide.is_compact_or_narrower());
+        assert!(SizeClass::Compact.is_compact_or_narrower());
+        assert!(SizeClass::Phone.is_compact_or_narrower());
+        assert_eq!(RightTab::default(), RightTab::Run);
     }
 
     #[test]
