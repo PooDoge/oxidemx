@@ -5,7 +5,6 @@ use oxide_ui::Theme;
 
 use crate::state::AppState;
 
-#[allow(dead_code)]
 #[derive(PartialEq, Clone)]
 pub struct RunTab {
     pub state: AppState,

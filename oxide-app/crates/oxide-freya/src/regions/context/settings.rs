@@ -7,7 +7,6 @@ use oxide_ui::Theme;
 use crate::state::AppState;
 use super::run::section_label;
 
-#[allow(dead_code)]
 #[derive(PartialEq, Clone)]
 pub struct SettingsTab {
     pub state: AppState,
