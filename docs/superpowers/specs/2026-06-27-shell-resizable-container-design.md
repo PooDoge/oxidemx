@@ -195,3 +195,15 @@ root = rect(Vertical).expanded()[ probe(overlay) | OxideContextMenuViewer | bann
   not resizable. The structure SWAPS (ResizableContainer ↔ rect) on collapse toggle, which remounts
   cleanly (no re-key needed; collapse resets drag state, which is acceptable).
 - Center `min_size` stays UNSET (percent default 25%); side px panels keep `min_size(60)`.
+
+## Resize-handle styling (live feedback 3, 2026-06-27)
+
+The auto-inserted `ResizableHandle` paints a 4px bar with its theme `background` at REST (a visible
+colored bar the user dislikes) and `hover_background` on hover/drag. Fix: register a
+`resizable_handle` theme preference so the handle is **transparent at rest** and only highlights on
+hover:
+- `background` → transparent (`Color::from_argb(0,0,0,0)`) — no visible bar at rest.
+- `hover_background` → a subtle highlight (`Theme::with_alpha(accent, ~0x40)` or `hairline_strong()`).
+- `HANDLE_SIZE` is 4px (fine; the gap itself is thin) — only the COLOR changes.
+Set via the app theme (customize the `Theme` passed to `use_init_theme` to include the
+`resizable_handle` `ThemePreference`, mirroring how Freya component theme preferences are registered).
