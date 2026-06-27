@@ -166,6 +166,8 @@ pub struct AppState {
     pub current_project: State<Option<ProjectId>>,
     pub sidebar_collapsed: State<bool>,
     pub context_collapsed: State<bool>,
+    /// Retained for slice 2 (rail agent-status visual style); no longer selects
+    /// right-panel content.
     pub active_direction: State<StatusDirection>,
     pub right_tab: State<RightTab>,
     pub size_class: State<SizeClass>,

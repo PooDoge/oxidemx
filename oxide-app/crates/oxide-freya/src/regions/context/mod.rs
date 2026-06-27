@@ -1,4 +1,5 @@
-//! Right region: a 60px direction rail (collapsed) or a segmented expanded panel.
+//! Right region: a 60px icon rail (collapsed) or a 348px control panel
+//! (expanded) with Run / Worktree / .oxide tabs.
 mod run;
 mod worktree;
 mod settings;
