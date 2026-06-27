@@ -114,3 +114,43 @@ ResizableContainer ──owns width distribution + drag-resize (handles)──�
 - Full `DockingArea` drag-rearrange/tabs-between-panels.
 - The later right-panel slices (rail agent-status + popovers, real Run/Worktree/.oxide data, editor,
   tablet/phone) — unchanged.
+
+## Spike findings (2026-06-27)
+
+Validated via `spike_resizable` test (see `app.rs`) at 1200×800. All PNGs written to `/tmp`.
+
+### Exact API used
+```rust
+ResizablePanel::new(PanelSize::px(274.))
+    .min_size(60.)
+    .key((0u8, sidebar_collapsed))   // ← tuple to disambiguate left vs right panel keys
+    .child(Sidebar { ... })
+```
+- `PanelSize::px(v)` / `PanelSize::percent(v)` — pixel or flex weight
+- `.min_size(f32)` — minimum size in logical pixels
+- `.key(impl Hash)` — `KeyExt` accepts any hashable value (bool, usize, tuple, …); creates a `DiffKey::U64` by hashing
+
+### Key disambiguation (critical)
+`.key(bool)` alone is **not safe** when two sibling panels both use a plain `bool`. If both
+collapse flags are `false` (both expanded), both panels get the same `U64` hash → Freya panics
+with `"duplicate sibling key"`. **Always include a panel-position discriminant** in the key tuple:
+`.key((0u8, sidebar_collapsed))` for the left panel, `.key((2u8, context_collapsed))` for the right.
+
+### Re-key behaviour
+`.key(...)` change → Freya unmounts the old panel and mounts a fresh one with the new
+`initial_size` registered via `use_hook`. The container's `ResizableContext` redistributes the
+remaining flex space immediately (instant, no tween). The right panel correctly stayed at 348 px
+when the left panel collapsed from 274 px to 60 px — the regression is fixed.
+
+### Available from `freya::prelude::*`
+All types — `ResizableContainer`, `ResizablePanel`, `PanelSize`, plus the `KeyExt`/`ChildrenExt`
+traits — are re-exported via `freya_components::resizable_container::*` which is re-exported
+through `freya::prelude::*` (line 214 of `freya/src/lib.rs`). No extra imports needed.
+
+### No manual handles
+`ResizableContainer` auto-inserts `ResizableHandle` between panels. Do NOT add `ResizableHandle`
+manually — it will create duplicate handles and mis-count panel indices.
+
+### Instant collapse
+Re-keying gives an instant collapse with no tween. The previous hand-rolled `use_animation`
+tween was the root cause of the cross-fire bug; instant collapse is the correct baseline.

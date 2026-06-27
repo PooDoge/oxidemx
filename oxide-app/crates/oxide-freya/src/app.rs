@@ -23,12 +23,11 @@ pub fn shell() -> impl IntoElement {
     let context_collapsed = *state.context_collapsed.read() || force_rail;
 
     rect()
-        .direction(Direction::Horizontal)
-        .content(Content::Flex)
+        .direction(Direction::Vertical)
         .expanded()
         .background((5u8, 7u8, 11u8))
         // Invisible full-window probe: measures LOGICAL width → size_class signal.
-        // Global-positioned overlay rect so it doesn't affect the horizontal layout.
+        // Global-positioned overlay rect so it doesn't affect the layout.
         .child(
             rect()
                 .layer(Layer::Overlay)
@@ -40,20 +39,31 @@ pub fn shell() -> impl IntoElement {
                     size_class.set_if_modified(crate::state::SizeClass::from_logical_width(e.area.size.width));
                 }),
         )
-        // Mount ContextMenuViewer once as the first child of the shell root.
-        // It provides the global ContextMenu context (in ScopeId::ROOT) and
-        // renders the floating overlay when open.  Being layout-neutral when
-        // closed, it has no effect on the shell's horizontal flow.
         .child(OxideContextMenuViewer::new())
         .maybe_child(connection_banner(conn))
-        .child(Sidebar { state: state.clone(), collapsed: sidebar_collapsed })
         .child(
-            rect()
-                .width(Size::flex(1.0))
-                .height(Size::fill())
-                .child(MainRegion { state: state.clone() }),
+            ResizableContainer::new()
+                .direction(Direction::Horizontal)
+                .panel(
+                    // key = (panel_index, collapsed) — panel_index disambiguates left vs right
+                    // so both booleans don't hash to the same U64 when both are false/true.
+                    ResizablePanel::new(PanelSize::px(if sidebar_collapsed { 60. } else { 274. }))
+                        .min_size(60.)
+                        .key((0u8, sidebar_collapsed))
+                        .child(Sidebar { state: state.clone(), collapsed: sidebar_collapsed }),
+                )
+                .panel(
+                    ResizablePanel::new(PanelSize::percent(100.))
+                        .min_size(320.)
+                        .child(MainRegion { state: state.clone() }),
+                )
+                .panel(
+                    ResizablePanel::new(PanelSize::px(if context_collapsed { 60. } else { 348. }))
+                        .min_size(60.)
+                        .key((2u8, context_collapsed))
+                        .child(ContextRegion { state: state.clone(), collapsed: context_collapsed }),
+                ),
         )
-        .child(ContextRegion { state: state.clone(), collapsed: context_collapsed })
 }
 
 fn connection_banner(conn: ConnState) -> Option<impl IntoElement> {
@@ -284,18 +294,30 @@ mod tests {
         let sidebar_collapsed = *state.sidebar_collapsed.read() || force_rail;
         let context_collapsed = *state.context_collapsed.read() || force_rail;
         rect()
-            .direction(Direction::Horizontal)
-            .content(Content::Flex)
+            .direction(Direction::Vertical)
             .expanded()
             .background((5u8, 7u8, 11u8))
-            .child(Sidebar { state: state.clone(), collapsed: sidebar_collapsed })
             .child(
-                rect()
-                    .width(Size::flex(1.0))
-                    .height(Size::fill())
-                    .child(MainRegion { state: state.clone() }),
+                ResizableContainer::new()
+                    .direction(Direction::Horizontal)
+                    .panel(
+                        ResizablePanel::new(PanelSize::px(if sidebar_collapsed { 60. } else { 274. }))
+                            .min_size(60.)
+                            .key((0u8, sidebar_collapsed))
+                            .child(Sidebar { state: state.clone(), collapsed: sidebar_collapsed }),
+                    )
+                    .panel(
+                        ResizablePanel::new(PanelSize::percent(100.))
+                            .min_size(320.)
+                            .child(MainRegion { state: state.clone() }),
+                    )
+                    .panel(
+                        ResizablePanel::new(PanelSize::px(if context_collapsed { 60. } else { 348. }))
+                            .min_size(60.)
+                            .key((2u8, context_collapsed))
+                            .child(ContextRegion { state: state.clone(), collapsed: context_collapsed }),
+                    ),
             )
-            .child(ContextRegion { state: state.clone(), collapsed: context_collapsed })
             .into()
     }
 
@@ -358,18 +380,30 @@ mod tests {
         let sidebar_collapsed = *state.sidebar_collapsed.read() || force_rail;
         let context_collapsed = *state.context_collapsed.read() || force_rail;
         rect()
-            .direction(Direction::Horizontal)
-            .content(Content::Flex)
+            .direction(Direction::Vertical)
             .expanded()
             .background((5u8, 7u8, 11u8))
-            .child(Sidebar { state: state.clone(), collapsed: sidebar_collapsed })
             .child(
-                rect()
-                    .width(Size::flex(1.0))
-                    .height(Size::fill())
-                    .child(MainRegion { state: state.clone() }),
+                ResizableContainer::new()
+                    .direction(Direction::Horizontal)
+                    .panel(
+                        ResizablePanel::new(PanelSize::px(if sidebar_collapsed { 60. } else { 274. }))
+                            .min_size(60.)
+                            .key((0u8, sidebar_collapsed))
+                            .child(Sidebar { state: state.clone(), collapsed: sidebar_collapsed }),
+                    )
+                    .panel(
+                        ResizablePanel::new(PanelSize::percent(100.))
+                            .min_size(320.)
+                            .child(MainRegion { state: state.clone() }),
+                    )
+                    .panel(
+                        ResizablePanel::new(PanelSize::px(if context_collapsed { 60. } else { 348. }))
+                            .min_size(60.)
+                            .key((2u8, context_collapsed))
+                            .child(ContextRegion { state: state.clone(), collapsed: context_collapsed }),
+                    ),
             )
-            .child(ContextRegion { state: state.clone(), collapsed: context_collapsed })
             .into()
     }
 
@@ -383,6 +417,179 @@ mod tests {
             TestingRunner::new(snapshot_shell_compact_app, (1000., 800.).into(), |_| {}, 1.);
         runner.poll(Duration::from_millis(1), Duration::from_millis(400));
         runner.render_to_file("/tmp/oxide-shell-compact.png");
+    }
+
+    // ── Snapshot: regression (right expanded + left collapsed) ────────────
+
+    fn snapshot_shell_regression_app() -> Element {
+        use crate::regions::context::ContextRegion;
+        let mock = Arc::new(MockTransport {
+            conversations: vec![
+                conv("c1", "hi, what can you do?"),
+                conv("c2", "run the shell command git commit -m test"),
+            ],
+            history: vec![
+                Turn { role: "user".into(), text: "What can you do?".into(), ts: 0 },
+                Turn {
+                    role: "assistant".into(),
+                    text: "I am Oxide, your desktop assistant.".into(),
+                    ts: 0,
+                },
+            ],
+            events: Mutex::new(Vec::new()),
+            ..MockTransport::new()
+        }) as Arc<dyn oxide_client::Transport>;
+        let state = AppState::new(mock);
+        let mut st = state.clone();
+        use_side_effect(move || {
+            st.bootstrap();
+            st.open_conversation(ConversationId::from("c1"));
+            // Force: left rail (sidebar collapsed), right expanded
+            st.sidebar_collapsed.set(true);
+            st.context_collapsed.set(false);
+        });
+        // Regression case: sidebar collapsed (rail 60px), context expanded (full 348px)
+        let sidebar_collapsed = true;
+        let context_collapsed = false;
+        rect()
+            .direction(Direction::Vertical)
+            .expanded()
+            .background((5u8, 7u8, 11u8))
+            .child(
+                ResizableContainer::new()
+                    .direction(Direction::Horizontal)
+                    .panel(
+                        ResizablePanel::new(PanelSize::px(if sidebar_collapsed { 60. } else { 274. }))
+                            .min_size(60.)
+                            .key((0u8, sidebar_collapsed))
+                            .child(Sidebar { state: state.clone(), collapsed: sidebar_collapsed }),
+                    )
+                    .panel(
+                        ResizablePanel::new(PanelSize::percent(100.))
+                            .min_size(320.)
+                            .child(MainRegion { state: state.clone() }),
+                    )
+                    .panel(
+                        ResizablePanel::new(PanelSize::px(if context_collapsed { 60. } else { 348. }))
+                            .min_size(60.)
+                            .key((2u8, context_collapsed))
+                            .child(ContextRegion { state: state.clone(), collapsed: context_collapsed }),
+                    ),
+            )
+            .into()
+    }
+
+    /// Regression: right panel (348px) stays full-width when left sidebar is collapsed to rail (60px).
+    /// The old bug: both animations cross-fired and the right panel shrank to a sliver.
+    /// Run with: cargo test -p oxide-freya snapshot_shell_regression -- --ignored --nocapture
+    #[test]
+    #[ignore = "snapshot: writes PNG to /tmp for visual review"]
+    fn snapshot_shell_regression() {
+        let (mut runner, _) =
+            TestingRunner::new(snapshot_shell_regression_app, (1200., 800.).into(), |_| {}, 1.);
+        runner.poll_n(Duration::from_millis(5), 12);
+        runner.sync_and_update();
+        runner.render_to_file("/tmp/oxide-shell-regression.png");
+    }
+
+    // ── Spike: validate ResizableContainer + re-key collapse ─────────────────
+
+    fn spike_app_expanded() -> Element {
+        use_init_theme(dark_theme);
+        ResizableContainer::new()
+            .direction(Direction::Horizontal)
+            .panel(
+                ResizablePanel::new(PanelSize::px(274.))
+                    .min_size(60.)
+                    .key(0usize)
+                    .child(
+                        rect()
+                            .width(Size::fill())
+                            .height(Size::fill())
+                            .background((40u8, 120u8, 200u8)),
+                    ),
+            )
+            .panel(
+                ResizablePanel::new(PanelSize::percent(100.))
+                    .min_size(320.)
+                    .child(
+                        rect()
+                            .width(Size::fill())
+                            .height(Size::fill())
+                            .background((20u8, 22u8, 28u8)),
+                    ),
+            )
+            .panel(
+                ResizablePanel::new(PanelSize::px(348.))
+                    .min_size(60.)
+                    .child(
+                        rect()
+                            .width(Size::fill())
+                            .height(Size::fill())
+                            .background((200u8, 80u8, 80u8)),
+                    ),
+            )
+            .into()
+    }
+
+    fn spike_app_collapsed() -> Element {
+        use_init_theme(dark_theme);
+        ResizableContainer::new()
+            .direction(Direction::Horizontal)
+            .panel(
+                ResizablePanel::new(PanelSize::px(60.))
+                    .min_size(60.)
+                    .key(1usize)
+                    .child(
+                        rect()
+                            .width(Size::fill())
+                            .height(Size::fill())
+                            .background((40u8, 120u8, 200u8)),
+                    ),
+            )
+            .panel(
+                ResizablePanel::new(PanelSize::percent(100.))
+                    .min_size(320.)
+                    .child(
+                        rect()
+                            .width(Size::fill())
+                            .height(Size::fill())
+                            .background((20u8, 22u8, 28u8)),
+                    ),
+            )
+            .panel(
+                ResizablePanel::new(PanelSize::px(348.))
+                    .min_size(60.)
+                    .child(
+                        rect()
+                            .width(Size::fill())
+                            .height(Size::fill())
+                            .background((200u8, 80u8, 80u8)),
+                    ),
+            )
+            .into()
+    }
+
+    /// Spike: validates ResizableContainer + re-key collapse at 1200x800.
+    /// Renders two variants: expanded (274px blue | flex center | 348px red)
+    /// and collapsed (60px blue rail | flex center | 348px red).
+    /// Run with: cargo test -p oxide-freya spike_resizable -- --ignored --nocapture
+    #[test]
+    #[ignore = "spike: validate ResizableContainer API + re-key; writes PNGs to /tmp"]
+    fn spike_resizable() {
+        // Variant 1: left panel expanded (274px)
+        let (mut runner, _) =
+            TestingRunner::new(spike_app_expanded, (1200., 800.).into(), |_| {}, 1.);
+        runner.poll_n(Duration::from_millis(5), 8);
+        runner.sync_and_update();
+        runner.render_to_file("/tmp/spike-resizable.png");
+
+        // Variant 2: left panel keyed-collapsed (60px) — verifies re-key resizes cleanly
+        let (mut runner2, _) =
+            TestingRunner::new(spike_app_collapsed, (1200., 800.).into(), |_| {}, 1.);
+        runner2.poll_n(Duration::from_millis(5), 8);
+        runner2.sync_and_update();
+        runner2.render_to_file("/tmp/spike-resizable-collapsed.png");
     }
 
     // ── Snapshot: styled thread (P1) ──────────────────────────────────────

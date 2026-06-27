@@ -2,7 +2,6 @@
 pub mod avatar;
 pub mod bubble;
 pub mod chip;
-pub mod collapsible_panel;
 pub mod composer;
 pub mod list_item;
 pub mod menu;
@@ -18,7 +17,6 @@ pub mod thread_header;
 pub use avatar::Avatar;
 pub use bubble::Bubble;
 pub use chip::WorktreeChip;
-pub use collapsible_panel::CollapsiblePanel;
 pub use composer::{Composer, ComposerConfig, SubmitPayload};
 pub use list_item::ListItem;
 pub use menu::{

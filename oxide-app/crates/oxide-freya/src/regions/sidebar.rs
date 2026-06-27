@@ -2,12 +2,10 @@
 //!
 //! The placeholder-page nav demo from 2a has been removed. The per-region-nav
 //! independence invariant is covered by `nav::tests::region_nav_is_independent`.
-use freya::animation::*;
 use freya::prelude::*;
 use oxide_ui::{
     Theme,
-    components::{CollapsiblePanel, ListItem, RailButton, SidebarHeader, StatusDot},
-    tokens::{SIDEBAR_FULL_W, SIDEBAR_RAIL_W},
+    components::{ListItem, RailButton, SidebarHeader, StatusDot},
 };
 
 use crate::state::AppState;
@@ -28,15 +26,6 @@ impl Component for Sidebar {
         let th = Theme::default();
 
         let is_collapsed = self.collapsed; // EFFECTIVE (render)
-        let collapsed_for_anim = self.collapsed;
-        let width_anim = use_animation(move |conf| {
-            conf.on_change(OnChange::Rerun);
-            conf.on_creation(OnCreation::Finish);
-            let w = AnimNum::new(SIDEBAR_FULL_W, SIDEBAR_RAIL_W)
-                .time(340).ease(Ease::Out).function(Function::Expo);
-            if collapsed_for_anim { w } else { w.into_reversed() }
-        });
-        let anim_w = width_anim.get().value();
 
         let convs = state.conversations.read().clone();
         let active = state.active.read().clone();
@@ -152,10 +141,10 @@ impl Component for Sidebar {
                 ),
         );
 
-        CollapsiblePanel::new()
-            .collapsed(is_collapsed)
-            .override_width(Some(anim_w))
-            .full(col.into_element())
-            .rail(rail)
+        if is_collapsed {
+            rail.into_element()
+        } else {
+            col.into_element()
+        }
     }
 }

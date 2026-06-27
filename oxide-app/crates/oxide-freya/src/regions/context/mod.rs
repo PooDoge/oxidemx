@@ -4,15 +4,11 @@ mod run;
 mod worktree;
 mod settings;
 
-use freya::animation::*;
 use freya::prelude::*;
 use freya_icons::lucide;
 use oxide_ui::Theme;
 
 use crate::state::{AppState, RightTab};
-
-const CONTEXT_FULL_W: f32 = 348.0;
-const CONTEXT_RAIL_W: f32 = 60.0;
 
 /// (RightTab, label) — drives the rail nav buttons + tab header.
 const TABS: [(RightTab, &str); 3] = [
@@ -45,21 +41,6 @@ impl Component for ContextRegion {
         let collapsed = self.collapsed;
         let active_tab = *state.right_tab.read();
 
-        // Width tween 348 <-> 60, scoped to the effective collapsed value,
-        // settling on mount (OnCreation::Finish) so the collapsed rail doesn't
-        // momentarily render at full width.
-        let is_collapsed = collapsed;
-        let width_anim = use_animation(move |conf| {
-            conf.on_change(OnChange::Rerun);
-            conf.on_creation(OnCreation::Finish);
-            let w = AnimNum::new(CONTEXT_FULL_W, CONTEXT_RAIL_W)
-                .time(340)
-                .ease(Ease::Out)
-                .function(Function::Expo);
-            if is_collapsed { w } else { w.into_reversed() }
-        });
-        let anim_w = width_anim.get().value();
-
         if collapsed {
             // Rail: icon buttons that expand + select a tab.
             let mut rail = rect()
@@ -67,7 +48,7 @@ impl Component for ContextRegion {
                 .cross_align(Alignment::Center)
                 .spacing(8.)
                 .padding(Gaps::new_all(8.))
-                .width(Size::px(anim_w))
+                .width(Size::fill())
                 .height(Size::fill())
                 .background(th.panel())
                 .border(Border::new().fill(th.hairline()).width(1.));
@@ -160,7 +141,7 @@ impl Component for ContextRegion {
             };
             rect()
                 .direction(Direction::Vertical)
-                .width(Size::px(anim_w))
+                .width(Size::fill())
                 .height(Size::fill())
                 .background(th.panel())
                 .border(Border::new().fill(th.hairline()).width(1.))
