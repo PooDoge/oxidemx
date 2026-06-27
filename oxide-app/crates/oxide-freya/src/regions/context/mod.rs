@@ -103,6 +103,7 @@ impl Component for ContextRegion {
 
             let mut header = rect()
                 .direction(Direction::Horizontal)
+                .content(Content::Flex)
                 .cross_align(Alignment::Center)
                 .spacing(4.)
                 .padding(Gaps::new(10., 12., 10., 12.))
