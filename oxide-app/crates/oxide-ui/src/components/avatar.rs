@@ -34,7 +34,7 @@ impl Component for Avatar {
             .corner_radius(CornerRadius::new_all(8.))
             .main_align(Alignment::Center)
             .cross_align(Alignment::Center)
-            .background_linear_gradient(
+            .background(
                 LinearGradient::new()
                     .angle(150.)
                     .stop((accent, 0.))

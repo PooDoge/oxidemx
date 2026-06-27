@@ -3,8 +3,8 @@ resolver = "2"
 members = ["crates/oxide-client", "crates/oxide-ui", "crates/oxide-freya"]
 
 [workspace.dependencies]
-freya = { path = "/run/media/system/fastdrive/repos/freya/crates/freya" }
-freya-testing = { path = "/run/media/system/fastdrive/repos/freya/crates/freya-testing" }
+freya = { path = "/run/media/system/fastdrive/repos/freya-blog04/crates/freya" }
+freya-testing = { path = "/run/media/system/fastdrive/repos/freya-blog04/crates/freya-testing" }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time", "sync"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

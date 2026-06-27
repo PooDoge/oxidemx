@@ -77,7 +77,7 @@ impl Component for Bubble {
                             );
                         })
                         .child(
-                            SelectableText::new(body.clone())
+                            SelectableText::new().span(body.clone())
                                 .font_size(13.)
                                 .color(th.text()),
                         ),
@@ -117,7 +117,7 @@ impl Component for Bubble {
                             );
                         })
                         .child(
-                            SelectableText::new(body.clone())
+                            SelectableText::new().span(body.clone())
                                 .font_size(13.)
                                 .color(th.subtext_hi()),
                         ),
