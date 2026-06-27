@@ -8,9 +8,24 @@ use oxide_ui::components::menu::OxideContextMenuViewer;
 use crate::regions::{context::ContextRegion, main_region::MainRegion, sidebar::Sidebar};
 use crate::state::{AppState, ConnState};
 
+/// Dark theme with a transparent resize handle at rest and a subtle accent highlight on hover.
+fn oxide_dark_theme() -> Theme {
+    let mut theme = dark_theme();
+    let accent = oxide_ui::tokens::Theme::default().accent();
+    theme.set(
+        "resizable_handle",
+        ResizableHandleThemePreference {
+            background: Preference::Specific(Color::from_argb(0, 0, 0, 0)),
+            hover_background: Preference::Specific(oxide_ui::tokens::Theme::with_alpha(accent, 0x40)),
+            corner_radius: Preference::Specific(CornerRadius::new_all(0.)),
+        },
+    );
+    theme
+}
+
 /// Root shell component — call from `fn app()`.
 pub fn shell() -> impl IntoElement {
-    use_init_theme(dark_theme);
+    use_init_theme(oxide_dark_theme);
     let transport: Arc<dyn Transport> = Arc::new(UdsTransport::new(UdsTransport::default_socket()));
     let state = AppState::new(transport);
     state.bootstrap();
@@ -41,28 +56,76 @@ pub fn shell() -> impl IntoElement {
         )
         .child(OxideContextMenuViewer::new())
         .maybe_child(connection_banner(conn))
-        .child(
-            ResizableContainer::new()
-                .direction(Direction::Horizontal)
-                .panel(
-                    // key = (panel_index, collapsed) — panel_index disambiguates left vs right
-                    // so both booleans don't hash to the same U64 when both are false/true.
-                    ResizablePanel::new(PanelSize::px(if sidebar_collapsed { 60. } else { 274. }))
-                        .min_size(60.)
-                        .key((0u8, sidebar_collapsed))
-                        .child(Sidebar { state: state.clone(), collapsed: sidebar_collapsed }),
-                )
-                .panel(
-                    ResizablePanel::new(PanelSize::percent(100.))
-                        .child(MainRegion { state: state.clone() }),
-                )
-                .panel(
-                    ResizablePanel::new(PanelSize::px(if context_collapsed { 60. } else { 348. }))
-                        .min_size(60.)
-                        .key((2u8, context_collapsed))
-                        .child(ContextRegion { state: state.clone(), collapsed: context_collapsed }),
-                ),
-        )
+        .child({
+            // right_group: center + (resizable right panel OR fixed right rail)
+            let right_group: Element = if context_collapsed {
+                rect()
+                    .direction(Direction::Horizontal)
+                    .content(Content::Flex)
+                    .width(Size::fill())
+                    .height(Size::fill())
+                    .child(
+                        rect()
+                            .width(Size::flex(1.0))
+                            .height(Size::fill())
+                            .child(MainRegion { state: state.clone() }),
+                    )
+                    .child(
+                        rect()
+                            .width(Size::px(60.))
+                            .height(Size::fill())
+                            .child(ContextRegion { state: state.clone(), collapsed: true }),
+                    )
+                    .into_element()
+            } else {
+                ResizableContainer::new()
+                    .direction(Direction::Horizontal)
+                    .panel(
+                        ResizablePanel::new(PanelSize::percent(100.))
+                            .child(MainRegion { state: state.clone() }),
+                    )
+                    .panel(
+                        ResizablePanel::new(PanelSize::px(348.))
+                            .min_size(60.)
+                            .child(ContextRegion { state: state.clone(), collapsed: false }),
+                    )
+                    .into_element()
+            };
+            // shell_body: (resizable left panel OR fixed left rail) + right_group
+            if sidebar_collapsed {
+                rect()
+                    .direction(Direction::Horizontal)
+                    .content(Content::Flex)
+                    .width(Size::fill())
+                    .height(Size::fill())
+                    .child(
+                        rect()
+                            .width(Size::px(60.))
+                            .height(Size::fill())
+                            .child(Sidebar { state: state.clone(), collapsed: true }),
+                    )
+                    .child(
+                        rect()
+                            .width(Size::flex(1.0))
+                            .height(Size::fill())
+                            .child(right_group),
+                    )
+                    .into_element()
+            } else {
+                ResizableContainer::new()
+                    .direction(Direction::Horizontal)
+                    .panel(
+                        ResizablePanel::new(PanelSize::px(274.))
+                            .min_size(60.)
+                            .child(Sidebar { state: state.clone(), collapsed: false }),
+                    )
+                    .panel(
+                        ResizablePanel::new(PanelSize::percent(100.))
+                            .child(right_group),
+                    )
+                    .into_element()
+            }
+        })
 }
 
 fn connection_banner(conn: ConnState) -> Option<impl IntoElement> {
@@ -292,30 +355,43 @@ mod tests {
         let force_rail = sc.is_compact_or_narrower();
         let sidebar_collapsed = *state.sidebar_collapsed.read() || force_rail;
         let context_collapsed = *state.context_collapsed.read() || force_rail;
+        let right_group: Element = if context_collapsed {
+            rect()
+                .direction(Direction::Horizontal)
+                .content(Content::Flex)
+                .width(Size::fill())
+                .height(Size::fill())
+                .child(rect().width(Size::flex(1.0)).height(Size::fill()).child(MainRegion { state: state.clone() }))
+                .child(rect().width(Size::px(60.)).height(Size::fill()).child(ContextRegion { state: state.clone(), collapsed: true }))
+                .into_element()
+        } else {
+            ResizableContainer::new()
+                .direction(Direction::Horizontal)
+                .panel(ResizablePanel::new(PanelSize::percent(100.)).child(MainRegion { state: state.clone() }))
+                .panel(ResizablePanel::new(PanelSize::px(348.)).min_size(60.).child(ContextRegion { state: state.clone(), collapsed: false }))
+                .into_element()
+        };
+        let shell_body: Element = if sidebar_collapsed {
+            rect()
+                .direction(Direction::Horizontal)
+                .content(Content::Flex)
+                .width(Size::fill())
+                .height(Size::fill())
+                .child(rect().width(Size::px(60.)).height(Size::fill()).child(Sidebar { state: state.clone(), collapsed: true }))
+                .child(rect().width(Size::flex(1.0)).height(Size::fill()).child(right_group))
+                .into_element()
+        } else {
+            ResizableContainer::new()
+                .direction(Direction::Horizontal)
+                .panel(ResizablePanel::new(PanelSize::px(274.)).min_size(60.).child(Sidebar { state: state.clone(), collapsed: false }))
+                .panel(ResizablePanel::new(PanelSize::percent(100.)).child(right_group))
+                .into_element()
+        };
         rect()
             .direction(Direction::Vertical)
             .expanded()
             .background((5u8, 7u8, 11u8))
-            .child(
-                ResizableContainer::new()
-                    .direction(Direction::Horizontal)
-                    .panel(
-                        ResizablePanel::new(PanelSize::px(if sidebar_collapsed { 60. } else { 274. }))
-                            .min_size(60.)
-                            .key((0u8, sidebar_collapsed))
-                            .child(Sidebar { state: state.clone(), collapsed: sidebar_collapsed }),
-                    )
-                    .panel(
-                        ResizablePanel::new(PanelSize::percent(100.))
-                            .child(MainRegion { state: state.clone() }),
-                    )
-                    .panel(
-                        ResizablePanel::new(PanelSize::px(if context_collapsed { 60. } else { 348. }))
-                            .min_size(60.)
-                            .key((2u8, context_collapsed))
-                            .child(ContextRegion { state: state.clone(), collapsed: context_collapsed }),
-                    ),
-            )
+            .child(shell_body)
             .into()
     }
 
@@ -377,30 +453,43 @@ mod tests {
         let force_rail = sc.is_compact_or_narrower();
         let sidebar_collapsed = *state.sidebar_collapsed.read() || force_rail;
         let context_collapsed = *state.context_collapsed.read() || force_rail;
+        let right_group: Element = if context_collapsed {
+            rect()
+                .direction(Direction::Horizontal)
+                .content(Content::Flex)
+                .width(Size::fill())
+                .height(Size::fill())
+                .child(rect().width(Size::flex(1.0)).height(Size::fill()).child(MainRegion { state: state.clone() }))
+                .child(rect().width(Size::px(60.)).height(Size::fill()).child(ContextRegion { state: state.clone(), collapsed: true }))
+                .into_element()
+        } else {
+            ResizableContainer::new()
+                .direction(Direction::Horizontal)
+                .panel(ResizablePanel::new(PanelSize::percent(100.)).child(MainRegion { state: state.clone() }))
+                .panel(ResizablePanel::new(PanelSize::px(348.)).min_size(60.).child(ContextRegion { state: state.clone(), collapsed: false }))
+                .into_element()
+        };
+        let shell_body: Element = if sidebar_collapsed {
+            rect()
+                .direction(Direction::Horizontal)
+                .content(Content::Flex)
+                .width(Size::fill())
+                .height(Size::fill())
+                .child(rect().width(Size::px(60.)).height(Size::fill()).child(Sidebar { state: state.clone(), collapsed: true }))
+                .child(rect().width(Size::flex(1.0)).height(Size::fill()).child(right_group))
+                .into_element()
+        } else {
+            ResizableContainer::new()
+                .direction(Direction::Horizontal)
+                .panel(ResizablePanel::new(PanelSize::px(274.)).min_size(60.).child(Sidebar { state: state.clone(), collapsed: false }))
+                .panel(ResizablePanel::new(PanelSize::percent(100.)).child(right_group))
+                .into_element()
+        };
         rect()
             .direction(Direction::Vertical)
             .expanded()
             .background((5u8, 7u8, 11u8))
-            .child(
-                ResizableContainer::new()
-                    .direction(Direction::Horizontal)
-                    .panel(
-                        ResizablePanel::new(PanelSize::px(if sidebar_collapsed { 60. } else { 274. }))
-                            .min_size(60.)
-                            .key((0u8, sidebar_collapsed))
-                            .child(Sidebar { state: state.clone(), collapsed: sidebar_collapsed }),
-                    )
-                    .panel(
-                        ResizablePanel::new(PanelSize::percent(100.))
-                            .child(MainRegion { state: state.clone() }),
-                    )
-                    .panel(
-                        ResizablePanel::new(PanelSize::px(if context_collapsed { 60. } else { 348. }))
-                            .min_size(60.)
-                            .key((2u8, context_collapsed))
-                            .child(ContextRegion { state: state.clone(), collapsed: context_collapsed }),
-                    ),
-            )
+            .child(shell_body)
             .into()
     }
 
@@ -448,30 +537,43 @@ mod tests {
         // Regression case: sidebar collapsed (rail 60px), context expanded (full 348px)
         let sidebar_collapsed = true;
         let context_collapsed = false;
+        let right_group: Element = if context_collapsed {
+            rect()
+                .direction(Direction::Horizontal)
+                .content(Content::Flex)
+                .width(Size::fill())
+                .height(Size::fill())
+                .child(rect().width(Size::flex(1.0)).height(Size::fill()).child(MainRegion { state: state.clone() }))
+                .child(rect().width(Size::px(60.)).height(Size::fill()).child(ContextRegion { state: state.clone(), collapsed: true }))
+                .into_element()
+        } else {
+            ResizableContainer::new()
+                .direction(Direction::Horizontal)
+                .panel(ResizablePanel::new(PanelSize::percent(100.)).child(MainRegion { state: state.clone() }))
+                .panel(ResizablePanel::new(PanelSize::px(348.)).min_size(60.).child(ContextRegion { state: state.clone(), collapsed: false }))
+                .into_element()
+        };
+        let shell_body: Element = if sidebar_collapsed {
+            rect()
+                .direction(Direction::Horizontal)
+                .content(Content::Flex)
+                .width(Size::fill())
+                .height(Size::fill())
+                .child(rect().width(Size::px(60.)).height(Size::fill()).child(Sidebar { state: state.clone(), collapsed: true }))
+                .child(rect().width(Size::flex(1.0)).height(Size::fill()).child(right_group))
+                .into_element()
+        } else {
+            ResizableContainer::new()
+                .direction(Direction::Horizontal)
+                .panel(ResizablePanel::new(PanelSize::px(274.)).min_size(60.).child(Sidebar { state: state.clone(), collapsed: false }))
+                .panel(ResizablePanel::new(PanelSize::percent(100.)).child(right_group))
+                .into_element()
+        };
         rect()
             .direction(Direction::Vertical)
             .expanded()
             .background((5u8, 7u8, 11u8))
-            .child(
-                ResizableContainer::new()
-                    .direction(Direction::Horizontal)
-                    .panel(
-                        ResizablePanel::new(PanelSize::px(if sidebar_collapsed { 60. } else { 274. }))
-                            .min_size(60.)
-                            .key((0u8, sidebar_collapsed))
-                            .child(Sidebar { state: state.clone(), collapsed: sidebar_collapsed }),
-                    )
-                    .panel(
-                        ResizablePanel::new(PanelSize::percent(100.))
-                            .child(MainRegion { state: state.clone() }),
-                    )
-                    .panel(
-                        ResizablePanel::new(PanelSize::px(if context_collapsed { 60. } else { 348. }))
-                            .min_size(60.)
-                            .key((2u8, context_collapsed))
-                            .child(ContextRegion { state: state.clone(), collapsed: context_collapsed }),
-                    ),
-            )
+            .child(shell_body)
             .into()
     }
 
