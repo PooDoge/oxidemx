@@ -5,7 +5,7 @@
 use freya::prelude::*;
 use oxide_ui::{
     Theme,
-    components::{ListItem, RailButton, SidebarHeader, StatusDot},
+    components::{AttachedPosition, ListItem, OxideTooltip, RailButton, SidebarHeader, StatusDot, TooltipGroup},
 };
 
 use crate::state::AppState;
@@ -104,31 +104,55 @@ impl Component for Sidebar {
             .height(Size::fill())
             // project dot at top — press expands.
             .child(
-                rect()
-                    .width(Size::px(10.)).height(Size::px(10.))
-                    .corner_radius(CornerRadius::new_all(5.))
-                    .background(th.accent())
-                    .on_press({
-                        let mut e = c_expand;
-                        move |_: Event<PressEventData>| e.set(false)
-                    }),
+                OxideTooltip::text("Projects")
+                    .placement(AttachedPosition::Right)
+                    .offset(6.)
+                    .child(
+                        rect()
+                            .width(Size::px(10.)).height(Size::px(10.))
+                            .corner_radius(CornerRadius::new_all(5.))
+                            .background(th.accent())
+                            .on_press({
+                                let mut e = c_expand;
+                                move |_: Event<PressEventData>| e.set(false)
+                            }),
+                    ),
             );
         for c in convs_rail {
             let st = state.clone();
             let id = c.id.clone();
             let sel = active_rail.as_ref() == Some(&c.id);
             let mut e = c_expand;
+            let detail = rect()
+                .direction(Direction::Vertical)
+                .spacing(3.)
+                .child(label().text(c.title.clone()).font_size(12.5).color(th.text()))
+                .child(
+                    label()
+                        .text(format!(
+                            "{}{}",
+                            c.model,
+                            c.worktree.as_ref().map(|w| format!(" · {}", w.branch)).unwrap_or_default(),
+                        ))
+                        .font_size(10.5)
+                        .color(th.faint()),
+                );
             rail = rail.child(
-                rect()
-                    .width(Size::px(28.)).height(Size::px(28.))
-                    .corner_radius(CornerRadius::new_all(8.))
-                    .center()
-                    .background(if sel { th.surface_hi() } else { th.surface() })
-                    .on_press(move |_: Event<PressEventData>| {
-                        st.open_conversation(id.clone());
-                        e.set(false);
-                    })
-                    .child(StatusDot::new(true)),
+                OxideTooltip::detailed(detail)
+                    .placement(AttachedPosition::Right)
+                    .offset(6.)
+                    .child(
+                        rect()
+                            .width(Size::px(28.)).height(Size::px(28.))
+                            .corner_radius(CornerRadius::new_all(8.))
+                            .center()
+                            .background(if sel { th.surface_hi() } else { th.surface() })
+                            .on_press(move |_: Event<PressEventData>| {
+                                st.open_conversation(id.clone());
+                                e.set(false);
+                            })
+                            .child(StatusDot::new(true)),
+                    ),
             );
         }
         let rail = rail.child(
@@ -142,7 +166,7 @@ impl Component for Sidebar {
         );
 
         if is_collapsed {
-            rail.into_element()
+            TooltipGroup::new().child(rail.into_element()).into_element()
         } else {
             col.into_element()
         }
