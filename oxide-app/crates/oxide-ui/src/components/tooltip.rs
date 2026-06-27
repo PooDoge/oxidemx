@@ -81,6 +81,7 @@ impl ChildrenExt for OxideTooltip {
 /// Shadowed surface for the detailed-content variant.
 pub(crate) fn tooltip_surface(th: Theme, child: Element) -> impl IntoElement {
     rect()
+        .interactive(Interactive::No)
         .background(th.panel())
         .border(Border::new().fill(th.hairline_strong()).width(1.))
         .corner_radius(CornerRadius::new_all(8.))
