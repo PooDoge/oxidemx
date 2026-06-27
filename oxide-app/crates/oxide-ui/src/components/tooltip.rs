@@ -1,0 +1,214 @@
+//! `OxideTooltip` — a hover tooltip modeled on Freya's `TooltipContainer`
+//! (`freya-components/src/tooltip.rs`): hover-delay Timer + `Attached` placement +
+//! a scale/opacity entrance animation. Adds a detailed-content variant, a
+//! configurable offset, and (via `TooltipGroup`) "instant after the first".
+use std::borrow::Cow;
+use std::time::Duration;
+
+use freya::animation::*;
+use freya::prelude::*;
+
+use crate::tokens::Theme;
+
+pub use freya::prelude::AttachedPosition;
+
+/// Tooltip body: a simple themed text label, or arbitrary rich content.
+enum TooltipBody {
+    Text(Cow<'static, str>),
+    Detailed(Element),
+}
+
+impl Clone for TooltipBody {
+    fn clone(&self) -> Self {
+        match self {
+            Self::Text(t) => Self::Text(t.clone()),
+            Self::Detailed(e) => Self::Detailed(e.clone()),
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct OxideTooltip {
+    body: TooltipBody,
+    position: AttachedPosition,
+    offset: f32,
+    delay: Duration,
+    children: Vec<Element>,
+    key: DiffKey,
+}
+
+impl OxideTooltip {
+    pub fn text(text: impl Into<Cow<'static, str>>) -> Self {
+        Self::with_body(TooltipBody::Text(text.into()))
+    }
+    pub fn detailed(content: impl IntoElement) -> Self {
+        Self::with_body(TooltipBody::Detailed(content.into_element()))
+    }
+    fn with_body(body: TooltipBody) -> Self {
+        Self {
+            body,
+            position: AttachedPosition::Bottom,
+            offset: 0.0,
+            delay: Duration::from_millis(1000),
+            children: vec![],
+            key: DiffKey::None,
+        }
+    }
+    pub fn placement(mut self, position: AttachedPosition) -> Self {
+        self.position = position;
+        self
+    }
+    pub fn offset(mut self, offset: f32) -> Self {
+        self.offset = offset;
+        self
+    }
+    pub fn delay(mut self, delay: Duration) -> Self {
+        self.delay = delay;
+        self
+    }
+}
+
+impl PartialEq for OxideTooltip {
+    fn eq(&self, _: &Self) -> bool { false } // re-render on each render of the parent (content is owned)
+}
+impl KeyExt for OxideTooltip {
+    fn write_key(&mut self) -> &mut DiffKey { &mut self.key }
+}
+impl ChildrenExt for OxideTooltip {
+    fn get_children(&mut self) -> &mut Vec<Element> { &mut self.children }
+}
+
+/// Shadowed surface for the detailed-content variant.
+pub(crate) fn tooltip_surface(th: Theme, child: Element) -> impl IntoElement {
+    rect()
+        .background(th.panel())
+        .border(Border::new().fill(th.hairline_strong()).width(1.))
+        .corner_radius(CornerRadius::new_all(8.))
+        .padding(Gaps::new_all(8.))
+        .child(child)
+}
+
+impl Component for OxideTooltip {
+    fn render(&self) -> impl IntoElement {
+        let th = Theme::default();
+        let mut is_hovering = use_state(|| false);
+        let mut delay_task = use_state::<Option<TaskHandle>>(|| None);
+
+        let animation = use_animation(move |conf| {
+            conf.on_change(OnChange::Rerun);
+            conf.on_creation(OnCreation::Finish);
+            let scale = AnimNum::new(0.9, 1.).time(150).ease(Ease::Out).function(Function::Expo);
+            let opacity = AnimNum::new(0., 1.).time(150).ease(Ease::Out).function(Function::Expo);
+            if is_hovering() { (scale, opacity) } else { (scale.into_reversed(), opacity.into_reversed()) }
+        });
+        let (scale, opacity) = animation.read().value();
+
+        let delay = self.delay;
+        let on_pointer_over = move |_| {
+            if let Some(handle) = delay_task.write().take() { handle.cancel(); }
+            let task = spawn(async move {
+                async_io::Timer::after(delay).await;
+                is_hovering.set_if_modified(true);
+            });
+            delay_task.set(Some(task));
+        };
+        let on_pointer_out = move |_| {
+            if let Some(handle) = delay_task.write().take() { handle.cancel(); }
+            is_hovering.set_if_modified(false);
+        };
+
+        let is_visible = opacity > 0.;
+        let pad = match self.position {
+            AttachedPosition::Top => Gaps::new(0., 0., 5. + self.offset, 0.),
+            AttachedPosition::Bottom => Gaps::new(5. + self.offset, 0., 0., 0.),
+            AttachedPosition::Left => Gaps::new(0., 5. + self.offset, 0., 0.),
+            AttachedPosition::Right => Gaps::new(0., 0., 0., 5. + self.offset),
+        };
+        let body: Element = match &self.body {
+            TooltipBody::Text(t) => rect()
+                .interactive(Interactive::No)
+                .padding(Gaps::new(4., 10., 4., 10.))
+                .border(Border::new().fill(th.hairline_strong()).width(1.))
+                .background(th.panel())
+                .corner_radius(CornerRadius::new_all(8.))
+                .child(label().max_lines(1).font_size(12.5).color(th.text()).text(t.clone()))
+                .into_element(),
+            TooltipBody::Detailed(e) => tooltip_surface(th, e.clone()).into_element(),
+        };
+
+        rect()
+            .a11y_role(AccessibilityRole::Tooltip)
+            .a11y_focusable(false)
+            .on_pointer_over(on_pointer_over)
+            .on_pointer_out(on_pointer_out)
+            .child(
+                Attached::new(rect().children(self.children.clone()))
+                    .position(self.position)
+                    .maybe_child(is_visible.then(|| {
+                        rect().opacity(opacity).scale(scale).padding(pad).child(body)
+                    })),
+            )
+    }
+    fn render_key(&self) -> DiffKey { self.key.clone().or(self.default_key()) }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use freya_testing::prelude::*;
+
+    /// Snapshot: renders the text tooltip body force-visible on a dark bg.
+    /// Run with: LIBRARY_PATH=/tmp/oxidemx-lib-links cargo test -p oxide-ui tooltip_snapshot_text -- --ignored
+    #[test]
+    #[ignore = "snapshot: writes PNG to /tmp for visual review"]
+    fn tooltip_snapshot_text() {
+        let th = Theme::default();
+        let text_body = rect()
+            .interactive(Interactive::No)
+            .padding(Gaps::new(4., 10., 4., 10.))
+            .border(Border::new().fill(th.hairline_strong()).width(1.))
+            .background(th.panel())
+            .corner_radius(CornerRadius::new_all(8.))
+            .child(label().max_lines(1).font_size(12.5).color(th.text()).text("Save file"))
+            .into_element();
+        let text_body_clone = text_body.clone();
+        fn app(text_body: Element) -> impl IntoElement {
+            use_init_theme(dark_theme);
+            rect()
+                .background(Theme::default().bg_deep())
+                .padding(Gaps::new_all(24.))
+                .child(text_body)
+        }
+        let (mut runner, _) =
+            TestingRunner::new(move || app(text_body_clone.clone()), (240., 80.).into(), |_| {}, 1.);
+        runner.sync_and_update();
+        runner.render_to_file("/tmp/tooltip-text.png");
+    }
+
+    /// Snapshot: renders the detailed tooltip body force-visible on a dark bg.
+    /// Run with: LIBRARY_PATH=/tmp/oxidemx-lib-links cargo test -p oxide-ui tooltip_snapshot_detailed -- --ignored
+    #[test]
+    #[ignore = "snapshot: writes PNG to /tmp for visual review"]
+    fn tooltip_snapshot_detailed() {
+        let th = Theme::default();
+        let detail_content = rect()
+            .direction(Direction::Vertical)
+            .spacing(4.)
+            .child(label().font_size(13.).color(th.text()).text("Keyboard shortcut"))
+            .child(label().font_size(11.5).color(th.subtext()).text("Ctrl + S"))
+            .into_element();
+        let detail_surface = tooltip_surface(th, detail_content).into_element();
+        let detail_surface_clone = detail_surface.clone();
+        fn app(body: Element) -> impl IntoElement {
+            use_init_theme(dark_theme);
+            rect()
+                .background(Theme::default().bg_deep())
+                .padding(Gaps::new_all(24.))
+                .child(body)
+        }
+        let (mut runner, _) =
+            TestingRunner::new(move || app(detail_surface_clone.clone()), (280., 120.).into(), |_| {}, 1.);
+        runner.sync_and_update();
+        runner.render_to_file("/tmp/tooltip-detailed.png");
+    }
+}

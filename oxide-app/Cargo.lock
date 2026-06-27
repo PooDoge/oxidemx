@@ -2924,6 +2924,7 @@ name = "oxide-ui"
 version = "0.1.0"
 dependencies = [
  "arboard",
+ "async-io",
  "freya",
  "freya-testing",
  "image",
