@@ -32,4 +32,4 @@ pub use status_dot::StatusDot;
 pub use status_puck::StatusPuck;
 pub use text_input::TextInput;
 pub use thread_header::ThreadHeader;
-pub use tooltip::{OxideTooltip, AttachedPosition};
+pub use tooltip::{OxideTooltip, TooltipGroup, AttachedPosition};

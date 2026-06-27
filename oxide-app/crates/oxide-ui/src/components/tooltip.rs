@@ -12,6 +12,52 @@ use crate::tokens::Theme;
 
 pub use freya::prelude::AttachedPosition;
 
+/// How long after the cursor leaves the last tooltip in a group before the
+/// warm state is reset (i.e. the next hover incurs the full delay again).
+const TOOLTIP_COOLDOWN: Duration = Duration::from_millis(400);
+
+/// Shared warm/cold state provided by `TooltipGroup` via context.
+#[derive(Clone, Copy, PartialEq)]
+pub(crate) struct TooltipGroupState {
+    pub warm: State<bool>,
+    pub cold_task: State<Option<TaskHandle>>,
+}
+
+/// Pure delay rule: instant only when a group is present AND warm.
+pub(crate) fn group_effective_delay_value(has_group: bool, warm: bool, base: Duration) -> Duration {
+    if has_group && warm { Duration::ZERO } else { base }
+}
+
+/// Groups a set of `OxideTooltip`s so that after the first shows, moving to
+/// another is instant; leaving the group for `TOOLTIP_COOLDOWN` resets it.
+#[derive(Default, Clone, PartialEq)]
+pub struct TooltipGroup {
+    children: Vec<Element>,
+    key: DiffKey,
+}
+
+impl TooltipGroup {
+    pub fn new() -> Self { Self::default() }
+}
+
+impl KeyExt for TooltipGroup {
+    fn write_key(&mut self) -> &mut DiffKey { &mut self.key }
+}
+
+impl ChildrenExt for TooltipGroup {
+    fn get_children(&mut self) -> &mut Vec<Element> { &mut self.children }
+}
+
+impl Component for TooltipGroup {
+    fn render(&self) -> impl IntoElement {
+        use_provide_context(|| TooltipGroupState {
+            warm: State::create(false),
+            cold_task: State::create(None),
+        });
+        rect().children(self.children.clone())
+    }
+}
+
 /// Tooltip body: a simple themed text label, or arbitrary rich content.
 enum TooltipBody {
     Text(Cow<'static, str>),
@@ -104,18 +150,33 @@ impl Component for OxideTooltip {
         });
         let (scale, opacity) = animation.read().value();
 
-        let delay = self.delay;
+        let group = use_try_consume::<TooltipGroupState>();
+        let has_group = group.is_some();
+        let warm = group.as_ref().map(|g| *g.warm.read()).unwrap_or(false);
+        let effective_delay = group_effective_delay_value(has_group, warm, self.delay);
+
         let on_pointer_over = move |_| {
+            if let Some(mut g) = group { if let Some(h) = g.cold_task.write().take() { h.cancel(); } }
             if let Some(handle) = delay_task.write().take() { handle.cancel(); }
+            let mut group2 = group;
             let task = spawn(async move {
-                async_io::Timer::after(delay).await;
+                async_io::Timer::after(effective_delay).await;
                 is_hovering.set_if_modified(true);
+                if let Some(g) = &mut group2 { g.warm.set_if_modified(true); }
             });
             delay_task.set(Some(task));
         };
         let on_pointer_out = move |_| {
             if let Some(handle) = delay_task.write().take() { handle.cancel(); }
             is_hovering.set_if_modified(false);
+            if let Some(mut g) = group {
+                let mut warm = g.warm;
+                let task = spawn(async move {
+                    async_io::Timer::after(TOOLTIP_COOLDOWN).await;
+                    warm.set_if_modified(false);
+                });
+                g.cold_task.set(Some(task));
+            }
         };
 
         let is_visible = opacity > 0.;
@@ -157,6 +218,18 @@ impl Component for OxideTooltip {
 mod tests {
     use super::*;
     use freya_testing::prelude::*;
+
+    #[test]
+    fn warm_makes_delay_instant_else_base() {
+        use std::time::Duration;
+        let base = Duration::from_millis(1000);
+        // No group → base delay.
+        assert_eq!(super::group_effective_delay_value(false, true, base), base, "no group → base");
+        // Group present but cold → base delay.
+        assert_eq!(super::group_effective_delay_value(true, false, base), base, "cold group → base");
+        // Group present + warm → instant.
+        assert_eq!(super::group_effective_delay_value(true, true, base), Duration::ZERO, "warm group → 0");
+    }
 
     /// Snapshot: renders the text tooltip body force-visible on a dark bg.
     /// Run with: LIBRARY_PATH=/tmp/oxidemx-lib-links cargo test -p oxide-ui tooltip_snapshot_text -- --ignored
