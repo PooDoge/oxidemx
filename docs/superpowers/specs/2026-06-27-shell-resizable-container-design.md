@@ -163,3 +163,35 @@ panel `min_size` is in PERCENT units, so 320(%) > 100(%) panics. **Fix: drop the
 `min_size`** (Freya's default for a percent panel = `initial_value * 0.25` = 25%, which is correct).
 Rule: `min_size` on a `PanelSize::percent(v)` panel must be a percent ≤ `v`; `min_size` on a
 `PanelSize::px` panel is pixels. (Left/right px panels keep `min_size(60.)`.)
+
+## Resize-semantics refinement (live feedback 2, 2026-06-27)
+
+Two issues from live drag-testing of the flat 3-panel `ResizableContainer`:
+1. **Collapsed side panels were still resizable** (a handle next to a 60px rail).
+2. **Dragging one side panel moved the OPPOSITE side**, and the center "retained" its width.
+
+**Root cause (traced in `resizable_container.rs::apply_resize`):** for a drag, the algorithm grows
+the panel immediately *behind* the handle and shrinks the *forward* panels **in positional order
+starting from index 0** (breaking at the first panel above its min). In a flat `[left|center|right]`,
+dragging the RIGHT handle inward (negative) sets `forward=[left, center]` and shrinks **left first**
+— so the right panel grows at the left panel's expense, bypassing the center. The center only absorbs
+in one drag direction. This generic cascade does not match "each side resizes against the center."
+
+**Fix — NESTED containers + collapse-aware structure** (the center always flexes; a collapsed side is
+a plain fixed rail with NO handle):
+```
+right_group =
+  if context_collapsed: rect(Horizontal, Content::Flex)[ MainRegion(flex(1.0)) | ContextRail(px 60) ]   // no handle
+  else:                 ResizableContainer(Horizontal)[ MainRegion(percent 100) | ContextRegion(px 348, min 60) ]
+shell_body =
+  if sidebar_collapsed: rect(Horizontal, Content::Flex)[ SidebarRail(px 60) | right_group(flex(1.0)) ]   // no handle
+  else:                 ResizableContainer(Horizontal)[ Sidebar(px 274, min 60) | right_group(percent 100) ]
+root = rect(Vertical).expanded()[ probe(overlay) | OxideContextMenuViewer | banner? | shell_body ]
+```
+- Outer container (when sidebar expanded) resizes left ↔ right_group; right_group is a flex unit, so
+  the center inside it absorbs and the RIGHT panel (px) stays. Inner container (when context expanded)
+  resizes center ↔ right; the left (outer) is untouched. → each side resizes ONLY against the center.
+- A collapsed side is a plain fixed `px(60)` rect OUTSIDE any container → no `ResizableHandle` →
+  not resizable. The structure SWAPS (ResizableContainer ↔ rect) on collapse toggle, which remounts
+  cleanly (no re-key needed; collapse resets drag state, which is acceptable).
+- Center `min_size` stays UNSET (percent default 25%); side px panels keep `min_size(60)`.
