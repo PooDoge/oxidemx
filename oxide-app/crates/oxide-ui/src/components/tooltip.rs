@@ -285,4 +285,120 @@ mod tests {
         runner.sync_and_update();
         runner.render_to_file("/tmp/tooltip-detailed.png");
     }
+
+    /// Snapshot: renders the text tooltip body attached at each placement (Top/Bottom/Left/Right).
+    /// One PNG per placement: /tmp/tooltip-{top,bottom,left,right}.png
+    /// Run with: LIBRARY_PATH=/tmp/oxidemx-lib-links cargo test -p oxide-ui tooltip_snapshot_placements -- --ignored
+    #[test]
+    #[ignore = "snapshot: writes PNG to /tmp for visual review"]
+    fn tooltip_snapshot_placements() {
+        fn make_body(th: Theme) -> Element {
+            rect()
+                .interactive(Interactive::No)
+                .padding(Gaps::new(4., 10., 4., 10.))
+                .border(Border::new().fill(th.hairline_strong()).width(1.))
+                .background(th.panel())
+                .corner_radius(CornerRadius::new_all(8.))
+                .child(label().max_lines(1).font_size(12.5).color(th.text()).text("Save file"))
+                .into_element()
+        }
+
+        fn make_trigger(th: Theme) -> impl IntoElement {
+            rect()
+                .width(Size::px(60.))
+                .height(Size::px(28.))
+                .background(th.surface())
+                .corner_radius(CornerRadius::new_all(4.))
+                .center()
+                .child(label().font_size(11.).color(th.text()).text("Btn"))
+        }
+
+        let placements = [
+            (AttachedPosition::Top, "/tmp/tooltip-top.png"),
+            (AttachedPosition::Bottom, "/tmp/tooltip-bottom.png"),
+            (AttachedPosition::Left, "/tmp/tooltip-left.png"),
+            (AttachedPosition::Right, "/tmp/tooltip-right.png"),
+        ];
+
+        for (pos, path) in placements {
+            let th = Theme::default();
+            let body = make_body(th);
+            fn app(pos: AttachedPosition, body: Element) -> impl IntoElement {
+                use_init_theme(dark_theme);
+                let th = Theme::default();
+                rect()
+                    .background(th.bg_deep())
+                    .width(Size::px(240.))
+                    .height(Size::px(120.))
+                    .center()
+                    .child(
+                        Attached::new(make_trigger(th))
+                            .position(pos)
+                            .child(body),
+                    )
+            }
+            let (mut runner, _) = TestingRunner::new(
+                move || app(pos, body.clone()),
+                (240., 120.).into(),
+                |_| {},
+                1.,
+            );
+            runner.sync_and_update();
+            runner.poll(
+                std::time::Duration::from_millis(16),
+                std::time::Duration::from_millis(160),
+            );
+            runner.render_to_file(path);
+        }
+    }
+
+    /// Snapshot: renders the detailed tooltip body attached Right of a trigger.
+    /// Output: /tmp/tooltip-detailed-right.png
+    /// Run with: LIBRARY_PATH=/tmp/oxidemx-lib-links cargo test -p oxide-ui tooltip_snapshot_detailed_right -- --ignored
+    #[test]
+    #[ignore = "snapshot: writes PNG to /tmp for visual review"]
+    fn tooltip_snapshot_detailed_right() {
+        let th = Theme::default();
+        let detail_content = rect()
+            .direction(Direction::Vertical)
+            .spacing(4.)
+            .child(label().font_size(13.).color(th.text()).text("Keyboard shortcut"))
+            .child(label().font_size(11.5).color(th.subtext()).text("Ctrl + S"))
+            .into_element();
+        let detail_surface = tooltip_surface(th, detail_content).into_element();
+        fn app(body: Element) -> impl IntoElement {
+            use_init_theme(dark_theme);
+            let th = Theme::default();
+            rect()
+                .background(th.bg_deep())
+                .width(Size::px(360.))
+                .height(Size::px(120.))
+                .center()
+                .child(
+                    Attached::new(
+                        rect()
+                            .width(Size::px(60.))
+                            .height(Size::px(28.))
+                            .background(th.surface())
+                            .corner_radius(CornerRadius::new_all(4.))
+                            .center()
+                            .child(label().font_size(11.).color(th.text()).text("Btn")),
+                    )
+                    .position(AttachedPosition::Right)
+                    .child(body),
+                )
+        }
+        let (mut runner, _) = TestingRunner::new(
+            move || app(detail_surface.clone()),
+            (360., 120.).into(),
+            |_| {},
+            1.,
+        );
+        runner.sync_and_update();
+        runner.poll(
+            std::time::Duration::from_millis(16),
+            std::time::Duration::from_millis(160),
+        );
+        runner.render_to_file("/tmp/tooltip-detailed-right.png");
+    }
 }
