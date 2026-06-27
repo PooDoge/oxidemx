@@ -8,15 +8,16 @@ use oxide_ui::components::menu::OxideContextMenuViewer;
 use crate::regions::{context::ContextRegion, main_region::MainRegion, sidebar::Sidebar};
 use crate::state::{AppState, ConnState};
 
-/// Dark theme with a transparent resize handle at rest and a subtle accent highlight on hover.
+/// Dark theme whose resize handle is INVISIBLE at rest (painted the panel colour so the 4px gap
+/// blends with the panels instead of showing the darker shell root) and highlights on hover.
 fn oxide_dark_theme() -> Theme {
     let mut theme = dark_theme();
-    let accent = oxide_ui::tokens::Theme::default().accent();
+    let th = oxide_ui::tokens::Theme::default();
     theme.set(
         "resizable_handle",
         ResizableHandleThemePreference {
-            background: Preference::Specific(Color::from_argb(0, 0, 0, 0)),
-            hover_background: Preference::Specific(oxide_ui::tokens::Theme::with_alpha(accent, 0x40)),
+            background: Preference::Specific(th.panel()),
+            hover_background: Preference::Specific(oxide_ui::tokens::Theme::with_alpha(th.accent(), 0x40)),
             corner_radius: Preference::Specific(CornerRadius::new_all(0.)),
         },
     );

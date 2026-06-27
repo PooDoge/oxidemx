@@ -202,7 +202,7 @@ The auto-inserted `ResizableHandle` paints a 4px bar with its theme `background`
 colored bar the user dislikes) and `hover_background` on hover/drag. Fix: register a
 `resizable_handle` theme preference so the handle is **transparent at rest** and only highlights on
 hover:
-- `background` → transparent (`Color::from_argb(0,0,0,0)`) — no visible bar at rest.
+- `background` → the PANEL colour `th.panel()` (NOT transparent — transparent shows the darker shell-root through the 4px gap as a black line; panel-colour blends since center bg()=18,20,24 ≈ panel()=15,17,23).
 - `hover_background` → a subtle highlight (`Theme::with_alpha(accent, ~0x40)` or `hairline_strong()`).
 - `HANDLE_SIZE` is 4px (fine; the gap itself is thin) — only the COLOR changes.
 Set via the app theme (customize the `Theme` passed to `use_init_theme` to include the
