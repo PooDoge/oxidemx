@@ -42,6 +42,7 @@ impl Component for SettingsTab {
             col = col.child(
                 rect()
                     .direction(Direction::Horizontal)
+                    .content(Content::Flex)
                     .cross_align(Alignment::Center)
                     .spacing(11.)
                     .width(Size::fill())
@@ -52,7 +53,7 @@ impl Component for SettingsTab {
                     .child(
                         rect()
                             .direction(Direction::Vertical)
-                            .width(Size::fill())
+                            .width(Size::flex(1.0))
                             .child(label().text(lbl).font_size(13.).color(th.text()))
                             .child(label().text(count).font_size(10.5).color(th.subtext())),
                     )
