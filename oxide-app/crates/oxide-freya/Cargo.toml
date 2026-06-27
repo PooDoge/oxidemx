@@ -17,6 +17,7 @@ devtools = ["freya/devtools"]
 freya = { workspace = true }
 oxide-client = { path = "../oxide-client" }
 oxide-ui = { path = "../oxide-ui" }
+freya-icons = { workspace = true }
 base64 = "0.22"
 tokio = { workspace = true }
 futures-util = { workspace = true }

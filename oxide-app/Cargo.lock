@@ -1485,6 +1485,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "freya-icons"
+version = "0.4.0-rc.23"
+dependencies = [
+ "bytes",
+]
+
+[[package]]
 name = "freya-performance-plugin"
 version = "0.4.0-rc.23"
 dependencies = [
@@ -2903,6 +2910,7 @@ version = "0.1.0"
 dependencies = [
  "base64",
  "freya",
+ "freya-icons",
  "freya-testing",
  "futures-util",
  "oxide-client",

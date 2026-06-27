@@ -5,19 +5,30 @@ mod settings;
 
 use freya::animation::*;
 use freya::prelude::*;
-use oxide_ui::{Theme, components::RailButton};
+use freya_icons::lucide;
+use oxide_ui::Theme;
 
 use crate::state::{AppState, RightTab};
 
 const CONTEXT_FULL_W: f32 = 348.0;
 const CONTEXT_RAIL_W: f32 = 60.0;
 
-/// (RightTab, rail icon glyph, label) — drives the rail nav buttons + tab header.
-const TABS: [(RightTab, &str, &str); 3] = [
-    (RightTab::Run, "\u{2023}", "Run"),
-    (RightTab::Worktree, "\u{2325}", "Worktree"),
-    (RightTab::Settings, "\u{2699}", ".oxide"),
+/// (RightTab, label) — drives the rail nav buttons + tab header.
+const TABS: [(RightTab, &str); 3] = [
+    (RightTab::Run, "Run"),
+    (RightTab::Worktree, "Worktree"),
+    (RightTab::Settings, ".oxide"),
 ];
+
+macro_rules! tab_icon {
+    ($tab:expr) => {
+        match $tab {
+            RightTab::Run      => lucide::activity(),
+            RightTab::Worktree => lucide::git_branch(),
+            RightTab::Settings => lucide::settings(),
+        }
+    };
+}
 
 #[derive(PartialEq, Clone)]
 pub struct ContextRegion {
@@ -49,7 +60,7 @@ impl Component for ContextRegion {
         let anim_w = width_anim.get().value();
 
         if collapsed {
-            // Rail: nav buttons that expand + select a tab.
+            // Rail: icon buttons that expand + select a tab.
             let mut rail = rect()
                 .direction(Direction::Vertical)
                 .cross_align(Alignment::Center)
@@ -59,32 +70,87 @@ impl Component for ContextRegion {
                 .height(Size::fill())
                 .background(th.panel())
                 .border(Border::new().fill(th.hairline()).width(1.));
-            for (tab, glyph, _lbl) in TABS {
+            for (tab, _lbl) in TABS {
                 let mut rt = state.right_tab;
                 let mut coll = state.context_collapsed;
+                let icon_color = if tab == active_tab { th.accent() } else { th.subtext() };
                 rail = rail.child(
-                    RailButton::new(glyph.to_string())
+                    rect()
+                        .width(Size::px(40.))
+                        .height(Size::px(40.))
+                        .corner_radius(CornerRadius::new_all(10.))
+                        .center()
                         .on_press(move |_: Event<PressEventData>| {
                             rt.set(tab);
                             coll.set(false);
-                        }),
+                        })
+                        .child(
+                            svg(tab_icon!(tab))
+                                .color(icon_color)
+                                .width(Size::px(18.))
+                                .height(Size::px(18.)),
+                        ),
                 );
             }
             rail.into_element()
         } else {
-            // Full panel: SegmentedButton header + ScrollView body + collapse toggle.
-            let mut seg = SegmentedButton::new();
-            for (tab, _glyph, lbl) in TABS {
+            // Full panel: custom accent-fill tab header + ScrollView body + collapse toggle.
+            let accent = th.accent();
+            let subtext = th.subtext();
+            let accent_bg = Theme::with_alpha(accent, 0x16);
+            let accent_border = Theme::with_alpha(accent, 0x33);
+            let transparent = Color::from_argb(0, 0, 0, 0);
+
+            let mut header = rect()
+                .direction(Direction::Horizontal)
+                .cross_align(Alignment::Center)
+                .spacing(4.)
+                .padding(Gaps::new(10., 12., 10., 12.))
+                .width(Size::fill())
+                .border(Border::new().fill(th.hairline()).width(1.));
+            for (tab, lbl) in TABS {
                 let mut rt = state.right_tab;
-                let selected = tab == active_tab;
-                seg = seg.child(
-                    ButtonSegment::new()
-                        .selected(selected)
+                let is_active = tab == active_tab;
+                let icon_color = if is_active { accent } else { subtext };
+                let text_color = if is_active { accent } else { subtext };
+                let bg = if is_active { accent_bg } else { transparent };
+                let border_color = if is_active { accent_border } else { transparent };
+                header = header.child(
+                    rect()
+                        .width(Size::flex(1.0))
+                        .direction(Direction::Horizontal)
+                        .cross_align(Alignment::Center)
+                        .spacing(6.)
+                        .padding(Gaps::new(7., 8., 7., 8.))
+                        .corner_radius(CornerRadius::new_all(8.))
+                        .background(bg)
+                        .border(Border::new().fill(border_color).width(1.))
                         .on_press(move |_: Event<PressEventData>| rt.set(tab))
-                        .child(label().text(lbl)),
+                        .child(
+                            svg(tab_icon!(tab))
+                                .color(icon_color)
+                                .width(Size::px(14.))
+                                .height(Size::px(14.)),
+                        )
+                        .child(label().text(lbl).color(text_color).font_size(12.)),
                 );
             }
             let mut coll = state.context_collapsed;
+            header = header.child(
+                rect()
+                    .width(Size::px(28.))
+                    .height(Size::px(28.))
+                    .corner_radius(CornerRadius::new_all(6.))
+                    .center()
+                    .on_press(move |_: Event<PressEventData>| coll.set(true))
+                    .child(
+                        svg(lucide::chevrons_right())
+                            .color(subtext)
+                            .width(Size::px(14.))
+                            .height(Size::px(14.)),
+                    ),
+            );
+
             let tab_body: Element = match active_tab {
                 RightTab::Run => run::RunTab { state: state.clone() }.into_element(),
                 RightTab::Worktree => worktree::WorktreeTab { state: state.clone() }.into_element(),
@@ -96,19 +162,7 @@ impl Component for ContextRegion {
                 .height(Size::fill())
                 .background(th.panel())
                 .border(Border::new().fill(th.hairline()).width(1.))
-                .child(
-                    rect()
-                        .direction(Direction::Horizontal)
-                        .cross_align(Alignment::Center)
-                        .spacing(8.)
-                        .padding(Gaps::new(10., 12., 10., 12.))
-                        .width(Size::fill())
-                        .child(rect().width(Size::flex(1.0)).child(seg))
-                        .child(
-                            RailButton::new("\u{00bb}".to_string())
-                                .on_press(move |_: Event<PressEventData>| coll.set(true)),
-                        ),
-                )
+                .child(header)
                 .child(ScrollView::new().child(tab_body))
                 .into_element()
         }
@@ -349,7 +403,7 @@ mod context_snapshot_tests {
             .into()
     }
 
-    /// Renders the expanded Run panel (segmented header + body stub) to a PNG.
+    /// Renders the expanded Run panel (accent tab header + body stub) to a PNG.
     /// Run with: cargo test -p oxide-freya context -- --ignored --nocapture
     #[test]
     #[ignore = "snapshot: writes PNG to /tmp for visual review"]
