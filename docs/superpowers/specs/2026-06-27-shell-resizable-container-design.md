@@ -154,3 +154,12 @@ manually — it will create duplicate handles and mis-count panel indices.
 ### Instant collapse
 Re-keying gives an instant collapse with no tween. The previous hand-rolled `use_animation`
 tween was the root cause of the cross-fire bug; instant collapse is the correct baseline.
+
+### Live-run fix (2026-06-27): percent-panel `min_size` units
+RUNTIME panic (snapshots did NOT catch it — only triggers when available space < the min, e.g.
+a narrow window or a drag): `clamp(min=320, max=100): min > max` from Freya's resize logic. Cause:
+the CENTER panel is `PanelSize::percent(100)` but was given `.min_size(320.)` — for a **percent**
+panel `min_size` is in PERCENT units, so 320(%) > 100(%) panics. **Fix: drop the center's
+`min_size`** (Freya's default for a percent panel = `initial_value * 0.25` = 25%, which is correct).
+Rule: `min_size` on a `PanelSize::percent(v)` panel must be a percent ≤ `v`; `min_size` on a
+`PanelSize::px` panel is pixels. (Left/right px panels keep `min_size(60.)`.)

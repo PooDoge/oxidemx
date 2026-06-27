@@ -54,7 +54,6 @@ pub fn shell() -> impl IntoElement {
                 )
                 .panel(
                     ResizablePanel::new(PanelSize::percent(100.))
-                        .min_size(320.)
                         .child(MainRegion { state: state.clone() }),
                 )
                 .panel(
@@ -308,7 +307,6 @@ mod tests {
                     )
                     .panel(
                         ResizablePanel::new(PanelSize::percent(100.))
-                            .min_size(320.)
                             .child(MainRegion { state: state.clone() }),
                     )
                     .panel(
@@ -394,7 +392,6 @@ mod tests {
                     )
                     .panel(
                         ResizablePanel::new(PanelSize::percent(100.))
-                            .min_size(320.)
                             .child(MainRegion { state: state.clone() }),
                     )
                     .panel(
@@ -466,7 +463,6 @@ mod tests {
                     )
                     .panel(
                         ResizablePanel::new(PanelSize::percent(100.))
-                            .min_size(320.)
                             .child(MainRegion { state: state.clone() }),
                     )
                     .panel(
@@ -511,7 +507,6 @@ mod tests {
             )
             .panel(
                 ResizablePanel::new(PanelSize::percent(100.))
-                    .min_size(320.)
                     .child(
                         rect()
                             .width(Size::fill())
@@ -549,7 +544,6 @@ mod tests {
             )
             .panel(
                 ResizablePanel::new(PanelSize::percent(100.))
-                    .min_size(320.)
                     .child(
                         rect()
                             .width(Size::fill())
