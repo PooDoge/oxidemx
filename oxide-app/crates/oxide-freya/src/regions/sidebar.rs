@@ -15,26 +15,26 @@ use crate::state::AppState;
 #[derive(PartialEq, Clone)]
 pub struct Sidebar {
     pub state: AppState,
+    /// Effective collapsed value (user signal OR compact size class), from `shell()`.
+    pub collapsed: bool,
 }
 
 impl Component for Sidebar {
     fn render(&self) -> impl IntoElement {
-        let collapsed = self.state.sidebar_collapsed;
-        let mut c_collapse = collapsed;
-        let mut c_expand = collapsed;
+        let user_collapsed = self.state.sidebar_collapsed; // buttons write this
+        let mut c_collapse = user_collapsed;
+        let mut c_expand = user_collapsed;
         let state = self.state.clone();
         let th = Theme::default();
 
-        let is_collapsed = *collapsed.read();
+        let is_collapsed = self.collapsed; // EFFECTIVE (render)
+        let collapsed_for_anim = self.collapsed;
         let width_anim = use_animation(move |conf| {
             conf.on_change(OnChange::Rerun);
+            conf.on_creation(OnCreation::Finish);
             let w = AnimNum::new(SIDEBAR_FULL_W, SIDEBAR_RAIL_W)
-                .time(180)
-                .ease(Ease::Out)
-                .function(Function::Quart);
-            // Read `collapsed` (State<bool>) inside the closure so the Effect
-            // subscribes to it and re-fires only on collapse-toggle.
-            if *collapsed.read() { w } else { w.into_reversed() }
+                .time(340).ease(Ease::Out).function(Function::Expo);
+            if collapsed_for_anim { w } else { w.into_reversed() }
         });
         let anim_w = width_anim.get().value();
 

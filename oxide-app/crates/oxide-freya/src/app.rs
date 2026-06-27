@@ -15,26 +15,45 @@ pub fn shell() -> impl IntoElement {
     let state = AppState::new(transport);
     state.bootstrap();
     let conn = *state.connection.read();
+    let mut size_class = state.size_class;
+
+    let sc = *state.size_class.read();
+    let force_rail = sc.is_compact_or_narrower();
+    let sidebar_collapsed = *state.sidebar_collapsed.read() || force_rail;
+    let context_collapsed = *state.context_collapsed.read() || force_rail;
 
     rect()
         .direction(Direction::Horizontal)
         .content(Content::Flex)
         .expanded()
         .background((5u8, 7u8, 11u8))
+        // Invisible full-window probe: measures LOGICAL width → size_class signal.
+        // Global-positioned overlay rect so it doesn't affect the horizontal layout.
+        .child(
+            rect()
+                .layer(Layer::Overlay)
+                .position(Position::new_global().left(0.0).top(0.0))
+                .width(Size::fill())
+                .height(Size::fill())
+                .opacity(0.0_f32)
+                .on_sized(move |e: Event<SizedEventData>| {
+                    size_class.set_if_modified(crate::state::SizeClass::from_logical_width(e.area.size.width));
+                }),
+        )
         // Mount ContextMenuViewer once as the first child of the shell root.
         // It provides the global ContextMenu context (in ScopeId::ROOT) and
         // renders the floating overlay when open.  Being layout-neutral when
         // closed, it has no effect on the shell's horizontal flow.
         .child(OxideContextMenuViewer::new())
         .maybe_child(connection_banner(conn))
-        .child(Sidebar { state: state.clone() })
+        .child(Sidebar { state: state.clone(), collapsed: sidebar_collapsed })
         .child(
             rect()
                 .width(Size::flex(1.0))
                 .height(Size::fill())
                 .child(MainRegion { state: state.clone() }),
         )
-        .child(ContextRegion { state: state.clone(), collapsed: *state.context_collapsed.read() })
+        .child(ContextRegion { state: state.clone(), collapsed: context_collapsed })
 }
 
 fn connection_banner(conn: ConnState) -> Option<impl IntoElement> {
@@ -107,7 +126,7 @@ mod tests {
             rect()
                 .direction(Direction::Horizontal)
                 .expanded()
-                .child(Sidebar { state: state.clone() })
+                .child(Sidebar { state: state.clone(), collapsed: *state.sidebar_collapsed.read() })
                 .child(
                     rect()
                         .width(Size::flex(1.0))
@@ -260,19 +279,23 @@ mod tests {
             st.bootstrap();
             st.open_conversation(ConversationId::from("c1"));
         });
+        let sc = *state.size_class.read();
+        let force_rail = sc.is_compact_or_narrower();
+        let sidebar_collapsed = *state.sidebar_collapsed.read() || force_rail;
+        let context_collapsed = *state.context_collapsed.read() || force_rail;
         rect()
             .direction(Direction::Horizontal)
             .content(Content::Flex)
             .expanded()
             .background((5u8, 7u8, 11u8))
-            .child(Sidebar { state: state.clone() })
+            .child(Sidebar { state: state.clone(), collapsed: sidebar_collapsed })
             .child(
                 rect()
                     .width(Size::flex(1.0))
                     .height(Size::fill())
                     .child(MainRegion { state: state.clone() }),
             )
-            .child(ContextRegion { state: state.clone(), collapsed: *state.context_collapsed.read() })
+            .child(ContextRegion { state: state.clone(), collapsed: context_collapsed })
             .into()
     }
 
@@ -370,7 +393,7 @@ mod tests {
             .direction(Direction::Horizontal)
             .expanded()
             .background((5u8, 7u8, 11u8))
-            .child(Sidebar { state: state.clone() })
+            .child(Sidebar { state: state.clone(), collapsed: *state.sidebar_collapsed.read() })
             .child(
                 rect()
                     .width(Size::flex(1.0))
