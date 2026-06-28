@@ -276,16 +276,32 @@ mod tests {
     ///
     /// This test:
     /// 1. Mounts `OxideContextMenuViewer` + a right-click target.
-    /// 2. Calls `open_context_menu` directly (fabricating a `PressEventData` event)
-    ///    from a `use_hook`/`use_side_effect` on the first frame to open the menu.
-    /// 3. Polls past the 125 ms entrance tween (~150 ms).
-    /// 4. Asserts the `MenuButton` label is present in the rendered tree — proving the
-    ///    menu content mounted and the tween played to opacity > 0.
-    ///    (Under the bug the mount gate `menu_open || anim_opacity > 0.0` also
-    ///    prevented mounting since `anim_opacity` stayed 0.0.)
+    /// 2. Opens the menu via a one-shot `use_side_effect` on the first frame.
+    /// 3. Polls past the 125 ms entrance tween (~260 ms total).
+    /// 4. Asserts the **rendered opacity** of the menu rect is > 0.5 — not merely
+    ///    that the label is present.  Under the bug, `anim_opacity` stays 0.0
+    ///    and the menu is mount-gated out (`menu_open || anim_opacity > 0.0` with
+    ///    `anim_opacity = 0`) so neither the label nor a visible rect ever appear.
+    ///    Even if the mount gate was satisfied by `menu_open` alone (a stale bool
+    ///    read outside the factory), the label would be present but opacity 0 —
+    ///    this assertion catches that weaker form of the bug too.
+    ///
+    /// Disambiguation: three `Layer::Overlay` rects appear when the menu is open:
+    ///   (1) the invisible probe (`.opacity(0.0)`, always 0),
+    ///   (2) OUR menu container rect (`.opacity(final_opacity)`, near 1 when open), and
+    ///   (3) Freya's internal `MenuContainer` overlay (`.opacity(1.0)` once measured).
+    /// A naive "max opacity across all overlay rects" would pass even under the bug
+    /// (because Freya's MenuContainer contributes 1.0 regardless).
+    /// Instead we collect every `Layer::Overlay` rect node + its opacity, then pick
+    /// the one whose subtree contains the "CTX-ITEM" label.  That is uniquely OUR
+    /// rect: the probe has no child labels, and Freya's MenuContainer is a
+    /// descendant of ours (inner node, not the topmost overlay).
+    ///
+    /// API used: `t.find_many` → `Rect::try_downcast(el)` + `r.relative_layer` +
+    ///           `r.effect.as_ref().and_then(|e| e.opacity)`;
+    ///           `TestingNode::children()` for the subtree walk.
     #[test]
     fn context_menu_becomes_visible_after_open() {
-        use freya_testing::TestingRunner;
 
         fn app() -> Element {
             // Open the menu on the very first frame via a one-shot side effect.
@@ -295,7 +311,7 @@ mod tests {
                 if !opened() {
                     opened.set(true);
                     // Build a minimal Menu with a labelled MenuButton so we can
-                    // assert its presence in the rendered tree.
+                    // also assert its presence as a sanity check.
                     let menu = Menu::new().child(
                         MenuButton::new().child("CTX-ITEM"),
                     );
@@ -321,16 +337,68 @@ mod tests {
         // Let the first frame (and the side-effect open) settle.
         t.poll(std::time::Duration::from_millis(5), std::time::Duration::from_millis(40));
         t.sync_and_update();
-        // Poll past the 125 ms entrance tween.
-        t.poll(std::time::Duration::from_millis(10), std::time::Duration::from_millis(160));
+        // Poll well past the 125 ms entrance tween so the animation reaches ~1.0.
+        t.poll(std::time::Duration::from_millis(10), std::time::Duration::from_millis(260));
         t.sync_and_update();
 
+        // Sanity: the CTX-ITEM label must be mounted.
         let item = t.find(|_, el| {
             Label::try_downcast(el).filter(|l| l.text.as_ref().contains("CTX-ITEM"))
         });
         assert!(
             item.is_some(),
-            "context menu item should be visible after open + entrance tween (was always invisible before the fix)"
+            "CTX-ITEM label must be mounted after open"
+        );
+
+        // Find the *rendered opacity* of the OxideContextMenuViewer's menu rect —
+        // not the probe rect (opacity=0 always) and not Freya's internal
+        // `MenuContainer` overlay (opacity=1 once measured).
+        //
+        // Disambiguation: collect every `Layer::Overlay` rect node + its rendered
+        // opacity, then pick the one whose subtree contains the "CTX-ITEM" label.
+        // That is uniquely our menu container rect: the probe has no label child,
+        // and Freya's MenuContainer is nested INSIDE our rect (it's an inner node,
+        // not the topmost overlay).
+        //
+        // Helper: depth-first check whether a TestingNode's subtree contains a
+        // Label whose text contains `needle`.
+        fn subtree_has_label(node: &freya_testing::TestingNode, needle: &str) -> bool {
+            if let Some(l) = Label::try_downcast(node.element().as_ref()) {
+                if l.text.as_ref().contains(needle) {
+                    return true;
+                }
+            }
+            node.children().iter().any(|c| subtree_has_label(c, needle))
+        }
+
+        // Gather all Layer::Overlay rects along with their node handles.
+        let overlay_rects = t.find_many(|node, el| {
+            Rect::try_downcast(el)
+                .filter(|r| matches!(r.relative_layer, Layer::Overlay))
+                .and_then(|r| r.effect.as_ref().and_then(|e| e.opacity))
+                .map(|op| (node, op))
+        });
+
+        // Identify the menu container rect — the overlay rect whose subtree holds
+        // the "CTX-ITEM" label (i.e. OUR rect, not the probe and not the inner
+        // Freya MenuContainer rect that is a descendant of ours).
+        let menu_rect_opacity = overlay_rects
+            .into_iter()
+            .find(|(node, _)| subtree_has_label(node, "CTX-ITEM"))
+            .map(|(_, op)| op);
+
+        assert!(
+            menu_rect_opacity.is_some(),
+            "could not find the Layer::Overlay rect whose subtree contains CTX-ITEM; \
+             the menu may not have mounted"
+        );
+
+        let opacity = menu_rect_opacity.unwrap();
+        assert!(
+            opacity > 0.5,
+            "menu rect opacity should be > 0.5 after the entrance tween completes \
+             (got {opacity:.3}); a value near 0 means the animation factory never \
+             re-ran — the plain-bool capture bug is active"
         );
     }
 }
