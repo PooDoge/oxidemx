@@ -584,6 +584,103 @@ mod tests {
         assert!(mid_close.is_some(), "content must remain mounted during the exit animation");
     }
 
+    /// After an anchor click opens the Popover, the overlay rect's *rendered* opacity
+    /// must be significantly > 0.  This test catches the measurement-deadlock bug where
+    /// `on_sized` was only called when `final_opacity > 0.0`, so the overlay was
+    /// permanently invisible: opacity=0, unmeasured, unpositioned — but still mounted
+    /// and clickable.
+    ///
+    /// The assertion reads `RectElement.effect.opacity` — the opacity actually applied
+    /// to the overlay rect — NOT just node presence.  That value is `0.0` under the
+    /// bug and `≈1.0` after the fix (post-tween).
+    ///
+    /// `TestingNode::is_visible()` only checks clip-region intersection and does NOT
+    /// check opacity; it would PASS under the bug.  `Rect::try_downcast` + the
+    /// `RectElement.effect.opacity` field is the only freya_testing API that directly
+    /// exposes the opacity value set on the overlay rect.
+    #[test]
+    fn popover_content_is_visible_after_open() {
+        use freya_testing::TestingRunner;
+
+        fn app() -> Element {
+            let mut open = use_state(|| false);
+            let trigger = rect()
+                .width(Size::px(80.))
+                .height(Size::px(32.))
+                .on_press(move |_: Event<PressEventData>| open.toggle())
+                .child(label().text("anchor").font_size(12.))
+                .into_element();
+
+            Popover::new(trigger)
+                .open(open())
+                .content(label().text("MENU").into_element())
+                .into_element()
+        }
+
+        let (mut t, _) = TestingRunner::new(app, (400., 320.).into(), |_| {}, 1.);
+        t.poll(
+            std::time::Duration::from_millis(5),
+            std::time::Duration::from_millis(40),
+        );
+        t.sync_and_update();
+
+        // Click the anchor to open.
+        let center = t
+            .find(|node, el| {
+                Label::try_downcast(el)
+                    .filter(|l| l.text.as_ref().contains("anchor"))
+                    .map(|_| {
+                        let c = node.layout().visible_area().center();
+                        (c.x as f64, c.y as f64)
+                    })
+            })
+            .expect("anchor should render before open");
+        t.click_cursor(center);
+
+        // Poll well past the 125ms entrance tween so the animation reaches ~1.0.
+        t.poll(
+            std::time::Duration::from_millis(10),
+            std::time::Duration::from_millis(260),
+        );
+        t.sync_and_update();
+
+        // Sanity: MENU label must be mounted.
+        let menu = t.find(|_, el| {
+            Label::try_downcast(el).filter(|l| l.text.as_ref().contains("MENU"))
+        });
+        assert!(menu.is_some(), "MENU label should be mounted after open");
+
+        // Read the overlay rect's *rendered* opacity.
+        //
+        // Under the bug (`on_sized` gated behind `final_opacity > 0.0`):
+        //   overlay is never measured → never positioned → final_opacity stays 0.0 forever.
+        //
+        // Under the fix (`!positioned || final_opacity > 0.0` gate):
+        //   on_sized fires on first layout → positioned → opacity ramps to ~1.0.
+        //
+        // We locate the overlay by its `Layer::Overlay` on the `RectElement` and
+        // read `RectElement.effect.opacity` — the opacity value set by
+        // `.opacity(final_opacity)` in `PopoverOverlay::render`.
+        let overlay_opacity: Option<f32> = t.find(|_, el| {
+            Rect::try_downcast(el)
+                .filter(|r| matches!(r.relative_layer, Layer::Overlay))
+                .and_then(|r| r.effect.as_ref().and_then(|e| e.opacity))
+        });
+
+        assert!(
+            overlay_opacity.is_some(),
+            "could not find the Layer::Overlay rect with an opacity value; \
+             check that PopoverOverlay renders a Layer::Overlay rect with .opacity()"
+        );
+        let opacity = overlay_opacity.unwrap();
+        assert!(
+            opacity > 0.5,
+            "overlay opacity should be > 0.5 after the entrance tween completes \
+             (got {opacity:.3}); a value near 0 means the measurement-deadlock is active — \
+             on_sized was never called so the overlay was never positioned"
+        );
+    }
+
     /// Snapshot of a mid-open Popover (scale < 1, opacity < 1 from the entrance tween).
     /// Run manually: cargo test -p oxide-ui popover_mid_open_snapshot -- --ignored
     #[test]
