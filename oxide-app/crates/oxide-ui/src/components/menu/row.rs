@@ -8,6 +8,7 @@ use freya::prelude::*;
 use crate::tokens::{Theme, Tone};
 use crate::components::composer::icons::icon;
 use super::theme::menu_theme;
+use super::surface::MenuDismiss;
 
 // ── MenuSection ───────────────────────────────────────────────────────────────
 
@@ -88,6 +89,7 @@ pub struct MenuRow {
     trailing: Option<Element>,
     selected: bool,
     on_press: Option<EventHandler<()>>,
+    auto_dismiss: bool,
 }
 
 impl MenuRow {
@@ -100,6 +102,7 @@ impl MenuRow {
             trailing: None,
             selected: false,
             on_press: None,
+            auto_dismiss: true,
         }
     }
 
@@ -132,12 +135,23 @@ impl MenuRow {
         self.on_press = Some(h.into());
         self
     }
+
+    /// Whether activating this row also dismisses the menu. Default true (a
+    /// regular item). Set false for toggle / submenu / nav rows that should keep
+    /// the menu open. Only has effect under a `MenuSurface::light_dismiss(true)`
+    /// (otherwise there is no `MenuDismiss` context and Freya's any-click-close applies).
+    pub fn auto_dismiss(mut self, v: bool) -> Self {
+        self.auto_dismiss = v;
+        self
+    }
 }
 
 impl Component for MenuRow {
     fn render(&self) -> impl IntoElement {
         let th = self.theme;
         let (_, item_theme) = menu_theme(th);
+        let dismiss = use_try_consume::<MenuDismiss>();
+        let auto_dismiss = self.auto_dismiss;
         let on_press = self.on_press.clone();
 
         // Title column: title + optional sub stacked vertically, takes flex space.
@@ -189,6 +203,13 @@ impl Component for MenuRow {
                 if let Some(h) = &on_press {
                     h.call(());
                 }
+                if auto_dismiss {
+                    if let Some(d) = &dismiss {
+                        if let Some(h) = &d.0 {
+                            h.call(());
+                        }
+                    }
+                }
             })
             .child(inner)
     }
@@ -201,6 +222,7 @@ mod tests {
     use super::*;
     use crate::components::menu::MenuSurface;
     use freya_testing::prelude::*;
+    use freya_testing::TestingRunner;
 
     /// `menu_theme` returns without panic and a `MenuSurface`+`MenuRow` mount
     /// together (verifying the Menu context chain required by `MenuButton`).
@@ -247,5 +269,66 @@ mod tests {
             Label::try_downcast(el).filter(|l| l.text.as_ref().contains("✓"))
         });
         assert!(check.is_some(), "MenuRow should render the trailing '✓' element");
+    }
+
+    // Mount a light-dismiss surface whose on_close bumps a counter shown in a label.
+    // Clicking an auto_dismiss(false) row must NOT bump it; an auto_dismiss(true) row must.
+    fn dismiss_body(auto_dismiss: bool) -> Element {
+        let mut closes = use_state(|| 0_u32);
+        MenuSurface::new(Theme::default())
+            .light_dismiss(true)
+            .on_close(move |_| *closes.write() += 1)
+            .child(
+                rect()
+                    .direction(Direction::Vertical)
+                    .child(label().text(format!("closes={}", closes.read())).font_size(12.))
+                    .child(
+                        MenuRow::new(Theme::default())
+                            .title("Row")
+                            .auto_dismiss(auto_dismiss)
+                            .on_press(move |_| {})
+                            .into_element(),
+                    )
+                    .into_element(),
+            )
+            .into_element()
+    }
+
+    fn dismiss_count_after_row_click(auto_dismiss: bool) -> String {
+        fn app_keep() -> Element { dismiss_body(false) }
+        fn app_close() -> Element { dismiss_body(true) }
+        let app: fn() -> Element = if auto_dismiss { app_close } else { app_keep };
+        let (mut t, _) = TestingRunner::new(app, (320., 240.).into(), |_| {}, 1.);
+        t.poll(std::time::Duration::from_millis(5), std::time::Duration::from_millis(60));
+        t.sync_and_update();
+        let center = t
+            .find(|node, el| {
+                Label::try_downcast(el)
+                    .filter(|l| l.text.as_ref().contains("Row"))
+                    .map(|_| {
+                        let c = node.layout().visible_area().center();
+                        (c.x as f64, c.y as f64)
+                    })
+            })
+            .expect("Row label present");
+        t.click_cursor(center);
+        t.poll(std::time::Duration::from_millis(5), std::time::Duration::from_millis(60));
+        t.sync_and_update();
+        let txt = t
+            .find(|_, el| {
+                Label::try_downcast(el).filter(|l| l.text.as_ref().contains("closes="))
+            })
+            .expect("counter label present");
+        txt.text.as_ref().to_string()
+    }
+
+    #[test]
+    fn auto_dismiss_false_row_does_not_close_menu() {
+        assert_eq!(dismiss_count_after_row_click(false), "closes=0");
+    }
+
+    #[test]
+    fn auto_dismiss_true_row_closes_menu() {
+        assert_eq!(dismiss_count_after_row_click(true), "closes=1");
     }
 }
