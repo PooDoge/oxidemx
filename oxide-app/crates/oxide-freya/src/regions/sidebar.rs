@@ -8,7 +8,7 @@ use oxide_ui::{
     Theme,
     components::{
         AttachedPosition, ListItem, MenuRow, MenuSurface, OxideTooltip, Placement, Popover,
-        RailButton, SidebarHeader, TooltipGroup,
+        RailButton, SidebarHeader, TextInput, TooltipGroup, menu_theme, open_context_menu,
     },
 };
 
@@ -33,6 +33,11 @@ impl Component for Sidebar {
 
         // Project dropdown open state — unconditional hook (collapsed rail uses it).
         let proj_open = use_state(|| false);
+
+        // Rename state: id of the conversation currently being edited (if any)
+        // and the current draft title. Both are unconditional hooks.
+        let mut editing  = use_state::<Option<String>>(|| None);
+        let mut edit_val = use_state(String::new);
 
         let convs = state.conversations.read().clone();
         let active = state.active.read().clone();
@@ -74,8 +79,8 @@ impl Component for Sidebar {
             .spacing(3.)
             .width(Size::fill());
         for c in convs {
-            let st = state.clone();
-            let id = c.id.clone();
+            let st  = state.clone();
+            let id  = c.id.clone();
             let sel = active.as_ref() == Some(&c.id);
             let m = meta.get(c.id.0.as_str());
             let title = crate::conversation_meta::effective_title(
@@ -85,15 +90,58 @@ impl Component for Sidebar {
             let icon = crate::conversation_meta::effective_icon(
                 m.and_then(|x| x.icon.as_deref()),
             );
-            list = list.child(
-                ListItem::new(title)
-                    .icon(Some(crate::conversation_meta::icon_svg(icon)))
-                    .selected(sel)
-                    .state("idle".into())
-                    .worktree(c.worktree.as_ref().map(|w| w.branch.clone()))
-                    .theme(th)
-                    .on_press(move |_| st.open_conversation(id.clone())),
-            );
+
+            let row: Element = if editing.read().as_deref() == Some(c.id.0.as_str()) {
+                // ── Inline rename editor ──────────────────────────────────────
+                let id_commit = c.id.0.clone();
+                let st_commit = state.clone();
+                rect()
+                    .width(Size::fill())
+                    .padding(Gaps::new(2., 4., 2., 4.))
+                    .child(
+                        TextInput::new(edit_val.into_writable(), th)
+                            .on_submit(move |text: String| {
+                                st_commit.rename_conversation(&id_commit, text);
+                                editing.set(None);
+                            }),
+                    )
+                    .into_element()
+            } else {
+                // ── Normal row with right-click to open rename menu ───────────
+                let id_menu    = c.id.0.clone();
+                let title_seed = title.to_owned();
+                rect()
+                    .width(Size::fill())
+                    .on_secondary_down(move |e: Event<PressEventData>| {
+                        let (container_theme, item_theme) = menu_theme(th);
+                        let id_press    = id_menu.clone();
+                        let seed        = title_seed.clone();
+                        let menu = Menu::new()
+                            .theme(container_theme)
+                            .child(
+                                MenuButton::new()
+                                    .theme(item_theme)
+                                    .on_press(move |_: Event<PressEventData>| {
+                                        edit_val.set(seed.clone());
+                                        editing.set(Some(id_press.clone()));
+                                    })
+                                    .child("Rename"),
+                            );
+                        open_context_menu(&e, menu);
+                    })
+                    .child(
+                        ListItem::new(title)
+                            .icon(Some(crate::conversation_meta::icon_svg(icon)))
+                            .selected(sel)
+                            .state("idle".into())
+                            .worktree(c.worktree.as_ref().map(|w| w.branch.clone()))
+                            .theme(th)
+                            .on_press(move |_| st.open_conversation(id.clone())),
+                    )
+                    .into_element()
+            };
+
+            list = list.child(row);
         }
 
         col = col.child(
