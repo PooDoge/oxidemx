@@ -72,7 +72,9 @@ impl Component for MenuSurface {
             rect().into_element()
         });
 
-        let mut menu = Menu::new().theme(container_theme).child(body);
+        // Our `Popover` overlay is the sole positioner; tell the inner Freya `Menu`
+        // to skip its own overflow-aware self-offset so it can't escape our box.
+        let mut menu = Menu::new().theme(container_theme).host_positioned(true).child(body);
         if let Some(h) = self.on_close.clone() {
             menu = menu.on_close(h);
         }
