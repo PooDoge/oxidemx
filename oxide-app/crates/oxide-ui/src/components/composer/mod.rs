@@ -240,7 +240,6 @@ impl Component for Composer {
             .send_on_enter(*send_on_enter.read())
             .on_select_model(move |id: &'static str| {
                 model_id.set(id.to_string());
-                provider_open.set(false);
             })
             .on_thinking(move |t: Thinking| thinking.set(t))
             .on_toggle_optimizer(move |v: bool| optimizer.set(v))

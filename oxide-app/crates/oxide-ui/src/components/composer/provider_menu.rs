@@ -17,7 +17,7 @@
 use freya::prelude::*;
 
 use crate::tokens::Theme;
-use crate::components::menu::{MenuRow, MenuSection, MenuSurface};
+use crate::components::menu::{MenuDismiss, MenuRow, MenuSection, MenuSurface};
 use super::config::{MODELS, ProviderId, Thinking};
 use super::icons::icon;
 
@@ -127,6 +127,7 @@ impl Component for ProviderMenu {
         let mut surface = MenuSurface::new(th)
             .min_w(260.)
             .max_w(320.)
+            .light_dismiss(true)
             .child(body);
         if let Some(h) = self.on_close.clone() {
             surface = surface.on_close(h);
@@ -139,6 +140,11 @@ impl Component for ProviderMenu {
 
 impl ProviderMenu {
     fn models_view(&self, th: Theme, mut view: State<View>) -> impl IntoElement {
+        // Call the hook once here, before any loop, to satisfy Freya's hook-ordering
+        // rule (hooks must run unconditionally and a constant number of times per render).
+        // The result is passed into each model_row call below.
+        let dismiss = use_try_consume::<MenuDismiss>();
+
         let mut rows: Vec<Element> = Vec::new();
 
         for provider in [ProviderId::Gemini, ProviderId::Claude, ProviderId::Local] {
@@ -148,7 +154,7 @@ impl ProviderMenu {
                     .into_element(),
             );
             for model in MODELS.iter().filter(|m| m.provider == provider) {
-                rows.push(self.model_row(model, th));
+                rows.push(self.model_row(model, th, dismiss.clone()));
             }
         }
 
@@ -207,6 +213,7 @@ impl ProviderMenu {
             .icon(Some("gear"))
             .title("Composer settings")
             .trailing(Some(icon("chevronDown", 14., th.faint())))
+            .auto_dismiss(false)
             .on_press(move |_| {
                 view.set(View::Settings);
             })
@@ -218,7 +225,7 @@ impl ProviderMenu {
             .children(rows)
     }
 
-    fn model_row(&self, model: &'static crate::components::composer::config::Model, th: Theme) -> Element {
+    fn model_row(&self, model: &'static crate::components::composer::config::Model, th: Theme, dismiss: Option<MenuDismiss>) -> Element {
         let is_active = model.id == self.selected_id.as_str();
         let on_select = self.on_select_model.clone();
         let model_id  = model.id;
@@ -280,6 +287,11 @@ impl ProviderMenu {
                 if let Some(h) = &on_select {
                     h.call(model_id);
                 }
+                if let Some(d) = &dismiss {
+                    if let Some(h) = &d.0 {
+                        h.call(());
+                    }
+                }
             })
             .child(inner)
             .into_element()
@@ -314,6 +326,7 @@ impl ProviderMenu {
         let back_row = MenuRow::new(th)
             .icon(Some("chevronDown"))
             .title("Composer settings")
+            .auto_dismiss(false)
             .on_press(move |_| {
                 view.set(View::Models);
             })
