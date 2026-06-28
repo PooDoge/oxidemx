@@ -836,6 +836,75 @@ mod tests {
         runner.render_to_file("/tmp/sidebar-titles-icons.png");
     }
 
+    // ── Snapshot: icon picker grid (Task 5) ──────────────────────────────────
+
+    fn snapshot_icon_picker_app() -> Element {
+        use oxide_ui::components::{MenuSurface, Placement, Popover};
+        use oxide_ui::tokens::Theme;
+        use freya::prelude::*;
+        use_init_theme(dark_theme);
+        let th = Theme::default();
+
+        let mut icon_rows = rect().direction(Direction::Vertical).padding(Gaps::new_all(4.));
+        for chunk in crate::conversation_meta::CURATED_ICONS.chunks(4) {
+            let mut icon_row = rect()
+                .direction(Direction::Horizontal)
+                .spacing(4.);
+            for &icon_name in chunk {
+                icon_row = icon_row.child(
+                    rect()
+                        .width(Size::px(30.))
+                        .height(Size::px(30.))
+                        .corner_radius(CornerRadius::new_all(8.))
+                        .center()
+                        .background(th.surface())
+                        .child(
+                            svg(crate::conversation_meta::icon_svg(icon_name))
+                                .width(Size::px(18.))
+                                .height(Size::px(18.))
+                                .color(th.text()),
+                        ),
+                );
+            }
+            icon_rows = icon_rows.child(icon_row);
+        }
+
+        let anchor: Element = rect()
+            .width(Size::px(200.))
+            .height(Size::px(36.))
+            .background(th.surface())
+            .center()
+            .child(label().text("row anchor").color(th.text()))
+            .into_element();
+
+        rect()
+            .direction(Direction::Vertical)
+            .expanded()
+            .background(th.bg_deep())
+            .center()
+            .child(
+                Popover::new(anchor)
+                    .open(true)
+                    .placement(Placement::Below)
+                    .content(MenuSurface::new(th).child(icon_rows)),
+            )
+            .into()
+    }
+
+    /// Renders the icon-picker grid (4 per row, 4 rows = 16 curated icons) standalone.
+    /// Does NOT need any AppState — purely visual verification of the grid layout.
+    ///
+    /// Run with: cargo test -p oxide-freya --bin oxide-freya snapshot_icon_picker -- --ignored
+    #[test]
+    #[ignore = "snapshot: writes PNG to /tmp for visual review"]
+    fn snapshot_icon_picker() {
+        let (mut runner, _) =
+            TestingRunner::new(snapshot_icon_picker_app, (400., 400.).into(), |_| {}, 1.);
+        runner.poll_n(Duration::from_millis(5), 12);
+        runner.sync_and_update();
+        runner.render_to_file("/tmp/icon-picker.png");
+    }
+
     // ── Snapshot: toolbar attachment strip (T2) ───────────────────────────────
 
     fn snapshot_toolbar_chips_app() -> Element {

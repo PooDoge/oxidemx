@@ -39,6 +39,9 @@ impl Component for Sidebar {
         let mut editing  = use_state::<Option<String>>(|| None);
         let mut edit_val = use_state(String::new);
 
+        // Icon picker: id of the conversation whose picker popover is open.
+        let mut icon_pick = use_state::<Option<String>>(|| None);
+
         let convs = state.conversations.read().clone();
         let active = state.active.read().clone();
         let meta = state.conversation_meta.read().clone();
@@ -107,15 +110,18 @@ impl Component for Sidebar {
                     )
                     .into_element()
             } else {
-                // ── Normal row with right-click to open rename menu ───────────
+                // ── Normal row with right-click to open rename/icon menu ──────
                 let id_menu    = c.id.0.clone();
+                let id_pick    = c.id.0.clone();
                 let title_seed = title.to_owned();
-                rect()
+                let row_inner = rect()
                     .width(Size::fill())
                     .on_secondary_down(move |e: Event<PressEventData>| {
                         let (container_theme, item_theme) = menu_theme(th);
+                        let item_theme2 = item_theme.clone();
                         let id_press    = id_menu.clone();
                         let seed        = title_seed.clone();
+                        let id_icon     = id_press.clone();
                         let menu = Menu::new()
                             .theme(container_theme)
                             .child(
@@ -126,6 +132,14 @@ impl Component for Sidebar {
                                         editing.set(Some(id_press.clone()));
                                     })
                                     .child("Rename"),
+                            )
+                            .child(
+                                MenuButton::new()
+                                    .theme(item_theme2)
+                                    .on_press(move |_: Event<PressEventData>| {
+                                        icon_pick.set(Some(id_icon.clone()));
+                                    })
+                                    .child("Set icon\u{2026}"),
                             );
                         open_context_menu(&e, menu);
                     })
@@ -138,7 +152,54 @@ impl Component for Sidebar {
                             .theme(th)
                             .on_press(move |_| st.open_conversation(id.clone())),
                     )
-                    .into_element()
+                    .into_element();
+
+                // ── Icon picker popover ───────────────────────────────────────
+                if icon_pick.read().as_deref() == Some(c.id.0.as_str()) {
+                    let mut icon_rows = rect().direction(Direction::Vertical).padding(Gaps::new_all(4.));
+                    for chunk in crate::conversation_meta::CURATED_ICONS.chunks(4) {
+                        let mut icon_row = rect()
+                            .direction(Direction::Horizontal)
+                            .spacing(4.);
+                        for &icon_name in chunk {
+                            let st_ic = state.clone();
+                            let id_ic = id_pick.clone();
+                            let name  = icon_name.to_string();
+                            icon_row = icon_row.child(
+                                rect()
+                                    .width(Size::px(30.))
+                                    .height(Size::px(30.))
+                                    .corner_radius(CornerRadius::new_all(8.))
+                                    .center()
+                                    .background(th.surface())
+                                    .on_press(move |_: Event<PressEventData>| {
+                                        st_ic.set_conversation_icon(&id_ic, name.clone());
+                                        icon_pick.set(None);
+                                    })
+                                    .child(
+                                        svg(crate::conversation_meta::icon_svg(icon_name))
+                                            .width(Size::px(18.))
+                                            .height(Size::px(18.))
+                                            .color(th.text()),
+                                    ),
+                            );
+                        }
+                        icon_rows = icon_rows.child(icon_row);
+                    }
+                    let surface = MenuSurface::new(th)
+                        .on_close({
+                            let mut p = icon_pick;
+                            move |()| p.set(None)
+                        })
+                        .child(icon_rows);
+                    Popover::new(row_inner)
+                        .open(true)
+                        .placement(Placement::Below)
+                        .content(surface)
+                        .into_element()
+                } else {
+                    row_inner
+                }
             };
 
             list = list.child(row);
