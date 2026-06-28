@@ -135,6 +135,7 @@ impl Component for PopoverOverlay {
         // overlay's measured size) — avoids a flash at the un-positioned origin.
         // Also hidden while the exit tween is playing and opacity reaches 0.
         let final_opacity = if self.positioned { self.opacity } else { 0.0_f32 };
+        let positioned    = self.positioned;
 
         let mut parent_size = self.parent_size;
         let content         = self.content.clone();
@@ -146,8 +147,13 @@ impl Component for PopoverOverlay {
             .offset_y(self.slide)
             .opacity(final_opacity)
             .on_sized(move |e: Event<SizedEventData>| {
-                // Only record size while opening/visible so a fading overlay doesn't re-measure.
-                if final_opacity > 0.0 { parent_size.set_if_modified(Some(e.area.size)); }
+                // Record size on the FIRST open (before `positioned`), else the
+                // chicken-and-egg deadlocks the menu invisible: `final_opacity` needs
+                // `positioned`, and `positioned` needs THIS measurement. Once positioned,
+                // keep measuring while visible; skip only when positioned AND fully faded.
+                if !positioned || final_opacity > 0.0 {
+                    parent_size.set_if_modified(Some(e.area.size));
+                }
             })
             .child(content)
     }
