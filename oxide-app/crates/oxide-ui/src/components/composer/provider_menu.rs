@@ -104,8 +104,9 @@ impl ProviderMenu {
         self
     }
 
-    /// Dismissal handler, threaded into the `MenuSurface` (Freya `Menu`'s
-    /// `on_close`): fires on outside-press + Escape.
+    /// Dismissal handler, passed to the `MenuSurface` (which runs in light-dismiss
+    /// mode): fires on outside-press + Escape, and is the `MenuDismiss` target that
+    /// the model rows call to close after a pick.
     pub fn on_close(mut self, h: impl Into<EventHandler<()>>) -> Self {
         self.on_close = Some(h.into());
         self

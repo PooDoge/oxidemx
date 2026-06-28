@@ -20,10 +20,10 @@ pub struct MenuDismiss(pub Option<EventHandler<()>>);
 /// A floating surface that wraps a `Menu` with a deep drop-shadow and correct
 /// width hugging.
 ///
-/// Dismissal rides on the inner Freya [`Menu`]: when `on_close` is set, it is
-/// threaded into `Menu::on_close`, so the menu dismisses on an outside
-/// `on_global_pointer_press` + Escape — the proven Freya model. Because the
-/// dismiss handler lives on the `Menu` node (which is only mounted while the
+/// When `light_dismiss` is false (the default), dismissal rides on the inner Freya
+/// [`Menu`]: when `on_close` is set, it is threaded into `Menu::on_close`, so the menu
+/// dismisses on an outside `on_global_pointer_press` + Escape — the proven Freya model.
+/// Because the dismiss handler lives on the `Menu` node (which is only mounted while the
 /// popover is open), the opening click can never reach it and self-close.
 ///
 /// When `light_dismiss(true)` is set, the surface instead owns the dismissal:

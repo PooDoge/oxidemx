@@ -244,7 +244,8 @@ impl Component for Composer {
             .on_thinking(move |t: Thinking| thinking.set(t))
             .on_toggle_optimizer(move |v: bool| optimizer.set(v))
             .on_toggle_send_on_enter(move |v: bool| send_on_enter.set(v))
-            // Outside-press / Escape dismissal, via Freya `Menu`'s `on_close`.
+            // MenuDismiss target + outside-press / Escape sink. The surface runs in
+            // light-dismiss mode, so it (not Freya `Menu`) owns dismissal.
             .on_close(move |_| provider_open.set(false))
             .into_element();
 
