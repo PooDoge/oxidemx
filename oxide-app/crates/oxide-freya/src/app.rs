@@ -34,9 +34,33 @@ pub fn shell() -> impl IntoElement {
     let mut size_class = state.size_class;
 
     let sc = *state.size_class.read();
-    let force_rail = sc.is_compact_or_narrower();
-    let sidebar_collapsed = *state.sidebar_collapsed.read() || force_rail;
-    let context_collapsed = *state.context_collapsed.read() || force_rail;
+    let _narrow = sc.is_compact_or_narrower();
+    let sidebar_collapsed = *state.sidebar_collapsed.read();
+    let context_collapsed = *state.context_collapsed.read();
+
+    // Edge-triggered responsive default: a breakpoint crossing collapses (shrink) or
+    // restores the wide default (grow). Between crossings the user's toggle is authoritative,
+    // so manual expand BELOW the breakpoint now sticks. `prev_sc` starts Wide so a narrow
+    // first render counts as a down-crossing (collapses on launch when small).
+    let mut prev_sc = use_state(|| crate::state::SizeClass::Wide);
+    {
+        let mut sidebar_c = state.sidebar_collapsed;
+        let mut context_c = state.context_collapsed;
+        let size_class_sig = state.size_class;
+        use_side_effect(move || {
+            let now = *size_class_sig.read();
+            let was = *prev_sc.peek(); // peek: react to size_class, not to prev_sc
+            let was_wide = matches!(was, crate::state::SizeClass::Wide);
+            let now_wide = matches!(now, crate::state::SizeClass::Wide);
+            if let Some(v) = crate::state::crossing_collapse(was_wide, now_wide, false) {
+                sidebar_c.set(v); // left panel: wide default = expanded (false)
+            }
+            if let Some(v) = crate::state::crossing_collapse(was_wide, now_wide, true) {
+                context_c.set(v); // right panel: wide default = collapsed (true)
+            }
+            prev_sc.set(now);
+        });
+    }
 
     rect()
         .direction(Direction::Vertical)
