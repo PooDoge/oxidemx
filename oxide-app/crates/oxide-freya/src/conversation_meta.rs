@@ -56,6 +56,12 @@ impl ConversationMetaStore {
         self.persist();
     }
 
+    /// Drop a conversation's metadata entry and persist (used when the conversation is deleted).
+    pub fn remove(&mut self, id: &str) {
+        self.map.remove(id);
+        self.persist();
+    }
+
     fn meta_path(project_dir: &str, project_id: &str) -> PathBuf {
         if !project_dir.trim().is_empty() {
             return PathBuf::from(project_dir)
@@ -102,6 +108,12 @@ impl ConversationMetaStore {
             Err(e) => eprintln!("conversation_meta: serialize failed: {e}"),
         }
     }
+}
+
+/// A conversation is "unsent" until its first message is sent: its agentd title is
+/// only set then, and no user-set meta title exists. Mirrors `effective_title`'s inputs.
+pub fn is_unsent(agentd_title: &str, meta_title: Option<&str>) -> bool {
+    agentd_title.is_empty() && meta_title.is_none()
 }
 
 /// Derive a display title from the first user message: trim, truncate to 60 chars.
@@ -190,6 +202,14 @@ mod tests {
     }
 
     #[test]
+    fn is_unsent_truth_table() {
+        assert!(super::is_unsent("", None), "empty title + no meta = unsent");
+        assert!(!super::is_unsent("Fix the bug", None), "agentd title = sent");
+        assert!(!super::is_unsent("", Some("My chat")), "meta title = sent");
+        assert!(!super::is_unsent("Fix", Some("My chat")), "both = sent");
+    }
+
+    #[test]
     fn store_roundtrip_in_tempdir() {
         let dir = std::env::temp_dir().join(format!("oxide-meta-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
@@ -202,6 +222,20 @@ mod tests {
         let m = reloaded.get("c1").unwrap();
         assert_eq!(m.title.as_deref(), Some("My chat"));
         assert_eq!(m.icon.as_deref(), Some("terminal"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn store_remove_persists_deletion() {
+        let dir = std::env::temp_dir().join(format!("oxide-meta-remove-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let dirs = dir.to_string_lossy().to_string();
+        let mut s = super::ConversationMetaStore::load(&dirs, "proj");
+        s.set_title("c1", "My chat".into());
+        s.remove("c1");
+        let reloaded = super::ConversationMetaStore::load(&dirs, "proj");
+        assert!(reloaded.get("c1").is_none(), "remove must persist deletion");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

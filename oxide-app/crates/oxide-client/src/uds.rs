@@ -105,6 +105,13 @@ impl Transport for UdsTransport {
         Ok(MessageId(sent.message_id))
     }
 
+    async fn delete_conversation(&self, conversation_id: &str) -> Result<(), TransportError> {
+        let (status, _) = self.send(Method::DELETE,
+            &format!("/v1/conversations/{conversation_id}"), None).await?;
+        if !(200..300).contains(&status) { return Err(TransportError::Http(status)); }
+        Ok(())
+    }
+
     fn subscribe(&self, conversation_id: &str) -> BoxStream<'static, Result<AgentEvent, TransportError>> {
         let sock = self.sock.clone();
         let path = format!("/v1/conversations/{conversation_id}/events");

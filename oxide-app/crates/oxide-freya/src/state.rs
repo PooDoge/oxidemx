@@ -309,6 +309,10 @@ impl AppState {
     /// On success (after the transport responds) the conversation is inserted and
     /// opened; transport errors are logged and leave the UI unchanged.
     pub fn create_conversation(&self) {
+        if let Some(existing) = self.first_unsent_conversation() {
+            self.open_conversation(existing);
+            return;
+        }
         let Some(project_id) = self.current_project.peek().clone() else { return };
         let mut conversations = self.conversations;
         let this = self.clone();
@@ -371,11 +375,54 @@ impl AppState {
         self.with_meta_store(|s| s.set_icon(id, icon));
     }
 
+    /// First conversation in the list that has never had a message sent.
+    fn first_unsent_conversation(&self) -> Option<ConversationId> {
+        let meta = self.conversation_meta.peek();
+        self.conversations.peek().iter()
+            .find(|c| crate::conversation_meta::is_unsent(
+                &c.title,
+                meta.get(c.id.as_str()).and_then(|m| m.title.as_deref()),
+            ))
+            .map(|c| c.id.clone())
+    }
+
+    pub fn delete_conversation(&self, id: ConversationId) {
+        let mut conversations = self.conversations;
+        let mut active = self.active;
+        // Capture the user's intent at call time, not at transport-response time.
+        let was_active = active.peek().as_ref() == Some(&id);
+        let this = self.clone();
+        let t = self.transport.clone();
+        spawn(async move {
+            if let Err(e) = t.delete_conversation(id.as_str()).await {
+                eprintln!("delete_conversation failed: {e}");
+                return; // truthful: leave UI unchanged on error
+            }
+            let mut nearest: Option<ConversationId> = None;
+            conversations.with_mut(|mut cs| {
+                let idx = cs.iter().position(|c| c.id == id);
+                if let Some(i) = idx {
+                    cs.remove(i);
+                    // nearest = row now at i (the old next), else previous, else None
+                    nearest = cs.get(i).or_else(|| i.checked_sub(1).and_then(|p| cs.get(p)))
+                        .map(|c| c.id.clone());
+                }
+            });
+            this.with_meta_store(|s| s.remove(id.as_str()));
+            if was_active {
+                match nearest {
+                    Some(n) => this.open_conversation(n),
+                    None => active.set(None),
+                }
+            }
+        });
+    }
+
     fn with_meta_store(&self, f: impl FnOnce(&mut crate::conversation_meta::ConversationMetaStore)) {
-        // Whole-file read-modify-write (load → edit → persist → refresh signal). This is
-        // lost-update-safe ONLY because every caller runs synchronously on the UI thread,
-        // so two edits never interleave. If this ever moves into a `spawn`, switch to a
-        // single owned store or per-key locking to avoid clobbering concurrent edits.
+        // Whole-file read-modify-write (load → edit → persist → refresh signal). The body is
+        // fully synchronous (no awaits), so it runs atomically on Freya's single-threaded
+        // executor even when invoked from a `spawn` (as `delete_conversation` does): each call
+        // load-fresh-edit-persists, so concurrent edits can't interleave or clobber.
         let (dir, pid) = {
             let cur = self.current_project.peek().clone();
             let projects = self.projects.peek().clone();
@@ -641,5 +688,156 @@ mod tests {
         runner.poll_n(Duration::from_millis(5), 12);
         assert!(runner.find(|_, el| Label::try_downcast(el).filter(|l| l.text.as_ref().contains("n=0"))).is_some(),
             "a failed create must leave conversations empty");
+    }
+
+    #[test]
+    fn create_conversation_reuses_existing_unsent() {
+        use freya_testing::prelude::*;
+        use oxide_client::mock::MockTransport;
+        fn app() -> impl IntoElement {
+            let mock = MockTransport {
+                conversations: vec![
+                    Conversation { id: ConversationId::from("c1"), project_id: ProjectId::from("personal"),
+                        title: "".into(), working_dir: String::new(), model: String::new(),
+                        created_at: 0, updated_at: 0, worktree: None },
+                ],
+                ..MockTransport::new()
+            };
+            let state = AppState::new(Arc::new(mock));
+            let st = state.clone();
+            use_hook(move || {
+                st.current_project.clone().set(Some(ProjectId::from("personal")));
+                st.conversations.clone().set(vec![
+                    Conversation { id: ConversationId::from("c1"), project_id: ProjectId::from("personal"),
+                        title: "".into(), working_dir: String::new(), model: String::new(),
+                        created_at: 0, updated_at: 0, worktree: None },
+                ]);
+                st.create_conversation();
+            });
+            let n = state.conversations.read().len();
+            let active = state.active.read().clone().map(|i| i.as_str().to_string()).unwrap_or_default();
+            label().text(format!("n={n} active={active}"))
+        }
+        let mut runner = launch_test(app);
+        runner.poll_n(Duration::from_millis(5), 12);
+        assert!(
+            runner.find(|_, el| Label::try_downcast(el)
+                .filter(|l| l.text.as_ref().contains("n=1") && l.text.as_ref().contains("active=c1"))
+            ).is_some(),
+            "create_conversation must reuse the existing unsent conversation, not grow the list"
+        );
+    }
+
+    #[test]
+    fn create_conversation_creates_when_none_unsent() {
+        use freya_testing::prelude::*;
+        use oxide_client::mock::MockTransport;
+        fn app() -> impl IntoElement {
+            let state = AppState::new(Arc::new(MockTransport::new()));
+            let st = state.clone();
+            use_hook(move || {
+                st.current_project.clone().set(Some(ProjectId::from("personal")));
+                st.conversations.clone().set(vec![
+                    Conversation { id: ConversationId::from("c1"), project_id: ProjectId::from("personal"),
+                        title: "Fix bug".into(), working_dir: String::new(), model: String::new(),
+                        created_at: 0, updated_at: 0, worktree: None },
+                ]);
+                st.create_conversation();
+            });
+            let n = state.conversations.read().len();
+            label().text(format!("n={n}"))
+        }
+        let mut runner = launch_test(app);
+        runner.poll_n(Duration::from_millis(5), 12);
+        assert!(
+            runner.find(|_, el| Label::try_downcast(el)
+                .filter(|l| l.text.as_ref().contains("n=2"))
+            ).is_some(),
+            "no unsent conversation → must create a new one (n=2)"
+        );
+    }
+
+    #[test]
+    fn delete_active_selects_nearest() {
+        use freya_testing::prelude::*;
+        use oxide_client::mock::MockTransport;
+        fn app() -> impl IntoElement {
+            let state = AppState::new(Arc::new(MockTransport::new()));
+            let st = state.clone();
+            use_hook(move || {
+                st.conversations.clone().set(vec![
+                    Conversation { id: ConversationId::from("c1"), project_id: ProjectId::from("personal"),
+                        title: "A".into(), working_dir: String::new(), model: String::new(),
+                        created_at: 0, updated_at: 0, worktree: None },
+                    Conversation { id: ConversationId::from("c2"), project_id: ProjectId::from("personal"),
+                        title: "B".into(), working_dir: String::new(), model: String::new(),
+                        created_at: 0, updated_at: 0, worktree: None },
+                    Conversation { id: ConversationId::from("c3"), project_id: ProjectId::from("personal"),
+                        title: "C".into(), working_dir: String::new(), model: String::new(),
+                        created_at: 0, updated_at: 0, worktree: None },
+                ]);
+                st.active.clone().set(Some(ConversationId::from("c2")));
+                // Set up a project so with_meta_store works (uses a temp dir via HOME/config)
+                st.projects.clone().set(vec![Project {
+                    id: ProjectId::from("personal"),
+                    name: "Personal".into(),
+                    default_working_dir: String::new(),
+                    created_at: 0,
+                }]);
+                st.current_project.clone().set(Some(ProjectId::from("personal")));
+                st.delete_conversation(ConversationId::from("c2"));
+            });
+            let ids: String = state.conversations.read().iter()
+                .map(|c| c.id.as_str().to_string())
+                .collect::<Vec<_>>()
+                .join(",");
+            let active = state.active.read().clone().map(|i| i.as_str().to_string()).unwrap_or_default();
+            label().text(format!("ids={ids} active={active}"))
+        }
+        let mut runner = launch_test(app);
+        runner.poll_n(Duration::from_millis(5), 12);
+        assert!(
+            runner.find(|_, el| Label::try_downcast(el)
+                .filter(|l| l.text.as_ref().contains("ids=c1,c3") && l.text.as_ref().contains("active=c3"))
+            ).is_some(),
+            "delete active c2 from [c1,c2,c3] must leave [c1,c3] and select c3 (nearest = index 1 → c3)"
+        );
+    }
+
+    #[test]
+    fn delete_last_clears_active() {
+        use freya_testing::prelude::*;
+        use oxide_client::mock::MockTransport;
+        fn app() -> impl IntoElement {
+            let state = AppState::new(Arc::new(MockTransport::new()));
+            let st = state.clone();
+            use_hook(move || {
+                st.conversations.clone().set(vec![
+                    Conversation { id: ConversationId::from("c1"), project_id: ProjectId::from("personal"),
+                        title: "A".into(), working_dir: String::new(), model: String::new(),
+                        created_at: 0, updated_at: 0, worktree: None },
+                ]);
+                st.active.clone().set(Some(ConversationId::from("c1")));
+                st.projects.clone().set(vec![Project {
+                    id: ProjectId::from("personal"),
+                    name: "Personal".into(),
+                    default_working_dir: String::new(),
+                    created_at: 0,
+                }]);
+                st.current_project.clone().set(Some(ProjectId::from("personal")));
+                st.delete_conversation(ConversationId::from("c1"));
+            });
+            let n = state.conversations.read().len();
+            let has_active = state.active.read().is_some();
+            label().text(format!("n={n} active={has_active}"))
+        }
+        let mut runner = launch_test(app);
+        runner.poll_n(Duration::from_millis(5), 12);
+        assert!(
+            runner.find(|_, el| Label::try_downcast(el)
+                .filter(|l| l.text.as_ref().contains("n=0") && l.text.as_ref().contains("active=false"))
+            ).is_some(),
+            "delete last conversation must empty list and clear active"
+        );
     }
 }
