@@ -13,6 +13,7 @@
 //! [`open_context_menu`] from a right-click (`on_secondary_down`). Dismissal is
 //! the Freya `Menu`'s own `on_close` (outside-press + Escape) — the menu mounts
 //! AFTER the opening click, so that click can't self-close it.
+use freya::animation::*;
 use freya::prelude::*;
 
 /// Mirrors Freya's `ContextMenuCloseRequest`. The Freya `Menu`'s `on_close`
@@ -114,6 +115,17 @@ impl ComponentOwned for OxideContextMenuViewer {
             })
         });
 
+        // Persist the last menu so it stays mounted during the exit fade.
+        // `ctx.menu` already stores `Option<(CursorPoint, Menu)>`, so `Menu` is
+        // safe in `State`. Root-scoped so it lives as long as the viewer.
+        let mut last_menu: State<Option<(CursorPoint, Menu)>> =
+            use_hook(|| State::create_in_scope(None, ScopeId::ROOT));
+        use_side_effect(move || {
+            if let Some(m) = ctx.menu.read().clone() {
+                last_menu.set(Some(m));
+            }
+        });
+
         // Dismiss when the window loses focus.
         use_side_effect(move || {
             if !*Platform::get().is_app_focused.read() {
@@ -125,6 +137,40 @@ impl ComponentOwned for OxideContextMenuViewer {
         // for the menu's edge clamp. `Platform::root_size` is PHYSICAL, so it's off
         // by the display scale factor (which Freya doesn't expose to components).
         let mut win: State<Option<Size2D>> = use_state(|| None);
+
+        // Select-style persistent animation (OnCreation::Finish + OnChange::Rerun).
+        // `ctx.menu` IS a `State` signal, so `OnChange::Rerun` subscribes to it
+        // directly — no plain-bool mirror needed (unlike Popover's open prop).
+        let menu_open = ctx.menu.read().is_some();
+        let animation = use_animation(move |conf| {
+            conf.on_change(OnChange::Rerun);
+            conf.on_creation(OnCreation::Finish);
+            let scale = AnimNum::new(0.9_f32, 1.)
+                .time(125)
+                .ease(Ease::Out)
+                .function(Function::Quart);
+            let opacity = AnimNum::new(0.0_f32, 1.)
+                .time(125)
+                .ease(Ease::Out)
+                .function(Function::Quart);
+            let slide = AnimNum::new(-8.0_f32, 0.)
+                .time(125)
+                .ease(Ease::Out)
+                .function(Function::Quart);
+            if menu_open {
+                (scale, opacity, slide)
+            } else {
+                (scale.into_reversed(), opacity.into_reversed(), slide.into_reversed())
+            }
+        });
+        let (anim_scale, anim_opacity, anim_slide) = animation.read().value();
+
+        // Clear `measured` once fully closed so the next open re-measures at the
+        // new cursor position.
+        if !menu_open && anim_opacity == 0.0 && ctx.measured.peek().is_some() {
+            let mut m = ctx.measured;
+            m.set(None);
+        }
 
         rect()
             .on_global_pointer_move(move |e: Event<PointerEventData>| {
@@ -143,49 +189,63 @@ impl ComponentOwned for OxideContextMenuViewer {
                         win.set_if_modified(Some(e.area.size));
                     }),
             )
-            .maybe_child(ctx.menu.read().clone().map(|(at, menu)| {
-                let at = at.to_f32();
+            .maybe_child(
+                // Stay mounted while open OR while the exit tween is still playing
+                // (anim_opacity > 0.0). Unmounts only once fully faded out, so
+                // click-away dismissal continues to work during the exit fade.
+                (menu_open || anim_opacity > 0.0)
+                    .then(|| ctx.menu.read().clone().or_else(|| last_menu.read().clone()))
+                    .flatten()
+                    .map(|(at, menu)| {
+                        let at = at.to_f32();
 
-                // Place at the cursor, then nudge back into the window using the
-                // MEASURED area (origin + size in layout space) vs root_size — the
-                // same space, exactly how Freya's own `Menu` handles overflow. The
-                // `offset_*` are post-layout shifts (they don't move the measured
-                // area), so measuring once is enough; reset on each open.
-                let (offset_x, offset_y, opacity) = match ctx.measured.read().as_ref() {
-                    None => (0.0_f32, 0.0_f32, 0.0_f32),
-                    Some((area, root)) => (
-                        overflow_offset(area.origin.x, area.size.width, root.width),
-                        overflow_offset(area.origin.y, area.size.height, root.height),
-                        1.0_f32,
-                    ),
-                };
+                        // Place at the cursor, then nudge back into the window using
+                        // the MEASURED area (origin + size in layout space) vs root_size
+                        // — the same space, exactly how Freya's own `Menu` handles
+                        // overflow. The `offset_*` are post-layout shifts (they don't
+                        // move the measured area), so measuring once is enough; reset on
+                        // each open. `measure_gate` hides the menu until measured, then
+                        // multiplied with `anim_opacity` for a smooth open.
+                        let (offset_x, offset_y, measure_gate) = match ctx.measured.read().as_ref() {
+                            None => (0.0_f32, 0.0_f32, 0.0_f32),
+                            Some((area, root)) => (
+                                overflow_offset(area.origin.x, area.size.width, root.width),
+                                overflow_offset(area.origin.y, area.size.height, root.height),
+                                1.0_f32,
+                            ),
+                        };
+                        let final_opacity = measure_gate * anim_opacity;
 
-                let mut measured = ctx.measured;
-                rect()
-                    .layer(Layer::Overlay)
-                    .position(Position::new_global().left(at.x).top(at.y))
-                    .offset_x(offset_x)
-                    .offset_y(offset_y)
-                    .opacity(opacity)
-                    .on_sized(move |e: Event<SizedEventData>| {
-                        // Clamp against the LOGICAL window size (measured by the
-                        // probe below) — NOT Platform::root_size, which is PHYSICAL
-                        // (window.inner_size()) and so off by the display scale.
-                        if measured.peek().is_none() {
-                            if let Some(w) = *win.peek() {
-                                measured.set(Some((e.area, w)));
-                            }
-                        }
-                    })
-                    // First close (the opening right-click's release) is ignored via
-                    // the `close_request` debounce; the next press actually closes.
-                    .child(menu.on_close(move |_| match (ctx.close_request)() {
-                        CloseReq::None => ctx.close_request.set(CloseReq::Pending),
-                        CloseReq::Pending => {
-                            ctx.menu.set(None);
-                            ctx.close_request.set(CloseReq::None);
-                        }
-                    }))
-            }))
+                        let mut measured = ctx.measured;
+                        rect()
+                            .layer(Layer::Overlay)
+                            .position(Position::new_global().left(at.x).top(at.y))
+                            .offset_x(offset_x)
+                            .offset_y(offset_y + anim_slide)
+                            .scale(anim_scale)
+                            .opacity(final_opacity)
+                            .on_sized(move |e: Event<SizedEventData>| {
+                                // Clamp against the LOGICAL window size (measured by the
+                                // probe below) — NOT Platform::root_size, which is PHYSICAL
+                                // (window.inner_size()) and so off by the display scale.
+                                if measured.peek().is_none() {
+                                    if let Some(w) = *win.peek() {
+                                        measured.set(Some((e.area, w)));
+                                    }
+                                }
+                            })
+                            // First close (the opening right-click's release) is ignored
+                            // via the `close_request` debounce; the next press closes.
+                            // Node stays mounted during the exit fade, so click-away still
+                            // fires `on_close` and dismisses correctly.
+                            .child(menu.on_close(move |_| match (ctx.close_request)() {
+                                CloseReq::None => ctx.close_request.set(CloseReq::Pending),
+                                CloseReq::Pending => {
+                                    ctx.menu.set(None);
+                                    ctx.close_request.set(CloseReq::None);
+                                }
+                            }))
+                    }),
+            )
     }
 }
