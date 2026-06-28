@@ -2,6 +2,7 @@
 pub mod avatar;
 pub mod bubble;
 pub mod chip;
+pub mod confirm_dialog;
 pub mod composer;
 pub mod list_item;
 pub mod menu;
@@ -17,6 +18,7 @@ pub mod tooltip;
 
 pub use avatar::Avatar;
 pub use bubble::Bubble;
+pub use confirm_dialog::ConfirmDialog;
 pub use chip::WorktreeChip;
 pub use composer::{Composer, ComposerConfig, SubmitPayload};
 pub use list_item::ListItem;

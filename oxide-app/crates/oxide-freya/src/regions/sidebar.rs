@@ -7,8 +7,8 @@ use freya_icons::lucide;
 use oxide_ui::{
     Theme,
     components::{
-        AttachedPosition, ListItem, MenuRow, MenuSurface, OxideTooltip, Placement, Popover,
-        RailButton, SidebarHeader, TextInput, TooltipGroup, menu_theme, open_context_menu,
+        AttachedPosition, ConfirmDialog, ListItem, MenuRow, MenuSurface, OxideTooltip, Placement,
+        Popover, RailButton, SidebarHeader, TextInput, TooltipGroup, menu_theme, open_context_menu,
     },
 };
 
@@ -41,6 +41,9 @@ impl Component for Sidebar {
 
         // Icon picker: id of the conversation whose picker popover is open.
         let mut icon_pick = use_state::<Option<String>>(|| None);
+
+        // Confirm-delete: Some((id, display_title)) when awaiting user confirmation.
+        let mut confirm_delete = use_state::<Option<(oxide_client::ConversationId, String)>>(|| None);
 
         let convs = state.conversations.read().clone();
         let active = state.active.read().clone();
@@ -114,14 +117,29 @@ impl Component for Sidebar {
                 let id_menu    = c.id.0.clone();
                 let id_pick    = c.id.0.clone();
                 let title_seed = title.to_owned();
+                // Pre-compute unsent status so it can be captured by value in the closure.
+                let meta_title_str = m.and_then(|x| x.title.clone());
+                let unsent_del = crate::conversation_meta::is_unsent(
+                    &c.title,
+                    meta_title_str.as_deref(),
+                );
+                let id_del    = c.id.clone();
+                let title_del = title.to_owned();
+                // Pre-clone state for use inside the move closure.
+                let state_del = state.clone();
                 let row_inner = rect()
                     .width(Size::fill())
                     .on_secondary_down(move |e: Event<PressEventData>| {
                         let (container_theme, item_theme) = menu_theme(th);
                         let item_theme2 = item_theme.clone();
+                        let item_theme3 = item_theme.clone();
                         let id_press    = id_menu.clone();
                         let seed        = title_seed.clone();
                         let id_icon     = id_press.clone();
+                        let st_del      = state_del.clone();
+                        let id_del_c    = id_del.clone();
+                        let title_del_c = title_del.clone();
+                        let unsent      = unsent_del;
                         let menu = Menu::new()
                             .theme(container_theme)
                             .child(
@@ -140,6 +158,18 @@ impl Component for Sidebar {
                                         icon_pick.set(Some(id_icon.clone()));
                                     })
                                     .child("Set icon\u{2026}"),
+                            )
+                            .child(
+                                MenuButton::new()
+                                    .theme(item_theme3)
+                                    .on_press(move |_: Event<PressEventData>| {
+                                        if unsent {
+                                            st_del.delete_conversation(id_del_c.clone());
+                                        } else {
+                                            confirm_delete.set(Some((id_del_c.clone(), title_del_c.clone())));
+                                        }
+                                    })
+                                    .child("Delete"),
                             );
                         open_context_menu(&e, menu);
                     })
@@ -212,6 +242,27 @@ impl Component for Sidebar {
                 .padding(Gaps::new(0., 8., 0., 8.))
                 .child(ScrollView::new().show_scrollbar(false).child(list)),
         );
+
+        // ── Confirm-delete dialog (full-window overlay, only when Some) ────────
+        col = col.maybe_child(confirm_delete.read().clone().map(|(del_id, del_title)| {
+            let st_confirm  = state.clone();
+            let st_cancel   = state.clone();
+            let del_id2     = del_id.clone();
+            ConfirmDialog::new(th)
+                .title(format!("Delete \"{del_title}\"?"))
+                .body("This can't be undone.".to_string())
+                .confirm_label("Delete")
+                .danger(true)
+                .on_confirm((move |()| {
+                    st_confirm.delete_conversation(del_id.clone());
+                    confirm_delete.set(None);
+                }).into())
+                .on_cancel((move |()| {
+                    let _ = &st_cancel;
+                    let _ = &del_id2;
+                    confirm_delete.set(None);
+                }).into())
+        }));
 
         col = col.child(
             rect()
