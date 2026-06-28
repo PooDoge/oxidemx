@@ -803,7 +803,7 @@ mod tests {
             ..MockTransport::new()
         }) as Arc<dyn oxide_client::Transport>;
         let state = AppState::new(mock);
-        let mut st = state.clone();
+        let st = state.clone();
         use_side_effect(move || {
             st.bootstrap();
         });
