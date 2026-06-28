@@ -389,6 +389,8 @@ impl AppState {
     pub fn delete_conversation(&self, id: ConversationId) {
         let mut conversations = self.conversations;
         let mut active = self.active;
+        // Capture the user's intent at call time, not at transport-response time.
+        let was_active = active.peek().as_ref() == Some(&id);
         let this = self.clone();
         let t = self.transport.clone();
         spawn(async move {
@@ -396,7 +398,6 @@ impl AppState {
                 eprintln!("delete_conversation failed: {e}");
                 return; // truthful: leave UI unchanged on error
             }
-            let was_active = active.peek().as_ref() == Some(&id);
             let mut nearest: Option<ConversationId> = None;
             conversations.with_mut(|mut cs| {
                 let idx = cs.iter().position(|c| c.id == id);
@@ -418,10 +419,10 @@ impl AppState {
     }
 
     fn with_meta_store(&self, f: impl FnOnce(&mut crate::conversation_meta::ConversationMetaStore)) {
-        // Whole-file read-modify-write (load → edit → persist → refresh signal). This is
-        // lost-update-safe ONLY because every caller runs synchronously on the UI thread,
-        // so two edits never interleave. If this ever moves into a `spawn`, switch to a
-        // single owned store or per-key locking to avoid clobbering concurrent edits.
+        // Whole-file read-modify-write (load → edit → persist → refresh signal). The body is
+        // fully synchronous (no awaits), so it runs atomically on Freya's single-threaded
+        // executor even when invoked from a `spawn` (as `delete_conversation` does): each call
+        // load-fresh-edit-persists, so concurrent edits can't interleave or clobber.
         let (dir, pid) = {
             let cur = self.current_project.peek().clone();
             let projects = self.projects.peek().clone();
