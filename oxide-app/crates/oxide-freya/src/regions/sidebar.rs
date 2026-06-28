@@ -3,9 +3,13 @@
 //! The placeholder-page nav demo from 2a has been removed. The per-region-nav
 //! independence invariant is covered by `nav::tests::region_nav_is_independent`.
 use freya::prelude::*;
+use freya_icons::lucide;
 use oxide_ui::{
     Theme,
-    components::{AttachedPosition, ListItem, OxideTooltip, RailButton, SidebarHeader, StatusDot, TooltipGroup},
+    components::{
+        AttachedPosition, ListItem, MenuRow, MenuSurface, OxideTooltip, Placement, Popover,
+        RailButton, SidebarHeader, StatusDot, TooltipGroup,
+    },
 };
 
 use crate::state::AppState;
@@ -26,6 +30,9 @@ impl Component for Sidebar {
         let th = Theme::default();
 
         let is_collapsed = self.collapsed; // EFFECTIVE (render)
+
+        // Project dropdown open state — unconditional hook (collapsed rail uses it).
+        let proj_open = use_state(|| false);
 
         let convs = state.conversations.read().clone();
         let active = state.active.read().clone();
@@ -96,9 +103,98 @@ impl Component for Sidebar {
                 ),
         );
 
-        // Collapsed rail: project dot, one icon per conversation, expand button.
+        // Collapsed rail: project dropdown, "+" create button, one icon per
+        // conversation, expand button.
         let convs_rail = state.conversations.read().clone();
         let active_rail = state.active.read().clone();
+
+        // ── Project dropdown button ───────────────────────────────────────────
+        let projects = state.projects.read().clone();
+        let current = state.current_project.read().clone();
+
+        let proj_btn: Element = rect()
+            .width(Size::px(28.)).height(Size::px(28.))
+            .corner_radius(CornerRadius::new_all(8.))
+            .center()
+            .background(th.surface())
+            .a11y_role(AccessibilityRole::Button)
+            .a11y_alt("Switch project")
+            .on_press({
+                let mut p = proj_open;
+                move |_: Event<PressEventData>| p.toggle()
+            })
+            .child(
+                svg(lucide::chevrons_up_down())
+                    .width(Size::px(16.))
+                    .height(Size::px(16.))
+                    .color(th.text()),
+            )
+            .into_element();
+
+        let mut proj_rows = rect().direction(Direction::Vertical);
+        for p in projects {
+            let st = state.clone();
+            let pid = p.id.clone();
+            let is_selected = current.as_ref() == Some(&p.id);
+            proj_rows = proj_rows.child(
+                MenuRow::new(th)
+                    .title(p.name.clone())
+                    .selected(is_selected)
+                    .on_press({
+                        let mut po = proj_open;
+                        move |()| {
+                            st.open_project(pid.clone());
+                            po.set(false);
+                        }
+                    }),
+            );
+        }
+
+        let proj_menu_surface = MenuSurface::new(th)
+            .min_w(180.)
+            .on_close({
+                let mut p = proj_open;
+                move |()| p.set(false)
+            })
+            .child(proj_rows);
+
+        let proj_popover = OxideTooltip::text("Switch project")
+            .placement(AttachedPosition::Right)
+            .offset(6.)
+            .child(
+                Popover::new(proj_btn)
+                    .open(*proj_open.read())
+                    .placement(Placement::Below)
+                    .content(proj_menu_surface)
+                    .into_element(),
+            );
+
+        // ── "+" create-conversation button ────────────────────────────────────
+        let new_btn: Element = rect()
+            .width(Size::px(28.)).height(Size::px(28.))
+            .corner_radius(CornerRadius::new_all(8.))
+            .center()
+            .background(th.accent())
+            .a11y_role(AccessibilityRole::Button)
+            .a11y_alt("New conversation")
+            .on_press({
+                let st = state.clone();
+                move |_: Event<PressEventData>| st.create_conversation()
+            })
+            .child(
+                svg(lucide::plus())
+                    .width(Size::px(16.))
+                    .height(Size::px(16.))
+                    .color(th.bg_deep()),
+            )
+            .into_element();
+
+        let new_btn_tooltip = OxideTooltip::text("New conversation")
+            .placement(AttachedPosition::Right)
+            .offset(6.)
+            .child(new_btn);
+
+        // ── Rail assembly ─────────────────────────────────────────────────────
         let mut rail = rect()
             .direction(Direction::Vertical)
             .cross_align(Alignment::Center)
@@ -106,27 +202,13 @@ impl Component for Sidebar {
             .padding(Gaps::new_all(8.))
             .width(Size::fill())
             .height(Size::fill())
-            // project dot at top — press expands.
-            .child(
-                OxideTooltip::text("Projects")
-                    .placement(AttachedPosition::Right)
-                    .offset(6.)
-                    .child(
-                        rect()
-                            .width(Size::px(10.)).height(Size::px(10.))
-                            .corner_radius(CornerRadius::new_all(5.))
-                            .background(th.accent())
-                            .on_press({
-                                let mut e = c_expand;
-                                move |_: Event<PressEventData>| e.set(false)
-                            }),
-                    ),
-            );
+            .child(proj_popover)
+            .child(new_btn_tooltip);
+
         for c in convs_rail {
             let st = state.clone();
             let id = c.id.clone();
             let sel = active_rail.as_ref() == Some(&c.id);
-            let mut e = c_expand;
             let detail = rect()
                 .direction(Direction::Vertical)
                 .spacing(3.)
@@ -154,7 +236,6 @@ impl Component for Sidebar {
                             .background(if sel { th.surface_hi() } else { th.surface() })
                             .on_press(move |_: Event<PressEventData>| {
                                 st.open_conversation(id.clone());
-                                e.set(false);
                             })
                             .child(StatusDot::new(true)),
                     ),
