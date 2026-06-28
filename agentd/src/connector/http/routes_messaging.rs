@@ -15,7 +15,7 @@ pub fn router(state: AppState) -> Router {
         .route("/v1/projects", get(list_projects))
         .route("/v1/projects/{project_id}/conversations", get(list_conversations))
         .route("/v1/conversations", post(create_conversation))
-        .route("/v1/conversations/{id}", get(get_conversation))
+        .route("/v1/conversations/{id}", get(get_conversation).delete(delete_conversation))
         .route("/v1/conversations/{id}/messages", get(history).post(send_message))
         .route("/v1/conversations/{id}/approvals/{request_id}", post(respond_approval))
         .route("/v1/conversations/{id}/events", get(super::sse::events_handler))
@@ -58,6 +58,14 @@ async fn get_conversation(
         Some(c) => Ok(Json(serde_json::to_value(c).unwrap_or_default())),
         None => Err(ApiError(crate::error::AgentdError::NotFound(format!("conversation {id}")))),
     }
+}
+
+async fn delete_conversation(
+    State(st): State<AppState>,
+    AxPath(id): AxPath<String>,
+) -> Result<axum::http::StatusCode, ApiError> {
+    st.svc.delete_conversation(&id).await?;
+    Ok(axum::http::StatusCode::NO_CONTENT)
 }
 
 async fn history(
