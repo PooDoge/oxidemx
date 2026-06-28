@@ -3,6 +3,7 @@ use freya::prelude::*;
 
 pub mod app;
 pub mod attachment_payload;
+pub mod conversation_meta;
 pub mod nav;
 pub mod regions;
 pub mod state;
