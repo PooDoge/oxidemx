@@ -100,6 +100,19 @@ impl SizeClass {
     }
 }
 
+/// What a breakpoint crossing should do to a panel's `collapsed` flag.
+/// `None` = no crossing (leave the user's value). On a crossing: shrinking (now narrow)
+/// collapses; growing (now wide) restores the panel's wide default.
+pub fn crossing_collapse(was_wide: bool, now_wide: bool, wide_default_collapsed: bool) -> Option<bool> {
+    if was_wide == now_wide {
+        None
+    } else if now_wide {
+        Some(wide_default_collapsed)
+    } else {
+        Some(true)
+    }
+}
+
 // ── Pure streaming reducer ──────────────────────────────────────────────────
 
 /// Pure streaming reducer — the single place assistant text is assembled.
@@ -579,6 +592,19 @@ mod tests {
         assert!(SizeClass::Compact.is_compact_or_narrower());
         assert!(SizeClass::Phone.is_compact_or_narrower());
         assert_eq!(RightTab::default(), RightTab::Run);
+    }
+
+    #[test]
+    fn crossing_collapse_truth_table() {
+        // no crossing → None
+        assert_eq!(super::crossing_collapse(true, true, false), None);
+        assert_eq!(super::crossing_collapse(false, false, true), None);
+        // shrank (wide→narrow) → collapse both panels
+        assert_eq!(super::crossing_collapse(true, false, false), Some(true));
+        assert_eq!(super::crossing_collapse(true, false, true), Some(true));
+        // grew (narrow→wide) → each panel's wide default
+        assert_eq!(super::crossing_collapse(false, true, false), Some(false)); // left: expanded
+        assert_eq!(super::crossing_collapse(false, true, true), Some(true));   // right: collapsed
     }
 
     #[test]
