@@ -172,6 +172,10 @@ pub fn shell() -> impl IntoElement {
                         .width(Size::px(274.))
                         .height(Size::window_percent(100.))
                         .shadow((0.0_f32, 0.0_f32, 48.0_f32, 0.0_f32, th.shadow_deep()))
+                        // Swallow presses inside the panel so they don't bubble to the
+                        // backdrop's on_press (which collapses the drawer). Only clicks on
+                        // the dim area outside the panel dismiss.
+                        .on_press(move |e: Event<PressEventData>| { e.stop_propagation(); })
                         .child(Sidebar { state: state.clone(), collapsed: false }),
                 )
                 .into_element()
@@ -196,6 +200,9 @@ pub fn shell() -> impl IntoElement {
                         .width(Size::px(348.))
                         .height(Size::window_percent(100.))
                         .shadow((0.0_f32, 0.0_f32, 48.0_f32, 0.0_f32, th.shadow_deep()))
+                        // Swallow presses inside the panel so they don't bubble to the
+                        // backdrop's on_press (which collapses the drawer).
+                        .on_press(move |e: Event<PressEventData>| { e.stop_propagation(); })
                         .child(ContextRegion { state: state.clone(), collapsed: false }),
                 )
                 .into_element()
