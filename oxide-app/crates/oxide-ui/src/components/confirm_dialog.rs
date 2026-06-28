@@ -140,6 +140,9 @@ impl Component for ConfirmDialog {
             .shadow((0.0_f32, 12.0_f32, 40.0_f32, 0.0_f32, th.shadow_deep()))
             .min_width(Size::px(320.))
             .max_width(Size::px(420.))
+            // Swallow presses inside the card so they don't bubble to the backdrop's
+            // on_press (which cancels). Only the dim area outside the card cancels.
+            .on_press(move |e: Event<PressEventData>| { e.stop_propagation(); })
             .child(
                 label()
                     .font_size(15.)
