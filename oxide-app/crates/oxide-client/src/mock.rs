@@ -65,6 +65,7 @@ impl Transport for MockTransport {
         self.recorded.lock().unwrap().extend_from_slice(attachments);
         Ok(MessageId::from("mock-msg"))
     }
+    async fn delete_conversation(&self, _conversation_id: &str) -> Result<(), TransportError> { Ok(()) }
     fn subscribe(&self, _c: &str) -> BoxStream<'static, Result<AgentEvent, TransportError>> {
         let evs = self.events.lock().unwrap().clone();
         stream::iter(evs.into_iter().map(Ok)).boxed()

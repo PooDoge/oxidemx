@@ -14,6 +14,7 @@ pub trait Transport: Send + Sync {
     async fn create_conversation(&self, project_id: &str, working_dir: Option<&str>) -> Result<Conversation, TransportError>;
     async fn get_history(&self, conversation_id: &str) -> Result<Vec<Turn>, TransportError>;
     async fn send_message(&self, conversation_id: &str, text: &str, attachments: &[AttachmentPayload]) -> Result<MessageId, TransportError>;
+    async fn delete_conversation(&self, conversation_id: &str) -> Result<(), TransportError>;
     /// SSE subscription. Yields normalized events; reconnects with Last-Event-ID on drop.
     fn subscribe(&self, conversation_id: &str) -> BoxStream<'static, Result<AgentEvent, TransportError>>;
 }
