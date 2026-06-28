@@ -294,6 +294,27 @@ impl AppState {
         });
     }
 
+    /// Create a new conversation in the current project, then make it active.
+    /// Project comes from `current_project`; model + working_dir default server-side.
+    /// On success the conversation is inserted optimistically and opened; transport
+    /// errors are logged and leave the UI unchanged.
+    pub fn create_conversation(&self) {
+        let Some(project_id) = self.current_project.peek().clone() else { return };
+        let mut conversations = self.conversations;
+        let this = self.clone();
+        let t = self.transport.clone();
+        spawn(async move {
+            match t.create_conversation(project_id.as_str(), None).await {
+                Ok(conv) => {
+                    let id = conv.id.clone();
+                    conversations.with_mut(|mut cs| cs.push(conv));
+                    this.open_conversation(id);
+                }
+                Err(e) => eprintln!("create_conversation failed: {e}"),
+            }
+        });
+    }
+
     /// Append the user turn immediately, then fire `send_message` to the
     /// transport.  The assistant reply streams back via the open subscription.
     ///
@@ -316,6 +337,7 @@ impl AppState {
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
+    use std::time::Duration;
 
     use oxide_client::{mock::MockTransport, AgentEvent};
 
@@ -462,5 +484,49 @@ mod tests {
         // Every direction has a non-empty icon glyph.
         assert!(StatusDirection::ALL.iter().all(|d| !d.icon().is_empty()));
         assert_eq!(StatusDirection::default(), StatusDirection::Spec);
+    }
+
+    #[test]
+    fn create_conversation_ok_inserts_and_activates() {
+        use freya_testing::prelude::*;
+        use oxide_client::mock::MockTransport;
+        fn app() -> impl IntoElement {
+            let state = AppState::new(Arc::new(MockTransport::new()));
+            let st = state.clone();
+            use_hook(move || {
+                st.current_project.clone().set(Some(ProjectId::from("personal")));
+                st.create_conversation();
+            });
+            let n = state.conversations.read().len();
+            let active = state.active.read().clone().map(|i| i.as_str().to_string()).unwrap_or_default();
+            label().text(format!("n={n} active={active}"))
+        }
+        let mut runner = launch_test(app);
+        runner.poll_n(Duration::from_millis(5), 12);
+        let found = runner.find(|_, el| {
+            Label::try_downcast(el).filter(|l| l.text.as_ref().contains("n=1") && l.text.as_ref().contains("active=mock-conv"))
+        });
+        assert!(found.is_some(), "create_conversation should optimistically insert + activate the new conversation");
+    }
+
+    #[test]
+    fn create_conversation_err_leaves_unchanged() {
+        use freya_testing::prelude::*;
+        use oxide_client::mock::MockTransport;
+        fn app() -> impl IntoElement {
+            let mock = MockTransport { create_conversation_fails: true, ..MockTransport::new() };
+            let state = AppState::new(Arc::new(mock));
+            let st = state.clone();
+            use_hook(move || {
+                st.current_project.clone().set(Some(ProjectId::from("personal")));
+                st.create_conversation();
+            });
+            let n = state.conversations.read().len();
+            label().text(format!("n={n}"))
+        }
+        let mut runner = launch_test(app);
+        runner.poll_n(Duration::from_millis(5), 12);
+        assert!(runner.find(|_, el| Label::try_downcast(el).filter(|l| l.text.as_ref().contains("n=0"))).is_some(),
+            "a failed create must leave conversations empty");
     }
 }
