@@ -95,7 +95,7 @@ impl OxideTooltip {
             body,
             position: AttachedPosition::Bottom,
             offset: 0.0,
-            delay: Duration::from_millis(1000),
+            delay: Duration::from_millis(250),
             children: vec![],
             key: DiffKey::None,
         }

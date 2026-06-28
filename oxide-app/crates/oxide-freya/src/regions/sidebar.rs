@@ -126,9 +126,10 @@ impl Component for Sidebar {
             let detail = rect()
                 .direction(Direction::Vertical)
                 .spacing(3.)
-                .child(label().text(c.title.clone()).font_size(12.5).color(th.text()))
+                .child(label().max_lines(1).text(c.title.clone()).font_size(12.5).color(th.text()))
                 .child(
                     label()
+                        .max_lines(1)
                         .text(format!(
                             "{}{}",
                             c.model,
