@@ -54,6 +54,10 @@ impl Component for Sidebar {
                 let on_st = state.clone();
                 SidebarHeader::new(projects, current_id)
                     .on_select(move |id: String| on_st.open_project(id.into()))
+                    .on_new({
+                        let st = state.clone();
+                        move |_| st.create_conversation()
+                    })
                     .theme(th)
             });
 
