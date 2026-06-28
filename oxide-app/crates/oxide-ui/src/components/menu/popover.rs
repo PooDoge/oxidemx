@@ -63,8 +63,10 @@
 //! - `opacity`: 0.0→1.0 on open, 1.0→0.0 on close (from parent hook)
 //! - `scale`/`slide`: applied directly as `.scale()` / `.offset_y()`
 //!
-//! The `on_sized` handler only records content size while `final_opacity > 0.0`
-//! so a fading-out overlay does not trigger re-measurement.
+//! The `on_sized` handler records content size while `!positioned` (the FIRST
+//! measurement — required to ever become positioned/visible) OR while visible
+//! (`final_opacity > 0.0`); it skips only once positioned AND fully faded, so a
+//! fading-out overlay does not needlessly re-measure.
 //!
 //! ## Auto-flip measurement
 //!
