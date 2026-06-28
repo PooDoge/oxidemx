@@ -296,8 +296,8 @@ impl AppState {
 
     /// Create a new conversation in the current project, then make it active.
     /// Project comes from `current_project`; model + working_dir default server-side.
-    /// On success the conversation is inserted optimistically and opened; transport
-    /// errors are logged and leave the UI unchanged.
+    /// On success (after the transport responds) the conversation is inserted and
+    /// opened; transport errors are logged and leave the UI unchanged.
     pub fn create_conversation(&self) {
         let Some(project_id) = self.current_project.peek().clone() else { return };
         let mut conversations = self.conversations;
