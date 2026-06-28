@@ -7,6 +7,7 @@ edition = "2021"
 freya       = { workspace = true }
 freya-icons = { workspace = true }
 arboard     = { workspace = true }
+bytes       = { workspace = true }
 image       = { workspace = true }
 async-io    = "2"
 

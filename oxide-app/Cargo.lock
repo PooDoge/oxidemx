@@ -2909,12 +2909,14 @@ name = "oxide-freya"
 version = "0.1.0"
 dependencies = [
  "base64",
+ "bytes",
  "freya",
  "freya-icons",
  "freya-testing",
  "futures-util",
  "oxide-client",
  "oxide-ui",
+ "serde",
  "serde_json",
  "tokio",
 ]
@@ -2925,6 +2927,7 @@ version = "0.1.0"
 dependencies = [
  "arboard",
  "async-io",
+ "bytes",
  "freya",
  "freya-icons",
  "freya-testing",

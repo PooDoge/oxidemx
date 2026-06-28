@@ -8,7 +8,7 @@ use oxide_ui::{
     Theme,
     components::{
         AttachedPosition, ListItem, MenuRow, MenuSurface, OxideTooltip, Placement, Popover,
-        RailButton, SidebarHeader, StatusDot, TooltipGroup,
+        RailButton, SidebarHeader, TooltipGroup,
     },
 };
 
@@ -36,6 +36,7 @@ impl Component for Sidebar {
 
         let convs = state.conversations.read().clone();
         let active = state.active.read().clone();
+        let meta = state.conversation_meta.read().clone();
 
         // Full panel: header + scrollable conversation list + collapse button.
         let mut col = rect()
@@ -76,8 +77,17 @@ impl Component for Sidebar {
             let st = state.clone();
             let id = c.id.clone();
             let sel = active.as_ref() == Some(&c.id);
+            let m = meta.get(c.id.0.as_str());
+            let title = crate::conversation_meta::effective_title(
+                m.and_then(|x| x.title.as_deref()),
+                &c.title,
+            );
+            let icon = crate::conversation_meta::effective_icon(
+                m.and_then(|x| x.icon.as_deref()),
+            );
             list = list.child(
-                ListItem::new(c.title.clone())
+                ListItem::new(title)
+                    .icon(Some(crate::conversation_meta::icon_svg(icon)))
                     .selected(sel)
                     .state("idle".into())
                     .worktree(c.worktree.as_ref().map(|w| w.branch.clone()))
@@ -209,10 +219,18 @@ impl Component for Sidebar {
             let st = state.clone();
             let id = c.id.clone();
             let sel = active_rail.as_ref() == Some(&c.id);
+            let m = meta.get(c.id.0.as_str());
+            let title = crate::conversation_meta::effective_title(
+                m.and_then(|x| x.title.as_deref()),
+                &c.title,
+            );
+            let icon = crate::conversation_meta::effective_icon(
+                m.and_then(|x| x.icon.as_deref()),
+            );
             let detail = rect()
                 .direction(Direction::Vertical)
                 .spacing(3.)
-                .child(label().max_lines(1).text(c.title.clone()).font_size(12.5).color(th.text()))
+                .child(label().max_lines(1).text(title).font_size(12.5).color(th.text()))
                 .child(
                     label()
                         .max_lines(1)
@@ -237,7 +255,12 @@ impl Component for Sidebar {
                             .on_press(move |_: Event<PressEventData>| {
                                 st.open_conversation(id.clone());
                             })
-                            .child(StatusDot::new(true)),
+                            .child(
+                                svg(crate::conversation_meta::icon_svg(icon))
+                                    .width(Size::px(16.))
+                                    .height(Size::px(16.))
+                                    .color(if sel { th.text() } else { th.faint() }),
+                            ),
                     ),
             );
         }

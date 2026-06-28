@@ -788,6 +788,54 @@ mod tests {
         runner.render_to_file("/tmp/oxide-sidebar-p2.png");
     }
 
+    // ── Snapshot: sidebar with effective titles + icons (Task 3) ─────────────
+
+    fn snapshot_sidebar_titles_icons_app() -> Element {
+        use_init_theme(dark_theme);
+        let mock = Arc::new(MockTransport {
+            conversations: vec![
+                conv("c1", "hi, what can you do?"),
+                conv("c2", "run the shell command git commit -m test"),
+                conv("c3", "research-digest on AutoAge"),
+                conv("c4", "Run research-digest on Microsoft Copilot Studio"),
+            ],
+            events: Mutex::new(Vec::new()),
+            ..MockTransport::new()
+        }) as Arc<dyn oxide_client::Transport>;
+        let state = AppState::new(mock);
+        let mut st = state.clone();
+        use_side_effect(move || {
+            st.bootstrap();
+        });
+        rect()
+            .direction(Direction::Horizontal)
+            .expanded()
+            .background((5u8, 7u8, 11u8))
+            .child(Sidebar { state: state.clone(), collapsed: false })
+            .child(
+                rect()
+                    .width(Size::flex(1.0))
+                    .height(Size::fill())
+                    .background((10u8, 13u8, 20u8)),
+            )
+            .into()
+    }
+
+    /// Renders the sidebar with effective title + icon merge (expanded + collapsed rail)
+    /// to /tmp/sidebar-titles-icons.png for visual review.
+    /// No meta entries seeded — uses agentd title fallback + default icon, exercising the merge.
+    ///
+    /// Run with: cargo test -p oxide-freya --bin oxide-freya snapshot_sidebar_titles_icons -- --ignored
+    #[test]
+    #[ignore = "snapshot: writes PNG to /tmp for visual review"]
+    fn snapshot_sidebar_titles_icons() {
+        let (mut runner, _) =
+            TestingRunner::new(snapshot_sidebar_titles_icons_app, (900., 800.).into(), |_| {}, 1.);
+        runner.poll_n(Duration::from_millis(5), 12);
+        runner.sync_and_update();
+        runner.render_to_file("/tmp/sidebar-titles-icons.png");
+    }
+
     // ── Snapshot: toolbar attachment strip (T2) ───────────────────────────────
 
     fn snapshot_toolbar_chips_app() -> Element {
