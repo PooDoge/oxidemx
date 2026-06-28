@@ -25,7 +25,7 @@ pub mod theme;
 pub use context_menu::{close_context_menu, open_context_menu, OxideContextMenuViewer};
 pub use popover::{Placement, Popover};
 pub use row::{MenuRow, MenuSection};
-pub use surface::MenuSurface;
+pub use surface::{MenuDismiss, MenuSurface};
 pub use text_menu::{
     copy_only_menu, copy_selection, cut_selection, editor_clipboard_menu, paste_text, select_all,
 };
