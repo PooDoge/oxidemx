@@ -19,9 +19,11 @@ oxide-client = { path = "../oxide-client" }
 oxide-ui = { path = "../oxide-ui" }
 freya-icons = { workspace = true }
 base64 = "0.22"
+bytes = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
 tokio = { workspace = true }
 futures-util = { workspace = true }
-serde_json = { workspace = true }
 
 [dev-dependencies]
 freya-testing = { workspace = true }

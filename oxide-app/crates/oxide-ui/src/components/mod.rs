@@ -21,8 +21,9 @@ pub use chip::WorktreeChip;
 pub use composer::{Composer, ComposerConfig, SubmitPayload};
 pub use list_item::ListItem;
 pub use menu::{
-    copy_only_menu, copy_selection, cut_selection, editor_clipboard_menu, menu_theme, paste_text,
-    select_all, MenuRow, MenuSection, MenuSurface, Placement, Popover,
+    close_context_menu, copy_only_menu, copy_selection, cut_selection, editor_clipboard_menu,
+    menu_theme, open_context_menu, paste_text, select_all, MenuRow, MenuSection, MenuSurface,
+    Placement, Popover,
 };
 pub use prompt_input::PromptInput;
 pub use rail_button::RailButton;

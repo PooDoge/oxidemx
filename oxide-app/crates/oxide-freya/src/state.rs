@@ -7,11 +7,14 @@
 //! `Transcript` is the ONLY place assistant text is assembled.
 //! Assistant content is only ever appended from `delta`/`final` events —
 //! never fabricated by any other path.
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use freya::prelude::*;
 use oxide_client::{AgentEvent, Conversation, ConversationId, Project, ProjectId, Transport, Turn};
 use oxide_client::dto::AttachmentPayload;
+
+use crate::conversation_meta::ConvMeta;
 
 // ── Connection state ────────────────────────────────────────────────────────
 
@@ -171,6 +174,7 @@ pub struct AppState {
     pub active_direction: State<StatusDirection>,
     pub right_tab: State<RightTab>,
     pub size_class: State<SizeClass>,
+    pub conversation_meta: State<HashMap<String, ConvMeta>>,
 }
 
 impl PartialEq for AppState {
@@ -188,6 +192,7 @@ impl PartialEq for AppState {
             && self.active_direction == other.active_direction
             && self.right_tab == other.right_tab
             && self.size_class == other.size_class
+            && self.conversation_meta == other.conversation_meta
     }
 }
 
@@ -208,6 +213,7 @@ impl AppState {
             active_direction: use_state(StatusDirection::default),
             right_tab: use_state(RightTab::default),
             size_class: use_state(SizeClass::default),
+            conversation_meta: use_state(HashMap::new),
         }
     }
 
@@ -220,6 +226,7 @@ impl AppState {
         let mut conversations = self.conversations;
         let mut connection = self.connection;
         let mut current_project = self.current_project;
+        let this = self.clone();
         spawn(async move {
             match t.health().await {
                 Ok(()) => connection.set(ConnState::Connected),
@@ -236,6 +243,7 @@ impl AppState {
                 if let Ok(cs) = t.list_conversations(pid.as_str()).await {
                     conversations.set(cs);
                 }
+                this.reload_conversation_meta();
             }
         });
     }
@@ -250,10 +258,12 @@ impl AppState {
         current.set(Some(id.clone()));
         active.set(None);
         let t = self.transport.clone();
+        let this = self.clone();
         spawn(async move {
             if let Ok(cs) = t.list_conversations(id.as_str()).await {
                 conversations.set(cs);
             }
+            this.reload_conversation_meta();
         });
     }
 
@@ -323,12 +333,61 @@ impl AppState {
     /// [`crate::attachment_payload::to_payload`] before calling this.
     pub fn send(&self, text: String, attachments: Vec<AttachmentPayload>) {
         let Some(id) = self.active.peek().clone() else { return };
+        let is_first_user_turn = !self.transcript.peek().turns.iter().any(|t| t.role == "user");
+        let has_title = self.conversation_meta.peek().get(id.as_str()).and_then(|m| m.title.as_ref()).is_some();
+        if is_first_user_turn && !has_title {
+            if let Some(title) = crate::conversation_meta::derive_title(&text) {
+                self.rename_conversation(id.as_str(), title);
+            }
+        }
         let mut transcript = self.transcript;
         transcript.with_mut(|mut tx| tx.apply_user(text.clone()));
         let t = self.transport.clone();
         spawn(async move {
             let _ = t.send_message(id.as_str(), &text, &attachments).await;
         });
+    }
+
+    /// Load the current project's title/icon overrides into the signal.
+    pub fn reload_conversation_meta(&self) {
+        let (dir, pid) = {
+            let cur = self.current_project.peek().clone();
+            let projects = self.projects.peek().clone();
+            match cur.and_then(|id| projects.iter().find(|p| p.id == id).cloned()) {
+                Some(p) => (p.default_working_dir.clone(), p.id.0.clone()),
+                None => return,
+            }
+        };
+        let store = crate::conversation_meta::ConversationMetaStore::load(&dir, &pid);
+        let mut sig = self.conversation_meta;
+        sig.set(store.as_map().clone());
+    }
+
+    pub fn rename_conversation(&self, id: &str, title: String) {
+        self.with_meta_store(|s| s.set_title(id, title));
+    }
+
+    pub fn set_conversation_icon(&self, id: &str, icon: String) {
+        self.with_meta_store(|s| s.set_icon(id, icon));
+    }
+
+    fn with_meta_store(&self, f: impl FnOnce(&mut crate::conversation_meta::ConversationMetaStore)) {
+        // Whole-file read-modify-write (load → edit → persist → refresh signal). This is
+        // lost-update-safe ONLY because every caller runs synchronously on the UI thread,
+        // so two edits never interleave. If this ever moves into a `spawn`, switch to a
+        // single owned store or per-key locking to avoid clobbering concurrent edits.
+        let (dir, pid) = {
+            let cur = self.current_project.peek().clone();
+            let projects = self.projects.peek().clone();
+            match cur.and_then(|id| projects.iter().find(|p| p.id == id).cloned()) {
+                Some(p) => (p.default_working_dir.clone(), p.id.0.clone()),
+                None => return,
+            }
+        };
+        let mut store = crate::conversation_meta::ConversationMetaStore::load(&dir, &pid);
+        f(&mut store);
+        let mut sig = self.conversation_meta;
+        sig.set(store.as_map().clone());
     }
 }
 
@@ -507,6 +566,60 @@ mod tests {
             Label::try_downcast(el).filter(|l| l.text.as_ref().contains("n=1") && l.text.as_ref().contains("active=mock-conv"))
         });
         assert!(found.is_some(), "create_conversation should optimistically insert + activate the new conversation");
+    }
+
+    /// Auto-title: first `send` on a blank transcript derives a title and
+    /// stores it in `conversation_meta`.
+    ///
+    /// The mock project has a real temp dir so persistence works end-to-end
+    /// (same path `with_meta_store` uses).  We drive `use_hook` synchronously
+    /// then poll for the signal update.
+    #[test]
+    fn send_first_message_auto_titles_conversation() {
+        use freya_testing::prelude::*;
+        use oxide_client::mock::MockTransport;
+        use std::sync::Arc;
+
+        let tmp = std::env::temp_dir()
+            .join(format!("oxide-meta-autotitle-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).expect("temp dir");
+        let tmp_str = tmp.to_string_lossy().to_string();
+
+        let project = Project {
+            id: ProjectId::from("test-proj"),
+            name: "Test".into(),
+            default_working_dir: tmp_str.clone(),
+            created_at: 0,
+        };
+        let project_cap = project.clone();
+
+        fn app(project: Project) -> impl IntoElement {
+            let state = AppState::new(Arc::new(MockTransport::new()));
+            let st = state.clone();
+            use_hook(move || {
+                st.projects.clone().set(vec![project.clone()]);
+                st.current_project.clone().set(Some(project.id.clone()));
+                st.active.clone().set(Some(ConversationId::from("conv-1")));
+                st.send("hello there".into(), vec![]);
+            });
+            let meta = state.conversation_meta.read();
+            let title = meta
+                .get("conv-1")
+                .and_then(|m| m.title.as_deref())
+                .unwrap_or("")
+                .to_string();
+            label().text(format!("title={title}"))
+        }
+
+        let mut runner = launch_test(move || app(project_cap.clone()));
+        runner.poll_n(Duration::from_millis(5), 12);
+        let found = runner.find(|_, el| {
+            Label::try_downcast(el)
+                .filter(|l| l.text.as_ref().contains("title=hello there"))
+        });
+        let _ = std::fs::remove_dir_all(&tmp);
+        assert!(found.is_some(), "first send must auto-title the conversation in conversation_meta");
     }
 
     #[test]

@@ -8,7 +8,7 @@ use oxide_ui::{
     Theme,
     components::{
         AttachedPosition, ListItem, MenuRow, MenuSurface, OxideTooltip, Placement, Popover,
-        RailButton, SidebarHeader, StatusDot, TooltipGroup,
+        RailButton, SidebarHeader, TextInput, TooltipGroup, menu_theme, open_context_menu,
     },
 };
 
@@ -34,8 +34,17 @@ impl Component for Sidebar {
         // Project dropdown open state — unconditional hook (collapsed rail uses it).
         let proj_open = use_state(|| false);
 
+        // Rename state: id of the conversation currently being edited (if any)
+        // and the current draft title. Both are unconditional hooks.
+        let mut editing  = use_state::<Option<String>>(|| None);
+        let mut edit_val = use_state(String::new);
+
+        // Icon picker: id of the conversation whose picker popover is open.
+        let mut icon_pick = use_state::<Option<String>>(|| None);
+
         let convs = state.conversations.read().clone();
         let active = state.active.read().clone();
+        let meta = state.conversation_meta.read().clone();
 
         // Full panel: header + scrollable conversation list + collapse button.
         let mut col = rect()
@@ -73,17 +82,127 @@ impl Component for Sidebar {
             .spacing(3.)
             .width(Size::fill());
         for c in convs {
-            let st = state.clone();
-            let id = c.id.clone();
+            let st  = state.clone();
+            let id  = c.id.clone();
             let sel = active.as_ref() == Some(&c.id);
-            list = list.child(
-                ListItem::new(c.title.clone())
-                    .selected(sel)
-                    .state("idle".into())
-                    .worktree(c.worktree.as_ref().map(|w| w.branch.clone()))
-                    .theme(th)
-                    .on_press(move |_| st.open_conversation(id.clone())),
+            let m = meta.get(c.id.0.as_str());
+            let title = crate::conversation_meta::effective_title(
+                m.and_then(|x| x.title.as_deref()),
+                &c.title,
             );
+            let icon = crate::conversation_meta::effective_icon(
+                m.and_then(|x| x.icon.as_deref()),
+            );
+
+            let row: Element = if editing.read().as_deref() == Some(c.id.0.as_str()) {
+                // ── Inline rename editor ──────────────────────────────────────
+                let id_commit = c.id.0.clone();
+                let st_commit = state.clone();
+                rect()
+                    .width(Size::fill())
+                    .padding(Gaps::new(2., 4., 2., 4.))
+                    .child(
+                        TextInput::new(edit_val.into_writable(), th)
+                            .on_submit(move |text: String| {
+                                st_commit.rename_conversation(&id_commit, text);
+                                editing.set(None);
+                            }),
+                    )
+                    .into_element()
+            } else {
+                // ── Normal row with right-click to open rename/icon menu ──────
+                let id_menu    = c.id.0.clone();
+                let id_pick    = c.id.0.clone();
+                let title_seed = title.to_owned();
+                let row_inner = rect()
+                    .width(Size::fill())
+                    .on_secondary_down(move |e: Event<PressEventData>| {
+                        let (container_theme, item_theme) = menu_theme(th);
+                        let item_theme2 = item_theme.clone();
+                        let id_press    = id_menu.clone();
+                        let seed        = title_seed.clone();
+                        let id_icon     = id_press.clone();
+                        let menu = Menu::new()
+                            .theme(container_theme)
+                            .child(
+                                MenuButton::new()
+                                    .theme(item_theme)
+                                    .on_press(move |_: Event<PressEventData>| {
+                                        edit_val.set(seed.clone());
+                                        editing.set(Some(id_press.clone()));
+                                    })
+                                    .child("Rename"),
+                            )
+                            .child(
+                                MenuButton::new()
+                                    .theme(item_theme2)
+                                    .on_press(move |_: Event<PressEventData>| {
+                                        icon_pick.set(Some(id_icon.clone()));
+                                    })
+                                    .child("Set icon\u{2026}"),
+                            );
+                        open_context_menu(&e, menu);
+                    })
+                    .child(
+                        ListItem::new(title)
+                            .icon(Some(crate::conversation_meta::icon_svg(icon)))
+                            .selected(sel)
+                            .state("idle".into())
+                            .worktree(c.worktree.as_ref().map(|w| w.branch.clone()))
+                            .theme(th)
+                            .on_press(move |_| st.open_conversation(id.clone())),
+                    )
+                    .into_element();
+
+                // ── Icon picker popover ───────────────────────────────────────
+                if icon_pick.read().as_deref() == Some(c.id.0.as_str()) {
+                    let mut icon_rows = rect().direction(Direction::Vertical).padding(Gaps::new_all(4.));
+                    for chunk in crate::conversation_meta::CURATED_ICONS.chunks(4) {
+                        let mut icon_row = rect()
+                            .direction(Direction::Horizontal)
+                            .spacing(4.);
+                        for &icon_name in chunk {
+                            let st_ic = state.clone();
+                            let id_ic = id_pick.clone();
+                            let name  = icon_name.to_string();
+                            icon_row = icon_row.child(
+                                rect()
+                                    .width(Size::px(30.))
+                                    .height(Size::px(30.))
+                                    .corner_radius(CornerRadius::new_all(8.))
+                                    .center()
+                                    .background(th.surface())
+                                    .on_press(move |_: Event<PressEventData>| {
+                                        st_ic.set_conversation_icon(&id_ic, name.clone());
+                                        icon_pick.set(None);
+                                    })
+                                    .child(
+                                        svg(crate::conversation_meta::icon_svg(icon_name))
+                                            .width(Size::px(18.))
+                                            .height(Size::px(18.))
+                                            .color(th.text()),
+                                    ),
+                            );
+                        }
+                        icon_rows = icon_rows.child(icon_row);
+                    }
+                    let surface = MenuSurface::new(th)
+                        .on_close({
+                            let mut p = icon_pick;
+                            move |()| p.set(None)
+                        })
+                        .child(icon_rows);
+                    Popover::new(row_inner)
+                        .open(true)
+                        .placement(Placement::Below)
+                        .content(surface)
+                        .into_element()
+                } else {
+                    row_inner
+                }
+            };
+
+            list = list.child(row);
         }
 
         col = col.child(
@@ -209,10 +328,18 @@ impl Component for Sidebar {
             let st = state.clone();
             let id = c.id.clone();
             let sel = active_rail.as_ref() == Some(&c.id);
+            let m = meta.get(c.id.0.as_str());
+            let title = crate::conversation_meta::effective_title(
+                m.and_then(|x| x.title.as_deref()),
+                &c.title,
+            );
+            let icon = crate::conversation_meta::effective_icon(
+                m.and_then(|x| x.icon.as_deref()),
+            );
             let detail = rect()
                 .direction(Direction::Vertical)
                 .spacing(3.)
-                .child(label().max_lines(1).text(c.title.clone()).font_size(12.5).color(th.text()))
+                .child(label().max_lines(1).text(title).font_size(12.5).color(th.text()))
                 .child(
                     label()
                         .max_lines(1)
@@ -237,7 +364,12 @@ impl Component for Sidebar {
                             .on_press(move |_: Event<PressEventData>| {
                                 st.open_conversation(id.clone());
                             })
-                            .child(StatusDot::new(true)),
+                            .child(
+                                svg(crate::conversation_meta::icon_svg(icon))
+                                    .width(Size::px(16.))
+                                    .height(Size::px(16.))
+                                    .color(if sel { th.text() } else { th.faint() }),
+                            ),
                     ),
             );
         }

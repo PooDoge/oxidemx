@@ -5,6 +5,7 @@
 //! `WorktreeChip` shows the active worktree branch.
 //!
 //! Press the row to fire the optional `on_press` handler.
+use bytes::Bytes;
 use freya::prelude::*;
 
 use crate::tokens::Theme;
@@ -22,6 +23,7 @@ use crate::tokens::Theme;
 #[derive(PartialEq, Clone)]
 pub struct ListItem {
     label: String,
+    icon: Option<Bytes>,
     selected: bool,
     state: String,
     worktree: Option<String>,
@@ -33,12 +35,18 @@ impl ListItem {
     pub fn new(label: String) -> Self {
         Self {
             label,
+            icon: None,
             selected: false,
             state: "idle".into(),
             worktree: None,
             on_press: None,
             theme: Theme::default(),
         }
+    }
+
+    pub fn icon(mut self, icon: Option<Bytes>) -> Self {
+        self.icon = icon;
+        self
     }
 
     pub fn selected(mut self, selected: bool) -> Self {
@@ -106,6 +114,12 @@ impl Component for ListItem {
                     .corner_radius(CornerRadius::new_all(3.))
                     .background(tone),
             )
+            .maybe_child(self.icon.clone().map(|bytes| {
+                svg(bytes)
+                    .width(Size::px(16.))
+                    .height(Size::px(16.))
+                    .color(txt)
+            }))
             .child(
                 label()
                     .text(self.label.clone())
