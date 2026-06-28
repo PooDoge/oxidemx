@@ -16,6 +16,8 @@ pub struct MockTransport {
     /// Events the next `subscribe` will yield, in order.
     pub events: Mutex<Vec<AgentEvent>>,
     pub healthy: bool,
+    /// When `true`, `create_conversation` returns `Err(Unreachable)`.
+    pub create_conversation_fails: bool,
     /// All attachments from every `send_message` call, in order of arrival.
     pub recorded: Arc<Mutex<Vec<AttachmentPayload>>>,
 }
@@ -28,6 +30,7 @@ impl MockTransport {
             history: Vec::new(),
             events: Mutex::new(Vec::new()),
             healthy: true,
+            create_conversation_fails: false,
             recorded: Arc::new(Mutex::new(Vec::new())),
         }
     }
@@ -50,6 +53,9 @@ impl Transport for MockTransport {
     async fn list_projects(&self) -> Result<Vec<Project>, TransportError> { Ok(self.projects.clone()) }
     async fn list_conversations(&self, _p: &str) -> Result<Vec<Conversation>, TransportError> { Ok(self.conversations.clone()) }
     async fn create_conversation(&self, project_id: &str, _wd: Option<&str>) -> Result<Conversation, TransportError> {
+        if self.create_conversation_fails {
+            return Err(TransportError::Unreachable("mock create".into()));
+        }
         Ok(Conversation { id: ConversationId::from("mock-conv"), project_id: ProjectId::from(project_id),
             title: "New".into(), working_dir: String::new(), model: String::new(), created_at: 0, updated_at: 0,
             worktree: None })
