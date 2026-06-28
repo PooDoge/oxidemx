@@ -372,6 +372,10 @@ impl AppState {
     }
 
     fn with_meta_store(&self, f: impl FnOnce(&mut crate::conversation_meta::ConversationMetaStore)) {
+        // Whole-file read-modify-write (load → edit → persist → refresh signal). This is
+        // lost-update-safe ONLY because every caller runs synchronously on the UI thread,
+        // so two edits never interleave. If this ever moves into a `spawn`, switch to a
+        // single owned store or per-key locking to avoid clobbering concurrent edits.
         let (dir, pid) = {
             let cur = self.current_project.peek().clone();
             let projects = self.projects.peek().clone();
