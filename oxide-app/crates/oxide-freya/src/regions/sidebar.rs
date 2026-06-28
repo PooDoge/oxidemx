@@ -45,6 +45,25 @@ impl Component for Sidebar {
         // Confirm-delete: Some((id, display_title)) when awaiting user confirmation.
         let mut confirm_delete = use_state::<Option<(oxide_client::ConversationId, String)>>(|| None);
 
+        // Pending-delete: the actual `delete_conversation` spawn must be owned by THIS
+        // (sidebar) scope, which stays mounted — not the ConfirmDialog's scope, which the
+        // confirm handler unmounts in the same tick (that would cancel the un-polled task).
+        // So the dialog only sets this signal; the side-effect below performs the delete.
+        let mut pending_delete = use_state::<Option<oxide_client::ConversationId>>(|| None);
+        {
+            let st = state.clone();
+            let mut pd = pending_delete;
+            use_side_effect(move || {
+                // Read into a local so the `.read()` guard is dropped before we `.set(None)`
+                // below (an `if let pd.read()` would hold the borrow across the body → panic).
+                let next = pd.read().clone();
+                if let Some(id) = next {
+                    st.delete_conversation(id);
+                    pd.set(None);
+                }
+            });
+        }
+
         let convs = state.conversations.read().clone();
         let active = state.active.read().clone();
         let meta = state.conversation_meta.read().clone();
@@ -245,21 +264,18 @@ impl Component for Sidebar {
 
         // ── Confirm-delete dialog (full-window overlay, only when Some) ────────
         col = col.maybe_child(confirm_delete.read().clone().map(|(del_id, del_title)| {
-            let st_confirm  = state.clone();
-            let st_cancel   = state.clone();
-            let del_id2     = del_id.clone();
             ConfirmDialog::new(th)
                 .title(format!("Delete \"{del_title}\"?"))
                 .body("This can't be undone.".to_string())
                 .confirm_label("Delete")
                 .danger(true)
                 .on_confirm((move |()| {
-                    st_confirm.delete_conversation(del_id.clone());
+                    // Hand the delete to the sidebar-scoped side-effect (survives this
+                    // dialog unmounting), then close the dialog.
+                    pending_delete.set(Some(del_id.clone()));
                     confirm_delete.set(None);
                 }).into())
                 .on_cancel((move |()| {
-                    let _ = &st_cancel;
-                    let _ = &del_id2;
                     confirm_delete.set(None);
                 }).into())
         }));

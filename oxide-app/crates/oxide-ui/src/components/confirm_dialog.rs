@@ -156,11 +156,15 @@ impl Component for ConfirmDialog {
             .child(btn_row);
 
         // ── Full-window dimmed backdrop + centered card ───────────────────────
+        // Window-relative size (NOT `fill`, which would size to the parent — here the
+        // narrow sidebar column — and push the card off-screen). `window_percent(100)`
+        // + a global (0,0) origin makes this a true full-window backdrop regardless of
+        // where the dialog is mounted, so `.center()` centers the card in the window.
         rect()
             .layer(Layer::Overlay)
             .position(Position::new_global().left(0.0).top(0.0))
-            .width(Size::fill())
-            .height(Size::fill())
+            .width(Size::window_percent(100.))
+            .height(Size::window_percent(100.))
             .background(Theme::with_alpha(th.bg_deep(), 0xb3)) // ~70% opacity
             .center()
             .on_press(move |_: Event<PressEventData>| {
