@@ -13,6 +13,7 @@ pub mod status_dot;
 pub mod status_puck;
 pub mod text_input;
 pub mod thread_header;
+pub mod tooltip;
 
 pub use avatar::Avatar;
 pub use bubble::Bubble;
@@ -31,3 +32,4 @@ pub use status_dot::StatusDot;
 pub use status_puck::StatusPuck;
 pub use text_input::TextInput;
 pub use thread_header::ThreadHeader;
+pub use tooltip::{OxideTooltip, TooltipGroup, AttachedPosition};

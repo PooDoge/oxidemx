@@ -25,7 +25,7 @@ OxideTooltip::text("Conversation title")              // or
 OxideTooltip::detailed(rect()...content...)           // arbitrary rich element
     .placement(AttachedPosition::Right)               // default Bottom
     .offset(8.0)                                       // extra gap beyond Freya's default 5px; default 0
-    .delay(Duration::from_millis(1000))               // default 1000ms
+    .delay(Duration::from_millis(250))                // default 250ms (tuned down from 1000ms in live testing)
     .child(<trigger element>)                          // the rail icon it wraps
 ```
 - `enum TooltipBody { Text(Cow<'static, str>), Detailed(Element) }` (private; set by `text()`/`detailed()`).

@@ -6,7 +6,10 @@ mod settings;
 
 use freya::prelude::*;
 use freya_icons::lucide;
-use oxide_ui::Theme;
+use oxide_ui::{
+    Theme,
+    components::{AttachedPosition, OxideTooltip, TooltipGroup},
+};
 
 use crate::state::{AppState, RightTab};
 
@@ -52,29 +55,34 @@ impl Component for ContextRegion {
                 .height(Size::fill())
                 .background(th.panel())
                 .border(Border::new().fill(th.hairline()).width(1.));
-            for (tab, _lbl) in TABS {
+            for (tab, lbl) in TABS {
                 let mut rt = state.right_tab;
                 let mut coll = state.context_collapsed;
                 let icon_color = if tab == active_tab { th.accent() } else { th.subtext() };
                 rail = rail.child(
-                    rect()
-                        .width(Size::px(40.))
-                        .height(Size::px(40.))
-                        .corner_radius(CornerRadius::new_all(10.))
-                        .center()
-                        .on_press(move |_: Event<PressEventData>| {
-                            rt.set(tab);
-                            coll.set(false);
-                        })
+                    OxideTooltip::text(lbl)
+                        .placement(AttachedPosition::Left)
+                        .offset(6.)
                         .child(
-                            svg(tab_icon!(tab))
-                                .color(icon_color)
-                                .width(Size::px(18.))
-                                .height(Size::px(18.)),
+                            rect()
+                                .width(Size::px(40.))
+                                .height(Size::px(40.))
+                                .corner_radius(CornerRadius::new_all(10.))
+                                .center()
+                                .on_press(move |_: Event<PressEventData>| {
+                                    rt.set(tab);
+                                    coll.set(false);
+                                })
+                                .child(
+                                    svg(tab_icon!(tab))
+                                        .color(icon_color)
+                                        .width(Size::px(18.))
+                                        .height(Size::px(18.)),
+                                ),
                         ),
                 );
             }
-            rail.into_element()
+            TooltipGroup::new().child(rail.into_element()).into_element()
         } else {
             // Full panel: custom accent-fill tab header + ScrollView body + collapse toggle.
             let accent = th.accent();
